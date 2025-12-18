@@ -30,6 +30,7 @@ export interface User {
   full_name?: string | null
   role: UserRole
   department_id?: string | null
+  is_active: boolean
 }
 
 export interface Department {
@@ -125,4 +126,3 @@ export interface Notification {
   created_at: string
   read_at?: string | null
 }
-

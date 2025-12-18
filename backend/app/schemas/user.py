@@ -15,6 +15,7 @@ class UserOut(BaseModel):
     full_name: str | None = None
     role: UserRole
     department_id: uuid.UUID | None = None
+    is_active: bool
 
 
 def _validate_password(value: str) -> str:
@@ -42,6 +43,8 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    username: str | None = Field(default=None, min_length=3, max_length=64)
     full_name: str | None = None
     role: UserRole | None = None
     department_id: uuid.UUID | None = None

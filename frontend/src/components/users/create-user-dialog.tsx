@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
-import type { User, UserRole } from "@/lib/types"
+import type { Department, User, UserRole } from "@/lib/types"
 
 const createUserSchema = z.object({
   full_name: z.string().max(200, { message: "Full name is too long" }).optional().or(z.literal("")),
@@ -23,6 +23,11 @@ const createUserSchema = z.object({
     .max(64, { message: "Username must be at most 64 characters" }),
   email: z.string().email({ message: "Invalid email address" }),
   role: z.enum(["admin", "manager", "staff"]),
+  department_id: z
+    .string()
+    .uuid({ message: "Select a department" })
+    .optional()
+    .or(z.literal("__none__")),
   password: z
     .string()
     .min(8, { message: "Must be at least 8 characters" })
@@ -34,14 +39,17 @@ const createUserSchema = z.object({
 export type CreateUserFormValues = z.infer<typeof createUserSchema>
 
 export function CreateUserDialog({
+  departments,
   onCreated,
   triggerLabel = "Create user",
 }: {
+  departments: Department[]
   onCreated?: (user: User) => void | Promise<void>
   triggerLabel?: string
 }) {
   const { apiFetch, user } = useAuth()
   const [open, setOpen] = React.useState(false)
+  const NONE_VALUE = "__none__"
 
   const form = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserSchema),
@@ -50,6 +58,7 @@ export function CreateUserDialog({
       username: "",
       email: "",
       role: "staff",
+      department_id: NONE_VALUE,
       password: "",
     },
   })
@@ -67,6 +76,7 @@ export function CreateUserDialog({
         username: values.username.trim(),
         full_name: values.full_name?.trim() || null,
         role: values.role as UserRole,
+        department_id: values.department_id === NONE_VALUE ? null : values.department_id,
         password: values.password,
       }),
     })
@@ -151,6 +161,31 @@ export function CreateUserDialog({
             />
             {form.formState.errors.role ? (
               <p className="text-xs text-destructive">{form.formState.errors.role.message}</p>
+            ) : null}
+          </div>
+          <div className="space-y-2">
+            <Label>Department</Label>
+            <Controller
+              control={form.control}
+              name="department_id"
+              render={({ field }) => (
+                <Select value={field.value ?? NONE_VALUE} onValueChange={field.onChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>None</SelectItem>
+                    {departments.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {form.formState.errors.department_id ? (
+              <p className="text-xs text-destructive">{form.formState.errors.department_id.message}</p>
             ) : null}
           </div>
           <div className="space-y-2">

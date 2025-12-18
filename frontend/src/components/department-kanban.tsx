@@ -26,6 +26,7 @@ function initials(src: string) {
 }
 
 export function DepartmentKanban({ departmentName }: { departmentName: string }) {
+  const UNASSIGNED_VALUE = "__unassigned__"
   const params = useSearchParams()
   const { apiFetch, user } = useAuth()
 
@@ -246,12 +247,15 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Assign to</Label>
-                      <Select value={newAssignedTo || ""} onValueChange={(v) => setNewAssignedTo(v || null)}>
+                      <Select
+                        value={newAssignedTo ?? UNASSIGNED_VALUE}
+                        onValueChange={(v) => setNewAssignedTo(v === UNASSIGNED_VALUE ? null : v)}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Unassigned" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Unassigned</SelectItem>
+                          <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
                           {users.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.full_name || u.username}

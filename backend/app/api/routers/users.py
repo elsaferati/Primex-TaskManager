@@ -20,9 +20,15 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)) -> list[UserOut]:
+async def list_users(
+    include_inactive: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[UserOut]:
     ensure_manager_or_admin(user)
     stmt = select(User)
+    if not include_inactive:
+        stmt = stmt.where(User.is_active.is_(True))
     if user.role != UserRole.admin:
         if user.department_id is None:
             return []
@@ -36,6 +42,7 @@ async def list_users(db: AsyncSession = Depends(get_db), user=Depends(get_curren
             full_name=u.full_name,
             role=u.role,
             department_id=u.department_id,
+            is_active=u.is_active,
         )
         for u in users
     ]
@@ -79,6 +86,7 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), u
         full_name=new_user.full_name,
         role=new_user.role,
         department_id=new_user.department_id,
+        is_active=new_user.is_active,
     )
 
 
@@ -100,6 +108,20 @@ async def update_user(
         if payload.role is not None or payload.department_id is not None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers cannot change role/department")
 
+    if payload.email is not None:
+        existing_email = (
+            await db.execute(select(User).where(User.email == payload.email, User.id != target.id))
+        ).scalar_one_or_none()
+        if existing_email is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+        target.email = payload.email
+    if payload.username is not None:
+        existing_username = (
+            await db.execute(select(User).where(User.username == payload.username, User.id != target.id))
+        ).scalar_one_or_none()
+        if existing_username is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+        target.username = payload.username
     if payload.department_id is not None:
         dept = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
         if dept is None:
@@ -123,4 +145,38 @@ async def update_user(
         full_name=target.full_name,
         role=target.role,
         department_id=target.department_id,
+        is_active=target.is_active,
+    )
+
+
+@router.delete("/{user_id}", response_model=UserOut)
+async def deactivate_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current=Depends(get_current_user),
+) -> UserOut:
+    ensure_manager_or_admin(current)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.id == current.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate yourself")
+
+    if current.role != UserRole.admin:
+        if current.department_id is None or target.department_id != current.department_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        if target.role != UserRole.staff:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers can only deactivate staff")
+
+    target.is_active = False
+    await db.commit()
+    await db.refresh(target)
+    return UserOut(
+        id=target.id,
+        email=target.email,
+        username=target.username,
+        full_name=target.full_name,
+        role=target.role,
+        department_id=target.department_id,
+        is_active=target.is_active,
     )
