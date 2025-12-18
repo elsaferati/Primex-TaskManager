@@ -2,32 +2,103 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { 
+  LayoutDashboard, 
+  Globe, 
+  Code2, 
+  FileText, 
+  Palette, 
+  CalendarDays, 
+  CalendarRange, 
+  BarChart3, 
+  Users, 
+  Settings,
+  Hexagon,
+  type LucideIcon
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
 
-type NavItem = { href: string; label: string; roles?: UserRole[] }
+// 1. Add an 'icon' property to your type definition
+type NavItem = { 
+  href: string; 
+  label: string; 
+  icon: LucideIcon;
+  roles?: UserRole[] 
+}
 
+// 2. Map icons to your existing routes
 const items: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/common", label: "Common View" },
-  { href: "/departments/development", label: "Development" },
-  { href: "/departments/pcm", label: "Project Content Manager" },
-  { href: "/departments/graphic-design", label: "Graphic Design" },
-  { href: "/weekly-planner", label: "Weekly Planner" },
-  { href: "/monthly-planner", label: "Monthly Planner" },
-  { href: "/reports", label: "Reports & Exports" },
-  { href: "/users", label: "Users", roles: ["admin", "manager"] },
-  { href: "/settings", label: "Settings", roles: ["admin", "manager"] },
+  { 
+    href: "/dashboard", 
+    label: "Dashboard", 
+    icon: LayoutDashboard 
+  },
+  { 
+    href: "/common", 
+    label: "Common View", 
+    icon: Globe 
+  },
+  { 
+    href: "/departments/development", 
+    label: "Development", 
+    icon: Code2 
+  },
+  { 
+    href: "/departments/pcm", 
+    label: "Project Content Manager", 
+    icon: FileText 
+  },
+  { 
+    href: "/departments/graphic-design", 
+    label: "Graphic Design", 
+    icon: Palette 
+  },
+  { 
+    href: "/weekly-planner", 
+    label: "Weekly Planner", 
+    icon: CalendarDays 
+  },
+  { 
+    href: "/monthly-planner", 
+    label: "Monthly Planner", 
+    icon: CalendarRange 
+  },
+  { 
+    href: "/reports", 
+    label: "Reports & Exports", 
+    icon: BarChart3 
+  },
+  { 
+    href: "/users", 
+    label: "Users", 
+    icon: Users, 
+    roles: ["admin", "manager"] 
+  },
+  { 
+    href: "/settings", 
+    label: "Settings", 
+    icon: Settings, 
+    roles: ["admin", "manager"] 
+  },
 ]
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
 
   return (
-    <aside className="w-64 border-r bg-sidebar text-sidebar-foreground">
-      <div className="px-4 py-4 text-sm font-semibold tracking-tight">Primex Nexus</div>
-      <nav className="space-y-1 px-2 pb-4">
+    <aside className="w-64 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen">
+      {/* Header / Logo Area */}
+      <div className="flex h-16 items-center border-b px-6">
+        <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
+          <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
+          <span>Primex Nexus</span>
+        </div>
+      </div>
+
+      {/* Navigation Links */}
+      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {items
           .filter((i) => (!i.roles ? true : i.roles.includes(role)))
           .map((item) => {
@@ -37,16 +108,24 @@ export function Sidebar({ role }: { role: UserRole }) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "block rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-sidebar-accent text-sidebar-accent-foreground"
+                  "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  active 
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground" 
+                    : "text-muted-foreground"
                 )}
               >
+                <item.icon className={cn(
+                  "h-4 w-4 shrink-0 transition-colors",
+                  active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                )} />
                 {item.label}
               </Link>
             )
           })}
       </nav>
+
+      {/* Optional: User Profile / Footer area could go here */}
     </aside>
   )
 }
-

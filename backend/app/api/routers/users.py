@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -43,13 +43,8 @@ async def list_users(db: AsyncSession = Depends(get_db), user=Depends(get_curren
 
 @router.post("", response_model=UserOut)
 async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)) -> UserOut:
-    ensure_manager_or_admin(user)
-
-    if user.role == UserRole.manager:
-        if payload.role != UserRole.staff:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers can only create staff users")
-        if user.department_id is None or payload.department_id != user.department_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     if payload.department_id is not None:
         ensure_department_access(user, payload.department_id)
@@ -57,11 +52,13 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), u
         if dept is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    existing = (
-        await db.execute(select(User).where(or_(User.email == payload.email, User.username == payload.username)))
-    ).scalar_one_or_none()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+    existing_email = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+    if existing_email is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+
+    existing_username = (await db.execute(select(User).where(User.username == payload.username))).scalar_one_or_none()
+    if existing_username is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
 
     new_user = User(
         email=payload.email,
@@ -127,4 +124,3 @@ async def update_user(
         role=target.role,
         department_id=target.department_id,
     )
-

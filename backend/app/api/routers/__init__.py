@@ -30,3 +30,4 @@ api_router.include_router(audit_logs_router, prefix="/audit-logs", tags=["audit-
 api_router.include_router(search_router, prefix="/search", tags=["search"])
 api_router.include_router(planners_router, prefix="/planners", tags=["planners"])
 api_router.include_router(exports_router, prefix="/exports", tags=["exports"])
+api_router.include_router(users_router, prefix="/users", tags=["users"])
