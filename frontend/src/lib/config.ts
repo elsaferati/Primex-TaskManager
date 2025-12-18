@@ -1,0 +1,10 @@
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:8000"
+
+export const API_HTTP_URL = `${API_BASE_URL}/api`
+
+export const API_WS_URL = API_BASE_URL.startsWith("https://")
+  ? API_BASE_URL.replace("https://", "wss://")
+  : API_BASE_URL.replace("http://", "ws://")
+

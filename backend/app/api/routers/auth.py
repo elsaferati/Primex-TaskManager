@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import uuid
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.security import (
+    REFRESH_TOKEN_TYPE,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    require_token_type,
+    verify_password,
+)
+from app.api.deps import get_current_user
+from app.db import get_db
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+from app.schemas.auth import LoginRequest, TokenResponse
+from app.schemas.user import UserOut
+
+
+router = APIRouter()
+
+REFRESH_COOKIE_NAME = "primex_refresh"
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+
+    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
+    jti = uuid.uuid4().hex
+    refresh_token, expires_at = create_refresh_token(user_id=user.id, jti=jti)
+
+    db.add(RefreshToken(user_id=user.id, jti=jti, expires_at=expires_at))
+    await db.commit()
+
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=int((expires_at - now).total_seconds()),
+        path="/api/auth",
+    )
+
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    response: Response,
+    refresh_cookie: str | None = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    if not refresh_cookie:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
+
+    try:
+        payload = decode_token(refresh_cookie)
+        require_token_type(payload, REFRESH_TOKEN_TYPE)
+        user_id = uuid.UUID(str(payload.get("sub")))
+        jti = str(payload.get("jti"))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    now = datetime.now(timezone.utc)
+    token_row = (
+        await db.execute(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user_id, RefreshToken.jti == jti, RefreshToken.revoked_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    if token_row is None or token_row.expires_at <= now:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+    token_row.revoked_at = now
+
+    new_jti = uuid.uuid4().hex
+    new_refresh_token, new_expires_at = create_refresh_token(user_id=user.id, jti=new_jti)
+    db.add(RefreshToken(user_id=user.id, jti=new_jti, expires_at=new_expires_at))
+    await db.commit()
+
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        new_refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=int((new_expires_at - now).total_seconds()),
+        path="/api/auth",
+    )
+
+    access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    refresh_cookie: str | None = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if refresh_cookie:
+        try:
+            payload = decode_token(refresh_cookie)
+            require_token_type(payload, REFRESH_TOKEN_TYPE)
+            user_id = uuid.UUID(str(payload.get("sub")))
+            jti = str(payload.get("jti"))
+            now = datetime.now(timezone.utc)
+            token_row = (
+                await db.execute(select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.jti == jti))
+            ).scalar_one_or_none()
+            if token_row and token_row.revoked_at is None:
+                token_row.revoked_at = now
+                await db.commit()
+        except Exception:
+            pass
+
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/auth")
+    return {"status": "ok"}
+
+
+@router.get("/me", response_model=UserOut)
+async def me(user: User = Depends(get_current_user)) -> UserOut:
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+        role=user.role,
+        department_id=user.department_id,
+    )
