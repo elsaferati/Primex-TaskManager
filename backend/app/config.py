@@ -4,10 +4,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True,  extra="ignore")
 
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
+
+     # Add these three lines:
+    ADMIN_EMAIL: str | None = None
+    ADMIN_USERNAME: str | None = None
+    ADMIN_PASSWORD: str | None = None
 
     JWT_SECRET: str
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

@@ -19,10 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    user_role_enum = sa.Enum("admin", "manager", "staff", name="user_role")
-    task_type_enum = sa.Enum("adhoc", "system", "reminder", name="task_type")
-    template_recurrence_enum = sa.Enum("daily", "weekly", "monthly", "yearly", name="template_recurrence")
-    common_category_enum = sa.Enum(
+    user_role_enum = postgresql.ENUM("admin", "manager", "staff", name="user_role", create_type=False)
+    task_type_enum = postgresql.ENUM("adhoc", "system", "reminder", name="task_type", create_type=False)
+    template_recurrence_enum = postgresql.ENUM("daily", "weekly", "monthly", "yearly", name="template_recurrence", create_type=False)
+    common_category_enum = postgresql.ENUM(
         "Delays",
         "Absences",
         "Annual Leave",
@@ -32,15 +32,17 @@ def upgrade() -> None:
         "Requests",
         "Proposals",
         name="common_category",
+        create_type=False,
     )
-    common_approval_status_enum = sa.Enum("pending", "approved", "rejected", name="common_approval_status")
-    notification_type_enum = sa.Enum(
+    common_approval_status_enum = postgresql.ENUM("pending", "approved", "rejected", name="common_approval_status", create_type=False)
+    notification_type_enum = postgresql.ENUM(
         "assignment",
         "status_change",
         "overdue",
         "mention",
         "reminder",
         name="notification_type",
+        create_type=False,
     )
 
     op.create_table(
@@ -289,10 +291,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    user_role_enum = sa.Enum("admin", "manager", "staff", name="user_role")
-    task_type_enum = sa.Enum("adhoc", "system", "reminder", name="task_type")
-    template_recurrence_enum = sa.Enum("daily", "weekly", "monthly", "yearly", name="template_recurrence")
-    common_category_enum = sa.Enum(
+    user_role_enum = postgresql.ENUM("admin", "manager", "staff", name="user_role", create_type=False)
+    task_type_enum = postgresql.ENUM("adhoc", "system", "reminder", name="task_type", create_type=False)
+    template_recurrence_enum = postgresql.ENUM("daily", "weekly", "monthly", "yearly", name="template_recurrence", create_type=False)
+    common_category_enum = postgresql.ENUM(
         "Delays",
         "Absences",
         "Annual Leave",
@@ -302,15 +304,17 @@ def downgrade() -> None:
         "Requests",
         "Proposals",
         name="common_category",
+        create_type=False,
     )
-    common_approval_status_enum = sa.Enum("pending", "approved", "rejected", name="common_approval_status")
-    notification_type_enum = sa.Enum(
+    common_approval_status_enum = postgresql.ENUM("pending", "approved", "rejected", name="common_approval_status", create_type=False)
+    notification_type_enum = postgresql.ENUM(
         "assignment",
         "status_change",
         "overdue",
         "mention",
         "reminder",
         name="notification_type",
+        create_type=False,
     )
 
     op.drop_index("ix_audit_logs_entity_id", table_name="audit_logs")
