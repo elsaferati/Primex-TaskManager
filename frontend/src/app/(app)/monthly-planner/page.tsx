@@ -25,10 +25,11 @@ export default function MonthlyPlannerPage() {
   const now = new Date()
   const [year, setYear] = React.useState(String(now.getFullYear()))
   const [month, setMonth] = React.useState(String(now.getMonth() + 1))
+  const ALL_USERS_VALUE = "__all__"
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>("")
-  const [userId, setUserId] = React.useState<string>("")
+  const [userId, setUserId] = React.useState<string>(ALL_USERS_VALUE)
   const [data, setData] = React.useState<MonthlyResponse | null>(null)
 
   React.useEffect(() => {
@@ -54,7 +55,7 @@ export default function MonthlyPlannerPage() {
       qs.set("year", year)
       qs.set("month", month)
       if (departmentId) qs.set("department_id", departmentId)
-      if (userId) qs.set("user_id", userId)
+      if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
       const res = await apiFetch(`/planners/monthly?${qs.toString()}`)
       if (!res.ok) return
       setData((await res.json()) as MonthlyResponse)
@@ -121,7 +122,7 @@ export default function MonthlyPlannerPage() {
                 <SelectValue placeholder="All users" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All users</SelectItem>
+                <SelectItem value={ALL_USERS_VALUE}>All users</SelectItem>
                 {users
                   .filter((u) => !departmentId || u.department_id === departmentId)
                   .map((u) => (
@@ -189,4 +190,3 @@ export default function MonthlyPlannerPage() {
     </div>
   )
 }
-
