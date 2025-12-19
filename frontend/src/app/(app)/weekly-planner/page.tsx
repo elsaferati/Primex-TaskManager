@@ -25,7 +25,8 @@ export default function WeeklyPlannerPage() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>("")
-  const [userId, setUserId] = React.useState<string>("")
+  const ALL_USERS_VALUE = "__all__"
+  const [userId, setUserId] = React.useState<string>(ALL_USERS_VALUE)
   const [weekStart, setWeekStart] = React.useState<string>(mondayISO())
   const [data, setData] = React.useState<WeeklyResponse | null>(null)
 
@@ -54,7 +55,7 @@ export default function WeeklyPlannerPage() {
       const qs = new URLSearchParams()
       qs.set("week_start", weekStart)
       if (departmentId) qs.set("department_id", departmentId)
-      if (userId) qs.set("user_id", userId)
+      if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
       const res = await apiFetch(`/planners/weekly?${qs.toString()}`)
       if (!res.ok) return
       const payload = (await res.json()) as WeeklyResponse
@@ -97,7 +98,7 @@ export default function WeeklyPlannerPage() {
                 <SelectValue placeholder="All users" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All users</SelectItem>
+                <SelectItem value={ALL_USERS_VALUE}>All users</SelectItem>
                 {users
                   .filter((u) => !departmentId || u.department_id === departmentId)
                   .map((u) => (
@@ -157,4 +158,3 @@ export default function WeeklyPlannerPage() {
     </div>
   )
 }
-

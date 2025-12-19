@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,8 +24,12 @@ type AuditLog = {
 }
 
 export default function TaskDetailsPage() {
+  const UNASSIGNED_VALUE = "__unassigned__"
   const params = useParams<{ id: string }>()
   const taskId = String(params.id)
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const returnTo = searchParams.get("returnTo")
   const { apiFetch, user } = useAuth()
 
   const [task, setTask] = React.useState<Task | null>(null)
@@ -62,7 +66,7 @@ export default function TaskDetailsPage() {
   const [description, setDescription] = React.useState("")
   const [statusId, setStatusId] = React.useState("")
   const [plannedFor, setPlannedFor] = React.useState("")
-  const [assignedTo, setAssignedTo] = React.useState("")
+  const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
   const [milestone, setMilestone] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
 
@@ -71,7 +75,7 @@ export default function TaskDetailsPage() {
     setDescription(task.description || "")
     setStatusId(task.status_id)
     setPlannedFor(task.planned_for || "")
-    setAssignedTo(task.assigned_to_user_id || "")
+    setAssignedTo(task.assigned_to_user_id || UNASSIGNED_VALUE)
     setMilestone(task.is_milestone)
     setReminder(task.reminder_enabled)
   }, [task])
@@ -87,7 +91,7 @@ export default function TaskDetailsPage() {
       }
       if (canManage) {
         payload.planned_for = plannedFor || null
-        payload.assigned_to_user_id = assignedTo || null
+        payload.assigned_to_user_id = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
         payload.is_milestone = milestone
       }
 
@@ -97,6 +101,10 @@ export default function TaskDetailsPage() {
         body: JSON.stringify(payload),
       })
       if (!res.ok) return
+      if (returnTo) {
+        router.push(returnTo)
+        return
+      }
       await load()
     } finally {
       setSaving(false)
@@ -108,7 +116,22 @@ export default function TaskDetailsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-lg font-semibold">{task.title}</div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (returnTo) {
+                router.push(returnTo)
+              } else {
+                router.back()
+              }
+            }}
+          >
+            Back
+          </Button>
+          <div className="text-lg font-semibold">{task.title}</div>
+        </div>
         <div className="flex flex-wrap gap-1">
           {task.task_type === "system" ? <Badge variant="secondary">System</Badge> : null}
           {task.reminder_enabled ? <Badge variant="secondary">1h Reminder</Badge> : null}
@@ -157,7 +180,7 @@ export default function TaskDetailsPage() {
                       <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Unassigned</SelectItem>
+                      <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
                       {users
                         .filter((u) => !u.department_id || u.department_id === task.department_id)
                         .map((u) => (
@@ -213,4 +236,3 @@ export default function TaskDetailsPage() {
     </div>
   )
 }
-

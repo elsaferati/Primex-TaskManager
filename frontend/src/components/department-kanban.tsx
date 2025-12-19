@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,7 @@ function initials(src: string) {
 export function DepartmentKanban({ departmentName }: { departmentName: string }) {
   const UNASSIGNED_VALUE = "__unassigned__"
   const params = useSearchParams()
+  const router = useRouter()
   const { apiFetch, user } = useAuth()
 
   const [department, setDepartment] = React.useState<Department | null>(null)
@@ -70,7 +71,8 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           const usersRes = await apiFetch("/users")
           if (usersRes.ok) {
             const us = (await usersRes.json()) as User[]
-            setUsers(us.filter((u) => !u.department_id || u.department_id === dep.id))
+            // Only allow assignment to users in the same department to match backend validation
+            setUsers(us.filter((u) => u.department_id === dep.id))
           }
         }
       } finally {
@@ -321,6 +323,31 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                         e.dataTransfer.setData("text/plain", t.id)
                         e.dataTransfer.effectAllowed = "move"
                       }}
+                      onClick={() => {
+                        const returnTo =
+                          typeof window !== "undefined"
+                            ? `${window.location.pathname}${window.location.search}`
+                            : null
+                        const target = returnTo
+                          ? `/tasks/${t.id}?returnTo=${encodeURIComponent(returnTo)}`
+                          : `/tasks/${t.id}`
+                        router.push(target)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          const returnTo =
+                            typeof window !== "undefined"
+                              ? `${window.location.pathname}${window.location.search}`
+                              : null
+                          const target = returnTo
+                            ? `/tasks/${t.id}?returnTo=${encodeURIComponent(returnTo)}`
+                            : `/tasks/${t.id}`
+                          router.push(target)
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <Link href={`/tasks/${t.id}`} className="text-sm font-medium leading-snug hover:underline">
