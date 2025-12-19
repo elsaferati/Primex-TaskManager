@@ -56,6 +56,11 @@ export default function UsersPage() {
     await load()
   }
 
+  const visibleUsers = React.useMemo(
+    () => (showInactive ? users.filter((u) => !u.is_active) : users),
+    [showInactive, users],
+  )
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -68,7 +73,7 @@ export default function UsersPage() {
               onCheckedChange={(value) => setShowInactive(Boolean(value))}
             />
             <Label htmlFor="show-inactive-users" className="text-sm">
-              Show deactivated
+              Show only deactivated
             </Label>
           </div>
           <CreateUserDialog departments={departments} onCreated={load} />
@@ -93,7 +98,7 @@ export default function UsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
+              {visibleUsers.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell>{u.email}</TableCell>
                   <TableCell>{u.username}</TableCell>
