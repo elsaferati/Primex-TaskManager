@@ -13,6 +13,7 @@ import {
   BarChart3, 
   Users, 
   Settings,
+  Layers,
   Hexagon,
   type LucideIcon
 } from "lucide-react"
@@ -39,6 +40,11 @@ const items: NavItem[] = [
     href: "/common", 
     label: "Common View", 
     icon: Globe 
+  },
+  {
+    href: "/system-tasks",
+    label: "System Tasks",
+    icon: Layers,
   },
   { 
     href: "/departments/development", 

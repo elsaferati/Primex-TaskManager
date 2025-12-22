@@ -4,6 +4,22 @@ export type TaskType = "adhoc" | "system" | "reminder"
 
 export type TemplateRecurrence = "daily" | "weekly" | "monthly" | "yearly"
 
+export type SystemTaskFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "3_MONTHS" | "6_MONTHS"
+
+export interface SystemTaskTemplate {
+  id: string
+  title: string
+  description?: string | null
+  department_id?: string | null
+  default_assignee_id?: string | null
+  frequency: SystemTaskFrequency
+  day_of_week?: number | null
+  day_of_month?: number | null
+  month_of_year?: number | null
+  is_active: boolean
+  created_at: string
+}
+
 export type CommonCategory =
   | "Delays"
   | "Absences"
@@ -35,6 +51,7 @@ export interface User {
 
 export interface Department {
   id: string
+  code: string
   name: string
 }
 
