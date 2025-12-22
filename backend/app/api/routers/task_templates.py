@@ -172,3 +172,4 @@ async def update_template(
     await db.commit()
     await db.refresh(tmpl)
     return _to_out(tmpl)
+

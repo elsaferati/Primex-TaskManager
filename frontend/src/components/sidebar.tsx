@@ -74,13 +74,13 @@ const items: NavItem[] = [
     href: "/users", 
     label: "Users", 
     icon: Users, 
-    roles: ["admin", "manager"] 
+    roles: ["ADMIN", "MANAGER"] 
   },
   { 
     href: "/settings", 
     label: "Settings", 
     icon: Settings, 
-    roles: ["admin", "manager"] 
+    roles: ["ADMIN", "MANAGER"] 
   },
 ]
 
@@ -129,3 +129,4 @@ export function Sidebar({ role }: { role: UserRole }) {
     </aside>
   )
 }
+

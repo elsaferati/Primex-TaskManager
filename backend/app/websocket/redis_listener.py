@@ -56,3 +56,4 @@ async def start_notification_listener() -> None:
             except Exception:
                 pass
         await asyncio.sleep(2)
+

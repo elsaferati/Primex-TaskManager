@@ -29,7 +29,7 @@ async def list_users(
     stmt = select(User)
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
-    if user.role != UserRole.admin:
+    if user.role != UserRole.ADMIN:
         if user.department_id is None:
             return []
         stmt = stmt.where(User.department_id == user.department_id)
@@ -50,7 +50,7 @@ async def list_users(
 
 @router.post("", response_model=UserOut)
 async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)) -> UserOut:
-    if user.role != UserRole.admin:
+    if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     if payload.department_id is not None:
@@ -63,9 +63,12 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), u
     if existing_email is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
 
-    existing_username = (await db.execute(select(User).where(User.username == payload.username))).scalar_one_or_none()
-    if existing_username is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+    if payload.username is not None:
+        existing_username = (
+            await db.execute(select(User).where(User.username == payload.username))
+        ).scalar_one_or_none()
+        if existing_username is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
 
     new_user = User(
         email=payload.email,
@@ -102,7 +105,7 @@ async def update_user(
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if current.role != UserRole.admin:
+    if current.role != UserRole.ADMIN:
         if current.department_id is None or target.department_id != current.department_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         if payload.role is not None or payload.department_id is not None:
@@ -162,10 +165,10 @@ async def deactivate_user(
     if target.id == current.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate yourself")
 
-    if current.role != UserRole.admin:
+    if current.role != UserRole.ADMIN:
         if current.department_id is None or target.department_id != current.department_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if target.role != UserRole.staff:
+        if target.role != UserRole.STAFF:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers can only deactivate staff")
 
     target.is_active = False
@@ -180,3 +183,4 @@ async def deactivate_user(
         department_id=target.department_id,
         is_active=target.is_active,
     )
+

@@ -28,3 +28,4 @@ def add_audit_log(
     db.add(entry)
     return entry
 
+

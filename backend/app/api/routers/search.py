@@ -42,3 +42,4 @@ async def search(
         projects=[SearchProjectResult(id=p.id, name=p.name, board_id=p.board_id) for p in projects],
     )
 
+

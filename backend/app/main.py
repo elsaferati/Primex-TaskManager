@@ -54,3 +54,4 @@ async def ws_notifications(websocket: WebSocket, token: str = Query(...)) -> Non
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(user_id, websocket)
+

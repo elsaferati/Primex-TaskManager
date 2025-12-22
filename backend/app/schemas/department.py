@@ -8,4 +8,5 @@ from pydantic import BaseModel
 class DepartmentOut(BaseModel):
     id: uuid.UUID
     name: str
+    code: str
 

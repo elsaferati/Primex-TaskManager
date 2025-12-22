@@ -51,3 +51,4 @@ async def publish_notification(*, user_id: uuid.UUID, notification: Notification
     client = get_redis_sync()
     payload = json.dumps({"user_id": str(user_id), "notification": {"type": "notification", **notification_to_payload(notification)}})
     await asyncio.to_thread(client.publish, CHANNEL, payload)
+

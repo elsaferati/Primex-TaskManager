@@ -64,7 +64,7 @@ export default function DashboardPage() {
             <Link className="block underline" href="/reports">
               Reports & Exports
             </Link>
-            {user?.role !== "staff" ? (
+            {user?.role !== "STAFF" ? (
               <Link className="block underline" href="/settings">
                 Settings
               </Link>
@@ -84,4 +84,6 @@ export default function DashboardPage() {
     </div>
   )
 }
+
+
 

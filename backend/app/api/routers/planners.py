@@ -70,13 +70,13 @@ async def weekly_planner(
     week_start_date = week_start or _week_start(today)
     week_end = week_start_date + timedelta(days=6)
 
-    if user.role == UserRole.staff:
+    if user.role == UserRole.STAFF:
         user_id = user.id
         department_id = user.department_id
 
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.admin:
+    elif user.role != UserRole.ADMIN:
         department_id = user.department_id
 
     stmt = select(Task).where(Task.completed_at.is_(None))
@@ -109,13 +109,13 @@ async def monthly_planner(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> MonthlyPlannerResponse:
-    if user.role == UserRole.staff:
+    if user.role == UserRole.STAFF:
         user_id = user.id
         department_id = user.department_id
 
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.admin:
+    elif user.role != UserRole.ADMIN:
         department_id = user.department_id
 
     month_start, month_end = _month_range(year, month)
@@ -174,4 +174,5 @@ async def monthly_planner(
         recurring=recurring,
         summary=MonthlyPlannerSummary(month_completed=month_completed, previous_month_completed=prev_completed),
     )
+
 

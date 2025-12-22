@@ -16,13 +16,11 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    full_name: Mapped[str | None] = mapped_column(String(200))
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False, server_default="STAFF")
 
-    department_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
-    )
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
 
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
@@ -33,3 +31,4 @@ class User(Base):
     )
 
     department = relationship("Department", lazy="joined")
+

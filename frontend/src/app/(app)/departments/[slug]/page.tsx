@@ -16,3 +16,4 @@ export default function DepartmentPage() {
   return <DepartmentKanban departmentName={name} />
 }
 
+

@@ -67,7 +67,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
         const initialBoard = bds[0]?.id || null
         setSelectedBoardId(initialBoard)
 
-        if (user?.role !== "staff") {
+        if (user?.role !== "STAFF") {
           const usersRes = await apiFetch("/users")
           if (usersRes.ok) {
             const us = (await usersRes.json()) as User[]
@@ -123,7 +123,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     )
   }
 
-  const canCreate = user?.role === "admin" || user?.role === "manager"
+  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
@@ -379,3 +379,5 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     </div>
   )
 }
+
+

@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "manager" | "staff"
+export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
 export type TaskType = "adhoc" | "system" | "reminder"
 
@@ -126,3 +126,5 @@ export interface Notification {
   created_at: string
   read_at?: string | null
 }
+
+

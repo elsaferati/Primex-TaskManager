@@ -22,7 +22,7 @@ const editUserSchema = z.object({
     .min(3, { message: "Username must be at least 3 characters" })
     .max(64, { message: "Username must be at most 64 characters" }),
   full_name: z.string().max(200, { message: "Full name is too long" }).optional().or(z.literal("")),
-  role: z.enum(["admin", "manager", "staff"]).optional(),
+  role: z.enum(["ADMIN", "MANAGER", "STAFF"]).optional(),
   department_id: z.string().uuid().optional().or(z.literal("__none__")),
   password: z
     .string()
@@ -48,7 +48,7 @@ export function EditUserDialog({
   const { apiFetch, user } = useAuth()
   const [open, setOpen] = React.useState(false)
   const NONE_VALUE = "__none__"
-  const canEditRoleDepartment = user?.role === "admin"
+  const canEditRoleDepartment = user?.role === "ADMIN"
 
   const form = useForm<EditUserFormValues>({
     resolver: zodResolver(editUserSchema),
@@ -162,14 +162,14 @@ export function EditUserDialog({
                   control={form.control}
                   name="role"
                   render={({ field }) => (
-                    <Select value={field.value ?? "staff"} onValueChange={field.onChange}>
+                    <Select value={field.value ?? "STAFF"} onValueChange={field.onChange}>
                       <SelectTrigger>
                         <SelectValue placeholder="Role" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="staff">Staff</SelectItem>
+                        <SelectItem value="ADMIN">Admin</SelectItem>
+                        <SelectItem value="MANAGER">Manager</SelectItem>
+                        <SelectItem value="STAFF">Staff</SelectItem>
                       </SelectContent>
                     </Select>
                   )}
@@ -216,3 +216,5 @@ export function EditUserDialog({
     </Dialog>
   )
 }
+
+

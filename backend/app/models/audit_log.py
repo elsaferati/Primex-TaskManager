@@ -24,3 +24,4 @@ class AuditLog(Base):
     after: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+

@@ -37,7 +37,7 @@ export default function TaskDetailsPage() {
   const [users, setUsers] = React.useState<User[]>([])
   const [audit, setAudit] = React.useState<AuditLog[]>([])
 
-  const canManage = user?.role === "admin" || user?.role === "manager"
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const load = React.useCallback(async () => {
     const taskRes = await apiFetch(`/tasks/${taskId}`)
@@ -236,3 +236,4 @@ export default function TaskDetailsPage() {
     </div>
   )
 }
+

@@ -15,3 +15,4 @@ def get_redis_sync() -> redis.Redis:
 
 def create_redis_async() -> AsyncRedis:
     return AsyncRedis.from_url(settings.REDIS_URL, decode_responses=True)
+

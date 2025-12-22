@@ -43,3 +43,4 @@ class TaskTemplateUpdate(BaseModel):
     assigned_to_user_id: uuid.UUID | None = None
     is_active: bool | None = None
 
+

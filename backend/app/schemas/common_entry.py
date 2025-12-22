@@ -46,3 +46,4 @@ class CommonEntryApprove(BaseModel):
 class CommonEntryReject(BaseModel):
     reason: str = Field(min_length=2, max_length=1000)
 
+

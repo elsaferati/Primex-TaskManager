@@ -63,3 +63,4 @@ def require_token_type(payload: dict, expected_type: str) -> None:
     if token_type != expected_type:
         raise ValueError("Invalid token type")
 
+

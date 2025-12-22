@@ -149,3 +149,4 @@ async def me(user: User = Depends(get_current_user)) -> UserOut:
         department_id=user.department_id,
         is_active=user.is_active,
     )
+

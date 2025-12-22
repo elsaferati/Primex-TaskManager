@@ -89,3 +89,4 @@ async def update_board(
     await db.refresh(board)
     return BoardOut(id=board.id, department_id=board.department_id, name=board.name, description=board.description)
 
+

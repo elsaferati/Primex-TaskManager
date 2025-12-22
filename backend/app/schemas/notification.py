@@ -18,3 +18,4 @@ class NotificationOut(BaseModel):
     created_at: datetime
     read_at: datetime | None = None
 
+

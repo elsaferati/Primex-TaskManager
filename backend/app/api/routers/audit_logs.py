@@ -33,7 +33,7 @@ def _to_out(a: AuditLog) -> AuditLogOut:
 
 
 async def _assert_entity_access(db: AsyncSession, user, entity_type: str, entity_id: uuid.UUID) -> None:
-    if user.role == UserRole.admin:
+    if user.role == UserRole.ADMIN:
         return
 
     if entity_type == "task":
@@ -42,7 +42,7 @@ async def _assert_entity_access(db: AsyncSession, user, entity_type: str, entity
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
         if user.department_id != task.department_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if user.role == UserRole.staff and task.assigned_to_user_id != user.id:
+        if user.role == UserRole.STAFF and task.assigned_to_user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         return
 
@@ -58,7 +58,7 @@ async def _assert_entity_access(db: AsyncSession, user, entity_type: str, entity
         entry = (await db.execute(select(CommonEntry).where(CommonEntry.id == entity_id))).scalar_one_or_none()
         if entry is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
-        if user.role == UserRole.staff and entry.created_by_user_id != user.id and entry.assigned_to_user_id != user.id:
+        if user.role == UserRole.STAFF and entry.created_by_user_id != user.id and entry.assigned_to_user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         return
 
@@ -73,7 +73,7 @@ async def list_audit_logs(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[AuditLogOut]:
-    if user.role == UserRole.staff and (entity_type is None or entity_id is None):
+    if user.role == UserRole.STAFF and (entity_type is None or entity_id is None):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
@@ -86,7 +86,7 @@ async def list_audit_logs(
         await _assert_entity_access(db, user, entity_type, entity_id)
 
     rows = (await db.execute(stmt.limit(max(1, min(limit, 500))))).scalars().all()
-    if user.role != UserRole.admin and (entity_type is None or entity_id is None):
+    if user.role != UserRole.ADMIN and (entity_type is None or entity_id is None):
         # Managers can browse common entries + their department tasks/templates only.
         filtered: list[AuditLog] = []
         for row in rows:
@@ -98,4 +98,5 @@ async def list_audit_logs(
         rows = filtered
 
     return [_to_out(a) for a in rows]
+
 

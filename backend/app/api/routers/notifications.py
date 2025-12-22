@@ -72,3 +72,4 @@ async def mark_all_read(db: AsyncSession = Depends(get_db), user=Depends(get_cur
     await db.commit()
     return {"status": "ok"}
 
+

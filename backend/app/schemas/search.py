@@ -22,3 +22,4 @@ class SearchResponse(BaseModel):
     tasks: list[SearchTaskResult]
     projects: list[SearchProjectResult]
 
+

@@ -33,7 +33,7 @@ export default function UsersPage() {
     void loadDepartments()
   }, [load])
 
-  if (!user || user.role === "staff") {
+  if (!user || user.role === "STAFF") {
     return <div className="text-sm text-muted-foreground">Forbidden.</div>
   }
 
@@ -128,3 +128,5 @@ export default function UsersPage() {
     </div>
   )
 }
+
+

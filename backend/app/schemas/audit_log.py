@@ -16,3 +16,4 @@ class AuditLogOut(BaseModel):
     after: dict | None = None
     created_at: datetime
 
+

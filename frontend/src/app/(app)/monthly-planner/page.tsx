@@ -41,7 +41,7 @@ export default function MonthlyPlannerPage() {
         const initialDep = user?.department_id || deps[0]?.id || ""
         setDepartmentId(initialDep)
       }
-      if (user?.role !== "staff") {
+      if (user?.role !== "STAFF") {
         const uRes = await apiFetch("/users")
         if (uRes.ok) setUsers((await uRes.json()) as User[])
       }
@@ -97,7 +97,7 @@ export default function MonthlyPlannerPage() {
             </SelectContent>
           </Select>
         </div>
-        {user?.role !== "staff" ? (
+        {user?.role !== "STAFF" ? (
           <div className="space-y-2">
             <Label>Department</Label>
             <Select value={departmentId} onValueChange={setDepartmentId}>
@@ -114,7 +114,7 @@ export default function MonthlyPlannerPage() {
             </Select>
           </div>
         ) : null}
-        {user?.role !== "staff" ? (
+        {user?.role !== "STAFF" ? (
           <div className="space-y-2">
             <Label>User</Label>
             <Select value={userId} onValueChange={setUserId}>
@@ -190,3 +190,5 @@ export default function MonthlyPlannerPage() {
     </div>
   )
 }
+
+

@@ -46,6 +46,6 @@ def require_roles(*roles: UserRole):
     return _inner
 
 
-require_admin = require_roles(UserRole.admin)
-require_manager_or_admin = require_roles(UserRole.admin, UserRole.manager)
+require_admin = require_roles(UserRole.ADMIN)
+require_manager_or_admin = require_roles(UserRole.ADMIN, UserRole.MANAGER)
 

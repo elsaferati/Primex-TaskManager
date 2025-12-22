@@ -32,3 +32,4 @@ class MonthlyPlannerResponse(BaseModel):
     recurring: list[TaskOut]
     summary: MonthlyPlannerSummary
 
+

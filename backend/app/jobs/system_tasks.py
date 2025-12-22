@@ -1,85 +1,92 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models.enums import NotificationType, TaskType, TemplateRecurrence
+from app.db import SessionLocal
+from app.models.enums import FrequencyType, NotificationType, TaskPriority, TaskStatus
 from app.models.notification import Notification
-from app.models.project import Project
 from app.models.task import Task
-from app.models.task_template import TaskTemplate
-from app.models.task_template_run import TaskTemplateRun
+from app.models.system_task_template import SystemTaskTemplate
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
-from app.db import SessionLocal
 
 
-def _week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())
-
-
-def _month_start(d: date) -> date:
-    return d.replace(day=1)
-
-
-def _year_start(d: date) -> date:
-    return d.replace(month=1, day=1)
-
-
-def _run_key_for(recurrence: TemplateRecurrence, today: date) -> date:
-    if recurrence == TemplateRecurrence.daily:
-        return today
-    if recurrence == TemplateRecurrence.weekly:
-        return _week_start(today)
-    if recurrence == TemplateRecurrence.monthly:
-        return _month_start(today)
-    return _year_start(today)
+def _should_run(template: SystemTaskTemplate, today: date) -> bool:
+    if template.frequency == FrequencyType.DAILY:
+        return True
+    if template.frequency == FrequencyType.WEEKLY:
+        if template.day_of_week is None:
+            return today.weekday() == 0
+        return today.weekday() == template.day_of_week
+    if template.frequency == FrequencyType.MONTHLY:
+        if template.day_of_month is None:
+            return today.day == 1
+        return today.day == template.day_of_month
+    if template.frequency == FrequencyType.YEARLY:
+        if template.month_of_year is not None and today.month != template.month_of_year:
+            return False
+        if template.day_of_month is not None and today.day != template.day_of_month:
+            return False
+        return True
+    if template.frequency == FrequencyType.THREE_MONTHS:
+        if template.month_of_year is not None and today.month != template.month_of_year:
+            return False
+        if template.day_of_month is not None and today.day != template.day_of_month:
+            return False
+        return today.month % 3 == 0
+    if template.frequency == FrequencyType.SIX_MONTHS:
+        if template.month_of_year is not None and today.month != template.month_of_year:
+            return False
+        if template.day_of_month is not None and today.day != template.day_of_month:
+            return False
+        return today.month % 6 == 0
+    return False
 
 
 async def generate_system_tasks() -> int:
     today = datetime.now(timezone.utc).date()
     created = 0
     async with SessionLocal() as db:
-        templates = (await db.execute(select(TaskTemplate).where(TaskTemplate.is_active.is_(True)))).scalars().all()
+        templates = (
+            await db.execute(
+                select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True))
+            )
+        ).scalars().all()
         created_notifications: list[Notification] = []
 
         for tmpl in templates:
-            run_key = _run_key_for(tmpl.recurrence, today)
-            exists = (
-                await db.execute(
-                    select(TaskTemplateRun.id).where(TaskTemplateRun.template_id == tmpl.id, TaskTemplateRun.run_key == run_key)
-                )
-            ).scalar_one_or_none()
-            if exists is not None:
+            if tmpl.department_id is None:
+                continue
+            if not _should_run(tmpl, today):
                 continue
 
-            project_id = tmpl.project_id
-            if project_id is None:
-                project_id = (
-                    await db.execute(
-                        select(Project.id).where(Project.board_id == tmpl.board_id).order_by(Project.created_at).limit(1)
+            existing = (
+                await db.execute(
+                    select(Task.id).where(
+                        Task.system_template_origin_id == tmpl.id,
+                        func.date(Task.start_date) == today,
                     )
-                ).scalar_one_or_none()
-                if project_id is None:
-                    continue
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
 
             task = Task(
                 department_id=tmpl.department_id,
-                board_id=tmpl.board_id,
-                project_id=project_id,
+                project_id=None,
                 title=tmpl.title,
                 description=tmpl.description,
-                task_type=TaskType.system,
-                status_id=tmpl.default_status_id,
-                position=0,
-                assigned_to_user_id=tmpl.assigned_to_user_id,
-                created_by_user_id=tmpl.created_by_user_id,
-                planned_for=run_key,
+                status=TaskStatus.TODO,
+                priority=TaskPriority.MEDIUM,
+                assigned_to=tmpl.default_assignee_id,
+                created_by=tmpl.default_assignee_id,
+                system_template_origin_id=tmpl.id,
+                start_date=datetime.now(timezone.utc),
             )
             db.add(task)
             await db.flush()
-            db.add(TaskTemplateRun(template_id=tmpl.id, run_key=run_key, task_id=task.id))
 
             add_audit_log(
                 db=db,
@@ -87,14 +94,14 @@ async def generate_system_tasks() -> int:
                 entity_type="task",
                 entity_id=task.id,
                 action="system_generated",
-                after={"template_id": str(tmpl.id), "run_key": run_key.isoformat()},
+                after={"template_id": str(tmpl.id), "run_date": today.isoformat()},
             )
 
-            if tmpl.assigned_to_user_id is not None:
+            if tmpl.default_assignee_id is not None:
                 created_notifications.append(
                     add_notification(
                         db=db,
-                        user_id=tmpl.assigned_to_user_id,
+                        user_id=tmpl.default_assignee_id,
                         type=NotificationType.assignment,
                         title="System task assigned",
                         body=tmpl.title,
@@ -113,3 +120,4 @@ async def generate_system_tasks() -> int:
                 pass
 
     return created
+

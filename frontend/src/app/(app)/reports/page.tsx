@@ -41,12 +41,12 @@ export default function ReportsPage() {
       if (pRes.ok) setProjects((await pRes.json()) as Project[])
       if (sRes.ok) setStatuses((await sRes.json()) as TaskStatus[])
     }
-    if (user?.role !== "staff") void boot()
+    if (user?.role !== "STAFF") void boot()
   }, [apiFetch, user])
 
   const download = async (ext: "csv" | "xlsx" | "pdf") => {
     const qs = new URLSearchParams()
-    if (user?.role === "admin" && departmentId) qs.set("department_id", departmentId)
+    if (user?.role === "ADMIN" && departmentId) qs.set("department_id", departmentId)
     if (userId) qs.set("user_id", userId)
     if (projectId) qs.set("project_id", projectId)
     if (statusId) qs.set("status_id", statusId)
@@ -66,7 +66,7 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url)
   }
 
-  if (!user || user.role === "staff") {
+  if (!user || user.role === "STAFF") {
     return <div className="text-sm text-muted-foreground">Forbidden.</div>
   }
 
@@ -79,7 +79,7 @@ export default function ReportsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-3">
-            {user.role === "admin" ? (
+            {user.role === "ADMIN" ? (
               <div className="space-y-2">
                 <Label>Department</Label>
                 <Select value={departmentId} onValueChange={setDepartmentId}>
@@ -106,7 +106,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value="">All users</SelectItem>
                   {users
-                    .filter((u) => (user.role === "admin" ? true : u.department_id === user.department_id))
+                    .filter((u) => (user.role === "ADMIN" ? true : u.department_id === user.department_id))
                     .map((u) => (
                       <SelectItem key={u.id} value={u.id}>
                         {u.full_name || u.username}
@@ -140,7 +140,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value="">All statuses</SelectItem>
                   {statuses
-                    .filter((s) => (user.role === "admin" && departmentId ? s.department_id === departmentId : true))
+                    .filter((s) => (user.role === "ADMIN" && departmentId ? s.department_id === departmentId : true))
                     .map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
@@ -174,3 +174,5 @@ export default function ReportsPage() {
     </div>
   )
 }
+
+

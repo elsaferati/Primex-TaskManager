@@ -22,7 +22,7 @@ const createUserSchema = z.object({
     .min(3, { message: "Username must be at least 3 characters" })
     .max(64, { message: "Username must be at most 64 characters" }),
   email: z.string().email({ message: "Invalid email address" }),
-  role: z.enum(["admin", "manager", "staff"]),
+  role: z.enum(["ADMIN", "MANAGER", "STAFF"]),
   department_id: z
     .string()
     .uuid({ message: "Select a department" })
@@ -57,13 +57,13 @@ export function CreateUserDialog({
       full_name: "",
       username: "",
       email: "",
-      role: "staff",
+      role: "STAFF",
       department_id: NONE_VALUE,
       password: "",
     },
   })
 
-  if (!user || user.role !== "admin") {
+  if (!user || user.role !== "ADMIN") {
     return null
   }
 
@@ -152,9 +152,9 @@ export function CreateUserDialog({
                     <SelectValue placeholder="Role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="ADMIN">Admin</SelectItem>
+                    <SelectItem value="MANAGER">Manager</SelectItem>
+                    <SelectItem value="STAFF">Staff</SelectItem>
                   </SelectContent>
                 </Select>
               )}
@@ -205,3 +205,5 @@ export function CreateUserDialog({
     </Dialog>
   )
 }
+
+

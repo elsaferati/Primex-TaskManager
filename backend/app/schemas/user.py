@@ -11,8 +11,8 @@ from app.models.enums import UserRole
 class UserOut(BaseModel):
     id: uuid.UUID
     email: EmailStr
-    username: str
-    full_name: str | None = None
+    username: str | None = None
+    full_name: str
     role: UserRole
     department_id: uuid.UUID | None = None
     is_active: bool
@@ -30,9 +30,9 @@ def _validate_password(value: str) -> str:
 
 class UserCreate(BaseModel):
     email: EmailStr
-    username: str = Field(min_length=3, max_length=64)
-    full_name: str | None = None
-    role: UserRole
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    full_name: str = Field(min_length=2, max_length=100)
+    role: UserRole = UserRole.STAFF
     department_id: uuid.UUID | None = None
     password: str = Field(min_length=8, max_length=128)
 
@@ -45,7 +45,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
     username: str | None = Field(default=None, min_length=3, max_length=64)
-    full_name: str | None = None
+    full_name: str | None = Field(default=None, min_length=2, max_length=100)
     role: UserRole | None = None
     department_id: uuid.UUID | None = None
     is_active: bool | None = None
@@ -57,3 +57,4 @@ class UserUpdate(BaseModel):
         if value is None:
             return value
         return _validate_password(value)
+

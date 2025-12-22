@@ -42,7 +42,7 @@ export default function SettingsPage() {
     void load()
   }, [load])
 
-  if (!user || user.role === "staff") {
+  if (!user || user.role === "STAFF") {
     return <div className="text-sm text-muted-foreground">Forbidden.</div>
   }
 
@@ -281,4 +281,6 @@ function TemplateForm({
     </div>
   )
 }
+
+
 

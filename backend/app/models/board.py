@@ -23,3 +23,4 @@ class Board(Base):
 
     department = relationship("Department", lazy="joined")
 
+

@@ -2,23 +2,50 @@ from __future__ import annotations
 
 import uuid
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+
+from app.models.enums import ProjectPhaseStatus, TaskStatus
 
 
 class ProjectOut(BaseModel):
     id: uuid.UUID
-    board_id: uuid.UUID
-    name: str
+    title: str
     description: str | None = None
+    department_id: uuid.UUID | None = None
+    manager_id: uuid.UUID | None = None
+    current_phase: ProjectPhaseStatus
+    status: TaskStatus
+    progress_percentage: int
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProjectCreate(BaseModel):
-    board_id: uuid.UUID
-    name: str = Field(min_length=2, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
+    title: str = Field(min_length=2, max_length=200)
+    description: str | None = Field(default=None)
+    department_id: uuid.UUID
+    manager_id: uuid.UUID | None = None
+    current_phase: ProjectPhaseStatus | None = None
+    status: TaskStatus | None = None
+    progress_percentage: int | None = Field(default=None, ge=0, le=100)
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class ProjectUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
+    title: str | None = Field(default=None, min_length=2, max_length=200)
+    description: str | None = Field(default=None)
+    manager_id: uuid.UUID | None = None
+    current_phase: ProjectPhaseStatus | None = None
+    status: TaskStatus | None = None
+    progress_percentage: int | None = Field(default=None, ge=0, le=100)
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    completed_at: datetime | None = None
 

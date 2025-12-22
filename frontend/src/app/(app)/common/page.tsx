@@ -38,7 +38,7 @@ export default function CommonViewPage() {
     const res = await apiFetch("/common-entries")
     if (res.ok) setEntries((await res.json()) as CommonEntry[])
 
-    if (user?.role !== "staff") {
+    if (user?.role !== "STAFF") {
       const [uRes, bRes, pRes, sRes] = await Promise.all([
         apiFetch("/users"),
         apiFetch("/boards"),
@@ -118,7 +118,7 @@ export default function CommonViewPage() {
   }
 
   const filtered = entries.filter((e) => e.category === active)
-  const canManage = user?.role === "admin" || user?.role === "manager"
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   return (
     <div className="space-y-4">
@@ -371,4 +371,6 @@ function ApproveDialog({
     </Dialog>
   )
 }
+
+
 
