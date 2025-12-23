@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import uuid
 
 from sqlalchemy import func, select
 
 from app.db import SessionLocal
+from app.models.department import Department
 from app.models.enums import FrequencyType, NotificationType, TaskPriority, TaskStatus
 from app.models.notification import Notification
 from app.models.task import Task
@@ -54,62 +56,76 @@ async def generate_system_tasks() -> int:
                 select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True))
             )
         ).scalars().all()
+        departments = (await db.execute(select(Department))).scalars().all()
         created_notifications: list[Notification] = []
 
         for tmpl in templates:
-            if tmpl.department_id is None:
-                continue
             if not _should_run(tmpl, today):
                 continue
 
-            existing = (
-                await db.execute(
-                    select(Task.id).where(
-                        Task.system_template_origin_id == tmpl.id,
-                        func.date(Task.start_date) == today,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing is not None:
+            target_departments: list[uuid.UUID] = []
+            if tmpl.department_id is not None:
+                target_departments = [tmpl.department_id]
+            else:
+                target_departments = [d.id for d in departments]
+
+            if not target_departments:
                 continue
 
-            task = Task(
-                department_id=tmpl.department_id,
-                project_id=None,
-                title=tmpl.title,
-                description=tmpl.description,
-                status=TaskStatus.TODO,
-                priority=TaskPriority.MEDIUM,
-                assigned_to=tmpl.default_assignee_id,
-                created_by=tmpl.default_assignee_id,
-                system_template_origin_id=tmpl.id,
-                start_date=datetime.now(timezone.utc),
-            )
-            db.add(task)
-            await db.flush()
-
-            add_audit_log(
-                db=db,
-                actor_user_id=None,
-                entity_type="task",
-                entity_id=task.id,
-                action="system_generated",
-                after={"template_id": str(tmpl.id), "run_date": today.isoformat()},
-            )
-
-            if tmpl.default_assignee_id is not None:
-                created_notifications.append(
-                    add_notification(
-                        db=db,
-                        user_id=tmpl.default_assignee_id,
-                        type=NotificationType.assignment,
-                        title="System task assigned",
-                        body=tmpl.title,
-                        data={"task_id": str(task.id), "template_id": str(tmpl.id)},
+            for dept_id in target_departments:
+                existing = (
+                    await db.execute(
+                        select(Task.id).where(
+                            Task.system_template_origin_id == tmpl.id,
+                            Task.department_id == dept_id,
+                            func.date(Task.start_date) == today,
+                        )
                     )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    continue
+
+                task = Task(
+                    department_id=dept_id,
+                    project_id=None,
+                    title=tmpl.title,
+                    description=tmpl.description,
+                    status=TaskStatus.TODO,
+                    priority=TaskPriority.MEDIUM,
+                    assigned_to=tmpl.default_assignee_id,
+                    created_by=tmpl.default_assignee_id,
+                    system_template_origin_id=tmpl.id,
+                    start_date=datetime.now(timezone.utc),
+                )
+                db.add(task)
+                await db.flush()
+
+                add_audit_log(
+                    db=db,
+                    actor_user_id=None,
+                    entity_type="task",
+                    entity_id=task.id,
+                    action="system_generated",
+                    after={
+                        "template_id": str(tmpl.id),
+                        "run_date": today.isoformat(),
+                        "department_id": str(dept_id),
+                    },
                 )
 
-            created += 1
+                if tmpl.default_assignee_id is not None:
+                    created_notifications.append(
+                        add_notification(
+                            db=db,
+                            user_id=tmpl.default_assignee_id,
+                            type=NotificationType.assignment,
+                            title="System task assigned",
+                            body=tmpl.title,
+                            data={"task_id": str(task.id), "template_id": str(tmpl.id)},
+                        )
+                    )
+
+                created += 1
 
         await db.commit()
 

@@ -66,11 +66,15 @@ async def create_system_task_template(
     user=Depends(get_current_user),
 ) -> SystemTaskTemplateOut:
     ensure_manager_or_admin(user)
-    ensure_department_access(user, payload.department_id)
+    if payload.department_id is not None:
+        ensure_department_access(user, payload.department_id)
 
-    department = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
-    if department is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+    if payload.department_id is not None:
+        department = (
+            await db.execute(select(Department).where(Department.id == payload.department_id))
+        ).scalar_one_or_none()
+        if department is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
     default_assignee: User | None = None
     if payload.default_assignee_id is not None:
@@ -79,7 +83,7 @@ async def create_system_task_template(
         ).scalar_one_or_none()
         if default_assignee is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        if default_assignee.department_id != payload.department_id:
+        if payload.department_id is not None and default_assignee.department_id != payload.department_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Assignee must belong to the selected department",

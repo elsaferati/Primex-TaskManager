@@ -21,36 +21,37 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import type { Department, SystemTaskFrequency, SystemTaskTemplate, User } from "@/lib/types"
 
-const DAY_FILTERS = [
-  { id: "today", label: "Sot", offset: 0 },
-  { id: "yesterday", label: "Dje", offset: -1 },
-  { id: "tomorrow", label: "Nesër", offset: 1 },
-] as const
-
 const EMPTY_VALUE = "__none__"
+const ALL_DEPARTMENTS_VALUE = "__all_departments__"
 
 const FREQUENCY_OPTIONS = [
-  { value: "DAILY", label: "Çdo ditë" },
-  { value: "WEEKLY", label: "Çdo javë" },
-  { value: "MONTHLY", label: "Çdo muaj" },
-  { value: "YEARLY", label: "Çdo vit" },
-  { value: "3_MONTHS", label: "Çdo 3 muaj" },
-  { value: "6_MONTHS", label: "Çdo 6 muaj" },
+  { value: "DAILY", label: "Every day" },
+  { value: "MONTHLY", label: "Every month" },
+  { value: "3_MONTHS", label: "Every 3 months" },
+  { value: "6_MONTHS", label: "Every 6 months" },
+  { value: "YEARLY", label: "Every year" },
 ] as const
 
+const FREQUENCY_VALUES = FREQUENCY_OPTIONS.map((option) => option.value)
+
+const FREQUENCY_CHIPS = [
+  { id: "all", label: "All" },
+  ...FREQUENCY_OPTIONS.map((option) => ({ id: option.value, label: option.label })),
+]
+
 const WEEK_DAYS = [
-  { value: "0", label: "E Hënë" },
-  { value: "1", label: "E Martë" },
-  { value: "2", label: "E Mërkurë" },
-  { value: "3", label: "E Enjte" },
-  { value: "4", label: "E Premte" },
-  { value: "5", label: "E Shtunë" },
-  { value: "6", label: "E Diel" },
+  { value: "0", label: "Monday" },
+  { value: "1", label: "Tuesday" },
+  { value: "2", label: "Wednesday" },
+  { value: "3", label: "Thursday" },
+  { value: "4", label: "Friday" },
+  { value: "5", label: "Saturday" },
+  { value: "6", label: "Sunday" },
 ]
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   value: String(index + 1).padStart(2, "0"),
-  label: new Date(0, index).toLocaleString("default", { month: "long" }),
+  label: new Date(0, index).toLocaleString("en-US", { month: "long" }),
 }))
 
 type Section = {
@@ -67,7 +68,52 @@ function normalizeDate(date: Date) {
 }
 
 function formatDisplayDate(date: Date) {
-  return date.toLocaleDateString("default", { weekday: "long", day: "numeric", month: "short" })
+  return date.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" })
+}
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ""
+  let inQuotes = false
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (inQuotes) {
+      if (char === "\"") {
+        const next = text[i + 1]
+        if (next === "\"") {
+          field += "\""
+          i += 1
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += char
+      }
+    } else if (char === "\"") {
+      inQuotes = true
+    } else if (char === ",") {
+      row.push(field)
+      field = ""
+    } else if (char === "\n") {
+      row.push(field)
+      if (row.some((cell) => cell.trim().length)) rows.push(row)
+      row = []
+      field = ""
+    } else if (char !== "\r") {
+      field += char
+    }
+  }
+
+  row.push(field)
+  if (row.some((cell) => cell.trim().length)) rows.push(row)
+  return rows
+}
+
+function csvEscape(value: unknown): string {
+  const str = String(value ?? "")
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, "\"\"")}"` : str
 }
 
 function pythonWeekday(date: Date) {
@@ -112,11 +158,13 @@ export default function SystemTasksPage() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [loading, setLoading] = React.useState(true)
-  const [selectedDays, setSelectedDays] = React.useState<string[]>(["today"])
-  const [multiSelect, setMultiSelect] = React.useState(false)
   const [customDate, setCustomDate] = React.useState("")
   const [createOpen, setCreateOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [showAllTemplates, setShowAllTemplates] = React.useState(true)
+  const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
+  const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -162,10 +210,6 @@ export default function SystemTasksPage() {
     if (departments.length === 0) return
     if (!departmentId) {
       setDepartmentId(user?.department_id || departments[0].id)
-      return
-    }
-    if (user?.department_id && user.department_id !== departmentId) {
-      setDepartmentId(user.department_id)
     }
   }, [departments, departmentId, user?.department_id])
 
@@ -177,6 +221,29 @@ export default function SystemTasksPage() {
     return new Map(users.map((u) => [u.id, u]))
   }, [users])
 
+  const frequencyCounts = React.useMemo(() => {
+    const counts = new Map<SystemTaskFrequency, number>()
+    for (const value of FREQUENCY_VALUES) {
+      counts.set(value as SystemTaskFrequency, 0)
+    }
+    for (const template of templates) {
+      counts.set(template.frequency, (counts.get(template.frequency) || 0) + 1)
+    }
+    return counts
+  }, [templates])
+
+  const filteredTemplates = React.useMemo(() => {
+    if (!frequencyFilters.length) return templates
+    const allowed = new Set(frequencyFilters)
+    return templates.filter((template) => allowed.has(template.frequency))
+  }, [frequencyFilters, templates])
+
+  React.useEffect(() => {
+    if (!frequencyMultiSelect && frequencyFilters.length > 1) {
+      setFrequencyFilters([frequencyFilters[0]])
+    }
+  }, [frequencyFilters, frequencyMultiSelect])
+
   const customDateObject = React.useMemo(() => {
     if (!customDate) return null
     const parsed = new Date(`${customDate}T00:00:00`)
@@ -184,64 +251,49 @@ export default function SystemTasksPage() {
   }, [customDate])
 
   const sections = React.useMemo<Section[]>(() => {
-    const items: Section[] = []
-
-    for (const filter of DAY_FILTERS) {
-      if (!selectedDays.includes(filter.id)) continue
-      const target = normalizeDate(new Date())
-      target.setDate(target.getDate() + filter.offset)
-      const scheduled = templates.filter((template) => shouldRunTemplate(template, target))
-      items.push({
-        id: `${filter.id}-${target.toISOString()}`,
-        label: `${filter.label} • ${formatDisplayDate(target)}`,
-        date: target,
-        templates: scheduled,
-      })
+    if (showAllTemplates || !customDateObject) {
+      const sorted = [...filteredTemplates].sort((a, b) => a.title.localeCompare(b.title))
+      return [
+        {
+          id: "all-templates",
+          label: "All system tasks",
+          date: new Date(),
+          templates: sorted,
+        },
+      ]
     }
 
-    if (customDateObject) {
-      const scheduled = templates.filter((template) => shouldRunTemplate(template, customDateObject))
-      const label = `Data e zgjedhur • ${formatDisplayDate(customDateObject)}`
-      items.push({
+    const scheduled = filteredTemplates.filter((template) => shouldRunTemplate(template, customDateObject))
+    return [
+      {
         id: `custom-${customDateObject.toISOString()}`,
-        label,
+        label: `Selected date - ${formatDisplayDate(customDateObject)}`,
         date: customDateObject,
         templates: scheduled,
-      })
-    }
-
-    return items
-  }, [customDateObject, selectedDays, templates])
-
-  const dayCounts = React.useMemo(() => {
-    return new Map(
-      DAY_FILTERS.map((filter) => {
-        const target = normalizeDate(new Date())
-        target.setDate(target.getDate() + filter.offset)
-        const count = templates.filter((template) => shouldRunTemplate(template, target)).length
-        return [filter.id, count] as const
-      })
-    )
-  }, [templates])
+      },
+    ]
+  }, [customDateObject, filteredTemplates, showAllTemplates])
 
   const resetFilters = () => {
-    setSelectedDays(["today"])
-    setMultiSelect(false)
     setCustomDate("")
+    setShowAllTemplates(true)
+    setFrequencyFilters([])
+    setFrequencyMultiSelect(false)
   }
 
-  const toggleDay = (id: string) => {
-    setSelectedDays((prev) => {
-      if (prev.includes(id)) {
-        if (!multiSelect && prev.length === 1) {
-          return prev
-        }
-        return prev.filter((value) => value !== id)
+  const toggleFrequencyFilter = (value: SystemTaskFrequency | "all") => {
+    if (value === "all") {
+      setFrequencyFilters([])
+      return
+    }
+    setFrequencyFilters((prev) => {
+      if (prev.includes(value)) {
+        return prev.filter((item) => item !== value)
       }
-      if (multiSelect) {
-        return [...prev, id]
+      if (frequencyMultiSelect) {
+        return [...prev, value]
       }
-      return [id]
+      return [value]
     })
   }
 
@@ -252,7 +304,8 @@ export default function SystemTasksPage() {
       const payload = {
         title: title.trim(),
         description: description.trim() || null,
-        department_id: departmentId,
+        department_id:
+          departmentId === ALL_DEPARTMENTS_VALUE ? null : departmentId,
         default_assignee_id: defaultAssignee === EMPTY_VALUE ? null : defaultAssignee,
         frequency,
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
@@ -283,38 +336,231 @@ export default function SystemTasksPage() {
   }
 
   const availableAssignees = React.useMemo(() => {
-    if (!departmentId) return users
+    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return users
     return users.filter((u) => u.department_id === departmentId)
   }, [departmentId, users])
+  const allFrequenciesSelected = frequencyFilters.length === 0
+
+  const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
+    const rows = templates.filter((template) => {
+      if (mode === "active") return template.is_active
+      if (mode === "inactive") return !template.is_active
+      return true
+    })
+    const header = [
+      "Title",
+      "Description",
+      "Department",
+      "DepartmentCode",
+      "Frequency",
+      "DayOfWeek",
+      "DayOfMonth",
+      "MonthOfYear",
+      "DefaultAssignee",
+      "Active",
+    ]
+    const body = rows.map((template) => {
+      const department = template.department_id ? departmentMap.get(template.department_id) : null
+      const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
+      return [
+        template.title,
+        template.description || "",
+        department ? department.name : "All departments",
+        department ? department.code : "",
+        template.frequency,
+        template.day_of_week ?? "",
+        template.day_of_month ?? "",
+        template.month_of_year ?? "",
+        assignee ? assignee.username || assignee.full_name || "" : "",
+        template.is_active ? "true" : "false",
+      ]
+        .map(csvEscape)
+        .join(",")
+    })
+    const blob = new Blob([header.join(",") + "\n" + body.join("\n")], { type: "text/csv" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `system_task_templates_${mode}.csv`
+    link.click()
+  }
+
+  const importTemplatesFromFile = async (file: File) => {
+    if (!canCreate) return
+    const text = await file.text()
+    const rows = parseCSV(text)
+    if (!rows.length) return
+
+    const header = rows[0].map((cell) => cell.trim().toLowerCase())
+    const hasHeader = header.includes("title") || header.includes("frequency")
+    const dataRows = hasHeader ? rows.slice(1) : rows
+
+    const getIndex = (name: string, aliases: string[] = []) => {
+      const target = [name, ...aliases]
+      return header.findIndex((cell) => target.includes(cell.replace(/\s+/g, "")))
+    }
+
+    const idxTitle = hasHeader ? getIndex("title") : 0
+    const idxDescription = hasHeader ? getIndex("description") : 1
+    const idxDepartment = hasHeader ? getIndex("department", ["departmentcode", "department_code"]) : 2
+    const idxFrequency = hasHeader ? getIndex("frequency") : 3
+    const idxDayOfWeek = hasHeader ? getIndex("dayofweek", ["day_of_week"]) : 4
+    const idxDayOfMonth = hasHeader ? getIndex("dayofmonth", ["day_of_month"]) : 5
+    const idxMonthOfYear = hasHeader ? getIndex("monthofyear", ["month_of_year"]) : 6
+    const idxAssignee = hasHeader ? getIndex("defaultassignee", ["assignee"]) : 7
+    const idxActive = hasHeader ? getIndex("active") : 8
+
+    const normalize = (value: string) => value.trim().toLowerCase()
+    const frequencyForValue = (value: string): SystemTaskFrequency | null => {
+      const raw = normalize(value)
+      const upper = value.trim().toUpperCase()
+      if ((FREQUENCY_VALUES as string[]).includes(upper)) {
+        return upper as SystemTaskFrequency
+      }
+      if (raw.includes("daily") || raw.includes("every day") || raw.includes("ditore")) return "DAILY"
+      if (raw.includes("weekly") || raw.includes("every week") || raw.includes("javore")) return "WEEKLY"
+      if (raw.includes("yearly") || raw.includes("annual") || raw.includes("vjetore")) return "YEARLY"
+      if (raw.includes("3") && raw.includes("month")) return "3_MONTHS"
+      if (raw.includes("6") && raw.includes("month")) return "6_MONTHS"
+      if (raw.includes("3") && raw.includes("mujore")) return "3_MONTHS"
+      if (raw.includes("6") && raw.includes("mujore")) return "6_MONTHS"
+      if (raw.includes("monthly") || raw.includes("mujore")) return "MONTHLY"
+      return null
+    }
+
+    const dayOfWeekForValue = (value: string) => {
+      const raw = normalize(value)
+      if (!raw) return null
+      const numeric = Number(raw)
+      if (!Number.isNaN(numeric)) return numeric
+      const map: Record<string, number> = {
+        monday: 0,
+        tuesday: 1,
+        wednesday: 2,
+        thursday: 3,
+        friday: 4,
+        saturday: 5,
+        sunday: 6,
+        "e hene": 0,
+        "e marte": 1,
+        "e merkure": 2,
+        "e enjte": 3,
+        "e premte": 4,
+        "e shtune": 5,
+        "e diel": 6,
+      }
+      return map[raw] ?? null
+    }
+
+    const departmentIdForValue = (value: string) => {
+      const raw = normalize(value)
+      if (!raw || raw === "all" || raw === "all departments") return null
+      const byCode = departments.find((dept) => dept.code.toLowerCase() === raw)
+      if (byCode) return byCode.id
+      const byName = departments.find((dept) => dept.name.toLowerCase() === raw)
+      return byName?.id ?? null
+    }
+
+    const assigneeIdForValue = (value: string) => {
+      const raw = normalize(value)
+      if (!raw) return null
+      const byUsername = users.find((u) => (u.username || "").toLowerCase() === raw)
+      if (byUsername) return byUsername.id
+      const byName = users.find((u) => (u.full_name || "").toLowerCase() === raw)
+      return byName?.id ?? null
+    }
+
+    const activeForValue = (value: string) => {
+      const raw = normalize(value)
+      if (!raw) return true
+      if (["true", "yes", "1", "active", "open"].includes(raw)) return true
+      if (["false", "no", "0", "inactive", "closed"].includes(raw)) return false
+      return true
+    }
+
+    for (const row of dataRows) {
+      const title = row[idxTitle]?.trim()
+      if (!title) continue
+      const frequencyValue = frequencyForValue(row[idxFrequency] || "")
+      if (!frequencyValue) continue
+
+      const payload = {
+        title,
+        description: row[idxDescription]?.trim() || null,
+        department_id: departmentIdForValue(row[idxDepartment] || ""),
+        default_assignee_id: assigneeIdForValue(row[idxAssignee] || ""),
+        frequency: frequencyValue,
+        day_of_week: dayOfWeekForValue(row[idxDayOfWeek] || ""),
+        day_of_month: row[idxDayOfMonth] ? Number(row[idxDayOfMonth]) : null,
+        month_of_year: row[idxMonthOfYear] ? Number(row[idxMonthOfYear]) : null,
+        is_active: activeForValue(row[idxActive] || ""),
+      }
+
+      await apiFetch("/system-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    }
+
+    await load()
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold">Detyra Sistemi</h3>
+          <h3 className="text-lg font-semibold">System Tasks</h3>
           <p className="text-sm text-muted-foreground">
-            Detyrat e departamenteve, të organizuara sipas frekuencës dhe datës.
+            Department tasks organized by frequency and date.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={async (event) => {
+              const file = event.target.files?.[0]
+              if (file) await importTemplatesFromFile(file)
+              event.target.value = ""
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={!canCreate}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Import CSV
+          </Button>
+          <Button variant="outline" onClick={() => exportTemplatesCSV("all")}>
+            Export all
+          </Button>
+          <Button variant="outline" onClick={() => exportTemplatesCSV("active")}>
+            Export active
+          </Button>
+          <Button variant="outline" onClick={() => exportTemplatesCSV("inactive")}>
+            Export inactive
+          </Button>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" disabled={!canCreate}>
-                + Shto Detyrë
+                + Add Task
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Shto detyrë sistemi</DialogTitle>
+                <DialogTitle>Add system task</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Departamenti</Label>
+                  <Label>Department</Label>
                   <Select value={departmentId} onValueChange={setDepartmentId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Zgjidh departamentin" />
+                      <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
                       {departments.map((dept) => (
                         <SelectItem key={dept.id} value={dept.id}>
                           {dept.name} ({dept.code})
@@ -324,19 +570,19 @@ export default function SystemTasksPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Titulli</Label>
+                  <Label>Title</Label>
                   <Input value={title} onChange={(event) => setTitle(event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Përshkrimi</Label>
+                  <Label>Description</Label>
                   <Textarea value={description} onChange={(event) => setDescription(event.target.value)} />
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Frekuenca</Label>
+                    <Label>Frequency</Label>
                     <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Zgjidh frekuencën" />
+                        <SelectValue placeholder="Select frequency" />
                       </SelectTrigger>
                       <SelectContent>
                         {FREQUENCY_OPTIONS.map((option) => (
@@ -349,10 +595,10 @@ export default function SystemTasksPage() {
                   </div>
                   {frequency === "WEEKLY" ? (
                     <div className="space-y-2">
-                      <Label>Ditë e javës</Label>
+                      <Label>Day of week</Label>
                       <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Zgjidh ditën" />
+                          <SelectValue placeholder="Select day" />
                         </SelectTrigger>
                         <SelectContent>
                           {WEEK_DAYS.map((day) => (
@@ -371,7 +617,7 @@ export default function SystemTasksPage() {
                   frequency === "6_MONTHS") && (
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Data (ditë)</Label>
+                      <Label>Day of month</Label>
                       <Input
                         type="number"
                         min={1}
@@ -382,13 +628,13 @@ export default function SystemTasksPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Muaji (opsional)</Label>
+                      <Label>Month (optional)</Label>
                       <Select value={monthOfYear} onValueChange={setMonthOfYear}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Zgjidh muajin" />
+                          <SelectValue placeholder="Select month" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={EMPTY_VALUE}>Nuk ka</SelectItem>
+                          <SelectItem value={EMPTY_VALUE}>None</SelectItem>
                           {MONTH_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               {option.label}
@@ -400,13 +646,13 @@ export default function SystemTasksPage() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label>Default assignee (opsional)</Label>
+                  <Label>Default assignee (optional)</Label>
                   <Select value={defaultAssignee} onValueChange={setDefaultAssignee}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Zgjidh përdoruesin" />
+                      <SelectValue placeholder="Select user" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={EMPTY_VALUE}>Asnjë</SelectItem>
+                      <SelectItem value={EMPTY_VALUE}>None</SelectItem>
                       {availableAssignees.map((person) => (
                         <SelectItem key={person.id} value={person.id}>
                           {person.full_name || person.username}
@@ -417,30 +663,36 @@ export default function SystemTasksPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
-                  <span className="text-sm">Aktiv</span>
+                  <span className="text-sm">Active</span>
                 </div>
                 <div className="flex justify-end">
                   <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
-                    {saving ? "Ruaj..." : "Ruaj detyrën"}
+                    {saving ? "Saving..." : "Save task"}
                   </Button>
                 </div>
               </div>
             </DialogContent>
           </Dialog>
           {!canCreate ? (
-            <span className="text-xs text-muted-foreground">Vetëm menaxherët ose admin mund të shtojnë detyra.</span>
+            <span className="text-xs text-muted-foreground">Only managers or admins can add tasks.</span>
           ) : null}
         </div>
       </div>
 
       <div className="space-y-3 rounded-lg border bg-muted p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2" id="system-day-chips">
-            {DAY_FILTERS.map((filter) => {
-              const active = selectedDays.includes(filter.id)
+          <div className="flex flex-wrap gap-2" id="system-all-freq-chips">
+            {FREQUENCY_CHIPS.map((chip) => {
+              const isAll = chip.id === "all"
+              const active = isAll
+                ? allFrequenciesSelected
+                : frequencyFilters.includes(chip.id as SystemTaskFrequency)
+              const count = isAll
+                ? templates.length
+                : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
               return (
                 <button
-                  key={filter.id}
+                  key={chip.id}
                   type="button"
                   className={cn(
                     "rounded-full border px-3 py-1 text-sm transition",
@@ -448,22 +700,22 @@ export default function SystemTasksPage() {
                       ? "border-primary bg-primary text-primary-foreground shadow-sm"
                       : "border-transparent bg-white text-muted-foreground hover:border-border hover:bg-white"
                   )}
-                  onClick={() => toggleDay(filter.id)}
+                  onClick={() => toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all")}
                 >
-                  {filter.label} <small>({dayCounts.get(filter.id) ?? 0})</small>
+                  {chip.label} {isAll ? null : <small>({count})</small>}
                 </button>
               )
             })}
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input
-              id="system-multi-toggle"
+              id="system-all-multi-toggle"
               type="checkbox"
               className="h-4 w-4 rounded border"
-              checked={multiSelect}
-              onChange={(event) => setMultiSelect(event.target.checked)}
+              checked={frequencyMultiSelect}
+              onChange={(event) => setFrequencyMultiSelect(event.target.checked)}
             />
-            Multi-select
+            Multi-select frequencies
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -473,17 +725,24 @@ export default function SystemTasksPage() {
               type="date"
               className="w-auto rounded-md"
               value={customDate}
-              onChange={(event) => setCustomDate(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value
+                setCustomDate(nextValue)
+                setShowAllTemplates(!nextValue)
+              }}
             />
           </div>
           <Button variant="outline" onClick={resetFilters}>
-            Shfaq të gjitha
+            Clear filters
+          </Button>
+          <Button variant="outline" onClick={() => setShowAllTemplates((prev) => !prev)}>
+            {showAllTemplates ? "Show scheduled" : "Show all tasks"}
           </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-sm text-muted-foreground">Duke ngarkuar...</div>
+        <div className="text-sm text-muted-foreground">Loading...</div>
       ) : sections.length ? (
         <div id="system-task-sections" className="space-y-4">
           {sections.map((section) => (
@@ -508,7 +767,10 @@ export default function SystemTasksPage() {
                       ) : null}
                       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                         <span>
-                          Dept: {departmentMap.get(template.department_id || "")?.name ?? "-"}
+                          Dept:{" "}
+                          {template.department_id
+                            ? departmentMap.get(template.department_id)?.name ?? "-"
+                            : "All departments"}
                         </span>
                         <span>
                           Assignee: {userMap.get(template.default_assignee_id || "")?.full_name || "-"}
@@ -517,7 +779,7 @@ export default function SystemTasksPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="text-sm text-muted-foreground">Nuk ka detyra të planifikuara.</div>
+                  <div className="text-sm text-muted-foreground">No scheduled tasks.</div>
                 )}
               </CardContent>
             </Card>
@@ -525,7 +787,7 @@ export default function SystemTasksPage() {
         </div>
       ) : (
         <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-          Asnjë detyrë sistemi e planifikuar për datat e përzgjedhura.
+          No system tasks match the current filters.
         </div>
       )}
     </div>
