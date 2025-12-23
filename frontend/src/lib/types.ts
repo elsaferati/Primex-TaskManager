@@ -134,6 +134,9 @@ export interface GaNote {
   id: string
   content: string
   created_by?: string | null
+  note_type?: "GA" | "KA"
+  status?: "OPEN" | "CLOSED"
+  priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT" | null
   start_date: string
   due_date?: string | null
   completed_at?: string | null
@@ -194,6 +197,18 @@ export interface Notification {
   data?: Record<string, unknown> | null
   created_at: string
   read_at?: string | null
+}
+
+export interface Meeting {
+  id: string
+  title: string
+  platform?: string | null
+  starts_at?: string | null
+  department_id: string
+  project_id?: string | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
 }
 
 

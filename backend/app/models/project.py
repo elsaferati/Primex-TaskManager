@@ -20,7 +20,7 @@ class Project(Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
     manager_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     current_phase: Mapped[ProjectPhaseStatus] = mapped_column(
-        Enum(ProjectPhaseStatus, name="project_phase_status"), nullable=False, server_default="PLANIFIKIMI"
+        Enum(ProjectPhaseStatus, name="project_phase_status"), nullable=False, server_default="TAKIMET"
     )
     status: Mapped[TaskStatus] = mapped_column(
         Enum(TaskStatus, name="task_status"), nullable=False, server_default="TODO"

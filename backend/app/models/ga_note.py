@@ -3,11 +3,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
 
 
 class GaNote(Base):
@@ -16,6 +17,13 @@ class GaNote(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     content: Mapped[str] = mapped_column(String, nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    note_type: Mapped[GaNoteType] = mapped_column(
+        Enum(GaNoteType, name="ga_note_type"), nullable=False, server_default="GA"
+    )
+    status: Mapped[GaNoteStatus] = mapped_column(
+        Enum(GaNoteStatus, name="ga_note_status"), nullable=False, server_default="OPEN"
+    )
+    priority: Mapped[GaNotePriority | None] = mapped_column(Enum(GaNotePriority, name="ga_note_priority"))
 
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
