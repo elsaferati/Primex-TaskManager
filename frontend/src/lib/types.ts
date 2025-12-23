@@ -42,7 +42,7 @@ export type NotificationType =
 export interface User {
   id: string
   email: string
-  username: string
+  username?: string | null
   full_name?: string | null
   role: UserRole
   department_id?: string | null
@@ -64,9 +64,20 @@ export interface Board {
 
 export interface Project {
   id: string
-  board_id: string
-  name: string
+  title?: string
+  name?: string
   description?: string | null
+  department_id?: string | null
+  manager_id?: string | null
+  current_phase?: string
+  status?: string
+  progress_percentage?: number
+  start_date?: string | null
+  due_date?: string | null
+  completed_at?: string | null
+  created_at?: string
+  updated_at?: string
+  board_id?: string
 }
 
 export interface TaskStatus {
@@ -79,24 +90,65 @@ export interface TaskStatus {
 
 export interface Task {
   id: string
-  department_id: string
-  board_id: string
-  project_id: string
+  department_id?: string
+  board_id?: string
+  project_id?: string | null
   title: string
   description?: string | null
-  task_type: TaskType
-  status_id: string
-  position: number
+  task_type?: TaskType
+  status_id?: string
+  position?: number
   assigned_to_user_id?: string | null
   planned_for?: string | null
-  is_carried_over: boolean
+  is_carried_over?: boolean
   carried_over_from?: string | null
-  is_milestone: boolean
-  reminder_enabled: boolean
+  is_milestone?: boolean
+  reminder_enabled?: boolean
   next_reminder_at?: string | null
+  assigned_to?: string | null
+  created_by?: string | null
+  ga_note_origin_id?: string | null
+  system_template_origin_id?: string | null
+  status?: string
+  priority?: string
+  progress_percentage?: number
+  start_date?: string | null
+  due_date?: string | null
+  completed_at?: string | null
+  is_bllok?: boolean
+  is_1h_report?: boolean
+  is_r1?: boolean
   created_at: string
   updated_at: string
+}
+
+export interface ChecklistItem {
+  id: string
+  checklist_id?: string | null
+  content: string
+  is_checked: boolean
+  position: number
+}
+
+export interface GaNote {
+  id: string
+  content: string
+  created_by?: string | null
+  start_date: string
+  due_date?: string | null
   completed_at?: string | null
+  is_converted_to_task: boolean
+  project_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectPrompt {
+  id: string
+  project_id: string
+  type: "GA_PROMPT" | "ZHVILLIM_PROMPT"
+  content: string
+  created_at: string
 }
 
 export interface TaskTemplate {
