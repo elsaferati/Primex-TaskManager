@@ -21,7 +21,7 @@ const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "No-Project Tasks", tone: "red" },
+  { id: "no-project", label: "Tasks", tone: "red" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
