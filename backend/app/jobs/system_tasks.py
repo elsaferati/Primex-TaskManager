@@ -91,7 +91,7 @@ async def generate_system_tasks() -> int:
                     title=tmpl.title,
                     description=tmpl.description,
                     status=TaskStatus.TODO,
-                    priority=TaskPriority.MEDIUM,
+                    priority=tmpl.priority or TaskPriority.MEDIUM,
                     assigned_to=tmpl.default_assignee_id,
                     created_by=tmpl.default_assignee_id,
                     system_template_origin_id=tmpl.id,

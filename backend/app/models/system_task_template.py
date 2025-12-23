@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import FrequencyType
+from app.models.enums import FrequencyType, TaskPriority
 
 
 class SystemTaskTemplate(Base):
@@ -27,6 +27,9 @@ class SystemTaskTemplate(Base):
     day_of_month: Mapped[int | None] = mapped_column(Integer)
     month_of_year: Mapped[int | None] = mapped_column(Integer)
 
+    priority: Mapped[TaskPriority | None] = mapped_column(
+        Enum(TaskPriority, name="task_priority"), nullable=True, server_default="MEDIUM"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

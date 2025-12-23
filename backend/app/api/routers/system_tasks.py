@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import UserRole
+from app.models.enums import TaskPriority, UserRole
+from app.models.task import Task
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.user import User
 from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateOut
@@ -20,6 +21,9 @@ router = APIRouter()
 
 
 def _template_to_out(template: SystemTaskTemplate) -> SystemTaskTemplateOut:
+    priority_value = template.priority or TaskPriority.MEDIUM
+    if priority_value == TaskPriority.URGENT:
+        priority_value = TaskPriority.HIGH
     return SystemTaskTemplateOut(
         id=template.id,
         title=template.title,
@@ -30,6 +34,7 @@ def _template_to_out(template: SystemTaskTemplate) -> SystemTaskTemplateOut:
         day_of_week=template.day_of_week,
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
+        priority=priority_value,
         is_active=template.is_active,
         created_at=template.created_at,
     )
@@ -45,12 +50,14 @@ async def list_system_task_templates(
     stmt = select(SystemTaskTemplate)
 
     if department_id is not None:
-        ensure_department_access(user, department_id)
-        stmt = stmt.where(SystemTaskTemplate.department_id == department_id)
-    elif user.role != UserRole.ADMIN:
-        if user.department_id is None:
-            return []
-        stmt = stmt.where(SystemTaskTemplate.department_id == user.department_id)
+        if user.role != UserRole.ADMIN:
+            ensure_department_access(user, department_id)
+        stmt = stmt.where(
+            or_(
+                SystemTaskTemplate.department_id == department_id,
+                SystemTaskTemplate.department_id.is_(None),
+            )
+        )
 
     if only_active:
         stmt = stmt.where(SystemTaskTemplate.is_active.is_(True))
@@ -89,6 +96,10 @@ async def create_system_task_template(
                 detail="Assignee must belong to the selected department",
             )
 
+    priority_value = payload.priority or TaskPriority.MEDIUM
+    if priority_value == TaskPriority.URGENT:
+        priority_value = TaskPriority.HIGH
+
     template = SystemTaskTemplate(
         title=payload.title,
         description=payload.description,
@@ -98,6 +109,7 @@ async def create_system_task_template(
         day_of_week=payload.day_of_week,
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
+        priority=priority_value,
         is_active=payload.is_active if payload.is_active is not None else True,
     )
 
@@ -105,3 +117,33 @@ async def create_system_task_template(
     await db.commit()
     await db.refresh(template)
     return _template_to_out(template)
+
+
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_system_task_template(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_admin),
+) -> Response:
+    template = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+
+    has_system_origin = await db.execute(
+        text(
+            "select 1 from information_schema.columns "
+            "where table_name = 'tasks' and column_name = 'system_template_origin_id'"
+        )
+    )
+    if has_system_origin.scalar() is not None:
+        await db.execute(
+            update(Task)
+            .where(Task.system_template_origin_id == template_id)
+            .values(system_template_origin_id=None)
+        )
+
+    await db.delete(template)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -7,12 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -25,13 +19,14 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
-import type { Department, SystemTaskFrequency, SystemTaskTemplate, User } from "@/lib/types"
+import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskPriority, User } from "@/lib/types"
 
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
 
 const FREQUENCY_OPTIONS = [
   { value: "DAILY", label: "Every day" },
+  { value: "WEEKLY", label: "Every week" },
   { value: "MONTHLY", label: "Every month" },
   { value: "3_MONTHS", label: "Every 3 months" },
   { value: "6_MONTHS", label: "Every 6 months" },
@@ -45,9 +40,38 @@ const COMBINED_FREQUENCIES: SystemTaskFrequency[] = ["3_MONTHS", "6_MONTHS"]
 const FREQUENCY_CHIPS = [
   { id: "all", label: "All" },
   { id: "DAILY", label: "Daily" },
+  { id: "WEEKLY", label: "Weekly" },
   { id: "MONTHLY", label: "Monthly" },
   { id: "3_6_MONTHS", label: "3/6 months" },
   { id: "YEARLY", label: "Yearly" },
+]
+
+const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
+
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "High",
+}
+
+const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
+  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
+  HIGH: "border-red-200 bg-red-50 text-red-700",
+  URGENT: "border-red-200 bg-red-50 text-red-700",
+}
+
+const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
+  LOW: "border-l-emerald-500",
+  MEDIUM: "border-l-amber-500",
+  HIGH: "border-l-red-600",
+  URGENT: "border-l-red-600",
+}
+
+const PRIORITY_CHIPS = [
+  { id: "all", label: "All" },
+  ...PRIORITY_OPTIONS.map((value) => ({ id: value, label: PRIORITY_LABELS[value] })),
 ]
 
 const WEEK_DAYS = [
@@ -163,6 +187,12 @@ function shouldRunTemplate(template: SystemTaskTemplate, date: Date) {
   }
 }
 
+function normalizePriority(value?: TaskPriority | null): TaskPriority {
+  if (value === "URGENT") return "HIGH"
+  if (value && PRIORITY_OPTIONS.includes(value)) return value
+  return "MEDIUM"
+}
+
 export default function SystemTasksPage() {
   const { apiFetch, user } = useAuth()
   const [templates, setTemplates] = React.useState<SystemTaskTemplate[]>([])
@@ -175,6 +205,8 @@ export default function SystemTasksPage() {
   const [showAllTemplates, setShowAllTemplates] = React.useState(true)
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
+  const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const [title, setTitle] = React.useState("")
@@ -182,12 +214,14 @@ export default function SystemTasksPage() {
   const [departmentId, setDepartmentId] = React.useState("")
   const [defaultAssignee, setDefaultAssignee] = React.useState(EMPTY_VALUE)
   const [frequency, setFrequency] = React.useState<SystemTaskFrequency>("DAILY")
+  const [priority, setPriority] = React.useState<TaskPriority>("MEDIUM")
   const [dayOfWeek, setDayOfWeek] = React.useState("")
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
 
   const canCreate = user?.role !== "STAFF"
+  const canDelete = user?.role === "ADMIN"
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -243,16 +277,35 @@ export default function SystemTasksPage() {
     return counts
   }, [templates])
 
+  const priorityCounts = React.useMemo(() => {
+    const counts = new Map<TaskPriority, number>()
+    for (const value of PRIORITY_OPTIONS) {
+      counts.set(value, 0)
+    }
+    for (const template of templates) {
+      const normalized = normalizePriority(template.priority)
+      counts.set(normalized, (counts.get(normalized) || 0) + 1)
+    }
+    return counts
+  }, [templates])
+
   const filteredTemplates = React.useMemo(() => {
-    if (!frequencyFilters.length) return templates
-    const allowed = new Set(frequencyFilters)
-    return templates.filter((template) => allowed.has(template.frequency))
-  }, [frequencyFilters, templates])
+    let filtered = templates
+    if (frequencyFilters.length) {
+      const allowed = new Set(frequencyFilters)
+      filtered = filtered.filter((template) => allowed.has(template.frequency))
+    }
+    if (priorityFilters.length) {
+      const allowed = new Set(priorityFilters)
+      filtered = filtered.filter((template) => allowed.has(normalizePriority(template.priority)))
+    }
+    return filtered
+  }, [frequencyFilters, priorityFilters, templates])
 
   React.useEffect(() => {
     const combinedSelected =
       COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
-      frequencyFilters.length === COMBINED_FREQUENCIES.length
+      frequencyFilters.length >= COMBINED_FREQUENCIES.length
     if (!frequencyMultiSelect && frequencyFilters.length > 1 && !combinedSelected) {
       setFrequencyFilters([frequencyFilters[0]])
     }
@@ -293,6 +346,7 @@ export default function SystemTasksPage() {
     setShowAllTemplates(true)
     setFrequencyFilters([])
     setFrequencyMultiSelect(false)
+    setPriorityFilters([])
   }
 
   const toggleFrequencyFilter = (value: SystemTaskFrequency | "all" | "3_6_MONTHS") => {
@@ -336,6 +390,7 @@ export default function SystemTasksPage() {
           departmentId === ALL_DEPARTMENTS_VALUE ? null : departmentId,
         default_assignee_id: defaultAssignee === EMPTY_VALUE ? null : defaultAssignee,
         frequency,
+        priority,
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
         day_of_month: dayOfMonth ? Number(dayOfMonth) : null,
         month_of_year:
@@ -356,10 +411,33 @@ export default function SystemTasksPage() {
       setDayOfMonth("")
       setMonthOfYear(EMPTY_VALUE)
       setFrequency("DAILY")
+      setPriority("MEDIUM")
       setIsActive(true)
       await load()
     } finally {
       setSaving(false)
+    }
+  }
+
+  const togglePriorityFilter = (value: TaskPriority | "all") => {
+    if (value === "all") {
+      setPriorityFilters([])
+      return
+    }
+    setPriorityFilters((prev) => (prev.includes(value) ? [] : [value]))
+  }
+
+  const deleteTemplate = async (templateId: string) => {
+    if (!canDelete) return
+    const confirmed = window.confirm("Delete this system task? This cannot be undone.")
+    if (!confirmed) return
+    setDeletingId(templateId)
+    try {
+      const res = await apiFetch(`/system-tasks/${templateId}`, { method: "DELETE" })
+      if (!res.ok) return
+      setTemplates((prev) => prev.filter((template) => template.id !== templateId))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -371,6 +449,7 @@ export default function SystemTasksPage() {
     COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
     frequencyFilters.length >= COMBINED_FREQUENCIES.length
   const allFrequenciesSelected = frequencyFilters.length === 0
+  const allPrioritiesSelected = priorityFilters.length === 0
 
   const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
     const rows = templates.filter((template) => {
@@ -384,6 +463,7 @@ export default function SystemTasksPage() {
       "Department",
       "DepartmentCode",
       "Frequency",
+      "Priority",
       "DayOfWeek",
       "DayOfMonth",
       "MonthOfYear",
@@ -399,6 +479,7 @@ export default function SystemTasksPage() {
         department ? department.name : "All departments",
         department ? department.code : "",
         template.frequency,
+        normalizePriority(template.priority),
         template.day_of_week ?? "",
         template.day_of_month ?? "",
         template.month_of_year ?? "",
@@ -424,6 +505,7 @@ export default function SystemTasksPage() {
     const header = rows[0].map((cell) => cell.trim().toLowerCase())
     const hasHeader = header.includes("title") || header.includes("frequency")
     const dataRows = hasHeader ? rows.slice(1) : rows
+    const noHeaderHasPriority = !hasHeader && (dataRows[0]?.length ?? 0) >= 11
 
     const getIndex = (name: string, aliases: string[] = []) => {
       const target = [name, ...aliases]
@@ -434,11 +516,12 @@ export default function SystemTasksPage() {
     const idxDescription = hasHeader ? getIndex("description") : 1
     const idxDepartment = hasHeader ? getIndex("department", ["departmentcode", "department_code"]) : 2
     const idxFrequency = hasHeader ? getIndex("frequency") : 3
-    const idxDayOfWeek = hasHeader ? getIndex("dayofweek", ["day_of_week"]) : 4
-    const idxDayOfMonth = hasHeader ? getIndex("dayofmonth", ["day_of_month"]) : 5
-    const idxMonthOfYear = hasHeader ? getIndex("monthofyear", ["month_of_year"]) : 6
-    const idxAssignee = hasHeader ? getIndex("defaultassignee", ["assignee"]) : 7
-    const idxActive = hasHeader ? getIndex("active") : 8
+    const idxPriority = hasHeader ? getIndex("priority") : noHeaderHasPriority ? 4 : -1
+    const idxDayOfWeek = hasHeader ? getIndex("dayofweek", ["day_of_week"]) : noHeaderHasPriority ? 5 : 4
+    const idxDayOfMonth = hasHeader ? getIndex("dayofmonth", ["day_of_month"]) : noHeaderHasPriority ? 6 : 5
+    const idxMonthOfYear = hasHeader ? getIndex("monthofyear", ["month_of_year"]) : noHeaderHasPriority ? 7 : 6
+    const idxAssignee = hasHeader ? getIndex("defaultassignee", ["assignee"]) : noHeaderHasPriority ? 8 : 7
+    const idxActive = hasHeader ? getIndex("active") : noHeaderHasPriority ? 9 : 8
 
     const normalize = (value: string) => value.trim().toLowerCase()
     const frequencyForValue = (value: string): SystemTaskFrequency | null => {
@@ -455,6 +538,20 @@ export default function SystemTasksPage() {
       if (raw.includes("3") && raw.includes("mujore")) return "3_MONTHS"
       if (raw.includes("6") && raw.includes("mujore")) return "6_MONTHS"
       if (raw.includes("monthly") || raw.includes("mujore")) return "MONTHLY"
+      return null
+    }
+
+    const priorityForValue = (value: string): TaskPriority | null => {
+      const raw = normalize(value)
+      if (!raw) return null
+      const upper = value.trim().toUpperCase()
+      if ((PRIORITY_OPTIONS as string[]).includes(upper)) {
+        return upper as TaskPriority
+      }
+      if (raw.includes("urgent") || raw.includes("critical")) return "HIGH"
+      if (raw.includes("high")) return "HIGH"
+      if (raw.includes("medium")) return "MEDIUM"
+      if (raw.includes("low")) return "LOW"
       return null
     }
 
@@ -513,6 +610,8 @@ export default function SystemTasksPage() {
       if (!title) continue
       const frequencyValue = frequencyForValue(row[idxFrequency] || "")
       if (!frequencyValue) continue
+      const priorityValue =
+        idxPriority >= 0 ? priorityForValue(row[idxPriority] || "") : null
 
       const payload = {
         title,
@@ -520,6 +619,7 @@ export default function SystemTasksPage() {
         department_id: departmentIdForValue(row[idxDepartment] || ""),
         default_assignee_id: assigneeIdForValue(row[idxAssignee] || ""),
         frequency: frequencyValue,
+        priority: priorityValue,
         day_of_week: dayOfWeekForValue(row[idxDayOfWeek] || ""),
         day_of_month: row[idxDayOfMonth] ? Number(row[idxDayOfMonth]) : null,
         month_of_year: row[idxMonthOfYear] ? Number(row[idxMonthOfYear]) : null,
@@ -564,22 +664,18 @@ export default function SystemTasksPage() {
           >
             Import Excel
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">Export</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => exportTemplatesCSV("all")}>
-                Export all
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportTemplatesCSV("active")}>
-                Export open
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportTemplatesCSV("inactive")}>
-                Export closed
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">Export</span>
+            <Button variant="outline" onClick={() => exportTemplatesCSV("all")}>
+              Export All
+            </Button>
+            <Button variant="outline" onClick={() => exportTemplatesCSV("active")}>
+              Export Open
+            </Button>
+            <Button variant="outline" onClick={() => exportTemplatesCSV("inactive")}>
+              Export Closed
+            </Button>
+          </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" disabled={!canCreate}>
@@ -631,8 +727,23 @@ export default function SystemTasksPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRIORITY_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {PRIORITY_LABELS[value]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   {frequency === "WEEKLY" ? (
-                    <div className="space-y-2">
+                    <div className="space-y-2 md:col-span-2">
                       <Label>Day of week</Label>
                       <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
                         <SelectTrigger>
@@ -717,9 +828,9 @@ export default function SystemTasksPage() {
         </div>
       </div>
 
-      <div className="space-y-3 rounded-lg border bg-muted p-4">
+      <div className="space-y-4 rounded-2xl border border-border/70 bg-gradient-to-br from-muted/80 to-muted p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2" id="system-all-freq-chips">
+          <div className="flex flex-wrap gap-3" id="system-all-freq-chips">
             {FREQUENCY_CHIPS.map((chip) => {
               const isAll = chip.id === "all"
               const isCombined = chip.id === "3_6_MONTHS"
@@ -738,16 +849,24 @@ export default function SystemTasksPage() {
                   key={chip.id}
                   type="button"
                   className={cn(
-                    "rounded-full border px-3 py-1 text-sm transition",
+                    "inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition shadow-sm",
+                    isAll && "px-5 font-semibold tracking-tight",
                     active
-                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                      : "border-transparent bg-white text-muted-foreground hover:border-border hover:bg-white"
+                      ? "border-black bg-black text-white shadow-md ring-1 ring-white/10"
+                      : isAll
+                        ? "border-black bg-black text-white shadow-md"
+                        : "border-black/70 bg-black/80 text-white/70 hover:border-black hover:bg-black hover:text-white hover:shadow-md"
                   )}
                   onClick={() =>
                     toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
                   }
                 >
-                  {chip.label} {isAll ? null : <small>({count})</small>}
+                  <span>{chip.label}</span>
+                  {isAll ? null : (
+                    <span className={cn("text-xs", active ? "text-white/80" : "text-white/60")}>
+                      ({count})
+                    </span>
+                  )}
                 </button>
               )
             })}
@@ -762,6 +881,40 @@ export default function SystemTasksPage() {
             />
             Multi-select frequencies
           </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3" id="system-priority-chips">
+          {PRIORITY_CHIPS.map((chip) => {
+            const isAll = chip.id === "all"
+            const active = isAll
+              ? allPrioritiesSelected
+              : priorityFilters.includes(chip.id as TaskPriority)
+            const count = isAll
+              ? templates.length
+              : priorityCounts.get(chip.id as TaskPriority) ?? 0
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition shadow-sm",
+                  isAll && "px-5 font-semibold tracking-tight",
+                  active
+                    ? "border-black bg-black text-white shadow-md ring-1 ring-white/10"
+                    : isAll
+                      ? "border-black bg-black text-white shadow-md"
+                      : "border-black/70 bg-black/80 text-white/70 hover:border-black hover:bg-black hover:text-white hover:shadow-md"
+                )}
+                onClick={() => togglePriorityFilter(chip.id as TaskPriority | "all")}
+              >
+                <span>{chip.label}</span>
+                {isAll ? null : (
+                  <span className={cn("text-xs", active ? "text-white/80" : "text-white/60")}>
+                    ({count})
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
@@ -798,31 +951,59 @@ export default function SystemTasksPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {section.templates.length ? (
-                  section.templates.map((template) => (
-                    <div key={template.id} className="rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-semibold">{template.title}</div>
-                        <Badge variant="outline">
-                          {FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
-                            template.frequency}
-                        </Badge>
+                  section.templates.map((template) => {
+                    const priorityValue = normalizePriority(template.priority)
+                    return (
+                      <div
+                        key={template.id}
+                        className={cn(
+                          "rounded-md border border-l-4 p-3",
+                          PRIORITY_BORDER_STYLES[priorityValue]
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold">{template.title}</div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">
+                              {FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
+                                template.frequency}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className={cn("border px-2 py-0.5 text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
+                            >
+                              {PRIORITY_LABELS[priorityValue]}
+                            </Badge>
+                            {canDelete ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={deletingId === template.id}
+                                onClick={() => void deleteTemplate(template.id)}
+                              >
+                                {deletingId === template.id ? "Deleting..." : "Delete"}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                        {template.description ? (
+                          <p className="text-sm text-muted-foreground">{template.description}</p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                          <span>
+                            Dept:{" "}
+                            {template.department_id
+                              ? departmentMap.get(template.department_id)?.name ?? "-"
+                              : "All departments"}
+                          </span>
+                          <span>
+                            Assignee: {userMap.get(template.default_assignee_id || "")?.full_name || "-"}
+                          </span>
+                        </div>
                       </div>
-                      {template.description ? (
-                        <p className="text-sm text-muted-foreground">{template.description}</p>
-                      ) : null}
-                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                        <span>
-                          Dept:{" "}
-                          {template.department_id
-                            ? departmentMap.get(template.department_id)?.name ?? "-"
-                            : "All departments"}
-                        </span>
-                        <span>
-                          Assignee: {userMap.get(template.default_assignee_id || "")?.full_name || "-"}
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    )
+                  })
                 ) : (
                   <div className="text-sm text-muted-foreground">No scheduled tasks.</div>
                 )}

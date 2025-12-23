@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType
+from app.models.enums import FrequencyType, TaskPriority
 
 
 class SystemTaskTemplateOut(BaseModel):
@@ -18,6 +18,7 @@ class SystemTaskTemplateOut(BaseModel):
     day_of_week: int | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    priority: TaskPriority | None = None
     is_active: bool
     created_at: datetime
 
@@ -31,5 +32,6 @@ class SystemTaskTemplateCreate(BaseModel):
     day_of_week: int | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    priority: TaskPriority | None = None
     is_active: bool | None = None
 

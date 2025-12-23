@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, Project, SystemTaskTemplate, Task, User } from "@/lib/types"
+import type { Department, Project, SystemTaskTemplate, Task, TaskPriority, User } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Sot)", tone: "neutral" },
@@ -56,6 +56,29 @@ const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   "3_MONTHS": "3/6 MUJORE",
   "6_MONTHS": "3/6 MUJORE",
 }
+
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "High",
+}
+
+const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
+  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
+  HIGH: "border-red-200 bg-red-50 text-red-700",
+  URGENT: "border-red-200 bg-red-50 text-red-700",
+}
+
+const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
+  LOW: "border-l-emerald-500",
+  MEDIUM: "border-l-amber-500",
+  HIGH: "border-l-red-600",
+  URGENT: "border-l-red-600",
+}
+
+const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -129,6 +152,12 @@ function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
   const dateLabel = date.toLocaleDateString("sq-AL", { day: "2-digit", month: "2-digit", year: "numeric" })
   return `${dayLabel}\n${dateLabel}`
+}
+
+function normalizePriority(value?: TaskPriority | null): TaskPriority {
+  if (value === "URGENT") return "HIGH"
+  if (value && PRIORITY_OPTIONS.includes(value)) return value
+  return "MEDIUM"
 }
 
 export function DepartmentKanban({ departmentName }: { departmentName: string }) {
@@ -782,8 +811,12 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                   <div className="divide-y">
                     {group.items.map((item) => {
                       const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
+                      const priorityValue = normalizePriority(item.priority)
                       return (
-                        <div key={item.id} className="grid grid-cols-7 gap-3 px-4 py-4 text-sm">
+                        <div
+                          key={item.id}
+                          className={`grid grid-cols-7 gap-3 border-l-4 px-4 py-4 text-sm ${PRIORITY_BORDER_STYLES[priorityValue]}`}
+                        >
                           <div className="col-span-2">
                             <div className="font-medium">{item.title}</div>
                             <div className="text-xs text-muted-foreground">{item.description || "—"}</div>
@@ -793,7 +826,17 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                             {formatSchedule(item, systemDate)}
                           </div>
                           <div>
-                            <Badge variant="secondary">{item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}</Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="secondary">
+                                {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                            </div>
                           </div>
                           <div>{owner?.full_name || owner?.username || "—"}</div>
                           <div>{user?.full_name || user?.username || "—"}</div>
