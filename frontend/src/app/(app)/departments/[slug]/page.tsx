@@ -5,9 +5,7 @@ import { useParams } from "next/navigation"
 import { DepartmentKanban } from "@/components/department-kanban"
 
 const map: Record<string, string> = {
-  development: "Development",
   pcm: "Project Content Manager",
-  "graphic-design": "Graphic Design",
 }
 
 export default function DepartmentPage() {

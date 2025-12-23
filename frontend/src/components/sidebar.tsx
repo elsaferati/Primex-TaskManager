@@ -51,11 +51,11 @@ const items: NavItem[] = [
     label: "Development", 
     icon: Code2 
   },
-  { 
-    href: "/departments/pcm", 
-    label: "Project Content Manager", 
-    icon: FileText 
-  },
+    { 
+      href: "/departments/project-content-manager", 
+      label: "Project Content Manager", 
+      icon: FileText 
+    },
   { 
     href: "/departments/graphic-design", 
     label: "Graphic Design", 
