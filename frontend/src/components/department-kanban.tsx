@@ -18,12 +18,12 @@ import { useAuth } from "@/lib/auth"
 import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, User } from "@/lib/types"
 
 const TABS = [
-  { id: "all", label: "All (Sot)", tone: "neutral" },
-  { id: "projects", label: "Projekte", tone: "neutral" },
-  { id: "system", label: "Detyra Sistemi", tone: "blue" },
-  { id: "no-project", label: "Detyra Pa Projekt", tone: "red" },
-  { id: "ga-ka", label: "Shenime GA/KA", tone: "neutral" },
-  { id: "meetings", label: "Takime", tone: "neutral" },
+  { id: "all", label: "All (Today)", tone: "neutral" },
+  { id: "projects", label: "Projects", tone: "neutral" },
+  { id: "system", label: "System Tasks", tone: "blue" },
+  { id: "no-project", label: "No-Project Tasks", tone: "red" },
+  { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
+  { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -31,31 +31,31 @@ type TabId = (typeof TABS)[number]["id"]
 const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
 
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Takimet",
-  PLANIFIKIMI: "Planifikimi",
-  ZHVILLIMI: "Zhvillimi",
-  TESTIMI: "Testimi",
-  DOKUMENTIMI: "Dokumentimi",
-  MBYLLUR: "Mbyllur",
+  TAKIMET: "Meetings",
+  PLANIFIKIMI: "Planning",
+  ZHVILLIMI: "Development",
+  TESTIMI: "Testing",
+  DOKUMENTIMI: "Documentation",
+  MBYLLUR: "Closed",
 }
 
 const WEEKDAYS_SQ = [
-  "E Hene",
-  "E Marte",
-  "E Merkure",
-  "E Enjte",
-  "E Premte",
-  "E Shtune",
-  "E Diel",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
 ]
 
 const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
-  DAILY: "DITORE",
-  WEEKLY: "JAVORE",
-  MONTHLY: "MUJORE",
-  YEARLY: "VJETORE",
-  "3_MONTHS": "3/6 MUJORE",
-  "6_MONTHS": "3/6 MUJORE",
+  DAILY: "Daily",
+  WEEKLY: "Weekly",
+  MONTHLY: "Monthly",
+  YEARLY: "Yearly",
+  "3_MONTHS": "3/6 months",
+  "6_MONTHS": "3/6 months",
 }
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
@@ -89,34 +89,34 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 
 const INTERNAL_MEETING = {
-  title: "Pikat e diskutimit (Zhvillim M1, M2, M3)",
+  title: "Discussion points (Development M1, M2, M3)",
   moderator: "Endi Hyseni",
   team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha"],
   slots: {
     M1: {
-      label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
+      label: "M1 FOR DEVELOPMENT (BRIEF 08:08-08:15 MAX)",
       items: [
-        "A ka mungesa, a ndryshon plani per sot?",
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "A ka e-mails te reja ne IT?",
-        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+        "Any absences, does today's plan change?",
+        "Any GA/KA notes in groups/Trello?",
+        "Any new emails in IT?",
+        "Each person's tasks for today (everyone opens RD/Trello side-by-side and discusses tasks).",
+        "Notes in the development group are copied into Trello under GA/KA notes.",
       ],
     },
     M2: {
-      label: "M2 PER ZHVILLIM (12:00-12:15 MAX)",
+      label: "M2 FOR DEVELOPMENT (12:00-12:15 MAX)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
-        "Cka mbetet per PM?",
+        "Any GA/KA notes in groups/Trello?",
+        "Discuss each person's tasks, what have we done by 12:00?",
+        "What remains for PM?",
       ],
     },
     M3: {
-      label: "M3 (ME TRELLO) PER ZHVILLIM (16:10-16:30 MAX)",
+      label: "M3 (WITH TRELLO) FOR DEVELOPMENT (16:10-16:30 MAX)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
-        "Cka kemi me punu neser?",
+        "Any GA/KA notes in groups/Trello?",
+        "Discuss everyone's tasks, what have we done so far?",
+        "What will we work on tomorrow?",
       ],
     },
   },
@@ -133,12 +133,12 @@ function initials(src: string) {
 
 function formatToday() {
   const now = new Date()
-  const date = now.toLocaleDateString("sq-AL", {
+  const date = now.toLocaleDateString("en-US", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   })
-  const day = now.toLocaleDateString("sq-AL", { weekday: "short" })
+  const day = now.toLocaleDateString("en-US", { weekday: "short" })
   return `${day} - ${date}`
 }
 
@@ -151,9 +151,9 @@ function formatDayLabel(date: Date) {
   const todayKey = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
   const targetKey = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
   const delta = Math.round((targetKey - todayKey) / (24 * 60 * 60 * 1000))
-  const prefix = delta === 0 ? "Sot" : delta === -1 ? "Dje" : delta === 1 ? "Neser" : ""
+  const prefix = delta === 0 ? "Today" : delta === -1 ? "Yesterday" : delta === 1 ? "Tomorrow" : ""
   const weekday = WEEKDAYS_SQ[date.getDay() === 0 ? 6 : date.getDay() - 1]
-  return prefix ? `${prefix} • ${weekday}` : weekday
+  return prefix ? `${prefix} - ${weekday}` : weekday
 }
 
 function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
@@ -185,7 +185,7 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
 
 function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
-  const dateLabel = date.toLocaleDateString("sq-AL", { day: "2-digit", month: "2-digit", year: "numeric" })
+  const dateLabel = date.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" })
   return `${dayLabel}\n${dateLabel}`
 }
 
@@ -199,8 +199,8 @@ function formatMeetingLabel(meeting: Meeting) {
     date.getFullYear() === today.getFullYear() &&
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate()
-  const timeLabel = date.toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })
-  const weekdayLabel = date.toLocaleDateString("sq-AL", { weekday: "long" })
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const weekdayLabel = date.toLocaleDateString("en-US", { weekday: "long" })
   const prefix = sameDay ? timeLabel : weekdayLabel
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
@@ -355,7 +355,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
     for (const t of visibleSystemTasks) {
-      const key = FREQUENCY_LABELS[t.frequency] || "DITORE"
+      const key = FREQUENCY_LABELS[t.frequency] || "Daily"
       const list = groups.get(key) || []
       list.push(t)
       groups.set(key, list)
@@ -618,7 +618,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="text-2xl font-semibold">{departmentName}</div>
-          <div className="text-sm text-muted-foreground">Menaxhimi i projekteve dhe detyrave ditore</div>
+          <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
         </div>
         <div className="inline-flex rounded-xl border bg-muted/40 p-1">
           <button
@@ -629,7 +629,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               viewMode === "department" ? "bg-background shadow-sm" : "text-muted-foreground",
             ].join(" ")}
           >
-            Departamenti
+            Department
           </button>
           <button
             type="button"
@@ -639,7 +639,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               viewMode === "mine" ? "bg-background shadow-sm" : "text-muted-foreground",
             ].join(" ")}
           >
-            Pamja Ime
+            My View
           </button>
         </div>
       </div>
@@ -676,27 +676,27 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       {activeTab === "projects" ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">Projekte Aktive</div>
+            <div className="text-lg font-semibold">Active Projects</div>
             {canCreate ? (
               <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                 <DialogTrigger asChild>
-                  <Button className="rounded-xl">+ Projekt i Ri</Button>
+                  <Button className="rounded-xl">+ New Project</Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-2xl">
                   <DialogHeader>
-                    <DialogTitle>Shto Projekt</DialogTitle>
+                    <DialogTitle>Add Project</DialogTitle>
                   </DialogHeader>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2 md:col-span-2">
-                      <Label>Titulli</Label>
+                      <Label>Title</Label>
                       <Input value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label>Pershkrimi</Label>
+                      <Label>Description</Label>
                       <Textarea
                         value={projectDescription}
                         onChange={(e) => setProjectDescription(e.target.value)}
-                        placeholder="Shkruaj pershkrimin e projektit..."
+                        placeholder="Enter the project description..."
                       />
                     </div>
                     <div className="space-y-2">
@@ -716,10 +716,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Faza</Label>
+                      <Label>Phase</Label>
                       <Select value={projectPhase} onValueChange={setProjectPhase}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Faza" />
+                          <SelectValue placeholder="Phase" />
                         </SelectTrigger>
                         <SelectContent>
                           {PHASES.map((p) => (
@@ -731,10 +731,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Statusi</Label>
+                      <Label>Status</Label>
                       <Select value={projectStatus} onValueChange={setProjectStatus}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Statusi" />
+                          <SelectValue placeholder="Status" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="TODO">To do</SelectItem>
@@ -747,10 +747,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                     </div>
                     <div className="flex justify-end gap-2 md:col-span-2">
                       <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
-                        Anulo
+                        Cancel
                       </Button>
                       <Button disabled={!projectTitle.trim() || creatingProject} onClick={() => void submitProject()}>
-                        {creatingProject ? "Ruaj..." : "Ruaj"}
+                        {creatingProject ? "Saving..." : "Save"}
                       </Button>
                     </div>
                   </div>
@@ -770,10 +770,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-base font-semibold">{project.title || project.name}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{project.description || "—"}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">{project.description || "-"}</div>
                     </div>
                     <Badge variant="outline" className="text-xs">
-                      {PHASE_LABELS[phase] || "Takimet"}
+                      {PHASE_LABELS[phase] || "Meetings"}
                     </Badge>
                   </div>
                   <div className="mt-4 text-xs text-muted-foreground">
@@ -797,7 +797,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                         </div>
                       ) : (
                         <div className="h-8 w-8 rounded-full bg-muted text-xs font-semibold flex items-center justify-center">
-                          —
+                          -
                         </div>
                       )}
                     </div>
@@ -808,10 +808,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                         disabled={!canAdvance || isAdvancing}
                         onClick={() => void advanceProjectPhase(project.id)}
                       >
-                        {isAdvancing ? "Duke mbyllur..." : "Mbyll fazen"}
+                        {isAdvancing ? "Closing..." : "Close phase"}
                       </Button>
                       <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
-                        Kliko per detaje →
+                        View details -&gt;
                       </Link>
                     </div>
                   </div>
@@ -827,12 +827,12 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-xl font-semibold">
-                {viewMode === "department" ? "All (Sot) - Departamenti" : "All (Sot)"}
+                {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
               </div>
               <div className="text-sm text-muted-foreground">
                 {viewMode === "department"
-                  ? "Te gjitha detyrat e sotit per ekipin e departamentit."
-                  : "Te gjitha detyrat e sotit, te organizuara ne nje vend."}
+                  ? "All of today's tasks for the department team."
+                  : "All of today's tasks, organized in one place."}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -859,10 +859,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           </div>
           <div className="grid gap-4 md:grid-cols-4">
             {[
-              { label: "PROJEKT TASKS", value: 0 },
-              { label: "PA PROJEKT", value: 0 },
-              { label: "SHENIME (OPEN)", value: 0 },
-              { label: "SISTEM", value: 0 },
+              { label: "PROJECT TASKS", value: 0 },
+              { label: "NO PROJECT", value: 0 },
+              { label: "NOTES (OPEN)", value: 0 },
+              { label: "SYSTEM", value: 0 },
             ].map((stat) => (
               <Card key={stat.label} className="p-4">
                 <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
@@ -877,27 +877,27 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold">Detyra Sistemi</div>
+              <div className="text-xl font-semibold">System Tasks</div>
               <div className="text-sm text-muted-foreground">
-                Detyrat e departamenteve, te organizuara sipas frekuences dhe dates.
+                Department tasks organized by frequency and date.
               </div>
             </div>
             {canCreate ? (
               <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="outline">+ Shto Detyre</Button>
+                  <Button variant="outline">+ Add Task</Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-2xl">
                   <DialogHeader>
-                    <DialogTitle>Shto Detyre Sistemi</DialogTitle>
+                    <DialogTitle>Add System Task</DialogTitle>
                   </DialogHeader>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2 md:col-span-2">
-                      <Label>Titulli</Label>
+                      <Label>Title</Label>
                       <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <Label>Personi (Owner)</Label>
+                      <Label>Owner</Label>
                       <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select owner" />
@@ -913,11 +913,11 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Vendosur nga</Label>
+                      <Label>Set by</Label>
                       <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
                     </div>
                     <div className="space-y-2">
-                      <Label>Data</Label>
+                      <Label>Date</Label>
                       <Input
                         type="date"
                         value={systemDateInput}
@@ -925,23 +925,23 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Frekuenca</Label>
+                      <Label>Frequency</Label>
                       <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Frekuenca" />
+                          <SelectValue placeholder="Frequency" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="DAILY">Ditore</SelectItem>
-                          <SelectItem value="WEEKLY">Javore</SelectItem>
-                          <SelectItem value="MONTHLY">Mujore</SelectItem>
-                          <SelectItem value="3_MONTHS">3 Mujore</SelectItem>
-                          <SelectItem value="6_MONTHS">6 Mujore</SelectItem>
-                          <SelectItem value="YEARLY">Vjetore</SelectItem>
+                          <SelectItem value="DAILY">Daily</SelectItem>
+                          <SelectItem value="WEEKLY">Weekly</SelectItem>
+                          <SelectItem value="MONTHLY">Monthly</SelectItem>
+                          <SelectItem value="3_MONTHS">3 months</SelectItem>
+                          <SelectItem value="6_MONTHS">6 months</SelectItem>
+                          <SelectItem value="YEARLY">Yearly</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Departamenti</Label>
+                      <Label>Department</Label>
                       <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
                         <SelectTrigger>
                           <SelectValue placeholder="Department" />
@@ -952,10 +952,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Statusi</Label>
+                      <Label>Status</Label>
                       <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Statusi" />
+                          <SelectValue placeholder="Status" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="OPEN">Open</SelectItem>
@@ -964,19 +964,19 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       </Select>
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label>Pershkrimi</Label>
+                      <Label>Description</Label>
                       <Textarea
                         value={systemDescription}
                         onChange={(e) => setSystemDescription(e.target.value)}
-                        placeholder="Shkruaj detajet e detyres..."
+                        placeholder="Enter task details..."
                       />
                     </div>
                     <div className="flex justify-end gap-2 md:col-span-2">
                       <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
-                        Anulo
+                        Cancel
                       </Button>
                       <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
-                        {creatingSystem ? "Ruaj..." : "Ruaj"}
+                        {creatingSystem ? "Saving..." : "Save"}
                       </Button>
                     </div>
                   </div>
@@ -988,9 +988,9 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-xl border bg-muted/40 p-1">
               {[
-                { label: "Sot", offset: 0 },
-                { label: "Dje", offset: -1 },
-                { label: "Neser", offset: 1 },
+                { label: "Today", offset: 0 },
+                { label: "Yesterday", offset: -1 },
+                { label: "Tomorrow", offset: 1 },
               ].map((opt) => {
                 const target = new Date()
                 target.setDate(target.getDate() + opt.offset)
@@ -1022,7 +1022,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               onChange={(e) => setSystemDate(new Date(e.target.value))}
             />
             <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
-              {showAllSystem ? "Vetem data" : "Shfaq te gjitha"}
+              {showAllSystem ? "Only date" : "Show all"}
             </Button>
           </div>
 
@@ -1037,12 +1037,12 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                     <Badge variant="secondary">{group.items.length}</Badge>
                   </div>
                   <div className="grid grid-cols-7 gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground">
-                    <div className="col-span-2">DETYRA</div>
-                    <div>DEPARTAMENTI</div>
-                    <div>KUR</div>
-                    <div>STATUSI</div>
+                    <div className="col-span-2">TASK</div>
+                    <div>DEPARTMENT</div>
+                    <div>WHEN</div>
+                    <div>STATUS</div>
                     <div>OWNER</div>
-                    <div>VENDOSUR NGA</div>
+                    <div>SET BY</div>
                   </div>
                   <div className="divide-y">
                     {group.items.map((item) => {
@@ -1055,7 +1055,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                         >
                           <div className="col-span-2">
                             <div className="font-medium">{item.title}</div>
-                            <div className="text-xs text-muted-foreground">{item.description || "—"}</div>
+                            <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
                           </div>
                           <div>{department.code}</div>
                           <div className="whitespace-pre-line text-muted-foreground">
@@ -1074,8 +1074,8 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                               </Badge>
                             </div>
                           </div>
-                          <div>{owner?.full_name || owner?.username || "—"}</div>
-                          <div>{user?.full_name || user?.username || "—"}</div>
+                          <div>{owner?.full_name || owner?.username || "-"}</div>
+                          <div>{user?.full_name || user?.username || "-"}</div>
                         </div>
                       )
                     })}
@@ -1092,7 +1092,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       {activeTab === "no-project" ? (
         <div className="grid gap-4 md:grid-cols-4">
           <Card className="p-4">
-            <div className="text-sm font-semibold">Normale / GA</div>
+            <div className="text-sm font-semibold">Normal / GA</div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.normal.length ? (
                 noProjectBuckets.normal.map((t) => (
@@ -1104,7 +1104,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
                       <Badge variant="outline" className="text-xs">
-                        {t.ga_note_origin_id ? "GA" : "Normale"}
+                        {t.ga_note_origin_id ? "GA" : "Normal"}
                       </Badge>
                     </div>
                   </Link>
@@ -1118,7 +1118,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           <Card className="p-4 bg-red-50/40 border-red-100">
             <div className="flex items-center gap-2 text-red-700 font-semibold">
               <span className="h-5 w-5 rounded-full bg-red-500" />
-              <span>BLLOK</span>
+              <span>BLOCKED</span>
             </div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.blocked.length ? (
@@ -1130,7 +1130,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                   >
                     <div className="font-medium">{t.title}</div>
                     <Badge variant="outline" className="mt-2 text-xs border-red-200 text-red-600">
-                      BLLOK
+                      BLOCKED
                     </Badge>
                   </Link>
                 ))
@@ -1168,7 +1168,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           <Card className="p-4 bg-green-50/40 border-green-100">
             <div className="text-green-700 font-semibold">R1</div>
             <div className="mt-2 text-sm text-green-700/80">
-              Projekt i ri (rasti i pare) behet bashke me menaxherin.
+              New project (first case) is handled with the manager.
             </div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.r1.length ? (
@@ -1207,16 +1207,16 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       >
                         {note.note_type || "GA"}
                       </Badge>
-                      <span>Nga {author?.full_name || author?.username || "-"}</span>
-                      <span>• {note.created_at ? new Date(note.created_at).toLocaleString("sq-AL") : "-"}</span>
+                      <span>By {author?.full_name || author?.username || "-"}</span>
+                      <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
                       {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
                     </div>
                     {note.status !== "CLOSED" ? (
                       <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                        Mbyll
+                        Close
                       </Button>
                     ) : (
-                      <Badge variant="secondary">Mbyllur</Badge>
+                      <Badge variant="secondary">Closed</Badge>
                     )}
                   </div>
                   <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
@@ -1231,19 +1231,19 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
 
       {activeTab === "meetings" ? (
         <div className="space-y-4">
-          <div className="text-xl font-semibold">Takime</div>
+          <div className="text-xl font-semibold">Meetings</div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-5 space-y-4">
-              <div className="text-sm font-semibold">Takime Externe</div>
+              <div className="text-sm font-semibold">External Meetings</div>
               <div className="grid gap-3">
                 <Input
-                  placeholder="Titulli i takimit"
+                  placeholder="Meeting title"
                   value={meetingTitle}
                   onChange={(e) => setMeetingTitle(e.target.value)}
                 />
                 <div className="grid gap-3 md:grid-cols-2">
                   <Input
-                    placeholder="Platforma (Zoom, Meet, Zyra...)"
+                    placeholder="Platform (Zoom, Meet, Office...)"
                     value={meetingPlatform}
                     onChange={(e) => setMeetingPlatform(e.target.value)}
                   />
@@ -1256,10 +1256,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 <div className="grid gap-3 md:grid-cols-2">
                   <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Projekt (opsional)" />
+                      <SelectValue placeholder="Project (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Pa projekt</SelectItem>
+                      <SelectItem value="__none__">No project</SelectItem>
                       {filteredProjects.map((project) => (
                         <SelectItem key={project.id} value={project.id}>
                           {project.title || project.name}
@@ -1268,7 +1268,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                     </SelectContent>
                   </Select>
                   <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                    {creatingMeeting ? "Duke ruajtur..." : "Shto"}
+                    {creatingMeeting ? "Saving..." : "Add"}
                   </Button>
                 </div>
               </div>
@@ -1291,7 +1291,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                               <Input
                                 value={editMeetingPlatform}
                                 onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                placeholder="Platforma"
+                                placeholder="Platform"
                               />
                               <Input
                                 type="datetime-local"
@@ -1301,10 +1301,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                             </div>
                             <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
                               <SelectTrigger>
-                                <SelectValue placeholder="Projekt (opsional)" />
+                                <SelectValue placeholder="Project (optional)" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">Pa projekt</SelectItem>
+                                <SelectItem value="__none__">No project</SelectItem>
                                 {filteredProjects.map((p) => (
                                   <SelectItem key={p.id} value={p.id}>
                                     {p.title || p.name}
@@ -1314,9 +1314,9 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                             </Select>
                             <div className="flex justify-end gap-2">
                               <Button variant="outline" onClick={cancelEditMeeting}>
-                                Anulo
+                                Cancel
                               </Button>
-                              <Button onClick={() => void saveMeeting(meeting.id)}>Ruaj</Button>
+                              <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
                             </div>
                           </div>
                         ) : (
@@ -1325,16 +1325,16 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                               <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
                               {project ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                  Projekt: {project.title || project.name}
+                                  Project: {project.title || project.name}
                                 </div>
                               ) : null}
                             </div>
                             <div className="flex items-center gap-2">
                               <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
-                                Ndrysho
+                                Edit
                               </Button>
                               <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
-                                Fshi
+                                Delete
                               </Button>
                             </div>
                           </div>
@@ -1343,17 +1343,17 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                     )
                   })
                 ) : (
-                  <div className="text-sm text-muted-foreground">Nuk ka takime eksterne ende.</div>
+                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
                 )}
               </div>
             </Card>
 
             <Card className="p-5 space-y-4">
-              <div className="text-sm font-semibold">Takime Interne</div>
+              <div className="text-sm font-semibold">Internal Meetings</div>
               <div>
                 <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  Moderator: <span className="font-medium text-foreground">{INTERNAL_MEETING.moderator}</span> · Ekipi:{" "}
+                  Moderator: <span className="font-medium text-foreground">{INTERNAL_MEETING.moderator}</span> - Team:{" "}
                   {INTERNAL_MEETING.team.join(", ")}
                 </div>
               </div>
