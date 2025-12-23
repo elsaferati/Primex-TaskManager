@@ -63,12 +63,30 @@ class PromptType(str, enum.Enum):
     ZHVILLIM_PROMPT = "ZHVILLIM_PROMPT"
 
 
+class GaNoteType(str, enum.Enum):
+    GA = "GA"
+    KA = "KA"
+
+
+class GaNoteStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
+class GaNotePriority(str, enum.Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    URGENT = "URGENT"
+
+
 class HolidayType(str, enum.Enum):
     PX_INTERNAL = "PX_INTERNAL"
     CLIENT = "CLIENT"
 
 
 class ProjectPhaseStatus(str, enum.Enum):
+    TAKIMET = "TAKIMET"
     PLANIFIKIMI = "PLANIFIKIMI"
     ZHVILLIMI = "ZHVILLIMI"
     TESTIMI = "TESTIMI"

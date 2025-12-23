@@ -15,10 +15,11 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { ChecklistItem, GaNote, Project, ProjectPrompt, Task, User } from "@/lib/types"
+import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
-const PHASES = ["PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
 const PHASE_LABELS: Record<string, string> = {
+  TAKIMET: "Takimet",
   PLANIFIKIMI: "Planifikimi",
   ZHVILLIMI: "Zhvillimi",
   TESTIMI: "Testimi",
@@ -57,19 +58,50 @@ function statusLabel(status?: string) {
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase())
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleString("sq-AL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function formatMeetingLabel(meeting: Meeting) {
+  const platformLabel = meeting.platform ? ` (${meeting.platform})` : ""
+  if (!meeting.starts_at) return `${meeting.title}${platformLabel}`
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return `${meeting.title}${platformLabel}`
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const timeLabel = date.toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })
+  const weekdayLabel = date.toLocaleDateString("sq-AL", { weekday: "long" })
+  const prefix = sameDay ? timeLabel : weekdayLabel
+  return `${prefix} - ${meeting.title}${platformLabel}`
+}
+
 export default function ProjectPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const projectId = String(params.id)
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [departmentUsers, setDepartmentUsers] = React.useState<User[]>([])
+  const [allUsers, setAllUsers] = React.useState<User[]>([])
   const [members, setMembers] = React.useState<User[]>([])
   const [checklistItems, setChecklistItems] = React.useState<ChecklistItem[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [prompts, setPrompts] = React.useState<ProjectPrompt[]>([])
+  const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [activeTab, setActiveTab] = React.useState<TabId>("description")
   const [newChecklistContent, setNewChecklistContent] = React.useState("")
   const [addingChecklist, setAddingChecklist] = React.useState(false)
@@ -84,6 +116,12 @@ export default function ProjectPage() {
   const [membersOpen, setMembersOpen] = React.useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = React.useState<string[]>([])
   const [savingMembers, setSavingMembers] = React.useState(false)
+  const [advancingPhase, setAdvancingPhase] = React.useState(false)
+  const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const [newGaNote, setNewGaNote] = React.useState("")
+  const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
+  const [addingGaNote, setAddingGaNote] = React.useState(false)
 
   React.useEffect(() => {
     const load = async () => {
@@ -92,13 +130,14 @@ export default function ProjectPage() {
       const p = (await pRes.json()) as Project
       setProject(p)
 
-      const [tRes, mRes, cRes, gRes, prRes, usersRes] = await Promise.all([
+      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
         apiFetch(`/project-members?project_id=${p.id}`),
         apiFetch(`/checklist-items?project_id=${p.id}`),
         apiFetch(`/ga-notes?project_id=${p.id}`),
         apiFetch(`/project-prompts?project_id=${p.id}`),
         apiFetch("/users"),
+        apiFetch(`/meetings?project_id=${p.id}`),
       ])
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
@@ -106,13 +145,32 @@ export default function ProjectPage() {
       if (cRes.ok) setChecklistItems((await cRes.json()) as ChecklistItem[])
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
+      if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
       if (usersRes.ok) {
         const users = (await usersRes.json()) as User[]
+        setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
     }
     void load()
   }, [apiFetch, projectId])
+
+  React.useEffect(() => {
+    if (project?.current_phase) setViewedPhase(project.current_phase)
+  }, [project?.current_phase])
+
+  React.useEffect(() => {
+    const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+    const allowedTabs =
+      phaseValue === "TAKIMET"
+        ? ["description"]
+        : phaseValue === "TESTIMI"
+          ? ["description", "checklists", "ga"]
+          : TABS.map((tab) => tab.id)
+    if (!allowedTabs.includes(activeTab)) {
+      setActiveTab("description")
+    }
+  }, [activeTab, project?.current_phase, viewedPhase])
 
   React.useEffect(() => {
     if (!membersOpen) return
@@ -256,12 +314,112 @@ export default function ProjectPage() {
     }
   }
 
+  const advancePhase = async () => {
+    if (!project) return
+    const openTasks = tasks.filter(
+      (task) => task.status !== "DONE" && task.status !== "CANCELLED"
+    )
+    const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
+    if (openTasks.length || uncheckedItems.length) {
+      if (openTasks.length && uncheckedItems.length) {
+        toast.error(`Ka ${openTasks.length} detyra te hapura dhe ${uncheckedItems.length} checklist te pa kryera.`)
+      } else if (openTasks.length) {
+        toast.error(`Ka ${openTasks.length} detyra te hapura.`)
+      } else {
+        toast.error(`Ka ${uncheckedItems.length} checklist te pa kryera.`)
+      }
+      return
+    }
+    setAdvancingPhase(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}/advance-phase`, { method: "POST" })
+      if (!res.ok) {
+        let detail = "Failed to advance phase"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setViewedPhase(updated.current_phase || "TAKIMET")
+      toast.success("Phase advanced")
+    } finally {
+      setAdvancingPhase(false)
+    }
+  }
+
+  const submitGaNote = async () => {
+    if (!project || !newGaNote.trim()) return
+    setAddingGaNote(true)
+    try {
+      const priorityValue = newGaNotePriority === "__none__" ? null : newGaNotePriority
+      const res = await apiFetch("/ga-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          content: newGaNote.trim(),
+          note_type: newGaNoteType,
+          priority: priorityValue,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add GA/KA note"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as GaNote
+      setGaNotes((prev) => [...prev, created])
+      setNewGaNote("")
+      setNewGaNoteType("GA")
+      setNewGaNotePriority("__none__")
+      toast.success("GA/KA note added")
+    } finally {
+      setAddingGaNote(false)
+    }
+  }
+
+  const closeGaNote = async (noteId: string) => {
+    const res = await apiFetch(`/ga-notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "CLOSED" }),
+    })
+    if (!res.ok) {
+      let detail = "Failed to close GA/KA note"
+      try {
+        const data = (await res.json()) as { detail?: string }
+        if (data?.detail) detail = data.detail
+      } catch {
+        // ignore
+      }
+      toast.error(detail)
+      return
+    }
+    const updated = (await res.json()) as GaNote
+    setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+  }
+
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
-  const phase = project.current_phase || "PLANIFIKIMI"
+  const phase = project.current_phase || "TAKIMET"
+  const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
+  const canAdvance = phaseIndex >= 0 && phaseIndex < PHASES.length - 1
+  const activePhase = viewedPhase || phase
   const userMap = new Map(
-    [...departmentUsers, ...members].map((m) => [m.id, m])
+    [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
   )
   const gaPrompt = prompts.find((p) => p.type === "GA_PROMPT")
   const devPrompt = prompts.find((p) => p.type === "ZHVILLIM_PROMPT")
@@ -280,30 +438,56 @@ export default function ProjectPage() {
           <div className="mt-3 text-3xl font-semibold">{title}</div>
           <div className="mt-3">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              {PHASE_LABELS[phase] || "Planifikimi"}
+              {PHASE_LABELS[phase] || "Takimet"}
             </Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
             {PHASES.map((p, idx) => {
+              const isViewed = p === activePhase
               const isCurrent = p === phase
               return (
                 <span key={p}>
-                  <span className={isCurrent ? "text-blue-600 font-medium" : ""}>
+                  <button
+                    type="button"
+                    onClick={() => setViewedPhase(p)}
+                    className={[
+                      "transition-colors",
+                      isViewed ? "text-blue-600 font-medium" : isCurrent ? "text-foreground" : "text-muted-foreground",
+                    ].join(" ")}
+                    aria-pressed={isViewed}
+                  >
                     {PHASE_LABELS[p]}
-                  </span>
+                  </button>
                   {idx < PHASES.length - 1 ? " -> " : ""}
                 </span>
               )
             })}
           </div>
+          {activePhase !== phase ? (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Pamja: {PHASE_LABELS[activePhase] || "Takimet"}
+            </div>
+          ) : null}
         </div>
-        <Button className="rounded-xl">Settings</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" disabled={!canAdvance || advancingPhase} onClick={() => void advancePhase()}>
+            {advancingPhase ? "Duke mbyllur..." : "Mbyll fazen"}
+          </Button>
+          <Button className="rounded-xl">Settings</Button>
+        </div>
       </div>
 
       <div className="border-b">
         <div className="flex flex-wrap gap-6">
-          {TABS.map((tab) => {
+          {(
+            activePhase === "TAKIMET"
+              ? TABS.filter((tab) => tab.id === "description")
+              : activePhase === "TESTIMI"
+                ? TABS.filter((tab) => tab.id === "description" || tab.id === "checklists" || tab.id === "ga")
+                : TABS
+          ).map((tab) => {
             const isActive = tab.id === activeTab
+            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testimi" : tab.label
             return (
               <button
                 key={tab.id}
@@ -314,7 +498,7 @@ export default function ProjectPage() {
                   isActive ? "text-blue-600" : "text-muted-foreground",
                 ].join(" ")}
               >
-                {tab.label}
+                {label}
                 {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
               </button>
             )
@@ -324,12 +508,46 @@ export default function ProjectPage() {
 
       {activeTab === "description" ? (
         <Card className="p-6">
-          <div className="text-lg font-semibold">Qellimi i Projektit</div>
-          <div className="mt-3 text-sm text-muted-foreground">{project.description || "-"}</div>
+          {activePhase === "TAKIMET" ? (
+            <>
+              <div className="text-lg font-semibold">Takimet (GA/KA)</div>
+              {gaNotes.length ? (
+                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+                  {gaNotes.map((note) => (
+                    <li key={note.id}>{note.content}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-3 text-sm text-muted-foreground">No GA/KA notes yet.</div>
+              )}
+              <div className="mt-6 text-base font-semibold">Takime Externe</div>
+              {meetings.length ? (
+                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+                  {meetings.map((meeting) => (
+                    <li key={meeting.id}>{formatMeetingLabel(meeting)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-3 text-sm text-muted-foreground">No meetings yet.</div>
+              )}
+            </>
+          ) : activePhase === "TESTIMI" ? (
+            <>
+              <div className="text-lg font-semibold">Checklist e Testimit</div>
+              <div className="mt-3 text-sm text-muted-foreground">
+                Shto checklist manualisht nga tab-i Checklists.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-lg font-semibold">Qellimi i Projektit</div>
+              <div className="mt-3 text-sm text-muted-foreground">{project.description || "-"}</div>
+            </>
+          )}
         </Card>
       ) : null}
 
-      {activeTab === "tasks" ? (
+      {activePhase !== "TAKIMET" && activeTab === "tasks" ? (
         <div className="space-y-4">
           <div className="flex items-center justify-end">
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -439,7 +657,7 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activeTab === "checklists" ? (
+      {activePhase !== "TAKIMET" && activeTab === "checklists" ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Input
@@ -455,7 +673,7 @@ export default function ProjectPage() {
               {addingChecklist ? "Shto..." : "Shto"}
             </Button>
           </div>
-          {checklistItems.length ? (
+          {activePhase === "TESTIMI" ? null : checklistItems.length ? (
             checklistItems.map((item) => (
               <Card
                 key={item.id}
@@ -474,7 +692,7 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activeTab === "members" ? (
+      {activePhase !== "TAKIMET" && activeTab === "members" ? (
         <div className="space-y-4">
           <div className="flex items-center justify-end">
             <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
@@ -531,13 +749,73 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activeTab === "ga" ? (
+      {activePhase !== "TAKIMET" && activeTab === "ga" ? (
         <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                <SelectTrigger className="w-28">
+                  <SelectValue placeholder="GA/KA" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="GA">GA</SelectItem>
+                  <SelectItem value="KA">KA</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="Prioriteti" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Pa prioritet</SelectItem>
+                  <SelectItem value="LOW">Low</SelectItem>
+                  <SelectItem value="MEDIUM">Medium</SelectItem>
+                  <SelectItem value="HIGH">High</SelectItem>
+                  <SelectItem value="URGENT">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-start gap-2">
+              <Textarea
+                placeholder="Shto shenim GA/KA..."
+                value={newGaNote}
+                onChange={(e) => setNewGaNote(e.target.value)}
+                rows={3}
+              />
+              <Button
+                variant="outline"
+                disabled={!newGaNote.trim() || addingGaNote}
+                onClick={() => void submitGaNote()}
+              >
+                {addingGaNote ? "Shto..." : "Shto"}
+              </Button>
+            </div>
+          </div>
           {gaNotes.length ? (
             gaNotes.map((note) => (
-              <Card key={note.id} className="bg-orange-50 border-orange-100 p-5">
-                <div className="text-sm font-semibold">Shenim GA:</div>
-                <div className="text-sm text-muted-foreground">{note.content}</div>
+              <Card key={note.id} className="border-orange-100 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Badge variant="outline" className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}>
+                      {note.note_type || "GA"}
+                    </Badge>
+                    <span>
+                      Nga {userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "-"}
+                    </span>
+                    <span>• {formatDateTime(note.created_at)}</span>
+                    {note.priority ? (
+                      <Badge variant="secondary">{statusLabel(note.priority)}</Badge>
+                    ) : null}
+                  </div>
+                  {note.status !== "CLOSED" ? (
+                    <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                      Mbyll
+                    </Button>
+                  ) : (
+                    <Badge variant="secondary">Mbyllur</Badge>
+                  )}
+                </div>
+                <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
               </Card>
             ))
           ) : (
@@ -546,7 +824,7 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activeTab === "prompts" ? (
+      {activePhase !== "TAKIMET" && activeTab === "prompts" ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="p-5 space-y-3">
             <div className="text-sm font-semibold">GA PROMPT</div>

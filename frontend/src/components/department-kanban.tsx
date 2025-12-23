@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, Project, SystemTaskTemplate, Task, TaskPriority, User } from "@/lib/types"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, User } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Sot)", tone: "neutral" },
@@ -28,9 +28,10 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
-const PHASES = ["PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
 
 const PHASE_LABELS: Record<string, string> = {
+  TAKIMET: "Takimet",
   PLANIFIKIMI: "Planifikimi",
   ZHVILLIMI: "Zhvillimi",
   TESTIMI: "Testimi",
@@ -86,6 +87,40 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
+
+const INTERNAL_MEETING = {
+  title: "Pikat e diskutimit (Zhvillim M1, M2, M3)",
+  moderator: "Endi Hyseni",
+  team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha"],
+  slots: {
+    M1: {
+      label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
+      items: [
+        "A ka mungesa, a ndryshon plani per sot?",
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "A ka e-mails te reja ne IT?",
+        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
+        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+      ],
+    },
+    M2: {
+      label: "M2 PER ZHVILLIM (12:00-12:15 MAX)",
+      items: [
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
+        "Cka mbetet per PM?",
+      ],
+    },
+    M3: {
+      label: "M3 (ME TRELLO) PER ZHVILLIM (16:10-16:30 MAX)",
+      items: [
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
+        "Cka kemi me punu neser?",
+      ],
+    },
+  },
+} as const
 
 function initials(src: string) {
   return src
@@ -154,6 +189,29 @@ function formatSchedule(t: SystemTaskTemplate, date: Date) {
   return `${dayLabel}\n${dateLabel}`
 }
 
+function formatMeetingLabel(meeting: Meeting) {
+  const platformLabel = meeting.platform ? ` (${meeting.platform})` : ""
+  if (!meeting.starts_at) return `${meeting.title}${platformLabel}`
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return `${meeting.title}${platformLabel}`
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const timeLabel = date.toLocaleTimeString("sq-AL", { hour: "2-digit", minute: "2-digit" })
+  const weekdayLabel = date.toLocaleDateString("sq-AL", { weekday: "long" })
+  const prefix = sameDay ? timeLabel : weekdayLabel
+  return `${prefix} - ${meeting.title}${platformLabel}`
+}
+
+function toMeetingInputValue(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 16)
+}
+
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
@@ -167,6 +225,8 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<User[]>([])
+  const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
+  const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>("projects")
@@ -188,8 +248,20 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
-  const [projectPhase, setProjectPhase] = React.useState("PLANIFIKIMI")
+  const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  const [advancingProjectId, setAdvancingProjectId] = React.useState<string | null>(null)
+  const [meetingTitle, setMeetingTitle] = React.useState("")
+  const [meetingPlatform, setMeetingPlatform] = React.useState("")
+  const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
+  const [meetingProjectId, setMeetingProjectId] = React.useState("__none__")
+  const [creatingMeeting, setCreatingMeeting] = React.useState(false)
+  const [editingMeetingId, setEditingMeetingId] = React.useState<string | null>(null)
+  const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
+  const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
+  const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
+  const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
+  const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
 
   React.useEffect(() => {
     const load = async () => {
@@ -202,10 +274,12 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
         setDepartment(dep)
         if (!dep) return
 
-        const [projRes, sysRes, tasksRes] = await Promise.all([
+        const [projRes, sysRes, tasksRes, gaRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?department_id=${dep.id}&include_done=false`),
+          apiFetch(`/ga-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         if (projRes.ok) setProjects((await projRes.json()) as Project[])
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
@@ -213,6 +287,8 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           const taskRows = (await tasksRes.json()) as Task[]
           setNoProjectTasks(taskRows.filter((t) => !t.project_id))
         }
+        if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
+        if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
 
         if (user?.role !== "STAFF") {
           const usersRes = await apiFetch("/users")
@@ -244,10 +320,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       projects: filteredProjects.length,
       system: systemTasks.length,
       "no-project": noProjectTasks.length,
-      "ga-ka": 0,
-      meetings: 0,
+      "ga-ka": gaNotes.filter((n) => n.status !== "CLOSED").length,
+      meetings: meetings.length,
     }),
-    [filteredProjects.length, systemTasks.length, noProjectTasks.length]
+    [filteredProjects.length, systemTasks.length, noProjectTasks.length, gaNotes, meetings]
   )
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -379,7 +455,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       setProjectTitle("")
       setProjectDescription("")
       setProjectManagerId("__unassigned__")
-      setProjectPhase("PLANIFIKIMI")
+      setProjectPhase("TAKIMET")
       setProjectStatus("TODO")
       toast.success("Project created")
     } finally {
@@ -387,8 +463,155 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     }
   }
 
+  const advanceProjectPhase = async (projectId: string) => {
+    setAdvancingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}/advance-phase`, { method: "POST" })
+      if (!res.ok) {
+        let detail = "Failed to advance phase"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+      toast.success("Phase advanced")
+    } finally {
+      setAdvancingProjectId(null)
+    }
+  }
+
+  const submitMeeting = async () => {
+    if (!meetingTitle.trim() || !department) return
+    setCreatingMeeting(true)
+    try {
+      const startsAt = meetingStartsAt ? new Date(meetingStartsAt).toISOString() : null
+      const payload = {
+        title: meetingTitle.trim(),
+        platform: meetingPlatform.trim() || null,
+        starts_at: startsAt,
+        department_id: department.id,
+        project_id: meetingProjectId === "__none__" ? null : meetingProjectId,
+      }
+      const res = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create meeting"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as Meeting
+      setMeetings((prev) => [created, ...prev])
+      setMeetingTitle("")
+      setMeetingPlatform("")
+      setMeetingStartsAt("")
+      setMeetingProjectId("__none__")
+      toast.success("Meeting created")
+    } finally {
+      setCreatingMeeting(false)
+    }
+  }
+
+  const startEditMeeting = (meeting: Meeting) => {
+    setEditingMeetingId(meeting.id)
+    setEditMeetingTitle(meeting.title)
+    setEditMeetingPlatform(meeting.platform || "")
+    setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at))
+    setEditMeetingProjectId(meeting.project_id || "__none__")
+  }
+
+  const cancelEditMeeting = () => {
+    setEditingMeetingId(null)
+    setEditMeetingTitle("")
+    setEditMeetingPlatform("")
+    setEditMeetingStartsAt("")
+    setEditMeetingProjectId("__none__")
+  }
+
+  const saveMeeting = async (meetingId: string) => {
+    if (!editMeetingTitle.trim()) return
+    const startsAt = editMeetingStartsAt ? new Date(editMeetingStartsAt).toISOString() : null
+    const payload = {
+      title: editMeetingTitle.trim(),
+      platform: editMeetingPlatform.trim() || null,
+      starts_at: startsAt,
+      project_id: editMeetingProjectId === "__none__" ? null : editMeetingProjectId,
+    }
+    const res = await apiFetch(`/meetings/${meetingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      let detail = "Failed to update meeting"
+      try {
+        const data = (await res.json()) as { detail?: string }
+        if (data?.detail) detail = data.detail
+      } catch {
+        // ignore
+      }
+      toast.error(detail)
+      return
+    }
+    const updated = (await res.json()) as Meeting
+    setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+    cancelEditMeeting()
+  }
+
+  const deleteMeeting = async (meetingId: string) => {
+    const res = await apiFetch(`/meetings/${meetingId}`, { method: "DELETE" })
+    if (!res.ok) {
+      let detail = "Failed to delete meeting"
+      try {
+        const data = (await res.json()) as { detail?: string }
+        if (data?.detail) detail = data.detail
+      } catch {
+        // ignore
+      }
+      toast.error(detail)
+      return
+    }
+    setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
+    toast.success("Meeting deleted")
+  }
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
   if (!department) return <div className="text-sm text-muted-foreground">Department not found.</div>
+
+  const closeGaNote = async (noteId: string) => {
+    const res = await apiFetch(`/ga-notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "CLOSED" }),
+    })
+    if (!res.ok) {
+      let detail = "Failed to close GA/KA note"
+      try {
+        const data = (await res.json()) as { detail?: string }
+        if (data?.detail) detail = data.detail
+      } catch {
+        // ignore
+      }
+      toast.error(detail)
+      return
+    }
+    const updated = (await res.json()) as GaNote
+    setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+  }
 
   return (
     <div className="space-y-6">
@@ -538,7 +761,10 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           <div className="grid gap-4 md:grid-cols-2">
             {filteredProjects.map((project) => {
               const manager = project.manager_id ? userMap.get(project.manager_id) : null
-              const phase = project.current_phase || "PLANIFIKIMI"
+              const phase = project.current_phase || "TAKIMET"
+              const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
+              const canAdvance = phaseIndex >= 0 && phaseIndex < PHASES.length - 1
+              const isAdvancing = advancingProjectId === project.id
               return (
                 <Card key={project.id} className="p-5">
                   <div className="flex items-start justify-between gap-3">
@@ -547,7 +773,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       <div className="mt-1 text-sm text-muted-foreground">{project.description || "—"}</div>
                     </div>
                     <Badge variant="outline" className="text-xs">
-                      {PHASE_LABELS[phase] || "Planifikimi"}
+                      {PHASE_LABELS[phase] || "Takimet"}
                     </Badge>
                   </div>
                   <div className="mt-4 text-xs text-muted-foreground">
@@ -575,9 +801,19 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                         </div>
                       )}
                     </div>
-                    <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
-                      Kliko per detaje →
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!canAdvance || isAdvancing}
+                        onClick={() => void advanceProjectPhase(project.id)}
+                      >
+                        {isAdvancing ? "Duke mbyllur..." : "Mbyll fazen"}
+                      </Button>
+                      <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
+                        Kliko per detaje →
+                      </Link>
+                    </div>
                   </div>
                 </Card>
               )
@@ -953,6 +1189,204 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               )}
             </div>
           </Card>
+        </div>
+      ) : null}
+
+      {activeTab === "ga-ka" ? (
+        <div className="space-y-3">
+          {gaNotes.length ? (
+            gaNotes.map((note) => {
+              const author = users.find((u) => u.id === note.created_by) || null
+              return (
+                <Card key={note.id} className="border-orange-100 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Badge
+                        variant="outline"
+                        className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
+                      >
+                        {note.note_type || "GA"}
+                      </Badge>
+                      <span>Nga {author?.full_name || author?.username || "-"}</span>
+                      <span>• {note.created_at ? new Date(note.created_at).toLocaleString("sq-AL") : "-"}</span>
+                      {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                    </div>
+                    {note.status !== "CLOSED" ? (
+                      <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                        Mbyll
+                      </Button>
+                    ) : (
+                      <Badge variant="secondary">Mbyllur</Badge>
+                    )}
+                  </div>
+                  <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
+                </Card>
+              )
+            })
+          ) : (
+            <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
+          )}
+        </div>
+      ) : null}
+
+      {activeTab === "meetings" ? (
+        <div className="space-y-4">
+          <div className="text-xl font-semibold">Takime</div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="p-5 space-y-4">
+              <div className="text-sm font-semibold">Takime Externe</div>
+              <div className="grid gap-3">
+                <Input
+                  placeholder="Titulli i takimit"
+                  value={meetingTitle}
+                  onChange={(e) => setMeetingTitle(e.target.value)}
+                />
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Input
+                    placeholder="Platforma (Zoom, Meet, Zyra...)"
+                    value={meetingPlatform}
+                    onChange={(e) => setMeetingPlatform(e.target.value)}
+                  />
+                  <Input
+                    type="datetime-local"
+                    value={meetingStartsAt}
+                    onChange={(e) => setMeetingStartsAt(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Projekt (opsional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Pa projekt</SelectItem>
+                      {filteredProjects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.title || project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
+                    {creatingMeeting ? "Duke ruajtur..." : "Shto"}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {meetings.length ? (
+                  meetings.map((meeting) => {
+                    const project = meeting.project_id
+                      ? projects.find((p) => p.id === meeting.project_id) || null
+                      : null
+                    const isEditing = editingMeetingId === meeting.id
+                    return (
+                      <Card key={meeting.id} className="border border-muted p-4">
+                        {isEditing ? (
+                          <div className="space-y-3">
+                            <Input
+                              value={editMeetingTitle}
+                              onChange={(e) => setEditMeetingTitle(e.target.value)}
+                            />
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <Input
+                                value={editMeetingPlatform}
+                                onChange={(e) => setEditMeetingPlatform(e.target.value)}
+                                placeholder="Platforma"
+                              />
+                              <Input
+                                type="datetime-local"
+                                value={editMeetingStartsAt}
+                                onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                              />
+                            </div>
+                            <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Projekt (opsional)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">Pa projekt</SelectItem>
+                                {filteredProjects.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    {p.title || p.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex justify-end gap-2">
+                              <Button variant="outline" onClick={cancelEditMeeting}>
+                                Anulo
+                              </Button>
+                              <Button onClick={() => void saveMeeting(meeting.id)}>Ruaj</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
+                              {project ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Projekt: {project.title || project.name}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
+                                Ndrysho
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
+                                Fshi
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    )
+                  })
+                ) : (
+                  <div className="text-sm text-muted-foreground">Nuk ka takime eksterne ende.</div>
+                )}
+              </div>
+            </Card>
+
+            <Card className="p-5 space-y-4">
+              <div className="text-sm font-semibold">Takime Interne</div>
+              <div>
+                <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  Moderator: <span className="font-medium text-foreground">{INTERNAL_MEETING.moderator}</span> · Ekipi:{" "}
+                  {INTERNAL_MEETING.team.join(", ")}
+                </div>
+              </div>
+              <div className="inline-flex rounded-xl border bg-muted/40 p-1">
+                {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
+                  <button
+                    key={slot}
+                    type="button"
+                    onClick={() => setInternalSlot(slot)}
+                    className={[
+                      "rounded-lg px-4 py-2 text-sm font-medium transition",
+                      internalSlot === slot ? "bg-background shadow-sm" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {slot}
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
+                <div className="space-y-2">
+                  {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
+                    <div key={item} className="flex items-start gap-3 rounded-lg border px-3 py-2">
+                      <Checkbox checked={false} disabled />
+                      <div className="text-sm text-muted-foreground">
+                        {idx + 1}. {item}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </div>
         </div>
       ) : null}
     </div>

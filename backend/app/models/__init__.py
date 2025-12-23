@@ -7,6 +7,7 @@ from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.holiday import Holiday
+from app.models.meeting import Meeting
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -27,6 +28,7 @@ __all__ = [
     "FeedbackLog",
     "GaNote",
     "Holiday",
+    "Meeting",
     "Notification",
     "Project",
     "ProjectMember",

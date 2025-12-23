@@ -175,3 +175,29 @@ async def update_checklist_item(
         is_checked=item.is_checked,
         position=item.position,
     )
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_200_OK)
+async def delete_checklist_item(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    item = (await db.execute(select(ChecklistItem).where(ChecklistItem.id == item_id))).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+
+    if item.checklist_id is not None:
+        checklist = (
+            await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
+        ).scalar_one_or_none()
+        if checklist and checklist.project_id is not None:
+            project = (
+                await db.execute(select(Project).where(Project.id == checklist.project_id))
+            ).scalar_one_or_none()
+            if project and project.department_id is not None:
+                ensure_department_access(user, project.department_id)
+
+    await db.delete(item)
+    await db.commit()
+    return {"ok": True}
