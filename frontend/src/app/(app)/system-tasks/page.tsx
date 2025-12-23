@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -34,9 +40,14 @@ const FREQUENCY_OPTIONS = [
 
 const FREQUENCY_VALUES = FREQUENCY_OPTIONS.map((option) => option.value)
 
+const COMBINED_FREQUENCIES: SystemTaskFrequency[] = ["3_MONTHS", "6_MONTHS"]
+
 const FREQUENCY_CHIPS = [
   { id: "all", label: "All" },
-  ...FREQUENCY_OPTIONS.map((option) => ({ id: option.value, label: option.label })),
+  { id: "DAILY", label: "Daily" },
+  { id: "MONTHLY", label: "Monthly" },
+  { id: "3_6_MONTHS", label: "3/6 months" },
+  { id: "YEARLY", label: "Yearly" },
 ]
 
 const WEEK_DAYS = [
@@ -239,7 +250,10 @@ export default function SystemTasksPage() {
   }, [frequencyFilters, templates])
 
   React.useEffect(() => {
-    if (!frequencyMultiSelect && frequencyFilters.length > 1) {
+    const combinedSelected =
+      COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
+      frequencyFilters.length === COMBINED_FREQUENCIES.length
+    if (!frequencyMultiSelect && frequencyFilters.length > 1 && !combinedSelected) {
       setFrequencyFilters([frequencyFilters[0]])
     }
   }, [frequencyFilters, frequencyMultiSelect])
@@ -281,9 +295,23 @@ export default function SystemTasksPage() {
     setFrequencyMultiSelect(false)
   }
 
-  const toggleFrequencyFilter = (value: SystemTaskFrequency | "all") => {
+  const toggleFrequencyFilter = (value: SystemTaskFrequency | "all" | "3_6_MONTHS") => {
     if (value === "all") {
       setFrequencyFilters([])
+      return
+    }
+    if (value === "3_6_MONTHS") {
+      setFrequencyFilters((prev) => {
+        const hasCombined = COMBINED_FREQUENCIES.every((item) => prev.includes(item))
+        const remaining = prev.filter((item) => !COMBINED_FREQUENCIES.includes(item))
+        if (hasCombined) {
+          return remaining
+        }
+        if (frequencyMultiSelect) {
+          return [...remaining, ...COMBINED_FREQUENCIES]
+        }
+        return [...COMBINED_FREQUENCIES]
+      })
       return
     }
     setFrequencyFilters((prev) => {
@@ -339,6 +367,9 @@ export default function SystemTasksPage() {
     if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return users
     return users.filter((u) => u.department_id === departmentId)
   }, [departmentId, users])
+  const combinedSelected =
+    COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
+    frequencyFilters.length >= COMBINED_FREQUENCIES.length
   const allFrequenciesSelected = frequencyFilters.length === 0
 
   const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
@@ -531,17 +562,24 @@ export default function SystemTasksPage() {
             disabled={!canCreate}
             onClick={() => fileInputRef.current?.click()}
           >
-            Import CSV
+            Import Excel
           </Button>
-          <Button variant="outline" onClick={() => exportTemplatesCSV("all")}>
-            Export all
-          </Button>
-          <Button variant="outline" onClick={() => exportTemplatesCSV("active")}>
-            Export active
-          </Button>
-          <Button variant="outline" onClick={() => exportTemplatesCSV("inactive")}>
-            Export inactive
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Export</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => exportTemplatesCSV("all")}>
+                Export all
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportTemplatesCSV("active")}>
+                Export open
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportTemplatesCSV("inactive")}>
+                Export closed
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" disabled={!canCreate}>
@@ -684,12 +722,17 @@ export default function SystemTasksPage() {
           <div className="flex flex-wrap gap-2" id="system-all-freq-chips">
             {FREQUENCY_CHIPS.map((chip) => {
               const isAll = chip.id === "all"
+              const isCombined = chip.id === "3_6_MONTHS"
               const active = isAll
                 ? allFrequenciesSelected
-                : frequencyFilters.includes(chip.id as SystemTaskFrequency)
+                : isCombined
+                  ? combinedSelected
+                  : frequencyFilters.includes(chip.id as SystemTaskFrequency)
               const count = isAll
                 ? templates.length
-                : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
+                : isCombined
+                  ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
+                  : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
               return (
                 <button
                   key={chip.id}
@@ -700,7 +743,9 @@ export default function SystemTasksPage() {
                       ? "border-primary bg-primary text-primary-foreground shadow-sm"
                       : "border-transparent bg-white text-muted-foreground hover:border-border hover:bg-white"
                   )}
-                  onClick={() => toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all")}
+                  onClick={() =>
+                    toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
+                  }
                 >
                   {chip.label} {isAll ? null : <small>({count})</small>}
                 </button>
