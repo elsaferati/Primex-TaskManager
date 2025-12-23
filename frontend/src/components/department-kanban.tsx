@@ -89,34 +89,33 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 
 const INTERNAL_MEETING = {
-  title: "Discussion points (Development M1, M2, M3)",
-  moderator: "Endi Hyseni",
-  team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha"],
+  title: "Pikat e diskutimit (Zhvillim M1, M2, M3)",
+  team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha", "Endi Hyseni"],
   slots: {
     M1: {
-      label: "M1 FOR DEVELOPMENT (BRIEF 08:08-08:15 MAX)",
+      label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
       items: [
-        "Any absences, does today's plan change?",
-        "Any GA/KA notes in groups/Trello?",
-        "Any new emails in IT?",
-        "Each person's tasks for today (everyone opens RD/Trello side-by-side and discusses tasks).",
-        "Notes in the development group are copied into Trello under GA/KA notes.",
+        "A ka mungesa, a ndryshon plani per sot?",
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "A ka e-mails te reja ne IT?",
+        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
+        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
       ],
     },
     M2: {
-      label: "M2 FOR DEVELOPMENT (12:00-12:15 MAX)",
+      label: "M2 PER ZHVILLIM (12:00-12:15 MAX)",
       items: [
-        "Any GA/KA notes in groups/Trello?",
-        "Discuss each person's tasks, what have we done by 12:00?",
-        "What remains for PM?",
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
+        "Cka mbetet per PM?",
       ],
     },
     M3: {
-      label: "M3 (WITH TRELLO) FOR DEVELOPMENT (16:10-16:30 MAX)",
+      label: "M3 (ME TRELLO) PER ZHVILLIM (16:10-16:30 MAX)",
       items: [
-        "Any GA/KA notes in groups/Trello?",
-        "Discuss everyone's tasks, what have we done so far?",
-        "What will we work on tomorrow?",
+        "A ka shenime GA/KA ne grupe/Trello?",
+        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
+        "Cka kemi me punu neser?",
       ],
     },
   },
@@ -1353,7 +1352,6 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               <div>
                 <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  Moderator: <span className="font-medium text-foreground">{INTERNAL_MEETING.moderator}</span> - Team:{" "}
                   {INTERNAL_MEETING.team.join(", ")}
                 </div>
               </div>
