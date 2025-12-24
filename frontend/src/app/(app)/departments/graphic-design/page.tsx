@@ -1,7 +1,7 @@
 "use client"
 
-import { DepartmentKanban } from "@/components/department-kanban"
+import DepartmentKanban from "./department-kanban"
 
 export default function GraphicDesignDepartmentPage() {
-  return <DepartmentKanban departmentName="Graphic Design" />
+  return <DepartmentKanban />
 }

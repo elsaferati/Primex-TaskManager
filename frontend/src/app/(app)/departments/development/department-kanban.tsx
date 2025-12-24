@@ -240,7 +240,8 @@ function normalizePriority(value?: TaskPriority | null): TaskPriority {
   return "MEDIUM"
 }
 
-export function DepartmentKanban({ departmentName }: { departmentName: string }) {
+export default function DepartmentKanban() {
+  const departmentName = "Development"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
