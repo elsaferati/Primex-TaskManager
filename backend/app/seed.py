@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.auth.security import get_password_hash
 from app.db import SessionLocal
 from app.models.department import Department
-from app.models.enums import UserRole
+from app.models.enums import ProjectPhaseStatus, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.user import User
 
@@ -21,6 +21,23 @@ DEPARTMENTS = [
     ("Development", "DEV"),
     ("Project Content Manager", "PCM"),
     ("Graphic Design", "GD"),
+]
+
+PCM_PROJECTS = [
+    {
+        "title": "MST",
+        "description": "Menaxhimi i programit dhe checklistes se produkteve.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.PLANIFIKIMI,
+        "progress_percentage": 48,
+    },
+    {
+        "title": "Set One",
+        "description": "Programi i perfunduar javen e kaluar.",
+        "status": TaskStatus.DONE,
+        "current_phase": ProjectPhaseStatus.MBYLLUR,
+        "progress_percentage": 100,
+    },
 ]
 
 
@@ -48,6 +65,28 @@ async def seed() -> None:
 
         await db.commit()
         print("Departments and metadata seeded.")
+
+        pcm_department = next((dept for dept in departments if dept.name == "Project Content Manager"), None)
+        if pcm_department:
+            existing_pcm = (
+                await db.execute(select(Project).where(Project.department_id == pcm_department.id))
+            ).scalars().all()
+            existing_titles = {p.title for p in existing_pcm}
+            for project in PCM_PROJECTS:
+                if project["title"] in existing_titles:
+                    continue
+                db.add(
+                    Project(
+                        title=project["title"],
+                        description=project["description"],
+                        department_id=pcm_department.id,
+                        status=project["status"],
+                        current_phase=project["current_phase"],
+                        progress_percentage=project["progress_percentage"],
+                    )
+                )
+            await db.commit()
+            print("PCM projects seeded.")
 
         # --- Seed Admin User ---
         admin_email = os.getenv("ADMIN_EMAIL")
