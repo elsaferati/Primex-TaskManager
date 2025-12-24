@@ -240,6 +240,11 @@ function normalizePriority(value?: TaskPriority | null): TaskPriority {
   return "MEDIUM"
 }
 
+function truncateDescription(value: string, limit = 120) {
+  if (value.length <= limit) return { text: value, truncated: false }
+  return { text: `${value.slice(0, limit).trim()}…`, truncated: true }
+}
+
 export default function DepartmentKanban() {
   const departmentName = "Project Content Manager"
   const { apiFetch, user } = useAuth()
@@ -300,6 +305,7 @@ export default function DepartmentKanban() {
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
+  const [expandedSystemDescriptions, setExpandedSystemDescriptions] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
     const load = async () => {
@@ -491,6 +497,10 @@ export default function DepartmentKanban() {
     if (showAllSystem) return visibleSystemTemplates
     return visibleSystemTemplates.filter((t) => shouldShowTemplate(t, systemDate))
   }, [showAllSystem, systemDate, visibleSystemTemplates])
+
+  const toggleSystemDescription = React.useCallback((id: string) => {
+    setExpandedSystemDescriptions((prev) => ({ ...prev, [id]: !prev[id] }))
+  }, [])
 
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
@@ -1161,12 +1171,29 @@ export default function DepartmentKanban() {
                 </div>
                 <div className="mt-4 space-y-2">
                   {todaySystemTasks.length ? (
-                    todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-lg border px-3 py-2 text-sm">
-                        <div className="font-medium">{task.title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{task.description || "-"}</div>
-                      </div>
-                    ))
+                    todaySystemTasks.map((task) => {
+                      const description = task.description?.trim() || ""
+                      const isExpanded = Boolean(expandedSystemDescriptions[task.id])
+                      const { text, truncated } = truncateDescription(description)
+                      const displayText = description ? (isExpanded ? description : text) : "-"
+                      return (
+                        <div key={task.id} className="rounded-lg border px-3 py-2 text-sm">
+                          <div className="font-medium">{task.title}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {displayText}
+                            {description && truncated ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleSystemDescription(task.id)}
+                                className="ml-2 text-[11px] font-semibold text-blue-600 hover:underline"
+                              >
+                                {isExpanded ? "Show less" : "Read more"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      )
+                    })
                   ) : (
                     <div className="text-sm text-muted-foreground">No system tasks today.</div>
                   )}
@@ -1405,7 +1432,26 @@ export default function DepartmentKanban() {
                         >
                           <div className="col-span-2">
                             <div className="font-medium">{item.title}</div>
-                            <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
+                            {(() => {
+                              const description = item.description?.trim() || ""
+                              const isExpanded = Boolean(expandedSystemDescriptions[item.id])
+                              const { text, truncated } = truncateDescription(description)
+                              const displayText = description ? (isExpanded ? description : text) : "-"
+                              return (
+                                <div className="text-xs text-muted-foreground">
+                                  {displayText}
+                                  {description && truncated ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSystemDescription(item.id)}
+                                      className="ml-2 text-[11px] font-semibold text-blue-600 hover:underline"
+                                    >
+                                      {isExpanded ? "Show less" : "Read more"}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              )
+                            })()}
                           </div>
                           <div>{department.code}</div>
                           <div className="whitespace-pre-line text-muted-foreground">
