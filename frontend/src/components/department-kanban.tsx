@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
 
@@ -15,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, User } from "@/lib/types"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, User } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -88,6 +89,13 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 
+const NO_PROJECT_TYPES = [
+  { id: "normal", label: "Normal / GA", description: "General tasks without a project." },
+  { id: "blocked", label: "Blocked", description: "Blocked all day by a single task." },
+  { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
+  { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
+] as const
+
 const INTERNAL_MEETING = {
   title: "Pikat e diskutimit (Zhvillim M1, M2, M3)",
   team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha", "Endi Hyseni"],
@@ -130,6 +138,10 @@ function initials(src: string) {
     .join("")
 }
 
+function assigneeLabel(user?: User | null) {
+  return user?.full_name || user?.username || user?.email || "-"
+}
+
 function formatToday() {
   const now = new Date()
   const date = now.toLocaleDateString("en-US", {
@@ -139,6 +151,17 @@ function formatToday() {
   })
   const day = now.toLocaleDateString("en-US", { weekday: "short" })
   return `${day} - ${date}`
+}
+
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function toDate(value?: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date
 }
 
 function formatDateInput(date: Date) {
@@ -219,16 +242,25 @@ function normalizePriority(value?: TaskPriority | null): TaskPriority {
 
 export function DepartmentKanban({ departmentName }: { departmentName: string }) {
   const { apiFetch, user } = useAuth()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get("tab")
+  const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
+  const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
+  const returnToTasks = `${pathname}?tab=no-project`
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
+  const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
-  const [activeTab, setActiveTab] = React.useState<TabId>("projects")
+  const [activeTab, setActiveTab] = React.useState<TabId>(
+    isTabId ? (normalizedTab as TabId) : "projects"
+  )
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
@@ -249,7 +281,6 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
-  const [advancingProjectId, setAdvancingProjectId] = React.useState<string | null>(null)
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
@@ -261,6 +292,13 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
   const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
+  const [noProjectOpen, setNoProjectOpen] = React.useState(false)
+  const [noProjectTitle, setNoProjectTitle] = React.useState("")
+  const [noProjectDescription, setNoProjectDescription] = React.useState("")
+  const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
+  const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
+  const [creatingNoProject, setCreatingNoProject] = React.useState(false)
 
   React.useEffect(() => {
     const load = async () => {
@@ -284,6 +322,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
+          setDepartmentTasks(taskRows)
           setNoProjectTasks(taskRows.filter((t) => !t.project_id))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
@@ -305,7 +344,15 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     void load()
   }, [apiFetch, departmentName, user?.role])
 
+  React.useEffect(() => {
+    if (isTabId) {
+      setActiveTab(normalizedTab as TabId)
+    }
+  }, [isTabId, normalizedTab])
+
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const todayDate = React.useMemo(() => new Date(), [])
+  const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
     if (viewMode === "mine" && user?.id) {
       return projects.filter((p) => p.manager_id === user.id)
@@ -313,31 +360,143 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     return projects
   }, [projects, user?.id, viewMode])
 
+  const visibleDepartmentTasks = React.useMemo(
+    () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
+    [departmentTasks, isMineView, user?.id]
+  )
+  const visibleNoProjectTasks = React.useMemo(
+    () => (isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks),
+    [noProjectTasks, isMineView, user?.id]
+  )
+  const visibleGaNotes = React.useMemo(
+    () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
+    [gaNotes, isMineView, user?.id]
+  )
+  const visibleMeetings = React.useMemo(
+    () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
+    [meetings, isMineView, user?.id]
+  )
+  const visibleSystemTemplates = React.useMemo(
+    () => (isMineView && user?.id ? systemTasks.filter((t) => t.default_assignee_id === user.id) : systemTasks),
+    [systemTasks, isMineView, user?.id]
+  )
+
+  const projectTasks = React.useMemo(
+    () => visibleDepartmentTasks.filter((t) => t.project_id),
+    [visibleDepartmentTasks]
+  )
+  const todaySystemTasks = React.useMemo(
+    () => visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate)),
+    [visibleSystemTemplates, todayDate]
+  )
+  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
+  const todayProjectTasks = React.useMemo(() => {
+    return projectTasks.filter((task) => {
+      const date = toDate(task.due_date || task.start_date || task.created_at)
+      return date ? isSameDay(date, todayDate) : false
+    })
+  }, [projectTasks, todayDate])
+  const todayNoProjectTasks = React.useMemo(() => {
+    return visibleNoProjectTasks.filter((task) => {
+      const date = toDate(task.due_date || task.start_date || task.created_at)
+      return date ? isSameDay(date, todayDate) : false
+    })
+  }, [visibleNoProjectTasks, todayDate])
+  const todayOpenNotes = React.useMemo(() => {
+    return openNotes.filter((note) => {
+      const date = toDate(note.created_at)
+      return date ? isSameDay(date, todayDate) : false
+    })
+  }, [openNotes, todayDate])
+  const todayMeetings = React.useMemo(
+    () =>
+      visibleMeetings.filter((m) => {
+        if (!m.starts_at) return false
+        const start = new Date(m.starts_at)
+        if (Number.isNaN(start.getTime())) return false
+        return isSameDay(start, todayDate)
+      }),
+    [visibleMeetings, todayDate]
+  )
+
+  const projectTaskGroups = React.useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const task of projectTasks) {
+      if (!task.project_id) continue
+      const list = map.get(task.project_id) || []
+      list.push(task)
+      map.set(task.project_id, list)
+    }
+    return Array.from(map.entries()).map(([projectId, tasks]) => {
+      const project = projects.find((p) => p.id === projectId) || null
+      return {
+        id: projectId,
+        name: project?.title || project?.name || "Project",
+        tasks,
+      }
+    })
+  }, [projectTasks, projects])
+  const todayProjectTaskGroups = React.useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const task of todayProjectTasks) {
+      if (!task.project_id) continue
+      const list = map.get(task.project_id) || []
+      list.push(task)
+      map.set(task.project_id, list)
+    }
+    return Array.from(map.entries()).map(([projectId, tasks]) => {
+      const project = projects.find((p) => p.id === projectId) || null
+      return {
+        id: projectId,
+        name: project?.title || project?.name || "Project",
+        tasks,
+      }
+    })
+  }, [todayProjectTasks, projects])
+
   const counts = React.useMemo(
     () => ({
-      all: filteredProjects.length,
+      all:
+        todayProjectTasks.length +
+        todayNoProjectTasks.length +
+        todayOpenNotes.length +
+        todaySystemTasks.length +
+        todayMeetings.length,
       projects: filteredProjects.length,
-      system: systemTasks.length,
-      "no-project": noProjectTasks.length,
-      "ga-ka": gaNotes.filter((n) => n.status !== "CLOSED").length,
-      meetings: meetings.length,
+      system: visibleSystemTemplates.length,
+      "no-project": visibleNoProjectTasks.length,
+      "ga-ka": visibleGaNotes.filter((n) => n.status !== "CLOSED").length,
+      meetings: visibleMeetings.length,
     }),
-    [filteredProjects.length, systemTasks.length, noProjectTasks.length, gaNotes, meetings]
+    [
+      filteredProjects.length,
+      visibleSystemTemplates.length,
+      visibleNoProjectTasks.length,
+      visibleGaNotes,
+      visibleMeetings,
+      openNotes.length,
+      projectTasks.length,
+      todayProjectTasks.length,
+      todayNoProjectTasks.length,
+      todayOpenNotes.length,
+      todayMeetings.length,
+      todaySystemTasks.length,
+    ]
   )
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const visibleSystemTasks = React.useMemo(() => {
-    if (showAllSystem) return systemTasks
-    return systemTasks.filter((t) => shouldShowTemplate(t, systemDate))
-  }, [showAllSystem, systemDate, systemTasks])
+    if (showAllSystem) return visibleSystemTemplates
+    return visibleSystemTemplates.filter((t) => shouldShowTemplate(t, systemDate))
+  }, [showAllSystem, systemDate, visibleSystemTemplates])
 
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
-    for (const t of noProjectTasks) {
+    for (const t of visibleNoProjectTasks) {
       if (t.is_bllok) {
         blocked.push(t)
       } else if (t.is_1h_report) {
@@ -349,7 +508,7 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       }
     }
     return { normal, blocked, oneHour, r1 }
-  }, [noProjectTasks])
+  }, [visibleNoProjectTasks])
 
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
@@ -361,7 +520,17 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     }
     return Array.from(groups.entries()).map(([label, items]) => ({
       label,
-      items: items.sort((a, b) => a.title.localeCompare(b.title)),
+      items: items.sort((a, b) => {
+        const rank = (value?: string | null) => {
+          if (value === "HIGH") return 3
+          if (value === "MEDIUM") return 2
+          if (value === "LOW") return 1
+          return 0
+        }
+        const byPriority = rank(b.priority) - rank(a.priority)
+        if (byPriority !== 0) return byPriority
+        return a.title.localeCompare(b.title)
+      }),
     }))
   }, [visibleSystemTasks])
 
@@ -462,26 +631,70 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
     }
   }
 
-  const advanceProjectPhase = async (projectId: string) => {
-    setAdvancingProjectId(projectId)
+  const submitNoProjectTask = async () => {
+    if (!noProjectTitle.trim() || !department) return
+    setCreatingNoProject(true)
     try {
-      const res = await apiFetch(`/projects/${projectId}/advance-phase`, { method: "POST" })
-      if (!res.ok) {
-        let detail = "Failed to advance phase"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
+      const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
+      const payload = {
+        title: noProjectTitle.trim(),
+        description: noProjectDescription.trim() || null,
+        project_id: null,
+        department_id: department.id,
+        status: "TODO",
+        priority: "MEDIUM",
+        is_bllok: noProjectType === "blocked",
+        is_1h_report: noProjectType === "hourly",
+        is_r1: noProjectType === "r1",
+        due_date: dueDate,
+      }
+      const assigneeIds =
+        noProjectAssignee === "__all__"
+          ? users.map((u) => u.id)
+          : noProjectAssignee === "__unassigned__"
+            ? [null]
+            : [noProjectAssignee]
+      if (noProjectAssignee === "__all__" && assigneeIds.length === 0) {
+        toast.error("No users available to assign.")
         return
       }
-      const updated = (await res.json()) as Project
-      setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
-      toast.success("Phase advanced")
+
+      const createdTasks: Task[] = []
+      for (const assigneeId of assigneeIds) {
+        const res = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            assigned_to: assigneeId,
+          }),
+        })
+        if (!res.ok) {
+          let detail = "Failed to create task"
+          try {
+            const data = (await res.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(detail)
+          return
+        }
+        createdTasks.push((await res.json()) as Task)
+      }
+      if (createdTasks.length) {
+        setNoProjectTasks((prev) => [...createdTasks, ...prev])
+        setDepartmentTasks((prev) => [...createdTasks, ...prev])
+      }
+      setNoProjectOpen(false)
+      setNoProjectTitle("")
+      setNoProjectDescription("")
+      setNoProjectType("normal")
+      setNoProjectAssignee("__unassigned__")
+      setNoProjectDueDate("")
+      toast.success("Task created")
     } finally {
-      setAdvancingProjectId(null)
+      setCreatingNoProject(false)
     }
   }
 
@@ -761,9 +974,6 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
             {filteredProjects.map((project) => {
               const manager = project.manager_id ? userMap.get(project.manager_id) : null
               const phase = project.current_phase || "TAKIMET"
-              const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-              const canAdvance = phaseIndex >= 0 && phaseIndex < PHASES.length - 1
-              const isAdvancing = advancingProjectId === project.id
               return (
                 <Card key={project.id} className="p-5">
                   <div className="flex items-start justify-between gap-3">
@@ -801,14 +1011,6 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!canAdvance || isAdvancing}
-                        onClick={() => void advanceProjectPhase(project.id)}
-                      >
-                        {isAdvancing ? "Closing..." : "Close phase"}
-                      </Button>
                       <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
                         View details -&gt;
                       </Link>
@@ -858,16 +1060,164 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
           </div>
           <div className="grid gap-4 md:grid-cols-4">
             {[
-              { label: "PROJECT TASKS", value: 0 },
-              { label: "NO PROJECT", value: 0 },
-              { label: "NOTES (OPEN)", value: 0 },
-              { label: "SYSTEM", value: 0 },
+              { label: "PROJECT TASKS", value: todayProjectTasks.length },
+              { label: "NO PROJECT", value: todayNoProjectTasks.length },
+              { label: "NOTES (OPEN)", value: todayOpenNotes.length },
+              { label: "SYSTEM", value: todaySystemTasks.length },
             ].map((stat) => (
               <Card key={stat.label} className="p-4">
                 <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
                 <div className="mt-2 text-2xl font-semibold">{stat.value}</div>
               </Card>
             ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Project Tasks</div>
+                <Badge variant="secondary">{todayProjectTasks.length}</Badge>
+              </div>
+              <div className="mt-4 space-y-4">
+                {todayProjectTaskGroups.length ? (
+                  todayProjectTaskGroups.map((group) => (
+                    <div key={group.id}>
+                      <div className="text-xs font-semibold text-muted-foreground">{group.name}</div>
+                      <div className="mt-2 space-y-2">
+                        {group.tasks.map((task) => {
+                          const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                          return (
+                            <Link
+                              key={task.id}
+                              href={`/tasks/${task.id}`}
+                              className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {task.status || "TODO"}
+                                </Badge>
+                                <div className="font-medium">{task.title}</div>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {assignee?.full_name || assignee?.username || "Unassigned"}
+                              </div>
+                            </Link>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-muted-foreground">No project tasks today.</div>
+                )}
+              </div>
+            </Card>
+
+            <div className="grid gap-4">
+              <Card className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">No Project Tasks</div>
+                  <Badge variant="secondary">{todayNoProjectTasks.length}</Badge>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {todayNoProjectTasks.length ? (
+                    todayNoProjectTasks.map((task) => {
+                      const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                      const typeLabel = task.is_bllok
+                        ? "Blocked"
+                        : task.is_1h_report
+                          ? "1H"
+                          : task.is_r1
+                            ? "R1"
+                            : "Normal"
+                      return (
+                        <Link
+                          key={task.id}
+                          href={`/tasks/${task.id}`}
+                          className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {typeLabel}
+                            </Badge>
+                            <div className="font-medium">{task.title}</div>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {assignee?.full_name || assignee?.username || "Unassigned"}
+                          </div>
+                        </Link>
+                      )
+                    })
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No tasks today.</div>
+                  )}
+                </div>
+              </Card>
+
+              <Card className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">System Tasks</div>
+                  <Badge variant="secondary">{todaySystemTasks.length}</Badge>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {todaySystemTasks.length ? (
+                    todaySystemTasks.map((task) => (
+                      <div key={task.id} className="rounded-lg border px-3 py-2 text-sm">
+                        <div className="font-medium">{task.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{task.description || "-"}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No system tasks today.</div>
+                  )}
+                </div>
+              </Card>
+            </div>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">GA/KA Notes (Open)</div>
+                <Badge variant="secondary">{todayOpenNotes.length}</Badge>
+              </div>
+              <div className="mt-4 space-y-2">
+                {todayOpenNotes.length ? (
+                  todayOpenNotes.map((note) => (
+                    <div key={note.id} className="rounded-lg border px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {note.note_type || "GA"}
+                        </Badge>
+                        <div className="font-medium">{note.content}</div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-muted-foreground">No open notes today.</div>
+                )}
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Meetings (Today)</div>
+                <Badge variant="secondary">{todayMeetings.length}</Badge>
+              </div>
+              <div className="mt-4 space-y-2">
+                {todayMeetings.length ? (
+                  todayMeetings.map((meeting) => (
+                    <div key={meeting.id} className="rounded-lg border px-3 py-2 text-sm">
+                      <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                      {meeting.project_id ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-muted-foreground">No meetings today.</div>
+                )}
+              </div>
+            </Card>
           </div>
         </div>
       ) : null}
@@ -1089,7 +1439,93 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
       ) : null}
 
       {activeTab === "no-project" ? (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-xl font-semibold">Tasks (No Project)</div>
+              <div className="text-sm text-muted-foreground">
+                Use these buckets to track non-project tasks and special cases.
+              </div>
+            </div>
+            <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">+ Add Task</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>New Task</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NO_PROJECT_TYPES.map((opt) => (
+                          <SelectItem key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-muted-foreground">
+                      {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Title</Label>
+                    <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea
+                      value={noProjectDescription}
+                      onChange={(e) => setNoProjectDescription(e.target.value)}
+                      rows={4}
+                    />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Assign to</Label>
+                      <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select assignee" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                          <SelectItem value="__all__">All team</SelectItem>
+                          {users.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || u.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Due date</Label>
+                      <Input
+                        type="date"
+                        value={noProjectDueDate}
+                        onChange={(e) => setNoProjectDueDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button disabled={!noProjectTitle.trim() || creatingNoProject} onClick={() => void submitNoProjectTask()}>
+                      {creatingNoProject ? "Creating..." : "Create"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
           <Card className="p-4">
             <div className="text-sm font-semibold">Normal / GA</div>
             <div className="mt-3 space-y-3">
@@ -1097,14 +1533,24 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 noProjectBuckets.normal.map((t) => (
                   <Link
                     key={t.id}
-                    href={`/tasks/${t.id}`}
+                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
                     className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
-                      <Badge variant="outline" className="text-xs">
-                        {t.ga_note_origin_id ? "GA" : "Normal"}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {t.ga_note_origin_id ? "GA" : "Normal"}
+                        </Badge>
+                        {t.assigned_to ? (
+                          <div
+                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
+                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                          >
+                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </Link>
                 ))
@@ -1124,10 +1570,20 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 noProjectBuckets.blocked.map((t) => (
                   <Link
                     key={t.id}
-                    href={`/tasks/${t.id}`}
+                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
                     className="block rounded-xl border border-red-100 bg-white px-4 py-3 hover:bg-red-50"
                   >
-                    <div className="font-medium">{t.title}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{t.title}</div>
+                      {t.assigned_to ? (
+                        <div
+                          className="h-7 w-7 rounded-full bg-red-100 text-[10px] font-semibold text-red-700 flex items-center justify-center"
+                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                        >
+                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                        </div>
+                      ) : null}
+                    </div>
                     <Badge variant="outline" className="mt-2 text-xs border-red-200 text-red-600">
                       BLOCKED
                     </Badge>
@@ -1149,10 +1605,20 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 noProjectBuckets.oneHour.map((t) => (
                   <Link
                     key={t.id}
-                    href={`/tasks/${t.id}`}
+                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
                     className="block rounded-xl border border-purple-100 bg-white px-4 py-3 hover:bg-purple-50"
                   >
-                    <div className="font-medium">{t.title}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{t.title}</div>
+                      {t.assigned_to ? (
+                        <div
+                          className="h-7 w-7 rounded-full bg-purple-100 text-[10px] font-semibold text-purple-700 flex items-center justify-center"
+                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                        >
+                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                        </div>
+                      ) : null}
+                    </div>
                     <Badge variant="outline" className="mt-2 text-xs border-purple-200 text-purple-600">
                       1H
                     </Badge>
@@ -1174,10 +1640,20 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 noProjectBuckets.r1.map((t) => (
                   <Link
                     key={t.id}
-                    href={`/tasks/${t.id}`}
+                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
                     className="block rounded-xl border border-green-100 bg-white px-4 py-3 hover:bg-green-50"
                   >
-                    <div className="font-medium">{t.title}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{t.title}</div>
+                      {t.assigned_to ? (
+                        <div
+                          className="h-7 w-7 rounded-full bg-green-100 text-[10px] font-semibold text-green-700 flex items-center justify-center"
+                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                        >
+                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                        </div>
+                      ) : null}
+                    </div>
                     <Badge variant="outline" className="mt-2 text-xs border-green-200 text-green-600">
                       R1
                     </Badge>
@@ -1188,14 +1664,26 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
               )}
             </div>
           </Card>
+          </div>
         </div>
       ) : null}
 
       {activeTab === "ga-ka" ? (
         <div className="space-y-3">
-          {gaNotes.length ? (
-            gaNotes.map((note) => {
+          {visibleGaNotes.length ? (
+            [...visibleGaNotes]
+              .sort((a, b) => {
+                const order = ["HIGH", "MEDIUM", "LOW"]
+                const aRank = a.priority ? order.indexOf(a.priority) : order.length
+                const bRank = b.priority ? order.indexOf(b.priority) : order.length
+                if (aRank !== bRank) return aRank - bRank
+                const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+                const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+                return bTime - aTime
+              })
+              .map((note) => {
               const author = users.find((u) => u.id === note.created_by) || null
+              const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
               return (
                 <Card key={note.id} className="border-orange-100 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1203,13 +1691,18 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                       <Badge
                         variant="outline"
                         className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
-                      >
-                        {note.note_type || "GA"}
-                      </Badge>
-                      <span>By {author?.full_name || author?.username || "-"}</span>
-                      <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
-                      {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
-                    </div>
+                        >
+                          {note.note_type || "GA"}
+                        </Badge>
+                        <span>By {author?.full_name || author?.username || "-"}</span>
+                        <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
+                        {project ? (
+                          <Badge variant="outline" className="text-sm px-2 py-0.5">
+                            {project.title || project.name || "Project"}
+                          </Badge>
+                        ) : null}
+                        {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                      </div>
                     {note.status !== "CLOSED" ? (
                       <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
                         Close
@@ -1222,11 +1715,11 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 </Card>
               )
             })
-          ) : (
-            <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
-          )}
-        </div>
-      ) : null}
+            ) : (
+              <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
+            )}
+          </div>
+        ) : null}
 
       {activeTab === "meetings" ? (
         <div className="space-y-4">
@@ -1272,8 +1765,8 @@ export function DepartmentKanban({ departmentName }: { departmentName: string })
                 </div>
               </div>
               <div className="space-y-3">
-                {meetings.length ? (
-                  meetings.map((meeting) => {
+                {visibleMeetings.length ? (
+                  visibleMeetings.map((meeting) => {
                     const project = meeting.project_id
                       ? projects.find((p) => p.id === meeting.project_id) || null
                       : null

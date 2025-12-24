@@ -76,6 +76,9 @@ async def create_ga_note(
     if project.department_id is not None:
         ensure_department_access(user, project.department_id)
 
+    if payload.priority == GaNotePriority.URGENT:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Urgent priority is not allowed")
+
     note = GaNote(
         content=payload.content,
         created_by=payload.created_by or user.id,
@@ -128,6 +131,8 @@ async def update_ga_note(
         if payload.status == GaNoteStatus.CLOSED:
             note.completed_at = note.completed_at or datetime.utcnow()
     if payload.priority is not None:
+        if payload.priority == GaNotePriority.URGENT:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Urgent priority is not allowed")
         note.priority = payload.priority
 
     await db.commit()

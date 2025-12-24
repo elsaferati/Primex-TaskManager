@@ -21,3 +21,7 @@ class ProjectPromptCreate(BaseModel):
     type: PromptType
     content: str
 
+
+class ProjectPromptUpdate(BaseModel):
+    content: str
+
