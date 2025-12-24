@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Task, TaskStatus, User } from "@/lib/types"
+import type { Task, User } from "@/lib/types"
 
 type AuditLog = {
   id: string
@@ -21,6 +21,21 @@ type AuditLog = {
   before?: Record<string, unknown> | null
   after?: Record<string, unknown> | null
   created_at: string
+}
+
+const TASK_STATUS_OPTIONS = [
+  { value: "TODO", label: "To do" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "REVIEW", label: "Review" },
+  { value: "DONE", label: "Done" },
+  { value: "CANCELLED", label: "Cancelled" },
+] as const
+
+function toDateInput(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
 }
 
 export default function TaskDetailsPage() {
@@ -33,7 +48,6 @@ export default function TaskDetailsPage() {
   const { apiFetch, user } = useAuth()
 
   const [task, setTask] = React.useState<Task | null>(null)
-  const [statuses, setStatuses] = React.useState<TaskStatus[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [audit, setAudit] = React.useState<AuditLog[]>([])
 
@@ -45,11 +59,7 @@ export default function TaskDetailsPage() {
     const t = (await taskRes.json()) as Task
     setTask(t)
 
-    const [sRes, aRes] = await Promise.all([
-      apiFetch(`/task-statuses?department_id=${t.department_id}`),
-      apiFetch(`/audit-logs?entity_type=task&entity_id=${t.id}`),
-    ])
-    if (sRes.ok) setStatuses((await sRes.json()) as TaskStatus[])
+    const aRes = await apiFetch(`/audit-logs?entity_type=task&entity_id=${t.id}`)
     if (aRes.ok) setAudit((await aRes.json()) as AuditLog[])
 
     if (canManage) {
@@ -64,8 +74,8 @@ export default function TaskDetailsPage() {
 
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState("")
-  const [statusId, setStatusId] = React.useState("")
-  const [plannedFor, setPlannedFor] = React.useState("")
+  const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
+  const [dueDate, setDueDate] = React.useState("")
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
   const [milestone, setMilestone] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
@@ -73,9 +83,9 @@ export default function TaskDetailsPage() {
   React.useEffect(() => {
     if (!task) return
     setDescription(task.description || "")
-    setStatusId(task.status_id)
-    setPlannedFor(task.planned_for || "")
-    setAssignedTo(task.assigned_to_user_id || UNASSIGNED_VALUE)
+    setStatusValue(task.status || "")
+    setDueDate(toDateInput(task.due_date))
+    setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
     setMilestone(task.is_milestone)
     setReminder(task.reminder_enabled)
   }, [task])
@@ -86,12 +96,12 @@ export default function TaskDetailsPage() {
     try {
       const payload: Record<string, unknown> = {
         description,
-        status_id: statusId,
         reminder_enabled: reminder,
       }
+      if (statusValue) payload.status = statusValue
       if (canManage) {
-        payload.planned_for = plannedFor || null
-        payload.assigned_to_user_id = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
+        payload.due_date = dueDate || null
+        payload.assigned_to = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
         payload.is_milestone = milestone
       }
 
@@ -148,14 +158,14 @@ export default function TaskDetailsPage() {
           <CardContent className="space-y-3">
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={statusId} onValueChange={setStatusId}>
+              <Select value={statusValue} onValueChange={setStatusValue}>
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  {statuses.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
+                  {TASK_STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -170,8 +180,8 @@ export default function TaskDetailsPage() {
             {canManage ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Planned for</Label>
-                  <Input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} />
+                  <Label>Due date</Label>
+                  <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label>Assign to</Label>

@@ -19,27 +19,27 @@ import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User
 
 const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Takimet",
-  PLANIFIKIMI: "Planifikimi",
-  ZHVILLIMI: "Zhvillimi",
-  TESTIMI: "Testimi",
-  DOKUMENTIMI: "Dokumentimi",
-  MBYLLUR: "Mbyllur",
+  TAKIMET: "Meetings",
+  PLANIFIKIMI: "Planning",
+  ZHVILLIMI: "Development",
+  TESTIMI: "Testing",
+  DOKUMENTIMI: "Documentation",
+  MBYLLUR: "Closed",
 }
 
 const TABS = [
   { id: "description", label: "Description" },
-  { id: "tasks", label: "Tasks (Detyrat)" },
+  { id: "tasks", label: "Tasks" },
   { id: "checklists", label: "Checklists" },
   { id: "members", label: "Members" },
-  { id: "ga", label: "Shenime GA/KA" },
+  { id: "ga", label: "GA/KA Notes" },
   { id: "prompts", label: "Prompts" },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED"] as const
-const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const
+const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const
 
 function initials(src: string) {
   return src
@@ -113,6 +113,8 @@ export default function ProjectPage() {
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
+  const [editingDescription, setEditingDescription] = React.useState("")
+  const [savingDescription, setSavingDescription] = React.useState(false)
   const [membersOpen, setMembersOpen] = React.useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = React.useState<string[]>([])
   const [savingMembers, setSavingMembers] = React.useState(false)
@@ -122,6 +124,10 @@ export default function ProjectPage() {
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
+  const [gaPromptContent, setGaPromptContent] = React.useState("")
+  const [devPromptContent, setDevPromptContent] = React.useState("")
+  const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
+  const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
 
   React.useEffect(() => {
     const load = async () => {
@@ -129,6 +135,7 @@ export default function ProjectPage() {
       if (!pRes.ok) return
       const p = (await pRes.json()) as Project
       setProject(p)
+      setEditingDescription(p.description || "")
 
       const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
@@ -160,15 +167,21 @@ export default function ProjectPage() {
   }, [project?.current_phase])
 
   React.useEffect(() => {
+    if (!prompts.length) return
+  }, [prompts])
+
+  React.useEffect(() => {
     const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
-    const allowedTabs =
-      phaseValue === "TAKIMET"
-        ? ["description"]
-        : phaseValue === "TESTIMI"
-          ? ["description", "checklists", "ga"]
-          : TABS.map((tab) => tab.id)
+    const allowedTabsByPhase: Record<string, TabId[]> = {
+      TAKIMET: ["description", "ga", "members"],
+      PLANIFIKIMI: ["description", "tasks", "checklists", "ga", "members"],
+      ZHVILLIMI: ["tasks", "checklists", "ga", "prompts"],
+      TESTIMI: ["tasks", "checklists", "ga"],
+      DOKUMENTIMI: ["description", "tasks", "checklists"],
+    }
+    const allowedTabs = allowedTabsByPhase[phaseValue] || TABS.map((tab) => tab.id)
     if (!allowedTabs.includes(activeTab)) {
-      setActiveTab("description")
+      setActiveTab(allowedTabs[0] || "description")
     }
   }, [activeTab, project?.current_phase, viewedPhase])
 
@@ -220,6 +233,35 @@ export default function ProjectPage() {
       toast.success("Task created")
     } finally {
       setCreating(false)
+    }
+  }
+
+  const saveDescription = async () => {
+    if (!project) return
+    setSavingDescription(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: editingDescription.trim() || null }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update description"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setEditingDescription(updated.description || "")
+      toast.success("Description updated")
+    } finally {
+      setSavingDescription(false)
     }
   }
 
@@ -421,8 +463,43 @@ export default function ProjectPage() {
   const userMap = new Map(
     [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
   )
-  const gaPrompt = prompts.find((p) => p.type === "GA_PROMPT")
-  const devPrompt = prompts.find((p) => p.type === "ZHVILLIM_PROMPT")
+  const savePrompt = async (type: "GA_PROMPT" | "ZHVILLIM_PROMPT") => {
+    if (!project) return
+    const isGa = type === "GA_PROMPT"
+    const content = (isGa ? gaPromptContent : devPromptContent).trim()
+    if (!content) {
+      toast.error("Prompt content is required")
+      return
+    }
+    if (isGa) setSavingGaPrompt(true)
+    else setSavingDevPrompt(true)
+    try {
+      const res = await apiFetch("/project-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: project.id, type, content }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to save prompt"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as ProjectPrompt
+      setPrompts((prev) => [created, ...prev])
+      if (isGa) setGaPromptContent("")
+      else setDevPromptContent("")
+      toast.success("Prompt saved")
+    } finally {
+      if (isGa) setSavingGaPrompt(false)
+      else setSavingDevPrompt(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -433,12 +510,12 @@ export default function ProjectPage() {
             onClick={() => router.back()}
             className="text-sm text-muted-foreground hover:text-foreground"
           >
-            &larr; Kthehu tek Projektet
+            &larr; Back to Projects
           </button>
           <div className="mt-3 text-3xl font-semibold">{title}</div>
           <div className="mt-3">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              {PHASE_LABELS[phase] || "Takimet"}
+              {PHASE_LABELS[phase] || "Meetings"}
             </Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
@@ -465,29 +542,30 @@ export default function ProjectPage() {
           </div>
           {activePhase !== phase ? (
             <div className="mt-2 text-xs text-muted-foreground">
-              Pamja: {PHASE_LABELS[activePhase] || "Takimet"}
+              View: {PHASE_LABELS[activePhase] || "Meetings"}
             </div>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" disabled={!canAdvance || advancingPhase} onClick={() => void advancePhase()}>
-            {advancingPhase ? "Duke mbyllur..." : "Mbyll fazen"}
-          </Button>
           <Button className="rounded-xl">Settings</Button>
         </div>
       </div>
 
       <div className="border-b">
         <div className="flex flex-wrap gap-6">
-          {(
-            activePhase === "TAKIMET"
-              ? TABS.filter((tab) => tab.id === "description")
-              : activePhase === "TESTIMI"
-                ? TABS.filter((tab) => tab.id === "description" || tab.id === "checklists" || tab.id === "ga")
-                : TABS
-          ).map((tab) => {
+          {(TABS.filter((tab) => {
+            const allowedTabsByPhase: Record<string, TabId[]> = {
+              TAKIMET: ["description", "ga", "members"],
+              PLANIFIKIMI: ["description", "tasks", "checklists", "ga", "members"],
+              ZHVILLIMI: ["tasks", "checklists", "ga", "prompts"],
+              TESTIMI: ["tasks", "checklists", "ga"],
+              DOKUMENTIMI: ["description", "tasks", "checklists"],
+            }
+            const allowedTabs = allowedTabsByPhase[activePhase] || TABS.map((t) => t.id)
+            return allowedTabs.includes(tab.id)
+          }) ).map((tab) => {
             const isActive = tab.id === activeTab
-            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testimi" : tab.label
+            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
             return (
               <button
                 key={tab.id}
@@ -510,53 +588,55 @@ export default function ProjectPage() {
         <Card className="p-6">
           {activePhase === "TAKIMET" ? (
             <>
-              <div className="text-lg font-semibold">Takimet (GA/KA)</div>
-              {gaNotes.length ? (
-                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
-                  {gaNotes.map((note) => (
-                    <li key={note.id}>{note.content}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="mt-3 text-sm text-muted-foreground">No GA/KA notes yet.</div>
-              )}
-              <div className="mt-6 text-base font-semibold">Takime Externe</div>
-              {meetings.length ? (
-                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
-                  {meetings.map((meeting) => (
-                    <li key={meeting.id}>{formatMeetingLabel(meeting)}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="mt-3 text-sm text-muted-foreground">No meetings yet.</div>
-              )}
+              <div className="text-lg font-semibold">Project Description</div>
+              <Textarea
+                value={editingDescription}
+                onChange={(e) => setEditingDescription(e.target.value)}
+                rows={4}
+                className="mt-3"
+              />
+              <div className="mt-3 flex justify-end">
+                <Button variant="outline" disabled={savingDescription} onClick={() => void saveDescription()}>
+                  {savingDescription ? "Saving..." : "Save"}
+                </Button>
+              </div>
             </>
           ) : activePhase === "TESTIMI" ? (
             <>
-              <div className="text-lg font-semibold">Checklist e Testimit</div>
+              <div className="text-lg font-semibold">Testing Checklist</div>
               <div className="mt-3 text-sm text-muted-foreground">
-                Shto checklist manualisht nga tab-i Checklists.
+                Add checklist items manually in the Checklists tab.
               </div>
             </>
           ) : (
             <>
-              <div className="text-lg font-semibold">Qellimi i Projektit</div>
-              <div className="mt-3 text-sm text-muted-foreground">{project.description || "-"}</div>
+              <div className="text-lg font-semibold">Project Description</div>
+              <Textarea
+                value={editingDescription}
+                onChange={(e) => setEditingDescription(e.target.value)}
+                rows={4}
+                className="mt-3"
+              />
+              <div className="mt-3 flex justify-end">
+                <Button variant="outline" disabled={savingDescription} onClick={() => void saveDescription()}>
+                  {savingDescription ? "Saving..." : "Save"}
+                </Button>
+              </div>
             </>
           )}
         </Card>
       ) : null}
 
-      {activePhase !== "TAKIMET" && activeTab === "tasks" ? (
+      {activeTab === "tasks" ? (
         <div className="space-y-4">
           <div className="flex items-center justify-end">
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline">+ Shto Detyre</Button>
+                <Button variant="outline">+ Add Task</Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                  <DialogTitle>Detyre e re</DialogTitle>
+                  <DialogTitle>New Task</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3">
                   <div className="space-y-2">
@@ -657,11 +737,11 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activePhase !== "TAKIMET" && activeTab === "checklists" ? (
+      {activeTab === "checklists" ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Input
-              placeholder="Shto item..."
+              placeholder="Add item..."
               value={newChecklistContent}
               onChange={(e) => setNewChecklistContent(e.target.value)}
             />
@@ -670,10 +750,10 @@ export default function ProjectPage() {
               disabled={!newChecklistContent.trim() || addingChecklist}
               onClick={() => void submitChecklistItem()}
             >
-              {addingChecklist ? "Shto..." : "Shto"}
+              {addingChecklist ? "Adding..." : "Add"}
             </Button>
           </div>
-          {activePhase === "TESTIMI" ? null : checklistItems.length ? (
+          {checklistItems.length ? (
             checklistItems.map((item) => (
               <Card
                 key={item.id}
@@ -692,7 +772,7 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activePhase !== "TAKIMET" && activeTab === "members" ? (
+      {activeTab === "members" ? (
         <div className="space-y-4">
           <div className="flex items-center justify-end">
             <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
@@ -749,7 +829,7 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activePhase !== "TAKIMET" && activeTab === "ga" ? (
+      {activeTab === "ga" ? (
         <div className="space-y-3">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -764,20 +844,19 @@ export default function ProjectPage() {
               </Select>
               <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Prioriteti" />
+                  <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Pa prioritet</SelectItem>
+                  <SelectItem value="__none__">No priority</SelectItem>
                   <SelectItem value="LOW">Low</SelectItem>
                   <SelectItem value="MEDIUM">Medium</SelectItem>
                   <SelectItem value="HIGH">High</SelectItem>
-                  <SelectItem value="URGENT">Urgent</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex items-start gap-2">
               <Textarea
-                placeholder="Shto shenim GA/KA..."
+              placeholder="Add GA/KA note..."
                 value={newGaNote}
                 onChange={(e) => setNewGaNote(e.target.value)}
                 rows={3}
@@ -787,7 +866,7 @@ export default function ProjectPage() {
                 disabled={!newGaNote.trim() || addingGaNote}
                 onClick={() => void submitGaNote()}
               >
-                {addingGaNote ? "Shto..." : "Shto"}
+              {addingGaNote ? "Adding..." : "Add"}
               </Button>
             </div>
           </div>
@@ -800,7 +879,7 @@ export default function ProjectPage() {
                       {note.note_type || "GA"}
                     </Badge>
                     <span>
-                      Nga {userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "-"}
+                      From {userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "-"}
                     </span>
                     <span>• {formatDateTime(note.created_at)}</span>
                     {note.priority ? (
@@ -809,10 +888,10 @@ export default function ProjectPage() {
                   </div>
                   {note.status !== "CLOSED" ? (
                     <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                      Mbyll
+                      Close
                     </Button>
                   ) : (
-                    <Badge variant="secondary">Mbyllur</Badge>
+                    <Badge variant="secondary">Closed</Badge>
                   )}
                 </div>
                 <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
@@ -824,17 +903,55 @@ export default function ProjectPage() {
         </div>
       ) : null}
 
-      {activePhase !== "TAKIMET" && activeTab === "prompts" ? (
+      {activeTab === "prompts" ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="p-5 space-y-3">
-            <div className="text-sm font-semibold">GA PROMPT</div>
-            <Textarea value={gaPrompt?.content || ""} readOnly rows={8} />
-            <div className="text-xs text-muted-foreground">Ky prompt perdoret per udhezime GA dhe standarte.</div>
+            <div className="text-sm font-semibold">GA Prompt</div>
+            <Textarea value={gaPromptContent} onChange={(e) => setGaPromptContent(e.target.value)} rows={8} />
+            <div className="flex justify-end">
+              <Button variant="outline" disabled={savingGaPrompt} onClick={() => void savePrompt("GA_PROMPT")}>
+                {savingGaPrompt ? "Saving..." : "Save"}
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">Used for GA guidelines and standards.</div>
+            {prompts.filter((p) => p.type === "GA_PROMPT").length ? (
+              <div className="space-y-3 pt-2">
+                {prompts
+                  .filter((p) => p.type === "GA_PROMPT")
+                  .map((prompt) => (
+                    <Card key={prompt.id} className="border border-muted p-4">
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
+                    </Card>
+                  ))}
+              </div>
+            ) : null}
           </Card>
           <Card className="p-5 space-y-3">
-            <div className="text-sm font-semibold">ZHVILLIM PROMPT</div>
-            <Textarea value={devPrompt?.content || ""} readOnly rows={8} />
-            <div className="text-xs text-muted-foreground">Ky prompt perdoret per ekipin e zhvillimit.</div>
+            <div className="text-sm font-semibold">Development Prompt</div>
+            <Textarea value={devPromptContent} onChange={(e) => setDevPromptContent(e.target.value)} rows={8} />
+            <div className="flex justify-end">
+              <Button variant="outline" disabled={savingDevPrompt} onClick={() => void savePrompt("ZHVILLIM_PROMPT")}>
+                {savingDevPrompt ? "Saving..." : "Save"}
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">Used by the development team.</div>
+            {prompts.filter((p) => p.type === "ZHVILLIM_PROMPT").length ? (
+              <div className="space-y-3 pt-2">
+                {prompts
+                  .filter((p) => p.type === "ZHVILLIM_PROMPT")
+                  .map((prompt) => (
+                    <Card key={prompt.id} className="border border-muted p-4">
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
+                    </Card>
+                  ))}
+              </div>
+            ) : null}
           </Card>
         </div>
       ) : null}
