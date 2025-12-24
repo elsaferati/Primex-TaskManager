@@ -15,6 +15,7 @@ from app.models.project_prompt import ProjectPrompt
 from app.models.refresh_token import RefreshToken
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 
@@ -36,6 +37,7 @@ __all__ = [
     "RefreshToken",
     "SystemTaskTemplate",
     "Task",
+    "TaskAssignee",
     "User",
     "WeeklyPlan",
 ]

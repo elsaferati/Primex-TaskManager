@@ -52,6 +52,7 @@ def _task_to_out(t: Task) -> TaskOut:
         is_milestone=t.is_milestone,
         reminder_enabled=t.reminder_enabled,
         next_reminder_at=t.next_reminder_at,
+        is_active=t.is_active,
         created_at=t.created_at,
         updated_at=t.updated_at,
         completed_at=t.completed_at,

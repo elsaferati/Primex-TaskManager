@@ -21,7 +21,12 @@ class SystemTaskTemplate(Base):
     default_assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     frequency: Mapped[FrequencyType] = mapped_column(
-        Enum(FrequencyType, name="frequency_type"), nullable=False
+        Enum(
+            FrequencyType,
+            name="frequency_type",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        nullable=False,
     )
     day_of_week: Mapped[int | None] = mapped_column(Integer)
     day_of_month: Mapped[int | None] = mapped_column(Integer)

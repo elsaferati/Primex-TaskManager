@@ -1,194 +1,215 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import delete, insert, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import FrequencyType, NotificationType, TaskPriority, TaskStatus, UserRole
-from app.models.notification import Notification
+from app.models.enums import TaskPriority, TaskStatus, UserRole
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.user import User
-from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateOut
-from app.services.audit import add_audit_log
-from app.services.notifications import add_notification, publish_notification
+from app.schemas.system_task import SystemTaskOut
+from app.schemas.task import TaskAssigneeOut
+from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateUpdate
 
 
 router = APIRouter()
 
 
-def _should_run_template(template: SystemTaskTemplate, today: date) -> bool:
-    if template.frequency == FrequencyType.DAILY:
-        return True
-    if template.frequency == FrequencyType.WEEKLY:
-        if template.day_of_week is None:
-            return today.weekday() == 0
-        return today.weekday() == template.day_of_week
-    if template.frequency == FrequencyType.MONTHLY:
-        if template.day_of_month is None:
-            return today.day == 1
-        return today.day == template.day_of_month
-    if template.frequency == FrequencyType.YEARLY:
-        if template.month_of_year is not None and today.month != template.month_of_year:
-            return False
-        if template.day_of_month is not None and today.day != template.day_of_month:
-            return False
-        return True
-    if template.frequency == FrequencyType.THREE_MONTHS:
-        if template.month_of_year is not None and today.month != template.month_of_year:
-            return False
-        if template.day_of_month is not None and today.day != template.day_of_month:
-            return False
-        return today.month % 3 == 0
-    if template.frequency == FrequencyType.SIX_MONTHS:
-        if template.month_of_year is not None and today.month != template.month_of_year:
-            return False
-        if template.day_of_month is not None and today.day != template.day_of_month:
-            return False
-        return today.month % 6 == 0
-    return False
+def _task_is_active(template: SystemTaskTemplate) -> bool:
+    if not template.is_active:
+        return False
+    return True
 
 
-async def _create_tasks_from_template(
+def _user_to_assignee(user: User) -> TaskAssigneeOut:
+    return TaskAssigneeOut(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+    )
+
+
+async def _assignees_for_tasks(
+    db: AsyncSession, task_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskAssignee.task_id, User)
+            .join(User, TaskAssignee.user_id == User.id)
+            .where(TaskAssignee.task_id.in_(task_ids))
+            .order_by(User.full_name)
+        )
+    ).all()
+    assignees: dict[uuid.UUID, list[TaskAssigneeOut]] = {task_id: [] for task_id in task_ids}
+    for task_id, user in rows:
+        assignees.setdefault(task_id, []).append(_user_to_assignee(user))
+    return assignees
+
+
+async def _replace_task_assignees(
+    db: AsyncSession, task: Task, assignee_ids: list[uuid.UUID]
+) -> None:
+    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+    if assignee_ids:
+        values = [{"task_id": task.id, "user_id": user_id} for user_id in assignee_ids]
+        await db.execute(insert(TaskAssignee), values)
+
+
+async def _sync_task_for_template(
     *,
     db: AsyncSession,
     template: SystemTaskTemplate,
-    creator_id: uuid.UUID,
-) -> list[Notification]:
-    today = datetime.now(timezone.utc).date()
-    if not template.is_active or not _should_run_template(template, today):
-        return []
+    creator_id: uuid.UUID | None,
+) -> tuple[Task, bool]:
+    task = (
+        await db.execute(
+            select(Task).where(Task.system_template_origin_id == template.id)
+        )
+    ).scalar_one_or_none()
+    active_value = _task_is_active(template)
 
-    if template.department_id is not None:
-        target_departments = [template.department_id]
-    else:
-        target_departments = (await db.execute(select(Department.id))).scalars().all()
-
-    if not target_departments:
-        return []
-
-    created_tasks: list[Task] = []
-    for dept_id in target_departments:
-        existing = (
-            await db.execute(
-                select(Task.id).where(
-                    Task.system_template_origin_id == template.id,
-                    Task.department_id == dept_id,
-                    func.date(Task.start_date) == today,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            continue
-
+    if task is None:
         task = Task(
-            department_id=dept_id,
-            project_id=None,
             title=template.title,
             description=template.description,
+            department_id=template.department_id,
+            assigned_to=template.default_assignee_id,
+            created_by=creator_id,
             status=TaskStatus.TODO,
             priority=template.priority or TaskPriority.MEDIUM,
-            assigned_to=template.default_assignee_id,
-            created_by=template.default_assignee_id or creator_id,
             system_template_origin_id=template.id,
             start_date=datetime.now(timezone.utc),
+            is_active=active_value,
         )
         db.add(task)
-        created_tasks.append(task)
+        await db.flush()
+        return task, True
 
-    if not created_tasks:
-        return []
-
-    await db.flush()
-
-    created_notifications: list[Notification] = []
-    for task in created_tasks:
-        add_audit_log(
-            db=db,
-            actor_user_id=creator_id,
-            entity_type="task",
-            entity_id=task.id,
-            action="system_generated",
-            after={
-                "template_id": str(template.id),
-                "run_date": today.isoformat(),
-                "department_id": str(task.department_id),
-            },
-        )
-        if template.default_assignee_id is not None:
-            created_notifications.append(
-                add_notification(
-                    db=db,
-                    user_id=template.default_assignee_id,
-                    type=NotificationType.assignment,
-                    title="System task assigned",
-                    body=template.title,
-                    data={"task_id": str(task.id), "template_id": str(template.id)},
-                )
-            )
-
-    return created_notifications
+    task.title = template.title
+    task.description = template.description
+    task.department_id = template.department_id
+    task.assigned_to = template.default_assignee_id
+    task.is_active = active_value
+    if task.priority is None:
+        task.priority = template.priority or TaskPriority.MEDIUM
+    return task, False
 
 
-def _template_to_out(template: SystemTaskTemplate) -> SystemTaskTemplateOut:
-    priority_value = template.priority or TaskPriority.MEDIUM
+def _task_row_to_out(
+    task: Task,
+    template: SystemTaskTemplate,
+    assignees: list[TaskAssigneeOut],
+) -> SystemTaskOut:
+    priority_value = task.priority or TaskPriority.MEDIUM
     if priority_value == TaskPriority.URGENT:
         priority_value = TaskPriority.HIGH
-    return SystemTaskTemplateOut(
-        id=template.id,
-        title=template.title,
-        description=template.description,
-        department_id=template.department_id,
-        default_assignee_id=template.default_assignee_id,
+    return SystemTaskOut(
+        id=task.id,
+        template_id=template.id,
+        title=task.title,
+        description=task.description,
+        department_id=task.department_id,
+        default_assignee_id=task.assigned_to,
+        assignees=assignees,
         frequency=template.frequency,
         day_of_week=template.day_of_week,
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
         priority=priority_value,
-        is_active=template.is_active,
-        created_at=template.created_at,
+        is_active=task.is_active,
+        created_at=task.created_at,
     )
 
 
-@router.get("", response_model=list[SystemTaskTemplateOut])
-async def list_system_task_templates(
+@router.get("", response_model=list[SystemTaskOut])
+async def list_system_tasks(
     department_id: uuid.UUID | None = None,
     only_active: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-) -> list[SystemTaskTemplateOut]:
-    stmt = select(SystemTaskTemplate)
+) -> list[SystemTaskOut]:
+    template_stmt = select(SystemTaskTemplate)
 
     if department_id is not None:
         if user.role != UserRole.ADMIN:
             ensure_department_access(user, department_id)
-        stmt = stmt.where(
+        template_stmt = template_stmt.where(
             or_(
                 SystemTaskTemplate.department_id == department_id,
                 SystemTaskTemplate.department_id.is_(None),
             )
         )
+    elif user.role != UserRole.ADMIN:
+        if user.department_id is None:
+            return []
+        template_stmt = template_stmt.where(
+            or_(
+                SystemTaskTemplate.department_id == user.department_id,
+                SystemTaskTemplate.department_id.is_(None),
+            )
+        )
 
+    templates = (await db.execute(template_stmt)).scalars().all()
+    if not templates:
+        return []
+
+    for tmpl in templates:
+        await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
+    await db.commit()
+
+    template_ids = [t.id for t in templates]
+    task_stmt = (
+        select(Task, SystemTaskTemplate)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.system_template_origin_id.in_(template_ids))
+    )
     if only_active:
-        stmt = stmt.where(SystemTaskTemplate.is_active.is_(True))
+        task_stmt = task_stmt.where(Task.is_active.is_(True))
+    task_stmt = task_stmt.order_by(Task.is_active.desc(), Task.created_at.desc())
 
-    rows = (await db.execute(stmt.order_by(SystemTaskTemplate.created_at))).scalars().all()
-    return [_template_to_out(template) for template in rows]
+    rows = (await db.execute(task_stmt)).all()
+    task_ids = [task.id for task, _ in rows]
+    assignee_map = await _assignees_for_tasks(db, task_ids)
+    fallback_ids = [
+        task.assigned_to
+        for task, _ in rows
+        if task.assigned_to is not None and not assignee_map.get(task.id)
+    ]
+    if fallback_ids:
+        fallback_users = (
+            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+        ).scalars().all()
+        fallback_map = {user.id: user for user in fallback_users}
+        for task, _ in rows:
+            if assignee_map.get(task.id):
+                continue
+            if task.assigned_to in fallback_map:
+                assignee_map[task.id] = [_user_to_assignee(fallback_map[task.assigned_to])]
+
+    return [
+        _task_row_to_out(task, template, assignee_map.get(task.id, []))
+        for task, template in rows
+    ]
 
 
-@router.post("", response_model=SystemTaskTemplateOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SystemTaskOut, status_code=status.HTTP_201_CREATED)
 async def create_system_task_template(
     payload: SystemTaskTemplateCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-) -> SystemTaskTemplateOut:
+) -> SystemTaskOut:
     ensure_manager_or_admin(user)
     if payload.department_id is not None:
         ensure_department_access(user, payload.department_id)
@@ -200,18 +221,27 @@ async def create_system_task_template(
         if department is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    default_assignee: User | None = None
-    if payload.default_assignee_id is not None:
-        default_assignee = (
-            await db.execute(select(User).where(User.id == payload.default_assignee_id))
-        ).scalar_one_or_none()
-        if default_assignee is None:
+    assignee_ids = None
+    if payload.assignees is not None:
+        seen: set[uuid.UUID] = set()
+        assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
+    elif payload.default_assignee_id is not None:
+        assignee_ids = [payload.default_assignee_id]
+
+    assignee_users: list[User] | None = None
+    if assignee_ids is not None:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        ).scalars().all()
+        if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        if payload.department_id is not None and default_assignee.department_id != payload.department_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Assignee must belong to the selected department",
-            )
+        if payload.department_id is not None:
+            for assignee in assignee_users:
+                if assignee.department_id != payload.department_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Assignee must belong to the selected department",
+                    )
 
     priority_value = payload.priority or TaskPriority.MEDIUM
     if priority_value == TaskPriority.URGENT:
@@ -221,7 +251,7 @@ async def create_system_task_template(
         title=payload.title,
         description=payload.description,
         department_id=payload.department_id,
-        default_assignee_id=payload.default_assignee_id,
+        default_assignee_id=assignee_ids[0] if assignee_ids else None,
         frequency=payload.frequency,
         day_of_week=payload.day_of_week,
         day_of_month=payload.day_of_month,
@@ -232,18 +262,19 @@ async def create_system_task_template(
 
     db.add(template)
     await db.flush()
-
-    created_notifications = await _create_tasks_from_template(db=db, template=template, creator_id=user.id)
-
+    task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
+    if assignee_ids is not None:
+        await _replace_task_assignees(db, task, assignee_ids)
+        task.assigned_to = assignee_ids[0] if assignee_ids else None
     await db.commit()
     await db.refresh(template)
-
-    for notification in created_notifications:
-        try:
-            await publish_notification(user_id=notification.user_id, notification=notification)
-        except Exception:
-            pass
-    return _template_to_out(template)
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_row_to_out(task, template, assignee_map.get(task.id, []))
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -265,12 +296,96 @@ async def delete_system_task_template(
         )
     )
     if has_system_origin.scalar() is not None:
-        await db.execute(
-            update(Task)
-            .where(Task.system_template_origin_id == template_id)
-            .values(system_template_origin_id=None)
-        )
+        await db.execute(delete(Task).where(Task.system_template_origin_id == template_id))
 
     await db.delete(template)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{template_id}", response_model=SystemTaskOut)
+async def update_system_task_template(
+    template_id: uuid.UUID,
+    payload: SystemTaskTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> SystemTaskOut:
+    ensure_manager_or_admin(user)
+    template = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+
+    fields_set = payload.__fields_set__
+    department_set = "department_id" in fields_set
+    assignee_set = "default_assignee_id" in fields_set or "assignees" in fields_set
+
+    if department_set and payload.department_id is None and template.department_id is not None:
+        ensure_department_access(user, template.department_id)
+
+    if department_set and payload.department_id is not None:
+        ensure_department_access(user, payload.department_id)
+        department = (
+            await db.execute(select(Department).where(Department.id == payload.department_id))
+        ).scalar_one_or_none()
+        if department is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    assignee_ids = None
+    if "assignees" in fields_set:
+        seen: set[uuid.UUID] = set()
+        assignee_ids = [uid for uid in (payload.assignees or []) if not (uid in seen or seen.add(uid))]
+    elif payload.default_assignee_id is not None:
+        assignee_ids = [payload.default_assignee_id]
+
+    assignee_users: list[User] | None = None
+    if assignee_set and assignee_ids is not None:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        ).scalars().all()
+        if len(assignee_users) != len(assignee_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+        target_department = payload.department_id if department_set else template.department_id
+        if target_department is not None:
+            for assignee in assignee_users:
+                if assignee.department_id != target_department:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Assignee must belong to the selected department",
+                    )
+
+    if payload.title is not None:
+        template.title = payload.title
+    if payload.description is not None:
+        template.description = payload.description
+    if department_set:
+        template.department_id = payload.department_id
+    if assignee_set and assignee_ids is not None:
+        template.default_assignee_id = assignee_ids[0] if assignee_ids else None
+    if payload.frequency is not None:
+        template.frequency = payload.frequency
+    if payload.day_of_week is not None:
+        template.day_of_week = payload.day_of_week
+    if payload.day_of_month is not None:
+        template.day_of_month = payload.day_of_month
+    if payload.month_of_year is not None:
+        template.month_of_year = payload.month_of_year
+    if payload.priority is not None:
+        template.priority = payload.priority
+    if payload.is_active is not None:
+        template.is_active = payload.is_active
+
+    await db.flush()
+    task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
+    if assignee_set and assignee_ids is not None:
+        await _replace_task_assignees(db, task, assignee_ids)
+        task.assigned_to = assignee_ids[0] if assignee_ids else None
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_row_to_out(task, template, assignee_map.get(task.id, []))
