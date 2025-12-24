@@ -59,6 +59,15 @@ const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   "6_MONTHS": "3/6 months",
 }
 
+const FREQUENCY_ORDER: SystemTaskTemplate["frequency"][] = [
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+  "3_MONTHS",
+  "6_MONTHS",
+  "YEARLY",
+]
+
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   LOW: "Low",
   MEDIUM: "Medium",
@@ -534,27 +543,29 @@ export default function DepartmentKanban() {
   }, [visibleNoProjectTasks])
 
   const systemGroups = React.useMemo(() => {
-    const groups = new Map<string, SystemTaskTemplate[]>()
+    const groups = new Map<SystemTaskTemplate["frequency"], SystemTaskTemplate[]>()
     for (const t of visibleSystemTasks) {
-      const key = FREQUENCY_LABELS[t.frequency] || "Daily"
+      const key = t.frequency
       const list = groups.get(key) || []
       list.push(t)
       groups.set(key, list)
     }
-    return Array.from(groups.entries()).map(([label, items]) => ({
-      label,
-      items: items.sort((a, b) => {
-        const rank = (value?: string | null) => {
-          if (value === "HIGH") return 3
-          if (value === "MEDIUM") return 2
-          if (value === "LOW") return 1
-          return 0
-        }
-        const byPriority = rank(b.priority) - rank(a.priority)
-        if (byPriority !== 0) return byPriority
-        return a.title.localeCompare(b.title)
-      }),
-    }))
+    return Array.from(groups.entries())
+      .sort((a, b) => FREQUENCY_ORDER.indexOf(a[0]) - FREQUENCY_ORDER.indexOf(b[0]))
+      .map(([frequency, items]) => ({
+        label: FREQUENCY_LABELS[frequency] || "Daily",
+        items: items.sort((a, b) => {
+          const rank = (value?: string | null) => {
+            if (value === "HIGH") return 3
+            if (value === "MEDIUM") return 2
+            if (value === "LOW") return 1
+            return 0
+          }
+          const byPriority = rank(b.priority) - rank(a.priority)
+          if (byPriority !== 0) return byPriority
+          return a.title.localeCompare(b.title)
+        }),
+      }))
   }, [visibleSystemTasks])
 
   const submitSystemTask = async () => {

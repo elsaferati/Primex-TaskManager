@@ -40,10 +40,15 @@ async function fetchMe(token: string): Promise<User> {
 }
 
 async function refreshAccessToken(): Promise<string | null> {
-  const res = await fetch(`${API_HTTP_URL}/auth/refresh`, {
-    method: "POST",
-    credentials: "include",
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_HTTP_URL}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    })
+  } catch {
+    return null
+  }
   if (!res.ok) return null
   const data = (await res.json()) as { access_token: string }
   return data.access_token
@@ -123,7 +128,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return fetch(url, { ...init, headers: h, credentials: "include" })
       }
 
-      const res = await doFetch()
+      let res: Response
+      try {
+        res = await doFetch()
+      } catch {
+        toast("Network error", {
+          description: "Unable to reach the server. Check the API URL or backend status.",
+        })
+        return new Response(null, { status: 503, statusText: "Network error" })
+      }
       if (res.status !== 401) return res
 
       const refreshed = await refreshAccessToken()
