@@ -18,6 +18,15 @@ class UserOut(BaseModel):
     is_active: bool
 
 
+class UserLookup(BaseModel):
+    id: uuid.UUID
+    username: str | None = None
+    full_name: str | None = None
+    role: UserRole
+    department_id: uuid.UUID | None = None
+    is_active: bool
+
+
 def _validate_password(value: str) -> str:
     if not re.search(r"[a-z]", value):
         raise ValueError("Must contain 1 lowercase letter")

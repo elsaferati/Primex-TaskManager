@@ -36,10 +36,37 @@ const TABS = [
   { id: "prompts", label: "Prompts" },
 ] as const
 
-type TabId = (typeof TABS)[number]["id"]
+const MEETING_TABS = [
+  { id: "meeting-focus", label: "Meeting Focus" },
+  { id: "meeting-checklist", label: "Checklist" },
+] as const
+
+type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED"] as const
 const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const
+
+const MEETING_POINTS = [
+  "Confirm scope and goals with the client.",
+  "Align on timeline, milestones, and communication.",
+  "Define roles, owners, and next steps.",
+  "Capture risks, dependencies, and open questions.",
+]
+
+const MEETING_CHECKLIST_ITEMS = [
+  "Lloji i projektit",
+  "Kerkuesi/Mbeshtetesi i projektit",
+  "Udheheqesi i projektit",
+  "Pjesemarresit tjere ne projekt",
+  "Roli i pjesemarresve tjere",
+  "Kzg/Plnf i Projektit",
+  "Cfare problemesh parashihen?",
+]
+const DOCUMENTATION_CHECKLIST_QUESTIONS = [
+  "Does the documentation have a clear ending?",
+  "Did you follow the documentation template?",
+  "Did you save it as files?",
+]
 
 function initials(src: string) {
   return src
@@ -111,6 +138,7 @@ export default function ProjectPage() {
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("MEDIUM")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
+  const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
   const [editingDescription, setEditingDescription] = React.useState("")
@@ -124,6 +152,22 @@ export default function ProjectPage() {
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
+  const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
+    MEETING_CHECKLIST_ITEMS.map((content, index) => ({
+      id: `meeting-${index}`,
+      content,
+      isChecked: false,
+    }))
+  )
+  const [documentationChecklist, setDocumentationChecklist] = React.useState(() =>
+    DOCUMENTATION_CHECKLIST_QUESTIONS.map((question, index) => ({
+      id: `doc-${index}`,
+      question,
+      isChecked: false,
+    }))
+  )
+  const [documentationFilePath, setDocumentationFilePath] = React.useState("")
+  const [documentationFilePaths, setDocumentationFilePaths] = React.useState<string[]>([])
   const [gaPromptContent, setGaPromptContent] = React.useState("")
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
@@ -171,24 +215,16 @@ export default function ProjectPage() {
   }, [prompts])
 
   React.useEffect(() => {
-    const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
-    const allowedTabsByPhase: Record<string, TabId[]> = {
-      TAKIMET: ["description", "ga", "members"],
-      PLANIFIKIMI: ["description", "tasks", "checklists", "ga", "members"],
-      ZHVILLIMI: ["tasks", "checklists", "ga", "prompts"],
-      TESTIMI: ["tasks", "checklists", "ga"],
-      DOKUMENTIMI: ["description", "tasks", "checklists"],
-    }
-    const allowedTabs = allowedTabsByPhase[phaseValue] || TABS.map((tab) => tab.id)
-    if (!allowedTabs.includes(activeTab)) {
-      setActiveTab(allowedTabs[0] || "description")
-    }
-  }, [activeTab, project?.current_phase, viewedPhase])
-
-  React.useEffect(() => {
     if (!membersOpen) return
     setSelectedMemberIds(members.map((m) => m.id))
   }, [membersOpen, members])
+
+  React.useEffect(() => {
+    if (!createOpen) return
+    if (newTaskPhase) return
+    const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+    setNewTaskPhase(phaseValue)
+  }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
   const submitCreateTask = async () => {
     if (!project) return
@@ -203,6 +239,7 @@ export default function ProjectPage() {
         assigned_to: newAssignedTo === "__unassigned__" ? null : newAssignedTo,
         status: newStatus,
         priority: newPriority,
+        phase: newTaskPhase || activePhase,
         due_date: newDueDate || null,
       }
       const res = await apiFetch("/tasks", {
@@ -229,6 +266,7 @@ export default function ProjectPage() {
       setNewStatus("TODO")
       setNewPriority("MEDIUM")
       setNewAssignedTo("__unassigned__")
+      setNewTaskPhase("")
       setNewDueDate("")
       toast.success("Task created")
     } finally {
@@ -312,6 +350,31 @@ export default function ProjectPage() {
       )
       toast.error("Failed to update checklist")
     }
+  }
+
+  const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
+    setMeetingChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
+    )
+  }
+
+  const updateMeetingChecklistItem = (itemId: string, content: string) => {
+    setMeetingChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, content } : item))
+    )
+  }
+
+  const toggleDocumentationChecklistItem = (itemId: string, next: boolean) => {
+    setDocumentationChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
+    )
+  }
+
+  const addDocumentationFilePath = () => {
+    const value = documentationFilePath.trim()
+    if (!value) return
+    setDocumentationFilePaths((prev) => [value, ...prev])
+    setDocumentationFilePath("")
   }
 
   const toggleMemberSelect = (userId: string) => {
@@ -453,13 +516,60 @@ export default function ProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
+  const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+  const visibleTabs = React.useMemo(() => {
+    if (phaseValue === "TAKIMET") {
+      return [...MEETING_TABS, ...TABS.filter((tab) => tab.id === "ga")]
+    }
+    if (phaseValue === "PLANIFIKIMI") {
+      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
+    }
+    if (phaseValue === "ZHVILLIMI") {
+      return [
+        ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
+        ...TABS.filter((tab) => tab.id === "ga"),
+      ]
+    }
+    if (phaseValue === "TESTIMI") {
+      return TABS.filter(
+        (tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts"
+      )
+    }
+    if (phaseValue === "DOKUMENTIMI") {
+      return TABS.filter(
+        (tab) =>
+          tab.id !== "description" &&
+          tab.id !== "tasks" &&
+          tab.id !== "members" &&
+          tab.id !== "prompts"
+      )
+    }
+    return TABS
+  }, [phaseValue])
+
+  React.useEffect(() => {
+    if (!visibleTabs.length) return
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id)
+    }
+  }, [activeTab, visibleTabs])
+
+  const activePhase = phaseValue
+  const visibleTasks = React.useMemo(
+    () =>
+      tasks.filter((task) => {
+        const taskPhase = task.phase || project?.current_phase || "TAKIMET"
+        return taskPhase === activePhase
+      }),
+    [activePhase, project?.current_phase, tasks]
+  )
+
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
   const phase = project.current_phase || "TAKIMET"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-  const canAdvance = phaseIndex >= 0 && phaseIndex < PHASES.length - 1
-  const activePhase = viewedPhase || phase
+  const canClosePhase = phase !== "MBYLLUR"
   const userMap = new Map(
     [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
   )
@@ -551,19 +661,19 @@ export default function ProjectPage() {
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          disabled={!canClosePhase || advancingPhase}
+          onClick={() => void advancePhase()}
+        >
+          {advancingPhase ? "Closing..." : "Close Phase"}
+        </Button>
+      </div>
+
       <div className="border-b">
         <div className="flex flex-wrap gap-6">
-          {(TABS.filter((tab) => {
-            const allowedTabsByPhase: Record<string, TabId[]> = {
-              TAKIMET: ["description", "ga", "members"],
-              PLANIFIKIMI: ["description", "tasks", "checklists", "ga", "members"],
-              ZHVILLIMI: ["tasks", "checklists", "ga", "prompts"],
-              TESTIMI: ["tasks", "checklists", "ga"],
-              DOKUMENTIMI: ["description", "tasks", "checklists"],
-            }
-            const allowedTabs = allowedTabsByPhase[activePhase] || TABS.map((t) => t.id)
-            return allowedTabs.includes(tab.id)
-          }) ).map((tab) => {
+          {visibleTabs.map((tab) => {
             const isActive = tab.id === activeTab
             const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
             return (
@@ -573,6 +683,7 @@ export default function ProjectPage() {
                 onClick={() => setActiveTab(tab.id)}
                 className={[
                   "relative pb-3 text-sm font-medium",
+                  tab.id === "ga" ? "ml-auto" : "",
                   isActive ? "text-blue-600" : "text-muted-foreground",
                 ].join(" ")}
               >
@@ -583,6 +694,42 @@ export default function ProjectPage() {
           })}
         </div>
       </div>
+
+      {activeTab === "meeting-focus" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">Meeting focus</div>
+          <div className="mt-2 text-sm text-muted-foreground">Main points to discuss in the meeting.</div>
+          <div className="mt-4 space-y-2">
+            {MEETING_POINTS.map((point) => (
+              <div key={point} className="flex items-start gap-2 text-sm text-muted-foreground">
+                <span className="mt-1 h-2 w-2 rounded-full bg-blue-500" aria-hidden />
+                <span>{point}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {activeTab === "meeting-checklist" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">Meeting checklist</div>
+          <div className="mt-3 space-y-3">
+            {meetingChecklist.map((item) => (
+              <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                <Checkbox
+                  checked={item.isChecked}
+                  onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
+                />
+                <Input
+                  value={item.content}
+                  onChange={(e) => updateMeetingChecklistItem(item.id, e.target.value)}
+                  className="flex-1"
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       {activeTab === "description" ? (
         <Card className="p-6">
@@ -603,9 +750,13 @@ export default function ProjectPage() {
             </>
           ) : activePhase === "TESTIMI" ? (
             <>
-              <div className="text-lg font-semibold">Testing Checklist</div>
-              <div className="mt-3 text-sm text-muted-foreground">
-                Add checklist items manually in the Checklists tab.
+              <div className="text-lg font-semibold">Testing Questions</div>
+              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                <div>What should we test and why?</div>
+                <div>Who owns each test area?</div>
+                <div>What environments or data are required?</div>
+                <div>How will issues be tracked and fixed?</div>
+                <div>What is the acceptance checklist to approve?</div>
               </div>
             </>
           ) : (
@@ -688,9 +839,24 @@ export default function ProjectPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((m) => (
+                          {allUsers.map((m) => (
                             <SelectItem key={m.id} value={m.id}>
                               {m.full_name || m.username || m.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phase</Label>
+                      <Select value={newTaskPhase} onValueChange={setNewTaskPhase}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select phase" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PHASES.map((p) => (
+                            <SelectItem key={p} value={p}>
+                              {PHASE_LABELS[p]}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -712,8 +878,8 @@ export default function ProjectPage() {
           </div>
           <Card className="p-0">
             <div className="divide-y">
-              {tasks.length ? (
-                tasks.map((task) => {
+              {visibleTasks.length ? (
+                visibleTasks.map((task) => {
                   const assignedId = task.assigned_to || task.assigned_to_user_id || null
                   const assigned = assignedId ? userMap.get(assignedId) : null
                   return (
@@ -739,35 +905,88 @@ export default function ProjectPage() {
 
       {activeTab === "checklists" ? (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Add item..."
-              value={newChecklistContent}
-              onChange={(e) => setNewChecklistContent(e.target.value)}
-            />
-            <Button
-              variant="outline"
-              disabled={!newChecklistContent.trim() || addingChecklist}
-              onClick={() => void submitChecklistItem()}
-            >
-              {addingChecklist ? "Adding..." : "Add"}
-            </Button>
-          </div>
-          {checklistItems.length ? (
-            checklistItems.map((item) => (
-              <Card
-                key={item.id}
-                className="cursor-pointer px-6 py-5"
-                onClick={() => void toggleChecklistItem(item.id, !item.is_checked)}
-              >
-                <div className="flex items-center gap-3">
-                  <Checkbox checked={item.is_checked} />
-                  <div className={item.is_checked ? "text-muted-foreground line-through" : ""}>{item.content}</div>
+          {activePhase === "DOKUMENTIMI" ? (
+            <Card className="p-6">
+              <div className="text-lg font-semibold">Documentation checklist</div>
+              <div className="mt-4 space-y-3">
+                {documentationChecklist.map((item) => (
+                  <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                    <Checkbox
+                      checked={item.isChecked}
+                      onCheckedChange={(checked) =>
+                        toggleDocumentationChecklistItem(item.id, Boolean(checked))
+                      }
+                    />
+                    <div className={item.isChecked ? "text-muted-foreground line-through" : ""}>
+                      {item.question}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6">
+                <div className="text-sm font-semibold">Documentation file paths</div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Input
+                    placeholder="Add file path..."
+                    value={documentationFilePath}
+                    onChange={(e) => setDocumentationFilePath(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={!documentationFilePath.trim()}
+                    onClick={addDocumentationFilePath}
+                  >
+                    Add
+                  </Button>
                 </div>
-              </Card>
-            ))
+                {documentationFilePaths.length ? (
+                  <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                    {documentationFilePaths.map((path, idx) => (
+                      <div key={`${path}-${idx}`} className="rounded-md border px-3 py-2">
+                        {path}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-sm text-muted-foreground">No file paths added.</div>
+                )}
+              </div>
+            </Card>
           ) : (
-            <div className="text-sm text-muted-foreground">No checklist items yet.</div>
+            <>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add item..."
+                  value={newChecklistContent}
+                  onChange={(e) => setNewChecklistContent(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  disabled={!newChecklistContent.trim() || addingChecklist}
+                  onClick={() => void submitChecklistItem()}
+                >
+                  {addingChecklist ? "Adding..." : "Add"}
+                </Button>
+              </div>
+              {checklistItems.length ? (
+                checklistItems.map((item) => (
+                  <Card
+                    key={item.id}
+                    className="cursor-pointer px-6 py-5"
+                    onClick={() => void toggleChecklistItem(item.id, !item.is_checked)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Checkbox checked={item.is_checked} />
+                      <div className={item.is_checked ? "text-muted-foreground line-through" : ""}>
+                        {item.content}
+                      </div>
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-sm text-muted-foreground">No checklist items yet.</div>
+              )}
+            </>
           )}
         </div>
       ) : null}

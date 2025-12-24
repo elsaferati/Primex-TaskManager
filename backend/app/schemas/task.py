@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
 
 
 class TaskOut(BaseModel):
@@ -20,6 +20,7 @@ class TaskOut(BaseModel):
     system_template_origin_id: uuid.UUID | None = None
     status: TaskStatus
     priority: TaskPriority
+    phase: ProjectPhaseStatus
     progress_percentage: int
     start_date: datetime | None = None
     due_date: datetime | None = None
@@ -39,6 +40,7 @@ class TaskCreate(BaseModel):
     assigned_to: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
     start_date: datetime | None = None
     due_date: datetime | None = None
@@ -56,6 +58,7 @@ class TaskUpdate(BaseModel):
     assigned_to: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
     start_date: datetime | None = None
     due_date: datetime | None = None

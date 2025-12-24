@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
 
 
 class Task(Base):
@@ -37,6 +37,11 @@ class Task(Base):
     )
     priority: Mapped[TaskPriority] = mapped_column(
         Enum(TaskPriority, name="task_priority"), nullable=False, server_default="MEDIUM"
+    )
+    phase: Mapped[ProjectPhaseStatus] = mapped_column(
+        Enum(ProjectPhaseStatus, name="project_phase_status"),
+        nullable=False,
+        server_default="TAKIMET",
     )
     progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 

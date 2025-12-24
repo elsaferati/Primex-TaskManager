@@ -49,6 +49,15 @@ export interface User {
   is_active: boolean
 }
 
+export interface UserLookup {
+  id: string
+  username?: string | null
+  full_name?: string | null
+  role: UserRole
+  department_id?: string | null
+  is_active: boolean
+}
+
 export interface Department {
   id: string
   code: string
@@ -111,6 +120,7 @@ export interface Task {
   system_template_origin_id?: string | null
   status?: string
   priority?: string
+  phase?: string
   progress_percentage?: number
   start_date?: string | null
   due_date?: string | null
@@ -142,6 +152,7 @@ export interface GaNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   project_id?: string | null
+  department_id?: string | null
   created_at: string
   updated_at: string
 }

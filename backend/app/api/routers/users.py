@@ -13,7 +13,7 @@ from app.db import get_db
 from app.models.department import Department
 from app.models.enums import UserRole
 from app.models.user import User
-from app.schemas.user import UserCreate, UserOut, UserUpdate
+from app.schemas.user import UserCreate, UserLookup, UserOut, UserUpdate
 
 
 router = APIRouter()
@@ -38,6 +38,29 @@ async def list_users(
         UserOut(
             id=u.id,
             email=u.email,
+            username=u.username,
+            full_name=u.full_name,
+            role=u.role,
+            department_id=u.department_id,
+            is_active=u.is_active,
+        )
+        for u in users
+    ]
+
+
+@router.get("/lookup", response_model=list[UserLookup])
+async def list_users_lookup(
+    include_inactive: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[UserLookup]:
+    stmt = select(User)
+    if not include_inactive:
+        stmt = stmt.where(User.is_active.is_(True))
+    users = (await db.execute(stmt.order_by(User.created_at))).scalars().all()
+    return [
+        UserLookup(
+            id=u.id,
             username=u.username,
             full_name=u.full_name,
             role=u.role,

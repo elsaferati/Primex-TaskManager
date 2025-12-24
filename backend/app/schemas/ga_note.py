@@ -19,6 +19,7 @@ class GaNoteOut(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool
     project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -34,6 +35,7 @@ class GaNoteCreate(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
     project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
 
 
 class GaNoteUpdate(BaseModel):

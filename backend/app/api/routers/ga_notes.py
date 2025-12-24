@@ -39,7 +39,7 @@ async def list_ga_notes(
         stmt = stmt.where(GaNote.project_id == project_id)
     elif department_id is not None:
         ensure_department_access(user, department_id)
-        stmt = stmt.join(Project, GaNote.project_id == Project.id).where(Project.department_id == department_id)
+        stmt = stmt.where(GaNote.department_id == department_id)
 
     notes = (await db.execute(stmt)).scalars().all()
     return [
@@ -55,6 +55,7 @@ async def list_ga_notes(
             completed_at=n.completed_at,
             is_converted_to_task=n.is_converted_to_task,
             project_id=n.project_id,
+            department_id=n.department_id,
             created_at=n.created_at,
             updated_at=n.updated_at,
         )
@@ -68,13 +69,22 @@ async def create_ga_note(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> GaNoteOut:
-    if payload.project_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id required")
-    project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.department_id is not None:
-        ensure_department_access(user, project.department_id)
+    if payload.project_id is None and payload.department_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")
+
+    project = None
+    department_id = payload.department_id
+    if payload.project_id is not None:
+        project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if project.department_id is not None:
+            ensure_department_access(user, project.department_id)
+        if department_id is not None and project.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
+        department_id = project.department_id
+    elif department_id is not None:
+        ensure_department_access(user, department_id)
 
     if payload.priority == GaNotePriority.URGENT:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Urgent priority is not allowed")
@@ -90,6 +100,7 @@ async def create_ga_note(
         completed_at=payload.completed_at,
         is_converted_to_task=payload.is_converted_to_task or False,
         project_id=payload.project_id,
+        department_id=department_id,
     )
     db.add(note)
     await db.commit()
@@ -106,6 +117,7 @@ async def create_ga_note(
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
         project_id=note.project_id,
+        department_id=note.department_id,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -149,6 +161,7 @@ async def update_ga_note(
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
         project_id=note.project_id,
+        department_id=note.department_id,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )

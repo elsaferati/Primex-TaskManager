@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, User } from "@/lib/types"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -138,8 +138,8 @@ function initials(src: string) {
     .join("")
 }
 
-function assigneeLabel(user?: User | null) {
-  return user?.full_name || user?.username || user?.email || "-"
+function assigneeLabel(user?: UserLookup | null) {
+  return user?.full_name || user?.username || "-"
 }
 
 function formatToday() {
@@ -254,7 +254,7 @@ export default function DepartmentKanban() {
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
-  const [users, setUsers] = React.useState<User[]>([])
+  const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -300,6 +300,14 @@ export default function DepartmentKanban() {
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
+  const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
+  const [addingGaNote, setAddingGaNote] = React.useState(false)
+  const [newGaNoteProjectId, setNewGaNoteProjectId] = React.useState("__none__")
+  const [newGaNoteType, setNewGaNoteType] = React.useState<"GA" | "KA">("GA")
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "LOW" | "MEDIUM" | "HIGH">(
+    "__none__"
+  )
+  const [newGaNote, setNewGaNote] = React.useState("")
 
   React.useEffect(() => {
     const load = async () => {
@@ -329,12 +337,10 @@ export default function DepartmentKanban() {
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
 
-        if (user?.role !== "STAFF") {
-          const usersRes = await apiFetch("/users")
-          if (usersRes.ok) {
-            const us = (await usersRes.json()) as User[]
-            setUsers(us.filter((u) => u.department_id === dep.id))
-          }
+        const usersRes = await apiFetch("/users/lookup")
+        if (usersRes.ok) {
+          const us = (await usersRes.json()) as UserLookup[]
+          setUsers(us)
         }
 
         setSystemDepartmentId(dep.id)
@@ -352,6 +358,10 @@ export default function DepartmentKanban() {
   }, [isTabId, normalizedTab])
 
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const departmentUsers = React.useMemo(
+    () => (department ? users.filter((u) => u.department_id === department.id) : []),
+    [department, users]
+  )
   const todayDate = React.useMemo(() => new Date(), [])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
@@ -486,6 +496,8 @@ export default function DepartmentKanban() {
   )
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const isReadOnly = viewMode === "mine"
+  const canManage = canCreate && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -651,7 +663,7 @@ export default function DepartmentKanban() {
       }
       const assigneeIds =
         noProjectAssignee === "__all__"
-          ? users.map((u) => u.id)
+          ? departmentUsers.map((u) => u.id)
           : noProjectAssignee === "__unassigned__"
             ? [null]
             : [noProjectAssignee]
@@ -802,6 +814,54 @@ export default function DepartmentKanban() {
     toast.success("Meeting deleted")
   }
 
+  const submitGaNote = async () => {
+    if (!newGaNote.trim()) return
+    if (!department) {
+      toast.error("Department not loaded.")
+      return
+    }
+    setAddingGaNote(true)
+    try {
+      const priorityValue = newGaNotePriority === "__none__" ? null : newGaNotePriority
+      const payload: Record<string, unknown> = {
+        content: newGaNote.trim(),
+        note_type: newGaNoteType,
+        priority: priorityValue,
+      }
+      if (newGaNoteProjectId === "__none__") {
+        payload.department_id = department.id
+      } else {
+        payload.project_id = newGaNoteProjectId
+      }
+      const res = await apiFetch("/ga-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add GA/KA note"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as GaNote
+      setGaNotes((prev) => [created, ...prev])
+      setNewGaNote("")
+      setNewGaNoteType("GA")
+      setNewGaNotePriority("__none__")
+      setNewGaNoteProjectId("__none__")
+      setGaNoteOpen(false)
+      toast.success("GA/KA note added")
+    } finally {
+      setAddingGaNote(false)
+    }
+  }
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
   if (!department) return <div className="text-sm text-muted-foreground">Department not found.</div>
 
@@ -890,7 +950,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-lg font-semibold">Active Projects</div>
-            {canCreate ? (
+            {canManage ? (
               <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                 <DialogTrigger asChild>
                   <Button className="rounded-xl">+ New Project</Button>
@@ -920,9 +980,9 @@ export default function DepartmentKanban() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {users.map((u) => (
+                          {departmentUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
+                              {u.full_name || u.username || "-"}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1003,7 +1063,7 @@ export default function DepartmentKanban() {
                     <div className="flex items-center gap-2">
                       {manager ? (
                         <div className="h-8 w-8 rounded-full bg-blue-100 text-xs font-semibold text-blue-700 flex items-center justify-center">
-                          {initials(manager.full_name || manager.username || manager.email)}
+                        {initials(manager.full_name || manager.username || "-")}
                         </div>
                       ) : (
                         <div className="h-8 w-8 rounded-full bg-muted text-xs font-semibold flex items-center justify-center">
@@ -1041,16 +1101,16 @@ export default function DepartmentKanban() {
               <div className="rounded-lg border bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                 {formatToday()}
               </div>
-              {viewMode === "mine" && users.length ? (
+              {viewMode === "department" && departmentUsers.length ? (
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                   <SelectTrigger className="h-9 w-48">
                     <SelectValue placeholder="All users" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">All users</SelectItem>
-                    {users.map((u) => (
+                    {departmentUsers.map((u) => (
                       <SelectItem key={u.id} value={u.id}>
-                        {u.full_name || u.username || u.email}
+                        {u.full_name || u.username || "-"}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1086,6 +1146,7 @@ export default function DepartmentKanban() {
                       <div className="mt-2 space-y-2">
                         {group.tasks.map((task) => {
                           const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                          const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
                           return (
                             <Link
                               key={task.id}
@@ -1095,6 +1156,9 @@ export default function DepartmentKanban() {
                               <div className="flex items-center gap-2">
                                 <Badge variant="outline" className="text-xs">
                                   {task.status || "TODO"}
+                                </Badge>
+                                <Badge variant="secondary" className="text-xs">
+                                  {phaseLabel}
                                 </Badge>
                                 <div className="font-medium">{task.title}</div>
                               </div>
@@ -1123,6 +1187,7 @@ export default function DepartmentKanban() {
                   {todayNoProjectTasks.length ? (
                     todayNoProjectTasks.map((task) => {
                       const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                      const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
                       const typeLabel = task.is_bllok
                         ? "Blocked"
                         : task.is_1h_report
@@ -1139,6 +1204,9 @@ export default function DepartmentKanban() {
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="text-xs">
                               {typeLabel}
+                            </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              {phaseLabel}
                             </Badge>
                             <div className="font-medium">{task.title}</div>
                           </div>
@@ -1232,7 +1300,7 @@ export default function DepartmentKanban() {
                 Department tasks organized by frequency and date.
               </div>
             </div>
-            {canCreate ? (
+            {canManage ? (
               <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline">+ Add Task</Button>
@@ -1254,9 +1322,9 @@ export default function DepartmentKanban() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {users.map((u) => (
+                          {departmentUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
+                              {u.full_name || u.username || "-"}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1448,83 +1516,88 @@ export default function DepartmentKanban() {
                 Use these buckets to track non-project tasks and special cases.
               </div>
             </div>
-            <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">+ Add Task</Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>New Task</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label>Type</Label>
-                    <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {NO_PROJECT_TYPES.map((opt) => (
-                          <SelectItem key={opt.id} value={opt.id}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="text-xs text-muted-foreground">
-                      {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Textarea
-                      value={noProjectDescription}
-                      onChange={(e) => setNoProjectDescription(e.target.value)}
-                      rows={4}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+            {!isReadOnly ? (
+              <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">+ Add Task</Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>New Task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label>Assign to</Label>
-                      <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                      <Label>Type</Label>
+                      <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select assignee" />
+                          <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          <SelectItem value="__all__">All team</SelectItem>
-                          {users.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
+                          {NO_PROJECT_TYPES.map((opt) => (
+                            <SelectItem key={opt.id} value={opt.id}>
+                              {opt.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      <div className="text-xs text-muted-foreground">
+                        {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Due date</Label>
-                      <Input
-                        type="date"
-                        value={noProjectDueDate}
-                        onChange={(e) => setNoProjectDueDate(e.target.value)}
+                      <Label>Title</Label>
+                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Textarea
+                        value={noProjectDescription}
+                        onChange={(e) => setNoProjectDescription(e.target.value)}
+                        rows={4}
                       />
                     </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Assign to</Label>
+                        <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select assignee" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                            <SelectItem value="__all__">All team</SelectItem>
+                            {departmentUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || "-"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Due date</Label>
+                        <Input
+                          type="date"
+                          value={noProjectDueDate}
+                          onChange={(e) => setNoProjectDueDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={!noProjectTitle.trim() || creatingNoProject}
+                        onClick={() => void submitNoProjectTask()}
+                      >
+                        {creatingNoProject ? "Creating..." : "Create"}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button disabled={!noProjectTitle.trim() || creatingNoProject} onClick={() => void submitNoProjectTask()}>
-                      {creatingNoProject ? "Creating..." : "Create"}
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+                </DialogContent>
+              </Dialog>
+            ) : null}
           </div>
           <div className="grid gap-4 md:grid-cols-4">
           <Card className="p-4">
@@ -1671,6 +1744,87 @@ export default function DepartmentKanban() {
 
       {activeTab === "ga-ka" ? (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-lg font-semibold">GA/KA Notes</div>
+            {!isReadOnly ? (
+              <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">+ Add Note</Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Add GA/KA Note</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label>Project</Label>
+                      <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select project (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No project (General)</SelectItem>
+                          {projects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.title || project.name || "Project"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!projects.length ? (
+                        <div className="text-xs text-muted-foreground">No projects available.</div>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Type</Label>
+                        <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="GA/KA" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GA">GA</SelectItem>
+                            <SelectItem value="KA">KA</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Priority</Label>
+                        <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">No priority</SelectItem>
+                            <SelectItem value="LOW">Low</SelectItem>
+                            <SelectItem value="MEDIUM">Medium</SelectItem>
+                            <SelectItem value="HIGH">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Note</Label>
+                      <Textarea
+                        placeholder="Add GA/KA note..."
+                        value={newGaNote}
+                        onChange={(e) => setNewGaNote(e.target.value)}
+                        rows={4}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
+                        {addingGaNote ? "Saving..." : "Add Note"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : null}
+          </div>
           {visibleGaNotes.length ? (
             [...visibleGaNotes]
               .sort((a, b) => {
@@ -1701,13 +1855,21 @@ export default function DepartmentKanban() {
                           <Badge variant="outline" className="text-sm px-2 py-0.5">
                             {project.title || project.name || "Project"}
                           </Badge>
-                        ) : null}
+                        ) : (
+                          <Badge variant="outline" className="text-sm px-2 py-0.5">
+                            General
+                          </Badge>
+                        )}
                         {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
                       </div>
                     {note.status !== "CLOSED" ? (
-                      <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                        Close
-                      </Button>
+                      !isReadOnly ? (
+                        <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                          Close
+                        </Button>
+                      ) : (
+                        <Badge variant="secondary">Open</Badge>
+                      )
                     ) : (
                       <Badge variant="secondary">Closed</Badge>
                     )}
@@ -1728,50 +1890,52 @@ export default function DepartmentKanban() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-5 space-y-4">
               <div className="text-sm font-semibold">External Meetings</div>
-              <div className="grid gap-3">
-                <Input
-                  placeholder="Meeting title"
-                  value={meetingTitle}
-                  onChange={(e) => setMeetingTitle(e.target.value)}
-                />
-                <div className="grid gap-3 md:grid-cols-2">
+              {!isReadOnly ? (
+                <div className="grid gap-3">
                   <Input
-                    placeholder="Platform (Zoom, Meet, Office...)"
-                    value={meetingPlatform}
-                    onChange={(e) => setMeetingPlatform(e.target.value)}
+                    placeholder="Meeting title"
+                    value={meetingTitle}
+                    onChange={(e) => setMeetingTitle(e.target.value)}
                   />
-                  <Input
-                    type="datetime-local"
-                    value={meetingStartsAt}
-                    onChange={(e) => setMeetingStartsAt(e.target.value)}
-                  />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Input
+                      placeholder="Platform (Zoom, Meet, Office...)"
+                      value={meetingPlatform}
+                      onChange={(e) => setMeetingPlatform(e.target.value)}
+                    />
+                    <Input
+                      type="datetime-local"
+                      value={meetingStartsAt}
+                      onChange={(e) => setMeetingStartsAt(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Project (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No project</SelectItem>
+                        {filteredProjects.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.title || project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
+                      {creatingMeeting ? "Saving..." : "Add"}
+                    </Button>
+                  </div>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Project (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">No project</SelectItem>
-                      {filteredProjects.map((project) => (
-                        <SelectItem key={project.id} value={project.id}>
-                          {project.title || project.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                    {creatingMeeting ? "Saving..." : "Add"}
-                  </Button>
-                </div>
-              </div>
+              ) : null}
               <div className="space-y-3">
                 {visibleMeetings.length ? (
                   visibleMeetings.map((meeting) => {
                     const project = meeting.project_id
                       ? projects.find((p) => p.id === meeting.project_id) || null
                       : null
-                    const isEditing = editingMeetingId === meeting.id
+                    const isEditing = !isReadOnly && editingMeetingId === meeting.id
                     return (
                       <Card key={meeting.id} className="border border-muted p-4">
                         {isEditing ? (
@@ -1822,14 +1986,16 @@ export default function DepartmentKanban() {
                                 </div>
                               ) : null}
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
-                                Edit
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
-                                Delete
-                              </Button>
-                            </div>
+                            {!isReadOnly ? (
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
+                                  Edit
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
+                                  Delete
+                                </Button>
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </Card>

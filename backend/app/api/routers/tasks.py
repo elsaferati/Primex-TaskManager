@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import NotificationType, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.task import Task
@@ -39,6 +39,7 @@ def _task_to_out(task: Task) -> TaskOut:
         system_template_origin_id=task.system_template_origin_id,
         status=task.status,
         priority=task.priority,
+        phase=task.phase,
         progress_percentage=task.progress_percentage,
         start_date=task.start_date,
         due_date=task.due_date,
@@ -134,6 +135,7 @@ async def create_task(
 ) -> TaskOut:
     ensure_manager_or_admin(user)
     department_id = payload.department_id
+    project = None
     if payload.project_id is not None:
         project = await _project_for_id(db, payload.project_id)
         if project.department_id is not None and project.department_id != department_id:
@@ -151,6 +153,7 @@ async def create_task(
 
     status_value = payload.status or TaskStatus.TODO
     priority_value = payload.priority or TaskPriority.MEDIUM
+    phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.TAKIMET)
     completed_at = payload.completed_at
     if completed_at is None and status_value in (TaskStatus.DONE, TaskStatus.CANCELLED):
         completed_at = datetime.now(timezone.utc)
@@ -164,6 +167,7 @@ async def create_task(
         created_by=user.id,
         status=status_value,
         priority=priority_value,
+        phase=phase_value,
         progress_percentage=payload.progress_percentage or 0,
         start_date=payload.start_date or datetime.now(timezone.utc),
         due_date=payload.due_date,
@@ -253,6 +257,7 @@ async def update_task(
             "department_id": payload.department_id,
             "assigned_to": payload.assigned_to,
             "priority": payload.priority,
+            "phase": payload.phase,
             "is_bllok": payload.is_bllok,
             "is_1h_report": payload.is_1h_report,
             "is_r1": payload.is_r1,
@@ -265,6 +270,7 @@ async def update_task(
         "description": task.description,
         "status": task.status.value,
         "priority": task.priority.value,
+        "phase": task.phase.value if task.phase else None,
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -317,6 +323,9 @@ async def update_task(
 
     if payload.priority is not None:
         task.priority = payload.priority
+    if payload.phase is not None:
+        ensure_manager_or_admin(user)
+        task.phase = payload.phase
     if payload.progress_percentage is not None:
         task.progress_percentage = payload.progress_percentage
     if payload.start_date is not None:
@@ -366,6 +375,7 @@ async def update_task(
         "description": task.description,
         "status": task.status.value,
         "priority": task.priority.value,
+        "phase": task.phase.value if task.phase else None,
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
