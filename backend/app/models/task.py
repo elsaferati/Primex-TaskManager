@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (UniqueConstraint("system_template_origin_id", name="uq_tasks_system_template_origin_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
@@ -22,8 +23,8 @@ class Task(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), index=True
     )
-    department_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=False
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id")
     )
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
@@ -52,6 +53,7 @@ class Task(Base):
     is_bllok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_1h_report: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_r1: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

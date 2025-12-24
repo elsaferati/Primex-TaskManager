@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -15,8 +15,9 @@ from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority,
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskOut, TaskUpdate
+from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskUpdate
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 
@@ -26,7 +27,44 @@ router = APIRouter()
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
 
 
-def _task_to_out(task: Task) -> TaskOut:
+def _user_to_assignee(user: User) -> TaskAssigneeOut:
+    return TaskAssigneeOut(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+    )
+
+
+async def _assignees_for_tasks(
+    db: AsyncSession, task_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskAssignee.task_id, User)
+            .join(User, TaskAssignee.user_id == User.id)
+            .where(TaskAssignee.task_id.in_(task_ids))
+            .order_by(User.full_name)
+        )
+    ).all()
+    assignees: dict[uuid.UUID, list[TaskAssigneeOut]] = {task_id: [] for task_id in task_ids}
+    for task_id, user in rows:
+        assignees.setdefault(task_id, []).append(_user_to_assignee(user))
+    return assignees
+
+
+async def _replace_task_assignees(
+    db: AsyncSession, task: Task, assignee_ids: list[uuid.UUID]
+) -> None:
+    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+    if assignee_ids:
+        values = [{"task_id": task.id, "user_id": user_id} for user_id in assignee_ids]
+        await db.execute(insert(TaskAssignee), values)
+
+
+def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
     return TaskOut(
         id=task.id,
         title=task.title,
@@ -34,6 +72,7 @@ def _task_to_out(task: Task) -> TaskOut:
         project_id=task.project_id,
         department_id=task.department_id,
         assigned_to=task.assigned_to,
+        assignees=assignees,
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
         system_template_origin_id=task.system_template_origin_id,
@@ -47,6 +86,7 @@ def _task_to_out(task: Task) -> TaskOut:
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
         is_r1=task.is_r1,
+        is_active=task.is_active,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -111,7 +151,25 @@ async def list_tasks(
         stmt = stmt.where(Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]))
 
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
-    return [_task_to_out(t) for t in tasks]
+    task_ids = [t.id for t in tasks]
+    assignee_map = await _assignees_for_tasks(db, task_ids)
+    fallback_ids = [
+        t.assigned_to
+        for t in tasks
+        if t.assigned_to is not None and not assignee_map.get(t.id)
+    ]
+    if fallback_ids:
+        fallback_users = (
+            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+        ).scalars().all()
+        fallback_map = {user.id: user for user in fallback_users}
+        for t in tasks:
+            if assignee_map.get(t.id):
+                continue
+            if t.assigned_to in fallback_map:
+                assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
+
+    return [_task_to_out(t, assignee_map.get(t.id, [])) for t in tasks]
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -124,7 +182,12 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     ensure_department_access(user, task.department_id)
-    return _task_to_out(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_to_out(task, assignee_map.get(task.id, []))
 
 
 @router.post("", response_model=TaskOut)
@@ -143,13 +206,23 @@ async def create_task(
 
     ensure_department_access(user, department_id)
 
-    assigned_user = None
-    if payload.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
-        if assigned_user is None:
+    assignee_ids: list[uuid.UUID] | None = None
+    assignee_users: list[User] = []
+    if payload.assignees is not None:
+        seen: set[uuid.UUID] = set()
+        assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
+    elif payload.assigned_to is not None:
+        assignee_ids = [payload.assigned_to]
+
+    if assignee_ids is not None:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        ).scalars().all()
+        if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
-        if assigned_user.department_id != department_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+        for assignee in assignee_users:
+            if assignee.department_id != department_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
 
     status_value = payload.status or TaskStatus.TODO
     priority_value = payload.priority or TaskPriority.MEDIUM
@@ -163,7 +236,7 @@ async def create_task(
         description=payload.description,
         project_id=payload.project_id,
         department_id=department_id,
-        assigned_to=payload.assigned_to,
+        assigned_to=assignee_ids[0] if assignee_ids else None,
         created_by=user.id,
         status=status_value,
         priority=priority_value,
@@ -178,6 +251,10 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
+    if assignee_ids is not None:
+        await _replace_task_assignees(db, task, assignee_ids)
+        if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
+            task.is_active = False
 
     add_audit_log(
         db=db,
@@ -194,11 +271,19 @@ async def create_task(
     )
 
     created_notifications: list[Notification] = []
-    if assigned_user is not None:
+    existing_assignee_ids: set[uuid.UUID] = set()
+    if payload.assignees is not None or payload.assigned_to is not None:
+        rows = (
+            await db.execute(
+                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+            )
+        ).scalars().all()
+        existing_assignee_ids = set(rows)
+    for assignee in assignee_users:
         created_notifications.append(
             add_notification(
                 db=db,
-                user_id=assigned_user.id,
+                user_id=assignee.id,
                 type=NotificationType.assignment,
                 title="Task assigned",
                 body=task.title,
@@ -232,7 +317,12 @@ async def create_task(
             pass
 
     await db.refresh(task)
-    return _task_to_out(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_to_out(task, assignee_map.get(task.id, []))
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
@@ -256,6 +346,7 @@ async def update_task(
             "project_id": payload.project_id,
             "department_id": payload.department_id,
             "assigned_to": payload.assigned_to,
+            "assignees": payload.assignees,
             "priority": payload.priority,
             "phase": payload.phase,
             "is_bllok": payload.is_bllok,
@@ -295,7 +386,37 @@ async def update_task(
         ensure_department_access(user, payload.department_id)
         task.department_id = payload.department_id
 
-    if payload.assigned_to is not None and payload.assigned_to != task.assigned_to:
+    if payload.assignees is not None:
+        ensure_manager_or_admin(user)
+        seen: set[uuid.UUID] = set()
+        assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        ).scalars().all()
+        if len(assignee_users) != len(assignee_ids):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+        for assignee in assignee_users:
+            if assignee.department_id != task.department_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+        await _replace_task_assignees(db, task, assignee_ids)
+        task.assigned_to = assignee_ids[0] if assignee_ids else None
+        if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
+            task.is_active = False
+        new_ids = set(assignee_ids) - existing_assignee_ids
+        for assignee in assignee_users:
+            if assignee.id not in new_ids:
+                continue
+            created_notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=assignee.id,
+                    type=NotificationType.assignment,
+                    title="Task assigned",
+                    body=task.title,
+                    data={"task_id": str(task.id)},
+                )
+            )
+    elif payload.assigned_to is not None and payload.assigned_to != task.assigned_to:
         ensure_manager_or_admin(user)
         assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
         if assigned_user is None:
@@ -303,6 +424,7 @@ async def update_task(
         if assigned_user.department_id != task.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
         task.assigned_to = payload.assigned_to
+        await _replace_task_assignees(db, task, [payload.assigned_to])
         created_notifications.append(
             add_notification(
                 db=db,
@@ -400,6 +522,29 @@ async def update_task(
             pass
 
     await db.refresh(task)
-    return _task_to_out(task)
+    assignee_out = [_user_to_assignee(a) for a in assignee_users] if assignee_users else []
+    return _task_to_out(task, assignee_out)
+
+
+@router.post("/{task_id}/deactivate", response_model=TaskOut)
+async def deactivate_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> TaskOut:
+    ensure_manager_or_admin(user)
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    ensure_department_access(user, task.department_id)
+    task.is_active = False
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_to_out(task, assignee_map.get(task.id, []))
 
 

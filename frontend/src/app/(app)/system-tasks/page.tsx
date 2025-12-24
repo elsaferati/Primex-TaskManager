@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import * as React from "react"
 
@@ -9,6 +9,16 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -25,12 +35,12 @@ const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
 
 const FREQUENCY_OPTIONS = [
-  { value: "DAILY", label: "Every day" },
-  { value: "WEEKLY", label: "Every week" },
-  { value: "MONTHLY", label: "Every month" },
-  { value: "3_MONTHS", label: "Every 3 months" },
+  { value: "DAILY", label: "Daily" },
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "3_MONTHS", label: "Quarterly" },
   { value: "6_MONTHS", label: "Every 6 months" },
-  { value: "YEARLY", label: "Every year" },
+  { value: "YEARLY", label: "Yearly" },
 ] as const
 
 const FREQUENCY_VALUES = FREQUENCY_OPTIONS.map((option) => option.value)
@@ -42,7 +52,7 @@ const FREQUENCY_CHIPS = [
   { id: "DAILY", label: "Daily" },
   { id: "WEEKLY", label: "Weekly" },
   { id: "MONTHLY", label: "Monthly" },
-  { id: "3_6_MONTHS", label: "3/6 months" },
+  { id: "3_6_MONTHS", label: "Quarterly/6 months" },
   { id: "YEARLY", label: "Yearly" },
 ]
 
@@ -56,15 +66,15 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
+  LOW: "border-yellow-300 bg-yellow-100 text-yellow-800",
+  MEDIUM: "border-orange-300 bg-orange-100 text-orange-800",
   HIGH: "border-red-200 bg-red-50 text-red-700",
   URGENT: "border-red-200 bg-red-50 text-red-700",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-emerald-500",
-  MEDIUM: "border-l-amber-500",
+  LOW: "border-l-yellow-500",
+  MEDIUM: "border-l-orange-500",
   HIGH: "border-l-red-600",
   URGENT: "border-l-red-600",
 }
@@ -101,16 +111,6 @@ type Section = {
   label: string
   date: Date
   templates: SystemTaskTemplate[]
-}
-
-function normalizeDate(date: Date) {
-  const clone = new Date(date)
-  clone.setHours(0, 0, 0, 0)
-  return clone
-}
-
-function formatDisplayDate(date: Date) {
-  return date.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" })
 }
 
 function parseCSV(text: string): string[][] {
@@ -158,42 +158,6 @@ function csvEscape(value: unknown): string {
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, "\"\"")}"` : str
 }
 
-function pythonWeekday(date: Date) {
-  return (date.getDay() + 6) % 7
-}
-
-function shouldRunTemplate(template: SystemTaskTemplate, date: Date) {
-  const normalized = normalizeDate(date)
-  const month = normalized.getMonth() + 1
-  const day = normalized.getDate()
-  const weekday = pythonWeekday(normalized)
-
-  if (!template.frequency) return false
-
-  switch (template.frequency) {
-    case "DAILY":
-      return true
-    case "WEEKLY":
-      return weekday === (template.day_of_week ?? 0)
-    case "MONTHLY":
-      return day === (template.day_of_month ?? 1)
-    case "YEARLY":
-      if (template.month_of_year != null && template.month_of_year !== month) return false
-      if (template.day_of_month != null && template.day_of_month !== day) return false
-      return true
-    case "3_MONTHS":
-      if (template.month_of_year != null && template.month_of_year !== month) return false
-      if (template.day_of_month != null && template.day_of_month !== day) return false
-      return month % 3 === 0
-    case "6_MONTHS":
-      if (template.month_of_year != null && template.month_of_year !== month) return false
-      if (template.day_of_month != null && template.day_of_month !== day) return false
-      return month % 6 === 0
-    default:
-      return false
-  }
-}
-
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
@@ -206,35 +170,49 @@ export default function SystemTasksPage() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [loading, setLoading] = React.useState(true)
-  const [customDate, setCustomDate] = React.useState("")
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [editOpen, setEditOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
-  const [showAllTemplates, setShowAllTemplates] = React.useState(true)
+  const [editSaving, setEditSaving] = React.useState(false)
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
-  const [deletingId, setDeletingId] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [departmentId, setDepartmentId] = React.useState("")
-  const [defaultAssignee, setDefaultAssignee] = React.useState(EMPTY_VALUE)
+  const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
+  const [assigneeQuery, setAssigneeQuery] = React.useState("")
+  const [assigneeError, setAssigneeError] = React.useState<string | null>(null)
   const [frequency, setFrequency] = React.useState<SystemTaskFrequency>("DAILY")
   const [priority, setPriority] = React.useState<TaskPriority>("MEDIUM")
   const [dayOfWeek, setDayOfWeek] = React.useState("")
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
+  const [editTemplate, setEditTemplate] = React.useState<SystemTaskTemplate | null>(null)
+  const [editTitle, setEditTitle] = React.useState("")
+  const [editDescription, setEditDescription] = React.useState("")
+  const [editDepartmentId, setEditDepartmentId] = React.useState("")
+  const [editAssigneeIds, setEditAssigneeIds] = React.useState<string[]>([])
+  const [editAssigneeQuery, setEditAssigneeQuery] = React.useState("")
+  const [editAssigneeError, setEditAssigneeError] = React.useState<string | null>(null)
+  const [editFrequency, setEditFrequency] = React.useState<SystemTaskFrequency>("DAILY")
+  const [editPriority, setEditPriority] = React.useState<TaskPriority>("MEDIUM")
+  const [editDayOfWeek, setEditDayOfWeek] = React.useState("")
+  const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
+  const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
+  const [editIsActive, setEditIsActive] = React.useState(true)
 
-  const canCreate = user?.role !== "STAFF"
-  const canDelete = user?.role === "ADMIN"
+  const canEdit = user?.role !== "STAFF"
+  const canCreate = canEdit
 
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
       const [templatesRes, departmentsRes] = await Promise.all([
-        apiFetch("/system-tasks?only_active=true"),
+        apiFetch("/system-tasks"),
         apiFetch("/departments"),
       ])
       if (templatesRes.ok) {
@@ -265,6 +243,29 @@ export default function SystemTasksPage() {
     }
   }, [departments, departmentId, user?.department_id])
 
+  React.useEffect(() => {
+    if (!editTemplate) return
+    setEditTitle(editTemplate.title || "")
+    setEditDescription(editTemplate.description || "")
+    setEditDepartmentId(editTemplate.department_id ?? ALL_DEPARTMENTS_VALUE)
+    const editIds =
+      editTemplate.assignees?.map((assignee) => assignee.id) ??
+      (editTemplate.default_assignee_id ? [editTemplate.default_assignee_id] : [])
+    setEditAssigneeIds(editIds)
+    setEditFrequency(editTemplate.frequency)
+    setEditPriority(normalizePriority(editTemplate.priority))
+    setEditDayOfWeek(editTemplate.day_of_week != null ? String(editTemplate.day_of_week) : "")
+    setEditDayOfMonth(editTemplate.day_of_month != null ? String(editTemplate.day_of_month) : "")
+    setEditMonthOfYear(
+      editTemplate.month_of_year != null
+        ? String(editTemplate.month_of_year).padStart(2, "0")
+        : EMPTY_VALUE
+    )
+    setEditIsActive(editTemplate.is_active)
+    setEditAssigneeQuery("")
+    setEditAssigneeError(null)
+  }, [editTemplate])
+
   const departmentMap = React.useMemo(() => {
     return new Map(departments.map((dept) => [dept.id, dept]))
   }, [departments])
@@ -272,6 +273,116 @@ export default function SystemTasksPage() {
   const userMap = React.useMemo(() => {
     return new Map(users.map((u) => [u.id, u]))
   }, [users])
+
+  const departmentNamesForOwnerIds = React.useCallback(
+    (ownerIds: string[]) => {
+      const ids = new Set<string>()
+      for (const ownerId of ownerIds) {
+        const deptId = userMap.get(ownerId)?.department_id
+        if (deptId) ids.add(deptId)
+      }
+      return Array.from(ids)
+        .map((id) => departmentMap.get(id)?.name)
+        .filter((name): name is string => Boolean(name))
+    },
+    [departmentMap, userMap]
+  )
+
+  const departmentNamesForAssignees = React.useCallback(
+    (assignees?: SystemTaskTemplate["assignees"]) => {
+      if (!assignees || assignees.length === 0) return []
+      return departmentNamesForOwnerIds(assignees.map((assignee) => assignee.id))
+    },
+    [departmentNamesForOwnerIds]
+  )
+
+  const formatDepartmentNames = React.useCallback((names: string[]) => {
+    if (!names.length) return "All departments"
+    if (names.length === 1) return names[0]
+    if (names.length === 2) return `${names[0]}, ${names[1]}`
+    return `${names[0]}, ${names[1]} +${names.length - 2}`
+  }, [])
+
+  const ownerDepartmentId = React.useCallback(
+    (ownerId: string) => userMap.get(ownerId)?.department_id ?? null,
+    [userMap]
+  )
+
+  const validateOwners = React.useCallback(
+    (deptId: string, ownerIds: string[]) => {
+      if (!ownerIds.length) return { ok: true }
+      if (!deptId || deptId === ALL_DEPARTMENTS_VALUE) return { ok: true }
+      const allMatch = ownerIds.every((id) => ownerDepartmentId(id) === deptId)
+      if (!allMatch) {
+        return {
+          ok: false,
+          message: "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.",
+        }
+      }
+      return { ok: true }
+    },
+    [ownerDepartmentId]
+  )
+
+  const handleDepartmentChange = (nextDeptId: string) => {
+    setDepartmentId(nextDeptId)
+    if (nextDeptId === ALL_DEPARTMENTS_VALUE) {
+      setAssigneeIds([])
+      setAssigneeError(null)
+      return
+    }
+    setAssigneeIds((prev) => prev.filter((id) => ownerDepartmentId(id) === nextDeptId))
+    setAssigneeError(null)
+  }
+
+  const handleEditDepartmentChange = (nextDeptId: string) => {
+    setEditDepartmentId(nextDeptId)
+    if (nextDeptId === ALL_DEPARTMENTS_VALUE) {
+      setEditAssigneeIds([])
+      setEditAssigneeError(null)
+      return
+    }
+    setEditAssigneeIds((prev) => prev.filter((id) => ownerDepartmentId(id) === nextDeptId))
+    setEditAssigneeError(null)
+  }
+
+  const handleAssigneesChange = (nextOwnerIds: string[]) => {
+    if (!nextOwnerIds.length) {
+      setAssigneeIds([])
+      setAssigneeError(null)
+      return
+    }
+    const firstDept = ownerDepartmentId(nextOwnerIds[0])
+    if (!firstDept) return
+    if (departmentId !== ALL_DEPARTMENTS_VALUE) {
+      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === departmentId)
+      if (!allMatch) {
+        setAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
+        return
+      }
+    }
+    setAssigneeIds(nextOwnerIds)
+    setAssigneeError(null)
+  }
+
+  const handleEditAssigneesChange = (nextOwnerIds: string[]) => {
+    if (!nextOwnerIds.length) {
+      setEditAssigneeIds([])
+      setEditAssigneeError(null)
+      return
+    }
+    const firstDept = ownerDepartmentId(nextOwnerIds[0])
+    if (!firstDept) return
+    if (editDepartmentId !== ALL_DEPARTMENTS_VALUE) {
+      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === editDepartmentId)
+      if (!allMatch) {
+        setEditAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
+        return
+      }
+    }
+    setEditAssigneeIds(nextOwnerIds)
+    setEditAssigneeError(null)
+  }
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
@@ -309,6 +420,7 @@ export default function SystemTasksPage() {
     return filtered
   }, [frequencyFilters, priorityFilters, templates])
 
+
   React.useEffect(() => {
     const combinedSelected =
       COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
@@ -318,44 +430,27 @@ export default function SystemTasksPage() {
     }
   }, [frequencyFilters, frequencyMultiSelect])
 
-  const customDateObject = React.useMemo(() => {
-    if (!customDate) return null
-    const parsed = new Date(`${customDate}T00:00:00`)
-    return Number.isNaN(parsed.getTime()) ? null : normalizeDate(parsed)
-  }, [customDate])
-
   const sections = React.useMemo<Section[]>(() => {
-    if (showAllTemplates || !customDateObject) {
-      const sorted = [...filteredTemplates].sort((a, b) => {
-        const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
-        const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
-        if (aPriority !== bPriority) return aPriority - bPriority
-        return a.title.localeCompare(b.title)
-      })
-      return [
-        {
-          id: "all-templates",
-          label: "All system tasks",
-          date: new Date(),
-          templates: sorted,
-        },
-      ]
-    }
-
-    const scheduled = filteredTemplates.filter((template) => shouldRunTemplate(template, customDateObject))
+    const sorted = [...filteredTemplates].sort((a, b) => {
+      const aInactive = !a.is_active
+      const bInactive = !b.is_active
+      if (aInactive !== bInactive) return aInactive ? 1 : -1
+      const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
+      const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
+      if (aPriority !== bPriority) return aPriority - bPriority
+      return a.title.localeCompare(b.title)
+    })
     return [
       {
-        id: `custom-${customDateObject.toISOString()}`,
-        label: `Selected date - ${formatDisplayDate(customDateObject)}`,
-        date: customDateObject,
-        templates: scheduled,
+        id: "all-templates",
+        label: "All System Tasks",
+        date: new Date(),
+        templates: sorted,
       },
     ]
-  }, [customDateObject, filteredTemplates, showAllTemplates])
+  }, [filteredTemplates])
 
   const resetFilters = () => {
-    setCustomDate("")
-    setShowAllTemplates(true)
     setFrequencyFilters([])
     setFrequencyMultiSelect(false)
     setPriorityFilters([])
@@ -393,14 +488,22 @@ export default function SystemTasksPage() {
 
   const submit = async () => {
     if (!departmentId) return
+    const validation = validateOwners(departmentId, assigneeIds)
+    if (!validation.ok) {
+      setAssigneeError(
+        validation.message || "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin."
+      )
+      return
+    }
+    const finalDeptId = departmentId
     setSaving(true)
     try {
       const payload = {
         title: title.trim(),
         description: description.trim() || null,
         department_id:
-          departmentId === ALL_DEPARTMENTS_VALUE ? null : departmentId,
-        default_assignee_id: defaultAssignee === EMPTY_VALUE ? null : defaultAssignee,
+          finalDeptId === ALL_DEPARTMENTS_VALUE ? null : finalDeptId,
+        assignees: assigneeIds,
         frequency,
         priority,
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
@@ -418,7 +521,9 @@ export default function SystemTasksPage() {
       setCreateOpen(false)
       setTitle("")
       setDescription("")
-      setDefaultAssignee(EMPTY_VALUE)
+      setAssigneeIds([])
+      setAssigneeQuery("")
+      setAssigneeError(null)
       setDayOfWeek("")
       setDayOfMonth("")
       setMonthOfYear(EMPTY_VALUE)
@@ -436,20 +541,56 @@ export default function SystemTasksPage() {
       setPriorityFilters([])
       return
     }
-    setPriorityFilters((prev) => (prev.includes(value) ? [] : [value]))
+    setPriorityFilters([value])
   }
 
-  const deleteTemplate = async (templateId: string) => {
-    if (!canDelete) return
-    const confirmed = window.confirm("Delete this system task? This cannot be undone.")
-    if (!confirmed) return
-    setDeletingId(templateId)
+  const startEdit = (template: SystemTaskTemplate) => {
+    if (!canEdit) return
+    setEditTemplate(template)
+    setEditOpen(true)
+  }
+
+  const submitEdit = async () => {
+    if (!editTemplate || !editTitle.trim()) return
+    const validation = validateOwners(editDepartmentId, editAssigneeIds)
+    if (!validation.ok) {
+      setEditAssigneeError(
+        validation.message || "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin."
+      )
+      return
+    }
+    const finalDeptId = editDepartmentId
+    setEditSaving(true)
     try {
-      const res = await apiFetch(`/system-tasks/${templateId}`, { method: "DELETE" })
+      const payload = {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        department_id:
+          finalDeptId === ALL_DEPARTMENTS_VALUE ? null : finalDeptId,
+        assignees: editAssigneeIds,
+        frequency: editFrequency,
+        priority: editPriority,
+        day_of_week: editDayOfWeek ? Number(editDayOfWeek) : null,
+        day_of_month: editDayOfMonth ? Number(editDayOfMonth) : null,
+        month_of_year:
+          editMonthOfYear && editMonthOfYear !== EMPTY_VALUE ? Number(editMonthOfYear) : null,
+        is_active: editIsActive,
+      }
+      const templateId = editTemplate.template_id ?? editTemplate.id
+      const res = await apiFetch(`/system-tasks/${templateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
       if (!res.ok) return
-      setTemplates((prev) => prev.filter((template) => template.id !== templateId))
+      const updated = (await res.json()) as SystemTaskTemplate
+      setTemplates((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      setEditOpen(false)
+      setEditTemplate(null)
+      setEditAssigneeError(null)
+      await load()
     } finally {
-      setDeletingId(null)
+      setEditSaving(false)
     }
   }
 
@@ -457,11 +598,67 @@ export default function SystemTasksPage() {
     if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return users
     return users.filter((u) => u.department_id === departmentId)
   }, [departmentId, users])
+  const editAvailableAssignees = React.useMemo(() => {
+    if (!editDepartmentId || editDepartmentId === ALL_DEPARTMENTS_VALUE) return users
+    return users.filter((u) => u.department_id === editDepartmentId)
+  }, [editDepartmentId, users])
+  const filteredAssignees = React.useMemo(() => {
+    const query = assigneeQuery.trim().toLowerCase()
+    if (!query) return availableAssignees
+    return availableAssignees.filter((person) => {
+      const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+      return name.includes(query)
+    })
+  }, [assigneeQuery, availableAssignees])
+  const filteredEditAssignees = React.useMemo(() => {
+    const query = editAssigneeQuery.trim().toLowerCase()
+    const base = !query
+      ? editAvailableAssignees
+      : editAvailableAssignees.filter((person) => {
+          const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+          return name.includes(query)
+        })
+    return [...base].sort((a, b) => {
+      const aSelected = editAssigneeIds.includes(a.id)
+      const bSelected = editAssigneeIds.includes(b.id)
+      if (aSelected !== bSelected) return aSelected ? -1 : 1
+      const aName = (a.full_name || a.username || a.email).toLowerCase()
+      const bName = (b.full_name || b.username || b.email).toLowerCase()
+      return aName.localeCompare(bName)
+    })
+  }, [editAssigneeQuery, editAvailableAssignees, editAssigneeIds])
   const combinedSelected =
     COMBINED_FREQUENCIES.every((value) => frequencyFilters.includes(value)) &&
     frequencyFilters.length >= COMBINED_FREQUENCIES.length
   const allFrequenciesSelected = frequencyFilters.length === 0
   const allPrioritiesSelected = priorityFilters.length === 0
+  const frequencyLabel = React.useMemo(() => {
+    if (allFrequenciesSelected) return "All frequencies"
+    const labels: string[] = []
+    const remaining = frequencyFilters.filter((value) => !COMBINED_FREQUENCIES.includes(value))
+    if (combinedSelected) labels.push("3/6 months")
+    for (const value of remaining) {
+      const option = FREQUENCY_OPTIONS.find((item) => item.value === value)
+      if (option) labels.push(option.label)
+    }
+    if (labels.length > 2) return `${labels.length} selected`
+    return labels.join(", ") || "Selected"
+  }, [allFrequenciesSelected, combinedSelected, frequencyFilters])
+  const priorityLabel = allPrioritiesSelected
+    ? "All priorities"
+    : PRIORITY_LABELS[priorityFilters[0] as TaskPriority] || "Priority"
+  const assigneeDeptNames = departmentNamesForOwnerIds(assigneeIds)
+  const editAssigneeDeptNames = departmentNamesForOwnerIds(editAssigneeIds)
+
+  const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
+    if (!list || list.length === 0) return "-"
+    if (list.length <= 2) {
+      return list
+        .map((person) => person.full_name || person.username || person.email)
+        .join(", ")
+    }
+    return `${list.length} people`
+  }
 
   const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
     const rows = templates.filter((template) => {
@@ -649,15 +846,15 @@ export default function SystemTasksPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-lg font-semibold">System Tasks</h3>
-          <p className="text-sm text-muted-foreground">
+          <h3 className="text-lg font-semibold leading-tight">System Tasks</h3>
+          <p className="text-base leading-tight text-gray-600">
             Department tasks organized by frequency and date.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <input
             ref={fileInputRef}
             type="file"
@@ -673,35 +870,28 @@ export default function SystemTasksPage() {
             variant="outline"
             disabled={!canCreate}
             onClick={() => fileInputRef.current?.click()}
+            size="sm"
+            className="h-7 px-2 text-base"
           >
             Import Excel
           </Button>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase text-muted-foreground">Export</span>
-            <Button variant="outline" onClick={() => exportTemplatesCSV("all")}>
-              Export All
-            </Button>
-            <Button variant="outline" onClick={() => exportTemplatesCSV("active")}>
-              Export Open
-            </Button>
-            <Button variant="outline" onClick={() => exportTemplatesCSV("inactive")}>
-              Export Closed
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => exportTemplatesCSV("all")} size="sm" className="h-7 px-2 text-base">
+            Export All
+          </Button>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" disabled={!canCreate}>
+              <Button variant="outline" disabled={!canCreate} size="sm" className="h-7 px-2 text-base">
                 + Add Task
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-2xl">
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Add system task</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select value={departmentId} onValueChange={setDepartmentId}>
+                  <Select value={departmentId} onValueChange={handleDepartmentChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
@@ -725,10 +915,10 @@ export default function SystemTasksPage() {
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Frequency</Label>
+                    <Label>Repeat</Label>
                     <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select frequency" />
+                        <SelectValue placeholder="Select repeat" />
                       </SelectTrigger>
                       <SelectContent>
                         {FREQUENCY_OPTIONS.map((option) => (
@@ -807,24 +997,73 @@ export default function SystemTasksPage() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label>Default assignee (optional)</Label>
-                  <Select value={defaultAssignee} onValueChange={setDefaultAssignee}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select user" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={EMPTY_VALUE}>None</SelectItem>
-                      {availableAssignees.map((person) => (
-                        <SelectItem key={person.id} value={person.id}>
-                          {person.full_name || person.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Assignees (optional)</Label>
+                  {departmentId === ALL_DEPARTMENTS_VALUE ? (
+                    assigneeDeptNames.length ? (
+                      <p className="text-[13px] text-muted-foreground">
+                        Departments: {formatDepartmentNames(assigneeDeptNames)}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-muted-foreground">
+                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                      </p>
+                    )
+                  ) : null}
+                  <div className="space-y-2 rounded-md border border-border/60 p-2">
+                    <Input
+                      value={assigneeQuery}
+                      onChange={(event) => setAssigneeQuery(event.target.value)}
+                      placeholder="Search users..."
+                    />
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {filteredAssignees.length ? (
+                        filteredAssignees.map((person) => {
+                          const isSelected = assigneeIds.includes(person.id)
+                          const nextIds = isSelected
+                            ? assigneeIds.filter((id) => id !== person.id)
+                            : [...assigneeIds, person.id]
+                          return (
+                            <div
+                              key={person.id}
+                              className="flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left hover:bg-muted/60"
+                              onClick={() => handleAssigneesChange(nextIds)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault()
+                                  handleAssigneesChange(nextIds)
+                                }
+                              }}
+                            >
+                              <Checkbox checked={isSelected} />
+                              <span>{person.full_name || person.username || person.email}</span>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-base text-muted-foreground">No users found.</div>
+                      )}
+                    </div>
+                    {assigneeIds.length ? (
+                      <div className="text-base text-muted-foreground">
+                        Selected:{" "}
+                        {assigneeIds
+                          .map((id) => {
+                            const person = userMap.get(id)
+                            return person?.full_name || person?.username || person?.email || id
+                          })
+                          .join(", ")}
+                      </div>
+                    ) : null}
+                    {assigneeError ? (
+                      <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
-                  <span className="text-sm">Active</span>
+                  <span className="text-base">Active</span>
                 </div>
                 <div className="flex justify-end">
                   <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
@@ -834,200 +1073,414 @@ export default function SystemTasksPage() {
               </div>
             </DialogContent>
           </Dialog>
+          <Dialog
+            open={editOpen}
+            onOpenChange={(open) => {
+              setEditOpen(open)
+              if (!open) setEditTemplate(null)
+            }}
+          >
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Edit system task</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Department</Label>
+                  <Select value={editDepartmentId} onValueChange={handleEditDepartmentChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                      {departments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.id}>
+                          {dept.name} ({dept.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Title</Label>
+                  <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={editDescription}
+                    onChange={(event) => setEditDescription(event.target.value)}
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Repeat</Label>
+                    <Select
+                      value={editFrequency}
+                      onValueChange={(value) => setEditFrequency(value as SystemTaskFrequency)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select repeat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FREQUENCY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={editPriority} onValueChange={(value) => setEditPriority(value as TaskPriority)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRIORITY_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {PRIORITY_LABELS[value]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {editFrequency === "WEEKLY" ? (
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Day of week</Label>
+                      <Select value={editDayOfWeek} onValueChange={setEditDayOfWeek}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WEEK_DAYS.map((day) => (
+                            <SelectItem key={day.value} value={day.value}>
+                              {day.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                </div>
+                {(editFrequency === "MONTHLY" ||
+                  editFrequency === "YEARLY" ||
+                  editFrequency === "3_MONTHS" ||
+                  editFrequency === "6_MONTHS") && (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Day of month</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={editDayOfMonth}
+                        onChange={(event) => setEditDayOfMonth(event.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="1-31"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Month (optional)</Label>
+                      <Select value={editMonthOfYear} onValueChange={setEditMonthOfYear}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select month" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={EMPTY_VALUE}>None</SelectItem>
+                          {MONTH_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Assignees (optional)</Label>
+                  {editDepartmentId === ALL_DEPARTMENTS_VALUE ? (
+                    editAssigneeDeptNames.length ? (
+                      <p className="text-[13px] text-muted-foreground">
+                        Departments: {formatDepartmentNames(editAssigneeDeptNames)}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-muted-foreground">
+                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                      </p>
+                    )
+                  ) : null}
+                  <div className="space-y-2 rounded-md border border-border/60 p-2">
+                    <Input
+                      value={editAssigneeQuery}
+                      onChange={(event) => setEditAssigneeQuery(event.target.value)}
+                      placeholder="Search users..."
+                    />
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {filteredEditAssignees.length ? (
+                        filteredEditAssignees.map((person) => {
+                          const isSelected = editAssigneeIds.includes(person.id)
+                          const nextIds = isSelected
+                            ? editAssigneeIds.filter((id) => id !== person.id)
+                            : [...editAssigneeIds, person.id]
+                          return (
+                            <div
+                              key={person.id}
+                              className="flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left hover:bg-muted/60"
+                              onClick={() => handleEditAssigneesChange(nextIds)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault()
+                                  handleEditAssigneesChange(nextIds)
+                                }
+                              }}
+                            >
+                              <Checkbox checked={isSelected} />
+                              <span>{person.full_name || person.username || person.email}</span>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-base text-muted-foreground">No users found.</div>
+                      )}
+                    </div>
+                    {editAssigneeIds.length ? (
+                      <div className="text-base text-muted-foreground">
+                        Selected:{" "}
+                        {editAssigneeIds
+                          .map((id) => {
+                            const person = userMap.get(id)
+                            return person?.full_name || person?.username || person?.email || id
+                          })
+                          .join(", ")}
+                      </div>
+                    ) : null}
+                    {editAssigneeError ? (
+                      <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
+                  <span className="text-base">Active</span>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    disabled={editSaving || !editTitle.trim() || !editDepartmentId}
+                    onClick={() => void submitEdit()}
+                  >
+                    {editSaving ? "Saving..." : "Save changes"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           {!canCreate ? (
-            <span className="text-xs text-muted-foreground">Only managers or admins can add tasks.</span>
+            <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
           ) : null}
         </div>
       </div>
 
-      <div className="space-y-4 rounded-2xl border border-border/70 bg-gradient-to-br from-muted/80 to-muted p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-3" id="system-all-freq-chips">
-            {FREQUENCY_CHIPS.map((chip) => {
-              const isAll = chip.id === "all"
-              const isCombined = chip.id === "3_6_MONTHS"
-              const active = isAll
-                ? allFrequenciesSelected
-                : isCombined
-                  ? combinedSelected
-                  : frequencyFilters.includes(chip.id as SystemTaskFrequency)
-              const count = isAll
-                ? templates.length
-                : isCombined
-                  ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
-                  : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition shadow-sm",
-                    isAll && "px-5 font-semibold tracking-tight",
-                    active
-                      ? "border-black bg-black text-white shadow-md ring-1 ring-white/10"
-                      : isAll
-                        ? "border-black bg-black text-white shadow-md"
-                        : "border-black/70 bg-black/80 text-white/70 hover:border-black hover:bg-black hover:text-white hover:shadow-md"
-                  )}
-                  onClick={() =>
-                    toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
-                  }
-                >
-                  <span>{chip.label}</span>
-                  {isAll ? null : (
-                    <span className={cn("text-xs", active ? "text-white/80" : "text-white/60")}>
-                      ({count})
+      <div className="rounded-lg border border-border/70 bg-gradient-to-br from-muted/80 to-muted p-2 shadow-none">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 rounded-full px-2 text-base font-medium">
+                Repeat: {frequencyLabel}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-64">
+              <DropdownMenuLabel>Repeat</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {FREQUENCY_CHIPS.map((chip) => {
+                const isAll = chip.id === "all"
+                const isCombined = chip.id === "3_6_MONTHS"
+                const active = isAll
+                  ? allFrequenciesSelected
+                  : isCombined
+                    ? combinedSelected
+                    : frequencyFilters.includes(chip.id as SystemTaskFrequency)
+                const count = isAll
+                  ? templates.length
+                  : isCombined
+                    ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
+                    : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={chip.id}
+                    checked={active}
+                    onCheckedChange={() =>
+                      toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
+                    }
+                  >
+                    <span className="flex flex-1 items-center justify-between">
+                      <span>{chip.label}</span>
+                      <span className="text-base text-muted-foreground">({count})</span>
                     </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              id="system-all-multi-toggle"
-              type="checkbox"
-              className="h-4 w-4 rounded border"
-              checked={frequencyMultiSelect}
-              onChange={(event) => setFrequencyMultiSelect(event.target.checked)}
-            />
-            Multi-select frequencies
-          </label>
-        </div>
-        <div className="flex flex-wrap items-center gap-3" id="system-priority-chips">
-          {PRIORITY_CHIPS.map((chip) => {
-            const isAll = chip.id === "all"
-            const active = isAll
-              ? allPrioritiesSelected
-              : priorityFilters.includes(chip.id as TaskPriority)
-            const count = isAll
-              ? templates.length
-              : priorityCounts.get(chip.id as TaskPriority) ?? 0
-            return (
-              <button
-                key={chip.id}
-                type="button"
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition shadow-sm",
-                  isAll && "px-5 font-semibold tracking-tight",
-                  active
-                    ? "border-black bg-black text-white shadow-md ring-1 ring-white/10"
-                    : isAll
-                      ? "border-black bg-black text-white shadow-md"
-                      : "border-black/70 bg-black/80 text-white/70 hover:border-black hover:bg-black hover:text-white hover:shadow-md"
-                )}
-                onClick={() => togglePriorityFilter(chip.id as TaskPriority | "all")}
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={frequencyMultiSelect}
+                onCheckedChange={(value) => setFrequencyMultiSelect(Boolean(value))}
               >
-                <span>{chip.label}</span>
-                {isAll ? null : (
-                  <span className={cn("text-xs", active ? "text-white/80" : "text-white/60")}>
-                    ({count})
+                Multi-select frequencies
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 rounded-full px-2 text-base font-medium">
+                Priority: {priorityLabel}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56">
+              <DropdownMenuLabel>Priority</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup
+                value={allPrioritiesSelected ? "all" : (priorityFilters[0] as TaskPriority)}
+                onValueChange={(value) => togglePriorityFilter(value as TaskPriority | "all")}
+              >
+                <DropdownMenuRadioItem value="all">
+                  <span className="flex flex-1 items-center justify-between">
+                    <span>All</span>
+                    <span className="text-base text-muted-foreground">({templates.length})</span>
                   </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Input
-              id="system-date"
-              type="date"
-              className="w-auto rounded-md"
-              value={customDate}
-              onChange={(event) => {
-                const nextValue = event.target.value
-                setCustomDate(nextValue)
-                setShowAllTemplates(!nextValue)
-              }}
-            />
-          </div>
-          <Button variant="outline" onClick={resetFilters}>
+                </DropdownMenuRadioItem>
+                {PRIORITY_OPTIONS.map((value) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    <span className="flex flex-1 items-center justify-between">
+                      <span>{PRIORITY_LABELS[value]}</span>
+                      <span className="text-base text-muted-foreground">({priorityCounts.get(value) ?? 0})</span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" onClick={resetFilters} size="sm" className="h-7 px-2 text-base font-medium">
             Clear filters
-          </Button>
-          <Button variant="outline" onClick={() => setShowAllTemplates((prev) => !prev)}>
-            {showAllTemplates ? "Show scheduled" : "Show all tasks"}
           </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-sm text-muted-foreground">Loading...</div>
+        <div className="text-base text-muted-foreground">Loading...</div>
       ) : sections.length ? (
-        <div id="system-task-sections" className="space-y-4">
+        <div id="system-task-sections" className="space-y-1.5">
           {sections.map((section) => (
-            <Card key={section.id}>
-              <CardHeader className="flex items-center justify-between">
-                <CardTitle className="text-sm">{section.label}</CardTitle>
+            <Card key={section.id} className="rounded-md border-border/70 shadow-none">
+              <CardHeader className="flex items-center justify-between py-1.5">
+                <CardTitle className="text-base font-semibold text-gray-800">
+                  {section.label}
+                </CardTitle>
                 <Badge variant="secondary">{section.templates.length}</Badge>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {section.templates.length ? (
-                  section.templates.map((template) => {
-                    const priorityValue = normalizePriority(template.priority)
-                    return (
-                      <div
-                        key={template.id}
-                        className={cn(
-                          "rounded-md border border-l-4 p-3",
-                          PRIORITY_BORDER_STYLES[priorityValue]
-                        )}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-sm font-semibold">{template.title}</div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">
-                              {FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
-                                template.frequency}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className={cn("border px-2 py-0.5 text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
-                            {canDelete ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="destructive"
-                                disabled={deletingId === template.id}
-                                onClick={() => void deleteTemplate(template.id)}
-                              >
-                                {deletingId === template.id ? "Deleting..." : "Delete"}
-                              </Button>
+              <CardContent className="space-y-0.5 pt-0">
+                <div className="overflow-x-auto">
+                  <div className="min-w-[760px] space-y-1">
+                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border bg-muted/30 px-2 py-2 text-[14px] font-semibold uppercase leading-tight tracking-[0.05em] text-slate-500">
+                      <div>Task Title</div>
+                      <div>Department</div>
+                      <div>Owner</div>
+                      <div className="whitespace-nowrap">Repeat</div>
+                      <div className="whitespace-nowrap">Priority</div>
+                      <div className="text-center whitespace-nowrap text-muted-foreground" />
+                    </div>
+                    {section.templates.length ? (
+                      section.templates.map((template, index) => {
+                        const priorityValue = normalizePriority(template.priority)
+                        const department = template.department_id ? departmentMap.get(template.department_id) : null
+                        const assigneeDeptNames = departmentNamesForAssignees(template.assignees)
+                        const ownerLabel = assigneeSummary(template.assignees)
+                        const isUnassignedAll = !template.department_id && !template.default_assignee_id
+                        const frequencyLabel =
+                          FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
+                          template.frequency
+                        const isInactive = template.is_active === false
+                        const showInactiveDivider =
+                          isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
+                        return (
+                          <React.Fragment key={template.id}>
+                            {showInactiveDivider ? (
+                              <div className="flex items-center gap-1.5 border-t border-dashed pt-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                                <span>Inactive tasks</span>
+                              </div>
                             ) : null}
-                          </div>
-                        </div>
-                        {template.description ? (
-                          <p className="text-sm text-muted-foreground">{template.description}</p>
-                        ) : null}
-                        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                          <span>
-                            Dept:{" "}
-                            {template.department_id
-                              ? departmentMap.get(template.department_id)?.name ?? "-"
-                              : "All departments"}
-                          </span>
-                          <span>
-                            Assignee: {userMap.get(template.default_assignee_id || "")?.full_name || "-"}
-                          </span>
-                        </div>
+                            <div
+                              className={cn(
+                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-l-4 px-3 py-3 text-[14px] font-normal leading-tight",
+                                PRIORITY_BORDER_STYLES[priorityValue]
+                              )}
+                            >
+                              <div className="space-y-0">
+                                <div className="text-[15px] font-medium leading-tight text-black">
+                                  {template.title}
+                                </div>
+                              </div>
+                              <div className="text-[14px] font-normal text-black">
+                                {department
+                                  ? department.name
+                                  : assigneeDeptNames.length
+                                    ? formatDepartmentNames(assigneeDeptNames)
+                                    : isInactive && isUnassignedAll
+                                      ? "NONE"
+                                      : "ALL"}
+                              </div>
+                              <div className="text-[14px] font-normal text-black">
+                                {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
+                              </div>
+                              <div className="text-[14px] font-normal text-black whitespace-nowrap">{frequencyLabel}</div>
+                              <div className="flex items-center justify-start">
+                                <Badge
+                                  variant="outline"
+                                  className={cn("border px-2 py-0.5 text-[14px]", PRIORITY_BADGE_STYLES[priorityValue])}
+                                >
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center justify-center">
+                                {canEdit ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-base"
+                                    onClick={() => startEdit(template)}
+                                  >
+                                    Edit
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </React.Fragment>
+                        )
+                      })
+                    ) : (
+                      <div className="text-base text-muted-foreground">No scheduled tasks.</div>
+                    )}
+                    {section.templates.some((template) => template.is_active === false) ? (
+                      <div className="border-t pt-3 text-base text-muted-foreground">
+                        Inactive tasks are listed at the bottom.
                       </div>
-                    )
-                  })
-                ) : (
-                  <div className="text-sm text-muted-foreground">No scheduled tasks.</div>
-                )}
+                    ) : null}
+                  </div>
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <div className="rounded-md border border-dashed border-border p-4 text-base text-muted-foreground">
           No system tasks match the current filters.
         </div>
       )}
     </div>
   )
 }
+
+

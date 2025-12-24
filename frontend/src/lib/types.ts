@@ -2,20 +2,25 @@ export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
 export type TaskType = "adhoc" | "system" | "reminder"
 
+export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT"
+
 export type TemplateRecurrence = "daily" | "weekly" | "monthly" | "yearly"
 
 export type SystemTaskFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "3_MONTHS" | "6_MONTHS"
 
 export interface SystemTaskTemplate {
   id: string
+  template_id?: string | null
   title: string
   description?: string | null
   department_id?: string | null
   default_assignee_id?: string | null
+  assignees?: TaskAssignee[] | null
   frequency: SystemTaskFrequency
   day_of_week?: number | null
   day_of_month?: number | null
   month_of_year?: number | null
+  priority?: TaskPriority | null
   is_active: boolean
   created_at: string
 }
@@ -115,6 +120,7 @@ export interface Task {
   reminder_enabled?: boolean
   next_reminder_at?: string | null
   assigned_to?: string | null
+  assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
   system_template_origin_id?: string | null

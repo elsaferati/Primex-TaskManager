@@ -3,9 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
+
+
+class TaskAssigneeOut(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    username: str | None = None
+    full_name: str | None = None
 
 
 class TaskOut(BaseModel):
@@ -15,6 +22,7 @@ class TaskOut(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
+    assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     created_by: uuid.UUID | None = None
     ga_note_origin_id: uuid.UUID | None = None
     system_template_origin_id: uuid.UUID | None = None
@@ -28,6 +36,7 @@ class TaskOut(BaseModel):
     is_bllok: bool
     is_1h_report: bool
     is_r1: bool
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -38,6 +47,7 @@ class TaskCreate(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID
     assigned_to: uuid.UUID | None = None
+    assignees: list[uuid.UUID] | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     phase: ProjectPhaseStatus | None = None
@@ -56,6 +66,7 @@ class TaskUpdate(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
+    assignees: list[uuid.UUID] | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     phase: ProjectPhaseStatus | None = None
