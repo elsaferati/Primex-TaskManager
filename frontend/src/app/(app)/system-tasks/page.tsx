@@ -207,7 +207,6 @@ export default function SystemTasksPage() {
 
   const canEdit = user?.role !== "STAFF"
   const canCreate = canEdit
-  const didMigrate = React.useRef(false)
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -275,6 +274,35 @@ export default function SystemTasksPage() {
     return new Map(users.map((u) => [u.id, u]))
   }, [users])
 
+  const departmentNamesForOwnerIds = React.useCallback(
+    (ownerIds: string[]) => {
+      const ids = new Set<string>()
+      for (const ownerId of ownerIds) {
+        const deptId = userMap.get(ownerId)?.department_id
+        if (deptId) ids.add(deptId)
+      }
+      return Array.from(ids)
+        .map((id) => departmentMap.get(id)?.name)
+        .filter((name): name is string => Boolean(name))
+    },
+    [departmentMap, userMap]
+  )
+
+  const departmentNamesForAssignees = React.useCallback(
+    (assignees?: SystemTaskTemplate["assignees"]) => {
+      if (!assignees || assignees.length === 0) return []
+      return departmentNamesForOwnerIds(assignees.map((assignee) => assignee.id))
+    },
+    [departmentNamesForOwnerIds]
+  )
+
+  const formatDepartmentNames = React.useCallback((names: string[]) => {
+    if (!names.length) return "All departments"
+    if (names.length === 1) return names[0]
+    if (names.length === 2) return `${names[0]}, ${names[1]}`
+    return `${names[0]}, ${names[1]} +${names.length - 2}`
+  }, [])
+
   const ownerDepartmentId = React.useCallback(
     (ownerId: string) => userMap.get(ownerId)?.department_id ?? null,
     [userMap]
@@ -283,18 +311,7 @@ export default function SystemTasksPage() {
   const validateOwners = React.useCallback(
     (deptId: string, ownerIds: string[]) => {
       if (!ownerIds.length) return { ok: true }
-      if (!deptId || deptId === ALL_DEPARTMENTS_VALUE) {
-        const firstDept = ownerDepartmentId(ownerIds[0])
-        if (!firstDept) return { ok: false, message: "Owner department is missing." }
-        const allMatch = ownerIds.every((id) => ownerDepartmentId(id) === firstDept)
-        if (!allMatch) {
-          return {
-            ok: false,
-            message: "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.",
-          }
-        }
-        return { ok: true, fixedDeptId: firstDept }
-      }
+      if (!deptId || deptId === ALL_DEPARTMENTS_VALUE) return { ok: true }
       const allMatch = ownerIds.every((id) => ownerDepartmentId(id) === deptId)
       if (!allMatch) {
         return {
@@ -337,14 +354,12 @@ export default function SystemTasksPage() {
     }
     const firstDept = ownerDepartmentId(nextOwnerIds[0])
     if (!firstDept) return
-    const nextDeptId = departmentId === ALL_DEPARTMENTS_VALUE ? firstDept : departmentId
-    const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === nextDeptId)
-    if (!allMatch) {
-      setAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
-      return
-    }
-    if (departmentId === ALL_DEPARTMENTS_VALUE) {
-      setDepartmentId(nextDeptId)
+    if (departmentId !== ALL_DEPARTMENTS_VALUE) {
+      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === departmentId)
+      if (!allMatch) {
+        setAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
+        return
+      }
     }
     setAssigneeIds(nextOwnerIds)
     setAssigneeError(null)
@@ -358,14 +373,12 @@ export default function SystemTasksPage() {
     }
     const firstDept = ownerDepartmentId(nextOwnerIds[0])
     if (!firstDept) return
-    const nextDeptId = editDepartmentId === ALL_DEPARTMENTS_VALUE ? firstDept : editDepartmentId
-    const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === nextDeptId)
-    if (!allMatch) {
-      setEditAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
-      return
-    }
-    if (editDepartmentId === ALL_DEPARTMENTS_VALUE) {
-      setEditDepartmentId(nextDeptId)
+    if (editDepartmentId !== ALL_DEPARTMENTS_VALUE) {
+      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === editDepartmentId)
+      if (!allMatch) {
+        setEditAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
+        return
+      }
     }
     setEditAssigneeIds(nextOwnerIds)
     setEditAssigneeError(null)
@@ -407,48 +420,6 @@ export default function SystemTasksPage() {
     return filtered
   }, [frequencyFilters, priorityFilters, templates])
 
-  React.useEffect(() => {
-    if (didMigrate.current) return
-    if (!canEdit || templates.length === 0 || users.length === 0) return
-    const migrate = async () => {
-      const updates = templates.filter((template) => {
-        if (template.department_id || !template.assignees?.length) return false
-        const firstDept = ownerDepartmentId(template.assignees[0].id)
-        if (!firstDept) return false
-        return template.assignees.every((owner) => ownerDepartmentId(owner.id) === firstDept)
-      })
-      for (const template of updates) {
-        const firstDept = ownerDepartmentId(template.assignees?.[0]?.id || "")
-        if (!firstDept) continue
-        const templateId = template.template_id ?? template.id
-        await apiFetch(`/system-tasks/${templateId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            department_id: firstDept,
-            assignees: template.assignees?.map((owner) => owner.id) ?? [],
-          }),
-        })
-      }
-      const clears = templates.filter((template) => {
-        if (template.department_id || !template.assignees?.length) return false
-        const firstDept = ownerDepartmentId(template.assignees[0].id)
-        if (!firstDept) return false
-        return template.assignees.some((owner) => ownerDepartmentId(owner.id) !== firstDept)
-      })
-      for (const template of clears) {
-        const templateId = template.template_id ?? template.id
-        await apiFetch(`/system-tasks/${templateId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assignees: [] }),
-        })
-      }
-      if (updates.length || clears.length) await load()
-    }
-    didMigrate.current = true
-    void migrate()
-  }, [canEdit, templates, users, ownerDepartmentId, apiFetch, load])
 
   React.useEffect(() => {
     const combinedSelected =
@@ -524,10 +495,7 @@ export default function SystemTasksPage() {
       )
       return
     }
-    const finalDeptId = validation.fixedDeptId ?? departmentId
-    if (validation.fixedDeptId && validation.fixedDeptId !== departmentId) {
-      setDepartmentId(validation.fixedDeptId)
-    }
+    const finalDeptId = departmentId
     setSaving(true)
     try {
       const payload = {
@@ -591,10 +559,7 @@ export default function SystemTasksPage() {
       )
       return
     }
-    const finalDeptId = validation.fixedDeptId ?? editDepartmentId
-    if (validation.fixedDeptId && validation.fixedDeptId !== editDepartmentId) {
-      setEditDepartmentId(validation.fixedDeptId)
-    }
+    const finalDeptId = editDepartmentId
     setEditSaving(true)
     try {
       const payload = {
@@ -682,6 +647,8 @@ export default function SystemTasksPage() {
   const priorityLabel = allPrioritiesSelected
     ? "All priorities"
     : PRIORITY_LABELS[priorityFilters[0] as TaskPriority] || "Priority"
+  const assigneeDeptNames = departmentNamesForOwnerIds(assigneeIds)
+  const editAssigneeDeptNames = departmentNamesForOwnerIds(editAssigneeIds)
 
   const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
     if (!list || list.length === 0) return "-"
@@ -1032,9 +999,15 @@ export default function SystemTasksPage() {
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
                   {departmentId === ALL_DEPARTMENTS_VALUE ? (
-                    <p className="text-[13px] text-muted-foreground">
-                      Kur zgjedh owner, departamenti do te caktohet automatikisht.
-                    </p>
+                    assigneeDeptNames.length ? (
+                      <p className="text-[13px] text-muted-foreground">
+                        Departments: {formatDepartmentNames(assigneeDeptNames)}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-muted-foreground">
+                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                      </p>
+                    )
                   ) : null}
                   <div className="space-y-2 rounded-md border border-border/60 p-2">
                     <Input
@@ -1228,9 +1201,15 @@ export default function SystemTasksPage() {
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
                   {editDepartmentId === ALL_DEPARTMENTS_VALUE ? (
-                    <p className="text-[13px] text-muted-foreground">
-                      Kur zgjedh owner, departamenti do te caktohet automatikisht.
-                    </p>
+                    editAssigneeDeptNames.length ? (
+                      <p className="text-[13px] text-muted-foreground">
+                        Departments: {formatDepartmentNames(editAssigneeDeptNames)}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-muted-foreground">
+                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                      </p>
+                    )
                   ) : null}
                   <div className="space-y-2 rounded-md border border-border/60 p-2">
                     <Input
@@ -1416,12 +1395,7 @@ export default function SystemTasksPage() {
                       section.templates.map((template, index) => {
                         const priorityValue = normalizePriority(template.priority)
                         const department = template.department_id ? departmentMap.get(template.department_id) : null
-                        const firstOwnerDept =
-                          template.assignees && template.assignees.length
-                            ? ownerDepartmentId(template.assignees[0].id)
-                            : null
-                        const fallbackDepartment =
-                          !department && firstOwnerDept ? departmentMap.get(firstOwnerDept) : null
+                        const assigneeDeptNames = departmentNamesForAssignees(template.assignees)
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =
@@ -1451,8 +1425,8 @@ export default function SystemTasksPage() {
                               <div className="text-[14px] font-normal text-black">
                                 {department
                                   ? department.name
-                                  : fallbackDepartment
-                                    ? fallbackDepartment.name
+                                  : assigneeDeptNames.length
+                                    ? formatDepartmentNames(assigneeDeptNames)
                                     : isInactive && isUnassignedAll
                                       ? "NONE"
                                       : "ALL"}
