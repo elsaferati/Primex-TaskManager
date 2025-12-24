@@ -74,6 +74,13 @@ const PRIORITY_CHIPS = [
   ...PRIORITY_OPTIONS.map((value) => ({ id: value, label: PRIORITY_LABELS[value] })),
 ]
 
+const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
+  HIGH: 0,
+  MEDIUM: 1,
+  LOW: 2,
+  URGENT: 0,
+}
+
 const WEEK_DAYS = [
   { value: "0", label: "Monday" },
   { value: "1", label: "Tuesday" },
@@ -319,7 +326,12 @@ export default function SystemTasksPage() {
 
   const sections = React.useMemo<Section[]>(() => {
     if (showAllTemplates || !customDateObject) {
-      const sorted = [...filteredTemplates].sort((a, b) => a.title.localeCompare(b.title))
+      const sorted = [...filteredTemplates].sort((a, b) => {
+        const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
+        const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
+        if (aPriority !== bPriority) return aPriority - bPriority
+        return a.title.localeCompare(b.title)
+      })
       return [
         {
           id: "all-templates",
