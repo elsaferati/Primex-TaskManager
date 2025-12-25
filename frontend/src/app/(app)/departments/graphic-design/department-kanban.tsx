@@ -90,7 +90,8 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 
 const NO_PROJECT_TYPES = [
-  { id: "normal", label: "Normal / GA", description: "General tasks without a project." },
+  { id: "normal", label: "Normal", description: "General tasks without a project." },
+  { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
   { id: "blocked", label: "Blocked", description: "Blocked all day by a single task." },
   { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
@@ -506,6 +507,7 @@ export default function DepartmentKanban() {
 
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
+    const ga: Task[] = []
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
@@ -516,11 +518,13 @@ export default function DepartmentKanban() {
         oneHour.push(t)
       } else if (t.is_r1) {
         r1.push(t)
+      } else if (t.ga_note_origin_id) {
+        ga.push(t)
       } else {
         normal.push(t)
       }
     }
-    return { normal, blocked, oneHour, r1 }
+    return { normal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
 
   const systemGroups = React.useMemo(() => {
@@ -648,6 +652,32 @@ export default function DepartmentKanban() {
     if (!noProjectTitle.trim() || !department) return
     setCreatingNoProject(true)
     try {
+      let gaNoteId: string | null = null
+      if (noProjectType === "ga") {
+        const noteRes = await apiFetch("/ga-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            department_id: department.id,
+            content: noProjectDescription.trim() || noProjectTitle.trim(),
+            note_type: "GA",
+          }),
+        })
+        if (!noteRes.ok) {
+          let detail = "Failed to create GA note"
+          try {
+            const data = (await noteRes.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(detail)
+          return
+        }
+        const createdNote = (await noteRes.json()) as GaNote
+        gaNoteId = createdNote.id
+        setGaNotes((prev) => [createdNote, ...prev])
+      }
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
       const payload = {
         title: noProjectTitle.trim(),
@@ -659,6 +689,7 @@ export default function DepartmentKanban() {
         is_bllok: noProjectType === "blocked",
         is_1h_report: noProjectType === "hourly",
         is_r1: noProjectType === "r1",
+        ga_note_origin_id: gaNoteId,
         due_date: dueDate,
       }
       const assigneeIds =
@@ -1601,7 +1632,7 @@ export default function DepartmentKanban() {
           </div>
           <div className="grid gap-4 md:grid-cols-4">
           <Card className="p-4">
-            <div className="text-sm font-semibold">Normal / GA</div>
+            <div className="text-sm font-semibold">Normal</div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.normal.length ? (
                 noProjectBuckets.normal.map((t) => (
@@ -1614,7 +1645,41 @@ export default function DepartmentKanban() {
                       <div className="font-medium">{t.title}</div>
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">
-                          {t.ga_note_origin_id ? "GA" : "Normal"}
+                          Normal
+                        </Badge>
+                        {t.assigned_to ? (
+                          <div
+                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
+                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                          >
+                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </Link>
+                ))
+              ) : (
+                <div className="text-sm text-muted-foreground">No tasks</div>
+              )}
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="text-sm font-semibold">GA</div>
+            <div className="mt-3 space-y-3">
+              {noProjectBuckets.ga.length ? (
+                noProjectBuckets.ga.map((t) => (
+                  <Link
+                    key={t.id}
+                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                    className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{t.title}</div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          GA
                         </Badge>
                         {t.assigned_to ? (
                           <div

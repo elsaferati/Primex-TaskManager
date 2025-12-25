@@ -48,6 +48,7 @@ class TaskCreate(BaseModel):
     department_id: uuid.UUID
     assigned_to: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
+    ga_note_origin_id: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     phase: ProjectPhaseStatus | None = None

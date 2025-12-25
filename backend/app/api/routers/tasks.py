@@ -12,6 +12,7 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
+from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.task import Task
@@ -206,6 +207,17 @@ async def create_task(
 
     ensure_department_access(user, department_id)
 
+    if payload.ga_note_origin_id is not None:
+        ga_note = (
+            await db.execute(select(GaNote).where(GaNote.id == payload.ga_note_origin_id))
+        ).scalar_one_or_none()
+        if ga_note is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
+        if ga_note.department_id is not None and ga_note.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
+        if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
+
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
     if payload.assignees is not None:
@@ -238,6 +250,7 @@ async def create_task(
         department_id=department_id,
         assigned_to=assignee_ids[0] if assignee_ids else None,
         created_by=user.id,
+        ga_note_origin_id=payload.ga_note_origin_id,
         status=status_value,
         priority=priority_value,
         phase=phase_value,
