@@ -20,9 +20,9 @@ import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, Ta
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
-  { id: "projects", label: "Projects", tone: "neutral" },
+  { id: "projects", label: "Projects", tone: "sky" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "Tasks", tone: "red" },
+  { id: "no-project", label: "Tasks", tone: "blue" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
@@ -283,6 +283,8 @@ export default function DepartmentKanban() {
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  const [showTitleWarning, setShowTitleWarning] = React.useState(false)
+  const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
@@ -315,11 +317,18 @@ export default function DepartmentKanban() {
       setLoading(true)
       try {
         const depRes = await apiFetch("/departments")
-        if (!depRes.ok) return
+        if (!depRes.ok) {
+          console.error("Failed to load departments:", depRes.status)
+          setLoading(false)
+          return
+        }
         const deps = (await depRes.json()) as Department[]
         const dep = deps.find((d) => d.name === departmentName) || null
         setDepartment(dep)
-        if (!dep) return
+        if (!dep) {
+          setLoading(false)
+          return
+        }
 
         const [projRes, sysRes, tasksRes, gaRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
@@ -345,6 +354,9 @@ export default function DepartmentKanban() {
         }
 
         setSystemDepartmentId(dep.id)
+      } catch (error) {
+        console.error("Error loading department data:", error)
+        toast.error("Failed to load department data. Please check if the backend server is running.")
       } finally {
         setLoading(false)
       }
@@ -357,6 +369,7 @@ export default function DepartmentKanban() {
       setActiveTab(normalizedTab as TabId)
     }
   }, [isTabId, normalizedTab])
+
 
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const departmentUsers = React.useMemo(
@@ -405,21 +418,39 @@ export default function DepartmentKanban() {
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      // Filter by user if selected
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [projectTasks, todayDate])
+  }, [projectTasks, todayDate, selectedUserId])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      // Filter by user if selected
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [visibleNoProjectTasks, todayDate])
+  }, [visibleNoProjectTasks, todayDate, selectedUserId])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
       const date = toDate(note.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      // Filter by user if selected (GA notes use created_by)
+      if (selectedUserId !== "__all__") {
+        return note.created_by === selectedUserId
+      }
+      return true
     })
-  }, [openNotes, todayDate])
+  }, [openNotes, todayDate, selectedUserId])
   const todayMeetings = React.useMemo(
     () =>
       visibleMeetings.filter((m) => {
@@ -604,6 +635,42 @@ export default function DepartmentKanban() {
     } finally {
       setCreatingSystem(false)
     }
+  }
+
+  const looksLikeFullName = (title: string): boolean => {
+    const trimmed = title.trim().toUpperCase()
+    if (trimmed.length <= 6) return false // Short names are likely shortcuts
+    
+    // Check for common company suffixes
+    const companyWords = ["COMPANY", "COMP", "INC", "INCORPORATED", "LLC", "LTD", "LIMITED", "CORP", "CORPORATION", "GROUP", "ENTERPRISES", "SOLUTIONS", "SYSTEMS", "SERVICES"]
+    const hasCompanyWord = companyWords.some(word => trimmed.includes(word))
+    
+    // Check for multiple words (more than 2 words suggests full name)
+    const wordCount = trimmed.split(/\s+/).filter(w => w.length > 0).length
+    
+    // Check if it's longer than typical shortcuts (more than 8 chars)
+    const isLong = trimmed.length > 8
+    
+    return hasCompanyWord || (wordCount > 2) || (isLong && wordCount > 1)
+  }
+
+  const handleProjectTitleChange = (value: string) => {
+    const upperValue = value.toUpperCase()
+    setProjectTitle(upperValue)
+  }
+
+  const attemptSubmitProject = () => {
+    if (!projectTitle.trim() || !department) return
+    
+    // Check if title looks like a full name
+    if (looksLikeFullName(projectTitle)) {
+      setPendingProjectTitle(projectTitle)
+      setShowTitleWarning(true)
+      return
+    }
+    
+    // If it looks like a shortcut, proceed directly
+    void submitProject()
   }
 
   const submitProject = async () => {
@@ -978,11 +1045,29 @@ export default function DepartmentKanban() {
                 const isActive = tab.id === activeTab
                 const badgeTone =
                   tab.tone === "blue"
-                    ? "bg-sky-100 text-sky-700 border-sky-200"
-                    : tab.tone === "red"
-                      ? "bg-red-50 text-red-600 border-red-200"
+                    ? "bg-blue-100 text-blue-700 border-blue-200"
+                    : tab.tone === "sky"
+                      ? "bg-sky-100 text-sky-700 border-sky-200"
                       : "bg-slate-100 text-slate-700 border-slate-200"
-                const badgeClass = isActive ? "bg-sky-500 text-white border-sky-500" : badgeTone
+                const activeBadge =
+                  tab.tone === "blue"
+                    ? "bg-blue-500 text-white border-blue-500"
+                    : tab.tone === "sky"
+                      ? "bg-sky-500 text-white border-sky-500"
+                      : "bg-slate-500 text-white border-slate-500"
+                const badgeClass = isActive ? activeBadge : badgeTone
+                const activeTabClass =
+                  tab.tone === "blue"
+                    ? "bg-blue-100 text-blue-700 shadow-sm"
+                    : tab.tone === "sky"
+                      ? "bg-sky-100 text-sky-700 shadow-sm"
+                      : "bg-slate-100 text-slate-700 shadow-sm"
+                const inactiveTabClass =
+                  tab.tone === "blue"
+                    ? "text-slate-600 hover:text-blue-700 hover:bg-blue-50/50"
+                    : tab.tone === "sky"
+                      ? "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50"
+                      : "text-slate-600 hover:text-slate-700 hover:bg-slate-50/50"
                 return (
                   <button
                     key={tab.id}
@@ -990,9 +1075,7 @@ export default function DepartmentKanban() {
                     onClick={() => setActiveTab(tab.id)}
                     className={[
                       "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200",
-                      isActive
-                        ? "bg-sky-100 text-sky-700 shadow-sm"
-                        : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                      isActive ? activeTabClass : inactiveTabClass,
                     ].join(" ")}
                   >
                     {tab.label}
@@ -1009,7 +1092,7 @@ export default function DepartmentKanban() {
         {activeTab === "projects" ? (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xl font-semibold text-slate-800">Active Projects</div>
+              <div className="text-xl font-semibold text-sky-700">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
@@ -1024,7 +1107,17 @@ export default function DepartmentKanban() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-slate-700">Title</Label>
-                        <Input value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                        <Input 
+                          value={projectTitle} 
+                          onChange={(e) => handleProjectTitleChange(e.target.value)} 
+                          className="border-sky-200 focus:border-sky-400 rounded-xl uppercase placeholder:normal-case" 
+                          placeholder="Enter project shortcut (e.g., ABC, XYZ)"
+                          style={{ textTransform: 'uppercase' }}
+                        />
+                        <div className="text-xs text-sky-600 flex items-center gap-1.5">
+                          <span className="text-sky-500">ℹ️</span>
+                          <span>Use a shortcut/abbreviation, not the full client name (e.g., "ABC" instead of "ABC Company")</span>
+                        </div>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-slate-700">Description</Label>
@@ -1070,7 +1163,7 @@ export default function DepartmentKanban() {
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-sky-200">
                           Cancel
                         </Button>
-                        <Button disabled={!projectTitle.trim() || creatingProject} onClick={() => void submitProject()} className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl">
+                        <Button disabled={!projectTitle.trim() || creatingProject} onClick={attemptSubmitProject} className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl">
                           {creatingProject ? "Saving..." : "Save"}
                         </Button>
                       </div>
@@ -1084,13 +1177,16 @@ export default function DepartmentKanban() {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const phase = project.current_phase || "TAKIMET"
                 return (
-                  <Card key={project.id} className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                  <Card key={project.id} className="bg-gradient-to-r from-sky-50/50 to-white border-l-4 border-sky-500 border-sky-100 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
-                        <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                      <div className="flex items-start gap-3">
+                        <div className="h-3 w-3 rounded-full bg-sky-500 mt-2 flex-shrink-0"></div>
+                        <div>
+                          <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
+                          <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                        </div>
                       </div>
-                      <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
+                      <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
                         {PHASE_LABELS[phase] || "Meetings"}
                       </Badge>
                     </div>
@@ -1110,7 +1206,7 @@ export default function DepartmentKanban() {
                     <div className="mt-4 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {manager ? (
-                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-100 to-blue-100 text-xs font-semibold text-sky-700 flex items-center justify-center shadow-sm">
+                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-100 to-rose-100 text-xs font-semibold text-sky-700 flex items-center justify-center shadow-sm">
                             {initials(manager.full_name || manager.username || "-")}
                           </div>
                         ) : (
@@ -1172,47 +1268,51 @@ export default function DepartmentKanban() {
             </div>
             <div className="grid gap-4 md:grid-cols-4">
               {[
-                { label: "PROJECT TASKS", value: todayProjectTasks.length },
-                { label: "NO PROJECT", value: todayNoProjectTasks.length },
-                { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-                { label: "SYSTEM", value: todaySystemTasks.length },
+                { label: "PROJECT TASKS", value: todayProjectTasks.length, color: "sky" },
+                { label: "NO PROJECT", value: todayNoProjectTasks.length, color: "blue" },
+                { label: "NOTES (OPEN)", value: todayOpenNotes.length, color: "sky" },
+                { label: "SYSTEM", value: todaySystemTasks.length, color: "blue" },
               ].map((stat) => (
-                <Card key={stat.label} className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
-                  <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{stat.label}</div>
-                  <div className="mt-2 text-3xl font-bold text-slate-800">{stat.value}</div>
+                <Card key={stat.label} className={`bg-gradient-to-br ${stat.color === "sky" ? "from-sky-50/40 to-white border-l-4 border-sky-500 border-sky-100" : "from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100"} shadow-sm rounded-2xl p-4`}>
+                  <div className={`text-xs font-semibold ${stat.color === "sky" ? "text-sky-600" : "text-blue-600"} uppercase tracking-wide`}>{stat.label}</div>
+                  <div className={`mt-2 text-3xl font-bold ${stat.color === "sky" ? "text-sky-700" : "text-blue-700"}`}>{stat.value}</div>
                 </Card>
               ))}
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
-              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
+              <Card className="bg-gradient-to-br from-sky-50/40 to-white border-l-4 border-sky-500 border-sky-100 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
-                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayProjectTasks.length}</Badge>
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full bg-sky-500"></div>
+                    <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
+                  </div>
+                  <Badge className="bg-sky-500 text-white border-0 shadow-sm">{todayProjectTasks.length}</Badge>
                 </div>
               <div className="mt-4 space-y-4">
                 {todayProjectTaskGroups.length ? (
                   todayProjectTaskGroups.map((group) => (
                     <div key={group.id}>
-                      <div className="text-xs font-semibold text-muted-foreground">{group.name}</div>
+                      <div className="text-xs font-semibold text-sky-700">{group.name}</div>
                       <div className="mt-2 space-y-2">
                         {group.tasks.map((task) => {
                           const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                           const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
                           return (
-                            <Link
-                              key={task.id}
-                              href={`/tasks/${task.id}`}
-                              className="block rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm transition-all hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                  {task.status || "TODO"}
-                                </Badge>
-                                <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
-                                  {phaseLabel}
-                                </Badge>
-                                <div className="font-medium text-slate-800">{task.title}</div>
-                              </div>
+                        <Link
+                          key={task.id}
+                          href={`/tasks/${task.id}`}
+                          className="block rounded-xl border-l-4 border-sky-500 border-sky-200 bg-gradient-to-r from-sky-50/60 to-white px-3 py-2.5 text-sm transition-all hover:border-sky-600 hover:from-sky-50 hover:shadow-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-sky-500 flex-shrink-0"></div>
+                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                              {task.status || "TODO"}
+                            </Badge>
+                            <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                              {phaseLabel}
+                            </Badge>
+                            <div className="font-medium text-slate-800">{task.title}</div>
+                          </div>
                               <div className="mt-1 text-xs text-slate-600">
                                 {assignee?.full_name || assignee?.username || "Unassigned"}
                               </div>
@@ -1229,10 +1329,13 @@ export default function DepartmentKanban() {
             </Card>
 
             <div className="grid gap-4">
-              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
+              <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-800">No Project Tasks</div>
-                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayNoProjectTasks.length}</Badge>
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+                    <div className="text-sm font-semibold text-slate-800">No Project Tasks</div>
+                  </div>
+                  <Badge className="bg-blue-500 text-white border-0 shadow-sm">{todayNoProjectTasks.length}</Badge>
                 </div>
                 <div className="mt-4 space-y-2">
                   {todayNoProjectTasks.length ? (
@@ -1250,13 +1353,14 @@ export default function DepartmentKanban() {
                         <Link
                           key={task.id}
                           href={`/tasks/${task.id}`}
-                          className="block rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm transition-all hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
+                          className="block rounded-xl border-l-4 border-blue-500 border-blue-200 bg-gradient-to-r from-blue-50/60 to-white px-3 py-2.5 text-sm transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
                         >
                           <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
                             <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                               {typeLabel}
                             </Badge>
-                            <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
+                            <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
                               {phaseLabel}
                             </Badge>
                             <div className="font-medium text-slate-800">{task.title}</div>
@@ -1273,17 +1377,23 @@ export default function DepartmentKanban() {
                 </div>
               </Card>
 
-              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
+              <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-800">System Tasks</div>
-                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todaySystemTasks.length}</Badge>
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+                  <div className="text-sm font-semibold text-blue-700">System Tasks</div>
+                  </div>
+                  <Badge className="bg-blue-500 text-white border-0 shadow-sm">{todaySystemTasks.length}</Badge>
                 </div>
                 <div className="mt-4 space-y-2">
                   {todaySystemTasks.length ? (
                     todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm">
-                        <div className="font-medium text-slate-800">{task.title}</div>
-                        <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
+                      <div key={task.id} className="rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-3 py-2.5 text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+                          <div className="font-medium text-slate-800">{task.title}</div>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600 ml-4">{task.description || "-"}</div>
                       </div>
                     ))
                   ) : (
@@ -1346,7 +1456,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold">System Tasks</div>
+              <div className="text-xl font-semibold text-blue-700">System Tasks</div>
               <div className="text-sm text-muted-foreground">
                 Department tasks organized by frequency and date.
               </div>
@@ -1564,25 +1674,27 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold">Tasks (No Project)</div>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-xl font-semibold text-blue-700">Tasks (No Project)</div>
+              <div className="text-sm text-slate-600">
                 Use these buckets to track non-project tasks and special cases.
               </div>
             </div>
             {!isReadOnly ? (
               <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
+                  <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-md shadow-blue-200/50 rounded-xl px-6">
+                    + Add Task
+                  </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
+                <DialogContent className="sm:max-w-lg bg-white border-blue-100 rounded-2xl">
                   <DialogHeader>
-                    <DialogTitle>New Task</DialogTitle>
+                    <DialogTitle className="text-slate-800">New Task</DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Type</Label>
+                      <Label className="text-slate-700">Type</Label>
                       <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                        <SelectTrigger>
+                        <SelectTrigger className="border-blue-200 focus:border-blue-400 rounded-xl">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1593,27 +1705,28 @@ export default function DepartmentKanban() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-slate-500">
                         {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Title</Label>
-                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                      <Label className="text-slate-700">Title</Label>
+                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-blue-200 focus:border-blue-400 rounded-xl" />
                     </div>
                     <div className="space-y-2">
-                      <Label>Description</Label>
+                      <Label className="text-slate-700">Description</Label>
                       <Textarea
                         value={noProjectDescription}
                         onChange={(e) => setNoProjectDescription(e.target.value)}
                         rows={4}
+                        className="border-blue-200 focus:border-blue-400 rounded-xl"
                       />
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>Assign to</Label>
+                        <Label className="text-slate-700">Assign to</Label>
                         <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                          <SelectTrigger>
+                          <SelectTrigger className="border-blue-200 focus:border-blue-400 rounded-xl">
                             <SelectValue placeholder="Select assignee" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1628,21 +1741,23 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label>Due date</Label>
+                        <Label className="text-slate-700">Due date</Label>
                         <Input
                           type="date"
                           value={noProjectDueDate}
                           onChange={(e) => setNoProjectDueDate(e.target.value)}
+                          className="border-blue-200 focus:border-blue-400 rounded-xl"
                         />
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
+                      <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-blue-200">
                         Cancel
                       </Button>
                       <Button
                         disabled={!noProjectTitle.trim() || creatingNoProject}
                         onClick={() => void submitNoProjectTask()}
+                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-md shadow-blue-200/50 rounded-xl"
                       >
                         {creatingNoProject ? "Creating..." : "Create"}
                       </Button>
@@ -1653,25 +1768,28 @@ export default function DepartmentKanban() {
             ) : null}
           </div>
           <div className="grid gap-4 md:grid-cols-4">
-          <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
-            <div className="text-sm font-semibold">Normal</div>
+          <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+              <div className="text-sm font-semibold text-blue-700">Normal</div>
+            </div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.normal.length ? (
                 noProjectBuckets.normal.map((t) => (
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-border/60 bg-background/70 px-4 py-3 transition hover:border-border hover:bg-background/90 hover:shadow-sm"
+                    className="block rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-4 py-3 transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
+                      <div className="font-medium text-slate-800">{t.title}</div>
                       <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
+                        <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
                           Normal
                         </Badge>
                         {t.assigned_to ? (
                           <div
-                            className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
+                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center shadow-sm"
                             title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                           >
                             {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
@@ -1682,30 +1800,33 @@ export default function DepartmentKanban() {
                   </Link>
                 ))
               ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
+                <div className="text-sm text-slate-500">No tasks</div>
               )}
             </div>
           </Card>
 
-          <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
-            <div className="text-sm font-semibold">GA</div>
+          <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+              <div className="text-sm font-semibold text-blue-700">GA</div>
+            </div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.ga.length ? (
                 noProjectBuckets.ga.map((t) => (
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-border/60 bg-background/70 px-4 py-3 transition hover:border-border hover:bg-background/90 hover:shadow-sm"
+                    className="block rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-4 py-3 transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
+                      <div className="font-medium text-slate-800">{t.title}</div>
                       <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
+                        <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
                           GA
                         </Badge>
                         {t.assigned_to ? (
                           <div
-                            className="h-7 w-7 rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700 flex items-center justify-center"
+                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center shadow-sm"
                             title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                           >
                             {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
@@ -1716,7 +1837,7 @@ export default function DepartmentKanban() {
                   </Link>
                 ))
               ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
+                <div className="text-sm text-slate-500">No tasks</div>
               )}
             </div>
           </Card>
@@ -2136,6 +2257,56 @@ export default function DepartmentKanban() {
           </div>
         </div>
       ) : null}
+
+        {/* Title Warning Confirmation Dialog */}
+        <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
+          <DialogContent className="sm:max-w-md bg-white border-amber-100 rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-amber-700 flex items-center gap-2">
+                <span className="text-2xl">⚠️</span>
+                <span>Possible Full Name Detected</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="text-sm text-slate-700">
+                The title "<span className="font-semibold text-amber-700">{pendingProjectTitle}</span>" looks like it might be a full client name rather than a shortcut.
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="text-sm font-semibold text-amber-800 mb-2">Remember:</div>
+                <div className="text-xs text-amber-700 space-y-1">
+                  <div>• Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
+                  <div>• Keep it short and simple (typically 2-6 characters)</div>
+                  <div>• Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
+                </div>
+              </div>
+              <div className="text-sm text-slate-600">
+                Are you sure you want to use this as the project title?
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowTitleWarning(false)
+                  setPendingProjectTitle("")
+                }} 
+                className="rounded-xl border-amber-200 hover:bg-amber-50"
+              >
+                Go Back & Edit
+              </Button>
+              <Button 
+                onClick={() => {
+                  setShowTitleWarning(false)
+                  setPendingProjectTitle("")
+                  void submitProject()
+                }} 
+                className="bg-amber-500 hover:bg-amber-600 text-white border-0 shadow-md shadow-amber-200/50 rounded-xl"
+              >
+                Yes, Use This Title
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

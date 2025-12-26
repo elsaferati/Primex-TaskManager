@@ -615,63 +615,63 @@ export default function DevelopmentProjectPage() {
         {/* Header Section with Soft Blue Background */}
         <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-sky-100/50 via-blue-50/50 to-sky-100/50 px-6 py-5 border-b border-sky-100/50">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <button
-                  type="button"
-                  onClick={() => router.back()}
+          <button
+            type="button"
+            onClick={() => router.back()}
                   className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors mb-4 inline-flex items-center gap-1.5 font-medium"
-                >
+          >
                   <span className="text-sky-500">←</span> Back to Projects
-                </button>
+          </button>
                 <h1 className="text-4xl font-bold text-slate-800 mb-4 tracking-tight">{title}</h1>
                 <div className="flex flex-wrap items-center gap-3 mb-4">
                   <Badge className="bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-200/80 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm">
-                    {PHASE_LABELS[phase] || "Meetings"}
-                  </Badge>
+              {PHASE_LABELS[phase] || "Meetings"}
+            </Badge>
                   {activePhase !== phase && (
                     <Badge variant="outline" className="bg-blue-50/50 text-blue-600 border-blue-200 px-3 py-1.5 text-xs font-medium rounded-lg">
                       View: {PHASE_LABELS[activePhase] || "Meetings"}
                     </Badge>
                   )}
-                </div>
+          </div>
                 {/* Phase Navigation - Beautiful Soft Blue Pills */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {PHASES.map((p, idx) => {
-                    const isViewed = p === activePhase
-                    const isCurrent = p === phase
-                    return (
+            {PHASES.map((p, idx) => {
+              const isViewed = p === activePhase
+              const isCurrent = p === phase
+              return (
                       <React.Fragment key={p}>
-                        <button
-                          type="button"
-                          onClick={() => setViewedPhase(p)}
-                          className={[
+                  <button
+                    type="button"
+                    onClick={() => setViewedPhase(p)}
+                    className={[
                             "px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200",
                             isViewed
                               ? "bg-sky-500 text-white shadow-md shadow-sky-200/50 scale-105"
                               : isCurrent
                                 ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80 border border-sky-200"
                                 : "bg-white/60 text-slate-500 hover:bg-sky-50/80 border border-slate-200 hover:border-sky-200",
-                          ].join(" ")}
-                          aria-pressed={isViewed}
-                        >
-                          {PHASE_LABELS[p]}
-                        </button>
+                    ].join(" ")}
+                    aria-pressed={isViewed}
+                  >
+                    {PHASE_LABELS[p]}
+                  </button>
                         {idx < PHASES.length - 1 && (
                           <span className="text-sky-300 text-lg font-light">→</span>
                         )}
                       </React.Fragment>
-                    )
-                  })}
-                </div>
-              </div>
+              )
+            })}
+          </div>
+        </div>
               <div className="flex items-center gap-3">
                 <Button className="bg-white hover:bg-sky-50 text-slate-700 border border-slate-200 shadow-sm rounded-xl px-4 py-2 font-medium transition-all">
                   Settings
                 </Button>
               </div>
-            </div>
-          </div>
+        </div>
+      </div>
 
           {/* Close Phase Button */}
           <div className="px-6 py-4 bg-white/50 flex justify-end">
@@ -681,23 +681,23 @@ export default function DevelopmentProjectPage() {
               onClick={() => void advancePhase()}
               className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {advancingPhase ? "Closing..." : "Close Phase"}
-            </Button>
-          </div>
+          {advancingPhase ? "Closing..." : "Close Phase"}
+        </Button>
+      </div>
         </Card>
 
         {/* Tabs Navigation - Soft Blue Design */}
         <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
           <div className="px-6 py-1">
             <div className="flex flex-wrap gap-1">
-              {visibleTabs.map((tab) => {
-                const isActive = tab.id === activeTab
-                const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
+          {visibleTabs.map((tab) => {
+            const isActive = tab.id === activeTab
+            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
                     className={[
                       "relative px-5 py-3 text-sm font-medium rounded-xl transition-all duration-200",
                       tab.id === "ga" ? "ml-auto" : "",
@@ -705,16 +705,16 @@ export default function DevelopmentProjectPage() {
                         ? "bg-sky-100 text-sky-700 shadow-sm"
                         : "text-slate-500 hover:text-sky-600 hover:bg-sky-50/50",
                     ].join(" ")}
-                  >
-                    {label}
+              >
+                {label}
                     {isActive && (
                       <span className="absolute inset-x-2 bottom-1.5 h-0.5 bg-sky-500 rounded-full" />
                     )}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
         </Card>
 
         {/* Tab Content Area with Soft Blue Design */}

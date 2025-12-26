@@ -20,6 +20,11 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:3000"
 
+    # Microsoft Teams/Graph API Configuration
+    MS_CLIENT_ID: str | None = None
+    MS_CLIENT_SECRET: str | None = None
+    MS_TENANT_ID: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
