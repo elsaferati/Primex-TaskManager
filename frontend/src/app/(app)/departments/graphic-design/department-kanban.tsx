@@ -18,11 +18,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, UserLookup } from "@/lib/types"
 
+// --- CONSTANTS ---
+
 const TABS = [
-  { id: "all", label: "All (Today)", tone: "neutral" },
+  { id: "all", label: "Overview", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "Tasks", tone: "red" },
+  { id: "no-project", label: "Buckets", tone: "red" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
@@ -40,15 +42,7 @@ const PHASE_LABELS: Record<string, string> = {
   MBYLLUR: "Closed",
 }
 
-const WEEKDAYS_SQ = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-]
+const WEEKDAYS_SQ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   DAILY: "Daily",
@@ -66,22 +60,6 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   URGENT: "High",
 }
 
-const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
-  HIGH: "border-red-200 bg-red-50 text-red-700",
-  URGENT: "border-red-200 bg-red-50 text-red-700",
-}
-
-const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-emerald-500",
-  MEDIUM: "border-l-amber-500",
-  HIGH: "border-l-red-600",
-  URGENT: "border-l-red-600",
-}
-
-const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
-
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
   INACTIVE: "Inactive",
@@ -98,37 +76,39 @@ const NO_PROJECT_TYPES = [
 ] as const
 
 const INTERNAL_MEETING = {
-  title: "Pikat e diskutimit (Zhvillim M1, M2, M3)",
+  title: "Daily Sync (Development)",
   team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha", "Endi Hyseni"],
   slots: {
     M1: {
-      label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
+      label: "M1: Morning Standup (08:08 - 08:15)",
       items: [
-        "A ka mungesa, a ndryshon plani per sot?",
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "A ka e-mails te reja ne IT?",
-        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+        "Attendances & Plan changes?",
+        "Check GA/KA notes in Trello/Groups.",
+        "Check new emails (IT).",
+        "Discuss individual tasks (Open RD/Trello side-by-side).",
+        "Copy Development group notes to Trello GA/KA.",
       ],
     },
     M2: {
-      label: "M2 PER ZHVILLIM (12:00-12:15 MAX)",
+      label: "M2: Mid-day Check (12:00 - 12:15)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
-        "Cka mbetet per PM?",
+        "Check GA/KA notes in Trello/Groups.",
+        "Discuss progress so far.",
+        "What remains for PM?",
       ],
     },
     M3: {
-      label: "M3 (ME TRELLO) PER ZHVILLIM (16:10-16:30 MAX)",
+      label: "M3: Wrap-up (16:10 - 16:30)",
       items: [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
-        "Cka kemi me punu neser?",
+        "Check GA/KA notes.",
+        "Discuss daily achievements.",
+        "Plan for tomorrow.",
       ],
     },
   },
 } as const
+
+// --- HELPERS ---
 
 function initials(src: string) {
   return src
@@ -145,13 +125,9 @@ function assigneeLabel(user?: UserLookup | null) {
 
 function formatToday() {
   const now = new Date()
-  const date = now.toLocaleDateString("en-US", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-  const day = now.toLocaleDateString("en-US", { weekday: "short" })
-  return `${day} - ${date}`
+  const date = now.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })
+  const day = now.toLocaleDateString("en-US", { weekday: "long" })
+  return `${day}, ${date}`
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -241,8 +217,10 @@ function normalizePriority(value?: TaskPriority | null): TaskPriority {
   return "MEDIUM"
 }
 
+// --- MAIN COMPONENT ---
+
 export default function DepartmentKanban() {
-  const departmentName = "Graphic Design"
+  const departmentName = "Development"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -250,6 +228,8 @@ export default function DepartmentKanban() {
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
+
+  // --- STATES ---
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
@@ -258,6 +238,7 @@ export default function DepartmentKanban() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
+  
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
@@ -267,6 +248,8 @@ export default function DepartmentKanban() {
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [multiSelect, setMultiSelect] = React.useState(false)
+
+  // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
   const [creatingSystem, setCreatingSystem] = React.useState(false)
   const [systemTitle, setSystemTitle] = React.useState("")
@@ -276,6 +259,7 @@ export default function DepartmentKanban() {
   const [systemDateInput, setSystemDateInput] = React.useState(() => formatDateInput(new Date()))
   const [systemFrequency, setSystemFrequency] = React.useState<SystemTaskTemplate["frequency"]>("DAILY")
   const [systemStatus, setSystemStatus] = React.useState<(typeof STATUS_OPTIONS)[number]>("OPEN")
+  
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [projectTitle, setProjectTitle] = React.useState("")
@@ -283,6 +267,7 @@ export default function DepartmentKanban() {
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
@@ -294,6 +279,7 @@ export default function DepartmentKanban() {
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
   const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
+  
   const [noProjectOpen, setNoProjectOpen] = React.useState(false)
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
@@ -301,15 +287,15 @@ export default function DepartmentKanban() {
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
+  
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [newGaNoteProjectId, setNewGaNoteProjectId] = React.useState("__none__")
   const [newGaNoteType, setNewGaNoteType] = React.useState<"GA" | "KA">("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "LOW" | "MEDIUM" | "HIGH">(
-    "__none__"
-  )
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "LOW" | "MEDIUM" | "HIGH">("__none__")
   const [newGaNote, setNewGaNote] = React.useState("")
 
+  // --- DATA LOADING ---
   React.useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -358,6 +344,7 @@ export default function DepartmentKanban() {
     }
   }, [isTabId, normalizedTab])
 
+  // --- MEMOS ---
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const departmentUsers = React.useMemo(
     () => (department ? users.filter((u) => u.department_id === department.id) : []),
@@ -365,6 +352,7 @@ export default function DepartmentKanban() {
   )
   const todayDate = React.useMemo(() => new Date(), [])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
+
   const filteredProjects = React.useMemo(() => {
     if (viewMode === "mine" && user?.id) {
       return projects.filter((p) => p.manager_id === user.id)
@@ -480,20 +468,7 @@ export default function DepartmentKanban() {
       "ga-ka": visibleGaNotes.filter((n) => n.status !== "CLOSED").length,
       meetings: visibleMeetings.length,
     }),
-    [
-      filteredProjects.length,
-      visibleSystemTemplates.length,
-      visibleNoProjectTasks.length,
-      visibleGaNotes,
-      visibleMeetings,
-      openNotes.length,
-      projectTasks.length,
-      todayProjectTasks.length,
-      todayNoProjectTasks.length,
-      todayOpenNotes.length,
-      todayMeetings.length,
-      todaySystemTasks.length,
-    ]
+    [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -551,6 +526,8 @@ export default function DepartmentKanban() {
     }))
   }, [visibleSystemTasks])
 
+  // --- ACTIONS ---
+
   const submitSystemTask = async () => {
     if (!systemTitle.trim() || !systemDepartmentId) return
     setCreatingSystem(true)
@@ -559,7 +536,6 @@ export default function DepartmentKanban() {
       const dayIdx = date.getDay() === 0 ? 6 : date.getDay() - 1
       const dayOfMonth = date.getDate()
       const monthOfYear = date.getMonth() + 1
-
       const payload = {
         title: systemTitle.trim(),
         description: systemDescription.trim() || null,
@@ -570,36 +546,16 @@ export default function DepartmentKanban() {
         day_of_month: systemFrequency !== "WEEKLY" && systemFrequency !== "DAILY" ? dayOfMonth : null,
         month_of_year:
           systemFrequency === "YEARLY" || systemFrequency === "3_MONTHS" || systemFrequency === "6_MONTHS"
-            ? monthOfYear
-            : null,
+            ? monthOfYear : null,
         is_active: systemStatus === "OPEN",
       }
-
-      const res = await apiFetch("/system-tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create system task"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
+      const res = await apiFetch("/system-tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      if (!res.ok) { toast.error("Failed to create system task"); return }
       const created = (await res.json()) as SystemTaskTemplate
       setSystemTasks((prev) => [created, ...prev])
       setCreateSystemOpen(false)
       setSystemTitle("")
       setSystemDescription("")
-      setSystemOwnerId("__unassigned__")
-      setSystemDateInput(formatDateInput(new Date()))
-      setSystemFrequency("DAILY")
-      setSystemStatus("OPEN")
       toast.success("System task created")
     } finally {
       setCreatingSystem(false)
@@ -618,30 +574,13 @@ export default function DepartmentKanban() {
         current_phase: projectPhase,
         status: projectStatus,
       }
-      const res = await apiFetch("/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create project"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
+      const res = await apiFetch("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      if (!res.ok) { toast.error("Failed to create project"); return }
       const created = (await res.json()) as Project
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       setProjectTitle("")
       setProjectDescription("")
-      setProjectManagerId("__unassigned__")
-      setProjectPhase("TAKIMET")
-      setProjectStatus("TODO")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -654,29 +593,12 @@ export default function DepartmentKanban() {
     try {
       let gaNoteId: string | null = null
       if (noProjectType === "ga") {
-        const noteRes = await apiFetch("/ga-notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            department_id: department.id,
-            content: noProjectDescription.trim() || noProjectTitle.trim(),
-            note_type: "GA",
-          }),
-        })
-        if (!noteRes.ok) {
-          let detail = "Failed to create GA note"
-          try {
-            const data = (await noteRes.json()) as { detail?: string }
-            if (data?.detail) detail = data.detail
-          } catch {
-            // ignore
-          }
-          toast.error(detail)
-          return
+        const noteRes = await apiFetch("/ga-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: department.id, content: noProjectDescription.trim() || noProjectTitle.trim(), note_type: "GA" }) })
+        if (noteRes.ok) {
+          const createdNote = (await noteRes.json()) as GaNote
+          gaNoteId = createdNote.id
+          setGaNotes((prev) => [createdNote, ...prev])
         }
-        const createdNote = (await noteRes.json()) as GaNote
-        gaNoteId = createdNote.id
-        setGaNotes((prev) => [createdNote, ...prev])
       }
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
       const payload = {
@@ -692,39 +614,12 @@ export default function DepartmentKanban() {
         ga_note_origin_id: gaNoteId,
         due_date: dueDate,
       }
-      const assigneeIds =
-        noProjectAssignee === "__all__"
-          ? departmentUsers.map((u) => u.id)
-          : noProjectAssignee === "__unassigned__"
-            ? [null]
-            : [noProjectAssignee]
-      if (noProjectAssignee === "__all__" && assigneeIds.length === 0) {
-        toast.error("No users available to assign.")
-        return
-      }
-
+      const assigneeIds = noProjectAssignee === "__all__" ? departmentUsers.map((u) => u.id) : noProjectAssignee === "__unassigned__" ? [null] : [noProjectAssignee]
+      
       const createdTasks: Task[] = []
       for (const assigneeId of assigneeIds) {
-        const res = await apiFetch("/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...payload,
-            assigned_to: assigneeId,
-          }),
-        })
-        if (!res.ok) {
-          let detail = "Failed to create task"
-          try {
-            const data = (await res.json()) as { detail?: string }
-            if (data?.detail) detail = data.detail
-          } catch {
-            // ignore
-          }
-          toast.error(detail)
-          return
-        }
-        createdTasks.push((await res.json()) as Task)
+        const res = await apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, assigned_to: assigneeId }) })
+        if (res.ok) createdTasks.push((await res.json()) as Task)
       }
       if (createdTasks.length) {
         setNoProjectTasks((prev) => [...createdTasks, ...prev])
@@ -733,9 +628,6 @@ export default function DepartmentKanban() {
       setNoProjectOpen(false)
       setNoProjectTitle("")
       setNoProjectDescription("")
-      setNoProjectType("normal")
-      setNoProjectAssignee("__unassigned__")
-      setNoProjectDueDate("")
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -754,48 +646,17 @@ export default function DepartmentKanban() {
         department_id: department.id,
         project_id: meetingProjectId === "__none__" ? null : meetingProjectId,
       }
-      const res = await apiFetch("/meetings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create meeting"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
+      const res = await apiFetch("/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      if (!res.ok) { toast.error("Failed to create meeting"); return }
       const created = (await res.json()) as Meeting
       setMeetings((prev) => [created, ...prev])
       setMeetingTitle("")
       setMeetingPlatform("")
       setMeetingStartsAt("")
-      setMeetingProjectId("__none__")
       toast.success("Meeting created")
     } finally {
       setCreatingMeeting(false)
     }
-  }
-
-  const startEditMeeting = (meeting: Meeting) => {
-    setEditingMeetingId(meeting.id)
-    setEditMeetingTitle(meeting.title)
-    setEditMeetingPlatform(meeting.platform || "")
-    setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at))
-    setEditMeetingProjectId(meeting.project_id || "__none__")
-  }
-
-  const cancelEditMeeting = () => {
-    setEditingMeetingId(null)
-    setEditMeetingTitle("")
-    setEditMeetingPlatform("")
-    setEditMeetingStartsAt("")
-    setEditMeetingProjectId("__none__")
   }
 
   const saveMeeting = async (meetingId: string) => {
@@ -807,50 +668,23 @@ export default function DepartmentKanban() {
       starts_at: startsAt,
       project_id: editMeetingProjectId === "__none__" ? null : editMeetingProjectId,
     }
-    const res = await apiFetch(`/meetings/${meetingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      let detail = "Failed to update meeting"
-      try {
-        const data = (await res.json()) as { detail?: string }
-        if (data?.detail) detail = data.detail
-      } catch {
-        // ignore
-      }
-      toast.error(detail)
-      return
-    }
+    const res = await apiFetch(`/meetings/${meetingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    if (!res.ok) { toast.error("Failed to update"); return }
     const updated = (await res.json()) as Meeting
     setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
-    cancelEditMeeting()
+    setEditingMeetingId(null)
   }
 
   const deleteMeeting = async (meetingId: string) => {
     const res = await apiFetch(`/meetings/${meetingId}`, { method: "DELETE" })
-    if (!res.ok) {
-      let detail = "Failed to delete meeting"
-      try {
-        const data = (await res.json()) as { detail?: string }
-        if (data?.detail) detail = data.detail
-      } catch {
-        // ignore
-      }
-      toast.error(detail)
-      return
+    if (res.ok) {
+      setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
+      toast.success("Meeting deleted")
     }
-    setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
-    toast.success("Meeting deleted")
   }
 
   const submitGaNote = async () => {
-    if (!newGaNote.trim()) return
-    if (!department) {
-      toast.error("Department not loaded.")
-      return
-    }
+    if (!newGaNote.trim() || !department) return
     setAddingGaNote(true)
     try {
       const priorityValue = newGaNotePriority === "__none__" ? null : newGaNotePriority
@@ -859,1259 +693,408 @@ export default function DepartmentKanban() {
         note_type: newGaNoteType,
         priority: priorityValue,
       }
-      if (newGaNoteProjectId === "__none__") {
-        payload.department_id = department.id
-      } else {
-        payload.project_id = newGaNoteProjectId
-      }
-      const res = await apiFetch("/ga-notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        let detail = "Failed to add GA/KA note"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
+      if (newGaNoteProjectId === "__none__") payload.department_id = department.id
+      else payload.project_id = newGaNoteProjectId
+      
+      const res = await apiFetch("/ga-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      if (!res.ok) { toast.error("Failed to add note"); return }
       const created = (await res.json()) as GaNote
       setGaNotes((prev) => [created, ...prev])
       setNewGaNote("")
-      setNewGaNoteType("GA")
-      setNewGaNotePriority("__none__")
-      setNewGaNoteProjectId("__none__")
       setGaNoteOpen(false)
-      toast.success("GA/KA note added")
+      toast.success("Note added")
     } finally {
       setAddingGaNote(false)
     }
   }
 
-  if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
-  if (!department) return <div className="text-sm text-muted-foreground">Department not found.</div>
-
   const closeGaNote = async (noteId: string) => {
-    const res = await apiFetch(`/ga-notes/${noteId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "CLOSED" }),
-    })
-    if (!res.ok) {
-      let detail = "Failed to close GA/KA note"
-      try {
-        const data = (await res.json()) as { detail?: string }
-        if (data?.detail) detail = data.detail
-      } catch {
-        // ignore
-      }
-      toast.error(detail)
-      return
+    const res = await apiFetch(`/ga-notes/${noteId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED" }) })
+    if (res.ok) {
+        const updated = (await res.json()) as GaNote
+        setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
     }
-    const updated = (await res.json()) as GaNote
-    setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
+  if (loading) return <div className="flex h-screen items-center justify-center text-sm text-slate-500 animate-pulse">Loading department...</div>
+  if (!department) return <div className="p-8 text-center text-sm text-muted-foreground">Department not found.</div>
+
+  // --- RENDER ---
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold">{departmentName}</div>
-          <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
-        </div>
-        <div className="inline-flex rounded-xl border bg-muted/40 p-1">
-          <button
-            type="button"
-            onClick={() => setViewMode("department")}
-            className={[
-              "rounded-lg px-4 py-2 text-sm font-medium transition",
-              viewMode === "department" ? "bg-background shadow-sm" : "text-muted-foreground",
-            ].join(" ")}
-          >
-            Department
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("mine")}
-            className={[
-              "rounded-lg px-4 py-2 text-sm font-medium transition",
-              viewMode === "mine" ? "bg-background shadow-sm" : "text-muted-foreground",
-            ].join(" ")}
-          >
-            My View
-          </button>
-        </div>
-      </div>
+    <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 shadow-sm dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
+      <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
+      <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
 
-      <div className="border-b">
-        <div className="flex flex-wrap gap-4">
-          {TABS.map((tab) => {
-            const isActive = tab.id === activeTab
-            const badgeTone =
-              tab.tone === "blue"
-                ? "bg-blue-50 text-blue-600"
-                : tab.tone === "red"
-                  ? "bg-red-50 text-red-600"
-                  : "bg-muted text-foreground"
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={[
-                  "relative flex items-center gap-2 px-2 pb-3 text-sm font-medium",
-                  isActive ? "text-foreground" : "text-muted-foreground",
-                ].join(" ")}
-              >
-                {tab.label}
-                <span className={`rounded-full px-2 py-0.5 text-xs ${badgeTone}`}>{counts[tab.id]}</span>
-                {isActive ? <span className="absolute inset-x-2 bottom-0 h-0.5 bg-foreground" /> : null}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {activeTab === "projects" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">Active Projects</div>
-            {canManage ? (
-              <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button className="rounded-xl">+ New Project</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add Project</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={projectDescription}
-                        onChange={(e) => setProjectDescription(e.target.value)}
-                        placeholder="Enter the project description..."
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Manager</Label>
-                      <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select manager" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Phase</Label>
-                      <Select value={projectPhase} onValueChange={setProjectPhase}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Phase" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PHASES.map((p) => (
-                            <SelectItem key={p} value={p}>
-                              {PHASE_LABELS[p]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={projectStatus} onValueChange={setProjectStatus}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="TODO">To do</SelectItem>
-                          <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                          <SelectItem value="REVIEW">Review</SelectItem>
-                          <SelectItem value="DONE">Done</SelectItem>
-                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!projectTitle.trim() || creatingProject} onClick={() => void submitProject()}>
-                        {creatingProject ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
+      <div className="relative space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
+            <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
+            <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {filteredProjects.map((project) => {
-              const manager = project.manager_id ? userMap.get(project.manager_id) : null
-              const phase = project.current_phase || "TAKIMET"
+          <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setViewMode("department")}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                viewMode === "department"
+                  ? "bg-foreground text-background shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              Department
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("mine")}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                viewMode === "mine"
+                  ? "bg-foreground text-background shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              My View
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+          <div className="flex flex-wrap gap-2">
+            {TABS.map((tab) => {
+              const isActive = tab.id === activeTab
+              const badgeTone =
+                tab.tone === "blue"
+                  ? "bg-blue-50 text-blue-600"
+                  : tab.tone === "red"
+                    ? "bg-red-50 text-red-600"
+                    : "bg-muted text-foreground"
+              const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
               return (
-                <Card key={project.id} className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-base font-semibold">{project.title || project.name}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{project.description || "-"}</div>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {PHASE_LABELS[phase] || "Meetings"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 text-xs text-muted-foreground">
-                    {PHASES.map((p, idx) => {
-                      const isCurrent = p === phase
-                      return (
-                        <span key={p}>
-                          <span className={isCurrent ? "text-blue-600 font-medium" : ""}>
-                            {PHASE_LABELS[p]}
-                          </span>
-                          {idx < PHASES.length - 1 ? " -> " : ""}
-                        </span>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {manager ? (
-                        <div className="h-8 w-8 rounded-full bg-blue-100 text-xs font-semibold text-blue-700 flex items-center justify-center">
-                        {initials(manager.full_name || manager.username || "-")}
-                        </div>
-                      ) : (
-                        <div className="h-8 w-8 rounded-full bg-muted text-xs font-semibold flex items-center justify-center">
-                          -
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
-                        View details -&gt;
-                      </Link>
-                    </div>
-                  </div>
-                </Card>
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={[
+                    "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-foreground text-background shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                  ].join(" ")}
+                >
+                  {tab.label}
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                </button>
               )
             })}
           </div>
         </div>
-      ) : null}
 
-      {activeTab === "all" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold">
-                {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {viewMode === "department"
-                  ? "All of today's tasks for the department team."
-                  : "All of today's tasks, organized in one place."}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="rounded-lg border bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-                {formatToday()}
-              </div>
-              {viewMode === "department" && departmentUsers.length ? (
-                <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                  <SelectTrigger className="h-9 w-48">
-                    <SelectValue placeholder="All users" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All users</SelectItem>
-                    {departmentUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name || u.username || "-"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-              {viewMode === "mine" ? <Button variant="outline">Print</Button> : null}
-            </div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-            {[
-              { label: "PROJECT TASKS", value: todayProjectTasks.length },
-              { label: "NO PROJECT", value: todayNoProjectTasks.length },
-              { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-              { label: "SYSTEM", value: todaySystemTasks.length },
-            ].map((stat) => (
-              <Card key={stat.label} className="p-4">
-                <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
-                <div className="mt-2 text-2xl font-semibold">{stat.value}</div>
-              </Card>
-            ))}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Project Tasks</div>
-                <Badge variant="secondary">{todayProjectTasks.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-4">
-                {todayProjectTaskGroups.length ? (
-                  todayProjectTaskGroups.map((group) => (
-                    <div key={group.id}>
-                      <div className="text-xs font-semibold text-muted-foreground">{group.name}</div>
-                      <div className="mt-2 space-y-2">
-                        {group.tasks.map((task) => {
-                          const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                          const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                          return (
-                            <Link
-                              key={task.id}
-                              href={`/tasks/${task.id}`}
-                              className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {task.status || "TODO"}
-                                </Badge>
-                                <Badge variant="secondary" className="text-xs">
-                                  {phaseLabel}
-                                </Badge>
-                                <div className="font-medium">{task.title}</div>
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {assignee?.full_name || assignee?.username || "Unassigned"}
-                              </div>
-                            </Link>
-                          )
+        <div className="min-h-[600px] animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* PROJECTS */}
+            {activeTab === "projects" && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                        {canManage && (
+                            <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+                                <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
+                                <DialogContent className="sm:max-w-xl rounded-2xl">
+                                    <DialogHeader><DialogTitle>Create Project</DialogTitle></DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
+                                        <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-2"><Label>Manager</Label><Select value={projectManagerId} onValueChange={setProjectManagerId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div>
+                                            <div className="space-y-2"><Label>Phase</Label><Select value={projectPhase} onValueChange={setProjectPhase}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{PHASES.map((p) => <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>)}</SelectContent></Select></div>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitProject()}>Create</Button></div>
+                                </DialogContent>
+                            </Dialog>
+                        )}
+                    </div>
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-2">
+                        {filteredProjects.map((project) => {
+                            // Derived Data Calculation
+                            const tasks = departmentTasks.filter(t => t.project_id === project.id);
+                            const phase = project.current_phase || "TAKIMET";
+                            const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
+                            
+                            // Calculate members from tasks assignees + manager
+                            const memberIds = new Set(tasks.map(t => t.assigned_to).filter(Boolean));
+                            if(project.manager_id) memberIds.add(project.manager_id);
+                            const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
+
+                            return (
+                                <Card key={project.id} className="group flex flex-col justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
+                                    <div className="space-y-4">
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1">
+                                                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{project.title || project.name}</h3>
+                                                {/* Single Phase Badge */}
+                                                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                                                    {PHASE_LABELS[phase]}
+                                                </Badge>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Tasks</div>
+                                                <div className="text-xl font-light text-slate-900 dark:text-white">{tasks.length}</div>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Description */}
+                                        <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 dark:text-slate-400">{project.description || "No description provided."}</p>
+                                        
+                                        {/* Taskbar: Horizontal list of tasks */}
+                                        <div className="space-y-2">
+                                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Task Summary</div>
+                                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                                                {tasks.length > 0 ? tasks.slice(0, 5).map(t => (
+                                                    <div key={t.id} className="flex-shrink-0 max-w-[150px] truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                                        {t.title}
+                                                    </div>
+                                                )) : <div className="text-xs text-slate-400 italic">No active tasks</div>}
+                                                {tasks.length > 5 && <div className="flex-shrink-0 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">+{tasks.length - 5} more</div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+                                        <div className="flex items-center gap-4">
+                                            {/* Members Stack */}
+                                            <div className="flex -space-x-2">
+                                                {members.length > 0 ? members.slice(0,4).map(m => (
+                                                    <div key={m?.id} className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-300" title={m?.full_name || m?.username}>
+                                                        {initials(m?.full_name || "?")}
+                                                    </div>
+                                                )) : <div className="text-xs text-slate-400">No members</div>}
+                                                {members.length > 4 && <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] text-slate-500 dark:border-slate-900 dark:bg-slate-800">+{members.length - 4}</div>}
+                                            </div>
+                                            
+                                            {/* GA Notes Count */}
+                                            {noteCount > 0 && (
+                                                <div className="flex items-center gap-1 text-xs text-slate-500">
+                                                    <span className="font-bold text-slate-700 dark:text-slate-300">{noteCount}</span> GA Notes
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        <Link href={`/projects/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
+                                            View <span aria-hidden="true">&rarr;</span>
+                                        </Link>
+                                    </div>
+                                </Card>
+                            )
                         })}
-                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No project tasks today.</div>
-                )}
-              </div>
-            </Card>
-
-            <div className="grid gap-4">
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">No Project Tasks</div>
-                  <Badge variant="secondary">{todayNoProjectTasks.length}</Badge>
                 </div>
-                <div className="mt-4 space-y-2">
-                  {todayNoProjectTasks.length ? (
-                    todayNoProjectTasks.map((task) => {
-                      const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                      const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                      const typeLabel = task.is_bllok
-                        ? "Blocked"
-                        : task.is_1h_report
-                          ? "1H"
-                          : task.is_r1
-                            ? "R1"
-                            : "Normal"
-                      return (
-                        <Link
-                          key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {typeLabel}
-                            </Badge>
-                            <Badge variant="secondary" className="text-xs">
-                              {phaseLabel}
-                            </Badge>
-                            <div className="font-medium">{task.title}</div>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {assignee?.full_name || assignee?.username || "Unassigned"}
-                          </div>
-                        </Link>
-                      )
-                    })
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No tasks today.</div>
-                  )}
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">System Tasks</div>
-                  <Badge variant="secondary">{todaySystemTasks.length}</Badge>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {todaySystemTasks.length ? (
-                    todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-lg border px-3 py-2 text-sm">
-                        <div className="font-medium">{task.title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{task.description || "-"}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No system tasks today.</div>
-                  )}
-                </div>
-              </Card>
-            </div>
-
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">GA/KA Notes (Open)</div>
-                <Badge variant="secondary">{todayOpenNotes.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-2">
-                {todayOpenNotes.length ? (
-                  todayOpenNotes.map((note) => (
-                    <div key={note.id} className="rounded-lg border px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <div className="font-medium">{note.content}</div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No open notes today.</div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Meetings (Today)</div>
-                <Badge variant="secondary">{todayMeetings.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-2">
-                {todayMeetings.length ? (
-                  todayMeetings.map((meeting) => (
-                    <div key={meeting.id} className="rounded-lg border px-3 py-2 text-sm">
-                      <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                      {meeting.project_id ? (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No meetings today.</div>
-                )}
-              </div>
-            </Card>
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "system" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold">System Tasks</div>
-              <div className="text-sm text-muted-foreground">
-                Department tasks organized by frequency and date.
-              </div>
-            </div>
-            {canManage ? (
-              <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add System Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Owner</Label>
-                      <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select owner" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Set by</Label>
-                      <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Date</Label>
-                      <Input
-                        type="date"
-                        value={systemDateInput}
-                        onChange={(e) => setSystemDateInput(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Frequency</Label>
-                      <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Frequency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="DAILY">Daily</SelectItem>
-                          <SelectItem value="WEEKLY">Weekly</SelectItem>
-                          <SelectItem value="MONTHLY">Monthly</SelectItem>
-                          <SelectItem value="3_MONTHS">3 months</SelectItem>
-                          <SelectItem value="6_MONTHS">6 months</SelectItem>
-                          <SelectItem value="YEARLY">Yearly</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Department</Label>
-                      <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Department" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={department.id}>{department.name}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="OPEN">Open</SelectItem>
-                          <SelectItem value="INACTIVE">Inactive</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={systemDescription}
-                        onChange={(e) => setSystemDescription(e.target.value)}
-                        placeholder="Enter task details..."
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
-                        {creatingSystem ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-xl border bg-muted/40 p-1">
-              {[
-                { label: "Today", offset: 0 },
-                { label: "Yesterday", offset: -1 },
-                { label: "Tomorrow", offset: 1 },
-              ].map((opt) => {
-                const target = new Date()
-                target.setDate(target.getDate() + opt.offset)
-                const active =
-                  target.toDateString() === systemDate.toDateString()
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => setSystemDate(target)}
-                    className={[
-                      "rounded-lg px-4 py-2 text-sm font-medium transition",
-                      active ? "bg-background shadow-sm" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
-              <span>Multi-select</span>
-            </div>
-            <Input
-              type="date"
-              className="w-40"
-              value={formatDateInput(systemDate)}
-              onChange={(e) => setSystemDate(new Date(e.target.value))}
-            />
-            <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
-              {showAllSystem ? "Only date" : "Show all"}
-            </Button>
-          </div>
-
-          <div className="space-y-4">
-            {systemGroups.length ? (
-              systemGroups.map((group) => (
-                <Card key={group.label} className="overflow-hidden">
-                  <div className="flex items-center gap-3 border-b px-4 py-3">
-                    <Badge variant="outline" className="text-xs font-semibold">
-                      {group.label}
-                    </Badge>
-                    <Badge variant="secondary">{group.items.length}</Badge>
-                  </div>
-                  <div className="grid grid-cols-7 gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground">
-                    <div className="col-span-2">TASK</div>
-                    <div>DEPARTMENT</div>
-                    <div>WHEN</div>
-                    <div>STATUS</div>
-                    <div>OWNER</div>
-                    <div>SET BY</div>
-                  </div>
-                  <div className="divide-y">
-                    {group.items.map((item) => {
-                      const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
-                      const priorityValue = normalizePriority(item.priority)
-                      return (
-                        <div
-                          key={item.id}
-                          className={`grid grid-cols-7 gap-3 border-l-4 px-4 py-4 text-sm ${PRIORITY_BORDER_STYLES[priorityValue]}`}
-                        >
-                          <div className="col-span-2">
-                            <div className="font-medium">{item.title}</div>
-                            <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
-                          </div>
-                          <div>{department.code}</div>
-                          <div className="whitespace-pre-line text-muted-foreground">
-                            {formatSchedule(item, systemDate)}
-                          </div>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="secondary">
-                                {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                              >
-                                {PRIORITY_LABELS[priorityValue]}
-                              </Badge>
-                            </div>
-                          </div>
-                          <div>{owner?.full_name || owner?.username || "-"}</div>
-                          <div>{user?.full_name || user?.username || "-"}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="text-sm text-muted-foreground">No system tasks yet.</div>
             )}
-          </div>
-        </div>
-      ) : null}
 
-      {activeTab === "no-project" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold">Tasks (No Project)</div>
-              <div className="text-sm text-muted-foreground">
-                Use these buckets to track non-project tasks and special cases.
-              </div>
-            </div>
-            {!isReadOnly ? (
-              <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>New Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label>Type</Label>
-                      <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {NO_PROJECT_TYPES.map((opt) => (
-                            <SelectItem key={opt.id} value={opt.id}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-xs text-muted-foreground">
-                        {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Title</Label>
-                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={noProjectDescription}
-                        onChange={(e) => setNoProjectDescription(e.target.value)}
-                        rows={4}
-                      />
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Assign to</Label>
-                        <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select assignee" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            <SelectItem value="__all__">All team</SelectItem>
-                            {departmentUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || "-"}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Due date</Label>
-                        <Input
-                          type="date"
-                          value={noProjectDueDate}
-                          onChange={(e) => setNoProjectDueDate(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button
-                        disabled={!noProjectTitle.trim() || creatingNoProject}
-                        onClick={() => void submitNoProjectTask()}
-                      >
-                        {creatingNoProject ? "Creating..." : "Create"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-          <Card className="p-4">
-            <div className="text-sm font-semibold">Normal</div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.normal.length ? (
-                noProjectBuckets.normal.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          Normal
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="text-sm font-semibold">GA</div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.ga.length ? (
-                noProjectBuckets.ga.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          GA
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-4 bg-red-50/40 border-red-100">
-            <div className="flex items-center gap-2 text-red-700 font-semibold">
-              <span className="h-5 w-5 rounded-full bg-red-500" />
-              <span>BLOCKED</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.blocked.length ? (
-                noProjectBuckets.blocked.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-red-100 bg-white px-4 py-3 hover:bg-red-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-red-100 text-[10px] font-semibold text-red-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-red-200 text-red-600">
-                      BLOCKED
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-4 bg-purple-50/40 border-purple-100">
-            <div className="flex items-center gap-2 text-purple-700 font-semibold">
-              <span className="h-5 w-5 rounded-full border-2 border-purple-500" />
-              <span>1H Report</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.oneHour.length ? (
-                noProjectBuckets.oneHour.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-purple-100 bg-white px-4 py-3 hover:bg-purple-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-purple-100 text-[10px] font-semibold text-purple-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-purple-200 text-purple-600">
-                      1H
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="p-4 bg-green-50/40 border-green-100">
-            <div className="text-green-700 font-semibold">R1</div>
-            <div className="mt-2 text-sm text-green-700/80">
-              New project (first case) is handled with the manager.
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.r1.length ? (
-                noProjectBuckets.r1.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-green-100 bg-white px-4 py-3 hover:bg-green-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-green-100 text-[10px] font-semibold text-green-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-green-200 text-green-600">
-                      R1
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "ga-ka" ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">GA/KA Notes</div>
-            {!isReadOnly ? (
-              <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Note</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Add GA/KA Note</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label>Project</Label>
-                      <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select project (optional)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">No project (General)</SelectItem>
-                          {projects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name || "Project"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {!projects.length ? (
-                        <div className="text-xs text-muted-foreground">No projects available.</div>
-                      ) : null}
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="GA/KA" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GA">GA</SelectItem>
-                            <SelectItem value="KA">KA</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Priority</Label>
-                        <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Priority" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">No priority</SelectItem>
-                            <SelectItem value="LOW">Low</SelectItem>
-                            <SelectItem value="MEDIUM">Medium</SelectItem>
-                            <SelectItem value="HIGH">High</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Note</Label>
-                      <Textarea
-                        placeholder="Add GA/KA note..."
-                        value={newGaNote}
-                        onChange={(e) => setNewGaNote(e.target.value)}
-                        rows={4}
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
-                        {addingGaNote ? "Saving..." : "Add Note"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          {visibleGaNotes.length ? (
-            [...visibleGaNotes]
-              .sort((a, b) => {
-                const order = ["HIGH", "MEDIUM", "LOW"]
-                const aRank = a.priority ? order.indexOf(a.priority) : order.length
-                const bRank = b.priority ? order.indexOf(b.priority) : order.length
-                if (aRank !== bRank) return aRank - bRank
-                const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-                const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
-                return bTime - aTime
-              })
-              .map((note) => {
-              const author = users.find((u) => u.id === note.created_by) || null
-              const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
-              return (
-                <Card key={note.id} className="border-orange-100 p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Badge
-                        variant="outline"
-                        className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
-                        >
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <span>By {author?.full_name || author?.username || "-"}</span>
-                        <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
-                        {project ? (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            {project.title || project.name || "Project"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            General
-                          </Badge>
-                        )}
-                        {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
-                      </div>
-                    {note.status !== "CLOSED" ? (
-                      !isReadOnly ? (
-                        <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                          Close
-                        </Button>
-                      ) : (
-                        <Badge variant="secondary">Open</Badge>
-                      )
-                    ) : (
-                      <Badge variant="secondary">Closed</Badge>
-                    )}
-                  </div>
-                  <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
-                </Card>
-              )
-            })
-            ) : (
-              <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
-            )}
-          </div>
-        ) : null}
-
-      {activeTab === "meetings" ? (
-        <div className="space-y-4">
-          <div className="text-xl font-semibold">Meetings</div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="p-5 space-y-4">
-              <div className="text-sm font-semibold">External Meetings</div>
-              {!isReadOnly ? (
-                <div className="grid gap-3">
-                  <Input
-                    placeholder="Meeting title"
-                    value={meetingTitle}
-                    onChange={(e) => setMeetingTitle(e.target.value)}
-                  />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Input
-                      placeholder="Platform (Zoom, Meet, Office...)"
-                      value={meetingPlatform}
-                      onChange={(e) => setMeetingPlatform(e.target.value)}
-                    />
-                    <Input
-                      type="datetime-local"
-                      value={meetingStartsAt}
-                      onChange={(e) => setMeetingStartsAt(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Project (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No project</SelectItem>
-                        {filteredProjects.map((project) => (
-                          <SelectItem key={project.id} value={project.id}>
-                            {project.title || project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                      {creatingMeeting ? "Saving..." : "Add"}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              <div className="space-y-3">
-                {visibleMeetings.length ? (
-                  visibleMeetings.map((meeting) => {
-                    const project = meeting.project_id
-                      ? projects.find((p) => p.id === meeting.project_id) || null
-                      : null
-                    const isEditing = !isReadOnly && editingMeetingId === meeting.id
-                    return (
-                      <Card key={meeting.id} className="border border-muted p-4">
-                        {isEditing ? (
-                          <div className="space-y-3">
-                            <Input
-                              value={editMeetingTitle}
-                              onChange={(e) => setEditMeetingTitle(e.target.value)}
-                            />
-                            <div className="grid gap-3 md:grid-cols-2">
-                              <Input
-                                value={editMeetingPlatform}
-                                onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                placeholder="Platform"
-                              />
-                              <Input
-                                type="datetime-local"
-                                value={editMeetingStartsAt}
-                                onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                              />
-                            </div>
-                            <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Project (optional)" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">No project</SelectItem>
-                                {filteredProjects.map((p) => (
-                                  <SelectItem key={p.id} value={p.id}>
-                                    {p.title || p.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
+            {/* OVERVIEW */}
+            {activeTab === "all" && (
+                <div className="space-y-8">
+                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div><h2 className="text-2xl font-light text-slate-900 dark:text-white">{formatToday()}</h2><p className="text-slate-500 dark:text-slate-400">Daily overview across all departments.</p></div>
+                        {viewMode === "department" && (
+                            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                                <SelectTrigger className="w-[200px] rounded-xl border-0 bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700"><SelectValue placeholder="Filter User" /></SelectTrigger>
+                                <SelectContent><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent>
                             </Select>
-                            <div className="flex justify-end gap-2">
-                              <Button variant="outline" onClick={cancelEditMeeting}>
-                                Cancel
-                              </Button>
-                              <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
-                              {project ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  Project: {project.title || project.name}
-                                </div>
-                              ) : null}
-                            </div>
-                            {!isReadOnly ? (
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
-                                  Edit
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
-                                  Delete
-                                </Button>
-                              </div>
-                            ) : null}
-                          </div>
                         )}
-                      </Card>
-                    )
-                  })
-                ) : (
-                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-5 space-y-4">
-              <div className="text-sm font-semibold">Internal Meetings</div>
-              <div>
-                <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {INTERNAL_MEETING.team.join(", ")}
-                </div>
-              </div>
-              <div className="inline-flex rounded-xl border bg-muted/40 p-1">
-                {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    onClick={() => setInternalSlot(slot)}
-                    className={[
-                      "rounded-lg px-4 py-2 text-sm font-medium transition",
-                      internalSlot === slot ? "bg-background shadow-sm" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {slot}
-                  </button>
-                ))}
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
-                <div className="space-y-2">
-                  {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                    <div key={item} className="flex items-start gap-3 rounded-lg border px-3 py-2">
-                      <Checkbox checked={false} disabled />
-                      <div className="text-sm text-muted-foreground">
-                        {idx + 1}. {item}
-                      </div>
                     </div>
-                  ))}
+                    <div className="grid gap-4 sm:grid-cols-4">
+                        {[ { label: "Projects", value: todayProjectTasks.length, color: "text-blue-600" }, { label: "Tasks", value: todayNoProjectTasks.length, color: "text-purple-600" }, { label: "Notes", value: todayOpenNotes.length, color: "text-amber-600" }, { label: "System", value: todaySystemTasks.length, color: "text-emerald-600" } ].map(stat => (
+                            <div key={stat.label} className="flex flex-col items-center justify-center rounded-2xl bg-white/40 p-6 text-center shadow-sm backdrop-blur-sm ring-1 ring-slate-900/5 dark:bg-slate-900/40 dark:ring-white/5"><span className={`text-4xl font-light ${stat.color} dark:text-white`}>{stat.value}</span><span className="mt-2 text-xs font-bold uppercase tracking-widest text-slate-400">{stat.label}</span></div>
+                        ))}
+                    </div>
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
+                             <div className="mb-4 flex items-center justify-between"><h3 className="font-medium text-slate-900 dark:text-white">Project Tasks</h3><Badge variant="secondary" className="rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{todayProjectTasks.length}</Badge></div>
+                             <div className="space-y-6">{todayProjectTaskGroups.length > 0 ? todayProjectTaskGroups.map(group => (<div key={group.id}><h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">{group.name}</h4><div className="space-y-2">{group.tasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="group flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-emerald-900"><div className="flex items-center gap-3"><div className={`h-2 w-2 rounded-full ${task.status === "DONE" ? "bg-emerald-400" : "bg-slate-300"}`}></div><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span></div><span className="text-xs text-slate-400 group-hover:text-emerald-600">{assigneeLabel(userMap.get(task.assigned_to))}</span></Link>))}</div></div>)) : <div className="py-8 text-center text-sm text-slate-400">No project tasks for today.</div>}</div>
+                        </div>
+                        <div className="space-y-6">
+                             <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
+                                <div className="mb-4 flex items-center justify-between"><h3 className="font-medium text-slate-900 dark:text-white">Ad-hoc Tasks</h3><Badge variant="secondary" className="rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{todayNoProjectTasks.length}</Badge></div>
+                                <div className="space-y-2">{todayNoProjectTasks.length > 0 ? todayNoProjectTasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-purple-200 dark:bg-slate-900 dark:ring-slate-800"><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span><Badge variant="outline" className="h-5 text-[10px]">{task.is_bllok ? "Blocked" : "Normal"}</Badge></Link>)) : <div className="py-4 text-center text-sm text-slate-400">Nothing pending.</div>}</div>
+                             </div>
+                             <div className="grid gap-6 sm:grid-cols-2"><div className="rounded-3xl border border-slate-100 bg-white/60 p-5 dark:border-slate-800 dark:bg-slate-900/40"><div className="text-sm text-slate-500">System Tasks</div><div className="mt-1 text-2xl font-light text-emerald-600">{todaySystemTasks.length}</div></div><div className="rounded-3xl border border-slate-100 bg-white/60 p-5 dark:border-slate-800 dark:bg-slate-900/40"><div className="text-sm text-slate-500">Meetings</div><div className="mt-1 text-2xl font-light text-slate-900 dark:text-white">{todayMeetings.length}</div></div></div>
+                        </div>
+                    </div>
                 </div>
-              </div>
-            </Card>
-          </div>
+            )}
+
+            {/* SYSTEM */}
+            {activeTab === "system" && (
+                <div className="space-y-6">
+                     <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">System Routine</h2>
+                        {canManage && (<Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Routine Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Routine</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={systemTitle} onChange={(e)=>setSystemTitle(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Owner</Label><Select value={systemOwnerId} onValueChange={setSystemOwnerId}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Frequency</Label><Select value={systemFrequency} onValueChange={(v:any)=>setSystemFrequency(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(FREQUENCY_LABELS).map(([k,v])=><SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={systemDescription} onChange={(e)=>setSystemDescription(e.target.value)} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setCreateSystemOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitSystemTask()}>Save</Button></div></DialogContent></Dialog>)}
+                     </div>
+                     <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+                         <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                             {[{l:"Today",o:0}, {l:"Yesterday",o:-1}, {l:"Tomorrow",o:1}].map(d => {
+                                 const target = new Date(); target.setDate(target.getDate() + d.o);
+                                 const active = target.toDateString() === systemDate.toDateString();
+                                 return <button key={d.l} onClick={()=>setSystemDate(target)} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${active ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{d.l}</button>
+                             })}
+                         </div>
+                         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
+                         <Input type="date" className="h-9 w-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0" value={formatDateInput(systemDate)} onChange={(e)=>setSystemDate(new Date(e.target.value))} />
+                         <div className="ml-auto flex items-center gap-2"><Label className="text-xs text-slate-500">Show All</Label><Checkbox checked={showAllSystem} onCheckedChange={(v)=>setShowAllSystem(!!v)} /></div>
+                     </div>
+                     <div className="space-y-8">
+                         {systemGroups.map(group => (<div key={group.label} className="space-y-4"><div className="flex items-center gap-3"><span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span><div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{group.items.map(item => (<div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800"><div className="space-y-2"><div className="flex items-start justify-between"><h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4><div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div></div><p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p></div><div className="mt-4 flex items-center gap-2 border-t border-slate-50 pt-3 dark:border-slate-800"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">{initials(item.default_assignee_id ? users.find(u => u.id === item.default_assignee_id)?.full_name || "?" : "?")}</div><span className="text-xs text-slate-400">{item.default_assignee_id ? users.find(u => u.id === item.default_assignee_id)?.full_name : "Unassigned"}</span></div></div>))}</div></div>))}
+                     </div>
+                </div>
+            )}
+
+            {/* BUCKETS */}
+            {activeTab === "no-project" && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                         <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
+                         {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v:any)=>setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t=><SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e)=>setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={noProjectDescription} onChange={(e)=>setNoProjectDescription(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e)=>setNoProjectDueDate(e.target.value)} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
+                    </div>
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
+                        <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">Blocked</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
+                        <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Origin</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
+                        <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
+                    </div>
+                </div>
+            )}
+
+            {/* NOTES */}
+            {activeTab === "ga-ka" && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                         <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">GA / KA Notes</h2><p className="text-sm text-slate-500">General Admin & Key Accounts.</p></div>
+                         {!isReadOnly && (<Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Note</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Note</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Related Project</Label><Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="None (General)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{projects.map(p=><SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Type</Label><Select value={newGaNoteType} onValueChange={(v:any)=>setNewGaNoteType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GA">GA</SelectItem><SelectItem value="KA">KA</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Priority</Label><Select value={newGaNotePriority} onValueChange={(v:any)=>setNewGaNotePriority(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem><SelectItem value="LOW">Low</SelectItem><SelectItem value="MEDIUM">Medium</SelectItem><SelectItem value="HIGH">High</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Content</Label><Textarea className="rounded-xl" value={newGaNote} onChange={(e)=>setNewGaNote(e.target.value)} rows={4} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setGaNoteOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitGaNote()}>Save</Button></div></DialogContent></Dialog>)}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {visibleGaNotes.length ? visibleGaNotes.map(note => {
+                            const author = users.find(u => u.id === note.created_by)
+                            const project = note.project_id ? projects.find(p => p.id === note.project_id) : null
+                            return (
+                                <Card key={note.id} className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border-0 bg-white/60 p-5 shadow-sm ring-1 ring-slate-900/5 transition hover:shadow-md dark:bg-slate-900/60 dark:ring-white/10">
+                                    <div className="absolute top-0 right-0 h-16 w-16 -translate-y-6 translate-x-6 rounded-full bg-slate-50 dark:bg-slate-800"></div>
+                                    <div className="relative z-10">
+                                        <div className="flex items-center justify-between mb-3"><span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>{note.note_type}</span><span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span></div>
+                                        <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
+                                    </div>
+                                    <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+                                        <div className="flex items-center gap-2"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">{initials(author?.full_name||"?")}</div><span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span></div>
+                                        {note.status !== "CLOSED" && !isReadOnly ? <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={()=>void closeGaNote(note.id)}>Archive</Button> : note.status === "CLOSED" ? <Badge variant="secondary" className="h-5 text-[10px]">Archived</Badge> : null}
+                                    </div>
+                                </Card>
+                            )
+                        }) : <div className="col-span-full py-12 text-center text-sm text-slate-400">No active notes.</div>}
+                    </div>
+                </div>
+            )}
+
+            {/* MEETINGS */}
+            {activeTab === "meetings" && (
+                <div className="space-y-8">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Meetings</h2>
+                    </div>
+
+                    <div className="grid gap-8 lg:grid-cols-2">
+                        {/* Internal Sync */}
+                        <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
+                             <div className="relative z-10">
+                                 <h3 className="text-lg font-medium text-slate-900 dark:text-white">Internal Sync</h3>
+                                 <p className="text-sm text-slate-500">Daily routine checks.</p>
+                                 
+                                 <div className="mt-6 mb-8 flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                                     {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map(slot => (
+                                         <button key={slot} onClick={()=>setInternalSlot(slot)} className={`flex-1 rounded-lg py-2 text-xs font-medium transition-all ${internalSlot === slot ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{slot}</button>
+                                     ))}
+                                 </div>
+
+                                 <div className="space-y-4">
+                                     <h4 className="font-medium text-emerald-600 dark:text-emerald-400">{INTERNAL_MEETING.slots[internalSlot].label}</h4>
+                                     <ul className="space-y-3">
+                                         {INTERNAL_MEETING.slots[internalSlot].items.map((item, i) => (
+                                             <li key={i} className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
+                                                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400">{i+1}</span>
+                                                 <span className="leading-relaxed">{item}</span>
+                                             </li>
+                                         ))}
+                                     </ul>
+                                 </div>
+                             </div>
+                        </div>
+
+                        {/* Scheduled */}
+                        <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
+                             <div className="flex items-center justify-between mb-4">
+                                <div><h3 className="text-lg font-medium text-slate-900 dark:text-white">Scheduled</h3><p className="text-sm text-slate-500">Project meetings & Calendar events.</p></div>
+                                <Badge variant="secondary" className="bg-slate-100 text-slate-600">{visibleMeetings.length} today</Badge>
+                             </div>
+
+                             {!isReadOnly && (
+                                 <div className="mb-6 rounded-2xl bg-slate-50/50 p-4 ring-1 ring-slate-100 dark:bg-slate-800/50 dark:ring-slate-700">
+                                     <div className="space-y-3">
+                                         <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="New Meeting Title" value={meetingTitle} onChange={(e)=>setMeetingTitle(e.target.value)} />
+                                         <div className="grid grid-cols-2 gap-3">
+                                             <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="Platform" value={meetingPlatform} onChange={(e)=>setMeetingPlatform(e.target.value)} />
+                                             <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" type="datetime-local" value={meetingStartsAt} onChange={(e)=>setMeetingStartsAt(e.target.value)} />
+                                         </div>
+                                         <div className="flex gap-3">
+                                             <Select value={meetingProjectId} onValueChange={setMeetingProjectId}><SelectTrigger className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><SelectValue placeholder="Project (Opt)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{filteredProjects.map(p=><SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select>
+                                             <Button className="shrink-0 rounded-xl bg-slate-900 text-white" onClick={()=>void submitMeeting()} disabled={!meetingTitle.trim() || creatingMeeting}>Add</Button>
+                                         </div>
+                                     </div>
+                                 </div>
+                             )}
+
+                             <div className="space-y-3">
+                                 {visibleMeetings.map((meeting) => {
+                                     const project = meeting.project_id ? projects.find(p => p.id === meeting.project_id) : null
+                                     const isEditing = editingMeetingId === meeting.id
+                                     
+                                     if (isEditing) {
+                                         return (
+                                             <div key={meeting.id} className="rounded-xl border bg-white p-4 space-y-2 shadow-lg ring-2 ring-emerald-100">
+                                                 <Input value={editMeetingTitle} onChange={(e)=>setEditMeetingTitle(e.target.value)} className="font-medium" />
+                                                 <div className="grid grid-cols-2 gap-2"><Input value={editMeetingPlatform} onChange={(e)=>setEditMeetingPlatform(e.target.value)} /><Input type="datetime-local" value={editMeetingStartsAt} onChange={(e)=>setEditMeetingStartsAt(e.target.value)} /></div>
+                                                 <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={()=>setEditingMeetingId(null)}>Cancel</Button><Button size="sm" onClick={()=>void saveMeeting(meeting.id)}>Save</Button></div>
+                                             </div>
+                                         )
+                                     }
+                                     return (
+                                         <div key={meeting.id} className="group flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-100 transition hover:ring-slate-300 dark:bg-slate-900 dark:ring-slate-800">
+                                             <div className="flex items-start gap-4">
+                                                 <div className="flex flex-col items-center min-w-[3rem]">
+                                                     <span className="text-xs font-bold text-slate-900 dark:text-white">{meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "--:--"}</span>
+                                                     <Badge variant="outline" className="mt-1 h-4 px-1 text-[8px] border-slate-200 text-slate-500">DB</Badge>
+                                                 </div>
+                                                 <div>
+                                                     <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">{meeting.title}</div>
+                                                     <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">•</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{project.title}</span></>}</div>
+                                                 </div>
+                                             </div>
+                                             {!isReadOnly && (
+                                                <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-900" onClick={()=>{setEditingMeetingId(meeting.id);setEditMeetingTitle(meeting.title);setEditMeetingPlatform(meeting.platform||"");setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at));setEditMeetingProjectId(meeting.project_id||"__none__");}}>✎</Button>
+                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-400 hover:text-rose-600" onClick={()=>void deleteMeeting(meeting.id)}>✕</Button>
+                                                </div>
+                                             )}
+                                         </div>
+                                     )
+                                 })}
+                                 {!visibleMeetings.length && <div className="py-4 text-center text-sm text-slate-400">No scheduled meetings.</div>}
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-      ) : null}
+      </div>
     </div>
   )
 }

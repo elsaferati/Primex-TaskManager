@@ -918,19 +918,25 @@ export default function DepartmentKanban() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold">{departmentName}</div>
-          <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
-        </div>
-        <div className="inline-flex rounded-xl border bg-muted/40 p-1">
+    <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 shadow-sm dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
+      <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
+      <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
+      <div className="relative space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
+            <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
+            <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+          </div>
+          <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
           <button
             type="button"
             onClick={() => setViewMode("department")}
             className={[
-              "rounded-lg px-4 py-2 text-sm font-medium transition",
-              viewMode === "department" ? "bg-background shadow-sm" : "text-muted-foreground",
+              "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+              viewMode === "department"
+                ? "bg-foreground text-background shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             ].join(" ")}
           >
             Department
@@ -939,8 +945,10 @@ export default function DepartmentKanban() {
             type="button"
             onClick={() => setViewMode("mine")}
             className={[
-              "rounded-lg px-4 py-2 text-sm font-medium transition",
-              viewMode === "mine" ? "bg-background shadow-sm" : "text-muted-foreground",
+              "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+              viewMode === "mine"
+                ? "bg-foreground text-background shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             ].join(" ")}
           >
             My View
@@ -948,8 +956,8 @@ export default function DepartmentKanban() {
         </div>
       </div>
 
-      <div className="border-b">
-        <div className="flex flex-wrap gap-4">
+      <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+        <div className="flex flex-wrap gap-2">
           {TABS.map((tab) => {
             const isActive = tab.id === activeTab
             const badgeTone =
@@ -958,19 +966,21 @@ export default function DepartmentKanban() {
                 : tab.tone === "red"
                   ? "bg-red-50 text-red-600"
                   : "bg-muted text-foreground"
+            const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
             return (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={[
-                  "relative flex items-center gap-2 px-2 pb-3 text-sm font-medium",
-                  isActive ? "text-foreground" : "text-muted-foreground",
+                  "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/70",
                 ].join(" ")}
               >
                 {tab.label}
-                <span className={`rounded-full px-2 py-0.5 text-xs ${badgeTone}`}>{counts[tab.id]}</span>
-                {isActive ? <span className="absolute inset-x-2 bottom-0 h-0.5 bg-foreground" /> : null}
+                <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
               </button>
             )
           })}
@@ -1067,7 +1077,7 @@ export default function DepartmentKanban() {
               const manager = project.manager_id ? userMap.get(project.manager_id) : null
               const phase = project.current_phase || "TAKIMET"
               return (
-                <Card key={project.id} className="p-5">
+                <Card key={project.id} className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-base font-semibold">{project.title || project.name}</div>
@@ -1082,7 +1092,7 @@ export default function DepartmentKanban() {
                       const isCurrent = p === phase
                       return (
                         <span key={p}>
-                          <span className={isCurrent ? "text-blue-600 font-medium" : ""}>
+                          <span className={isCurrent ? "text-emerald-600 font-semibold" : ""}>
                             {PHASE_LABELS[p]}
                           </span>
                           {idx < PHASES.length - 1 ? " -> " : ""}
@@ -1093,7 +1103,7 @@ export default function DepartmentKanban() {
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {manager ? (
-                        <div className="h-8 w-8 rounded-full bg-blue-100 text-xs font-semibold text-blue-700 flex items-center justify-center">
+                        <div className="h-8 w-8 rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700 flex items-center justify-center">
                         {initials(manager.full_name || manager.username || "-")}
                         </div>
                       ) : (
@@ -1103,7 +1113,10 @@ export default function DepartmentKanban() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <Link href={`/projects/${project.id}`} className="text-sm text-blue-600 hover:underline">
+                      <Link
+                        href={`/projects/${project.id}`}
+                        className="text-sm font-semibold text-emerald-700 transition-colors hover:text-emerald-800 hover:underline"
+                      >
                         View details -&gt;
                       </Link>
                     </div>
@@ -1119,7 +1132,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold">
+              <div className="text-xl font-semibold tracking-tight">
                 {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
               </div>
               <div className="text-sm text-muted-foreground">
@@ -1129,7 +1142,7 @@ export default function DepartmentKanban() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="rounded-lg border bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+              <div className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
                 {formatToday()}
               </div>
               {viewMode === "department" && departmentUsers.length ? (
@@ -1157,14 +1170,14 @@ export default function DepartmentKanban() {
               { label: "NOTES (OPEN)", value: todayOpenNotes.length },
               { label: "SYSTEM", value: todaySystemTasks.length },
             ].map((stat) => (
-              <Card key={stat.label} className="p-4">
+              <Card key={stat.label} className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
                 <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
                 <div className="mt-2 text-2xl font-semibold">{stat.value}</div>
               </Card>
             ))}
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="p-4">
+            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold">Project Tasks</div>
                 <Badge variant="secondary">{todayProjectTasks.length}</Badge>
@@ -1182,7 +1195,7 @@ export default function DepartmentKanban() {
                             <Link
                               key={task.id}
                               href={`/tasks/${task.id}`}
-                              className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
+                              className="block rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm transition hover:border-border hover:bg-background/90 hover:shadow-sm"
                             >
                               <div className="flex items-center gap-2">
                                 <Badge variant="outline" className="text-xs">
@@ -1209,7 +1222,7 @@ export default function DepartmentKanban() {
             </Card>
 
             <div className="grid gap-4">
-              <Card className="p-4">
+              <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold">No Project Tasks</div>
                   <Badge variant="secondary">{todayNoProjectTasks.length}</Badge>
@@ -1230,7 +1243,7 @@ export default function DepartmentKanban() {
                         <Link
                           key={task.id}
                           href={`/tasks/${task.id}`}
-                          className="block rounded-lg border px-3 py-2 text-sm hover:bg-muted/40"
+                          className="block rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm transition hover:border-border hover:bg-background/90 hover:shadow-sm"
                         >
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="text-xs">
@@ -1253,7 +1266,7 @@ export default function DepartmentKanban() {
                 </div>
               </Card>
 
-              <Card className="p-4">
+              <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold">System Tasks</div>
                   <Badge variant="secondary">{todaySystemTasks.length}</Badge>
@@ -1261,7 +1274,7 @@ export default function DepartmentKanban() {
                 <div className="mt-4 space-y-2">
                   {todaySystemTasks.length ? (
                     todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-lg border px-3 py-2 text-sm">
+                      <div key={task.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
                         <div className="font-medium">{task.title}</div>
                         <div className="mt-1 text-xs text-muted-foreground">{task.description || "-"}</div>
                       </div>
@@ -1273,7 +1286,7 @@ export default function DepartmentKanban() {
               </Card>
             </div>
 
-            <Card className="p-4">
+            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold">GA/KA Notes (Open)</div>
                 <Badge variant="secondary">{todayOpenNotes.length}</Badge>
@@ -1281,7 +1294,7 @@ export default function DepartmentKanban() {
               <div className="mt-4 space-y-2">
                 {todayOpenNotes.length ? (
                   todayOpenNotes.map((note) => (
-                    <div key={note.id} className="rounded-lg border px-3 py-2 text-sm">
+                    <div key={note.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">
                           {note.note_type || "GA"}
@@ -1296,7 +1309,7 @@ export default function DepartmentKanban() {
               </div>
             </Card>
 
-            <Card className="p-4">
+            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold">Meetings (Today)</div>
                 <Badge variant="secondary">{todayMeetings.length}</Badge>
@@ -1304,7 +1317,7 @@ export default function DepartmentKanban() {
               <div className="mt-4 space-y-2">
                 {todayMeetings.length ? (
                   todayMeetings.map((meeting) => (
-                    <div key={meeting.id} className="rounded-lg border px-3 py-2 text-sm">
+                    <div key={meeting.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
                       <div className="font-medium">{formatMeetingLabel(meeting)}</div>
                       {meeting.project_id ? (
                         <div className="mt-1 text-xs text-muted-foreground">
@@ -1435,7 +1448,7 @@ export default function DepartmentKanban() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-xl border bg-muted/40 p-1">
+            <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
               {[
                 { label: "Today", offset: 0 },
                 { label: "Yesterday", offset: -1 },
@@ -1451,8 +1464,10 @@ export default function DepartmentKanban() {
                     type="button"
                     onClick={() => setSystemDate(target)}
                     className={[
-                      "rounded-lg px-4 py-2 text-sm font-medium transition",
-                      active ? "bg-background shadow-sm" : "text-muted-foreground",
+                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-foreground text-background shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
                     ].join(" ")}
                   >
                     {opt.label}
@@ -1478,7 +1493,7 @@ export default function DepartmentKanban() {
           <div className="space-y-4">
             {systemGroups.length ? (
               systemGroups.map((group) => (
-                <Card key={group.label} className="overflow-hidden">
+                <Card key={group.label} className="overflow-hidden rounded-2xl border-border/60 bg-card/70 shadow-sm">
                   <div className="flex items-center gap-3 border-b px-4 py-3">
                     <Badge variant="outline" className="text-xs font-semibold">
                       {group.label}
@@ -1631,7 +1646,7 @@ export default function DepartmentKanban() {
             ) : null}
           </div>
           <div className="grid gap-4 md:grid-cols-4">
-          <Card className="p-4">
+          <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
             <div className="text-sm font-semibold">Normal</div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.normal.length ? (
@@ -1639,7 +1654,7 @@ export default function DepartmentKanban() {
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
+                    className="block rounded-xl border border-border/60 bg-background/70 px-4 py-3 transition hover:border-border hover:bg-background/90 hover:shadow-sm"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
@@ -1649,7 +1664,7 @@ export default function DepartmentKanban() {
                         </Badge>
                         {t.assigned_to ? (
                           <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
+                            className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
                             title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                           >
                             {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
@@ -1665,7 +1680,7 @@ export default function DepartmentKanban() {
             </div>
           </Card>
 
-          <Card className="p-4">
+          <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
             <div className="text-sm font-semibold">GA</div>
             <div className="mt-3 space-y-3">
               {noProjectBuckets.ga.length ? (
@@ -1673,7 +1688,7 @@ export default function DepartmentKanban() {
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border px-4 py-3 hover:bg-muted/40"
+                    className="block rounded-xl border border-border/60 bg-background/70 px-4 py-3 transition hover:border-border hover:bg-background/90 hover:shadow-sm"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
@@ -1683,7 +1698,7 @@ export default function DepartmentKanban() {
                         </Badge>
                         {t.assigned_to ? (
                           <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center"
+                            className="h-7 w-7 rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700 flex items-center justify-center"
                             title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                           >
                             {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
@@ -1699,9 +1714,9 @@ export default function DepartmentKanban() {
             </div>
           </Card>
 
-          <Card className="p-4 bg-red-50/40 border-red-100">
-            <div className="flex items-center gap-2 text-red-700 font-semibold">
-              <span className="h-5 w-5 rounded-full bg-red-500" />
+          <Card className="rounded-2xl border-rose-100 bg-rose-50/60 p-4 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/30">
+            <div className="flex items-center gap-2 text-rose-700 font-semibold">
+              <span className="h-5 w-5 rounded-full bg-rose-500" />
               <span>BLOCKED</span>
             </div>
             <div className="mt-3 space-y-3">
@@ -1710,20 +1725,20 @@ export default function DepartmentKanban() {
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-red-100 bg-white px-4 py-3 hover:bg-red-50"
+                    className="block rounded-xl border border-rose-100/80 bg-white/80 px-4 py-3 transition hover:bg-rose-50 hover:shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
                       {t.assigned_to ? (
                         <div
-                          className="h-7 w-7 rounded-full bg-red-100 text-[10px] font-semibold text-red-700 flex items-center justify-center"
+                          className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center"
                           title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                         >
                           {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
                         </div>
                       ) : null}
                     </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-red-200 text-red-600">
+                    <Badge variant="outline" className="mt-2 text-xs border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-200">
                       BLOCKED
                     </Badge>
                   </Link>
@@ -1734,9 +1749,9 @@ export default function DepartmentKanban() {
             </div>
           </Card>
 
-          <Card className="p-4 bg-purple-50/40 border-purple-100">
-            <div className="flex items-center gap-2 text-purple-700 font-semibold">
-              <span className="h-5 w-5 rounded-full border-2 border-purple-500" />
+          <Card className="rounded-2xl border-amber-100 bg-amber-50/60 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/25">
+            <div className="flex items-center gap-2 text-amber-700 font-semibold">
+              <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
               <span>1H Report</span>
             </div>
             <div className="mt-3 space-y-3">
@@ -1745,20 +1760,20 @@ export default function DepartmentKanban() {
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-purple-100 bg-white px-4 py-3 hover:bg-purple-50"
+                    className="block rounded-xl border border-amber-100/80 bg-white/80 px-4 py-3 transition hover:bg-amber-50 hover:shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
                       {t.assigned_to ? (
                         <div
-                          className="h-7 w-7 rounded-full bg-purple-100 text-[10px] font-semibold text-purple-700 flex items-center justify-center"
+                          className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-700 flex items-center justify-center"
                           title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                         >
                           {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
                         </div>
                       ) : null}
                     </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-purple-200 text-purple-600">
+                    <Badge variant="outline" className="mt-2 text-xs border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-200">
                       1H
                     </Badge>
                   </Link>
@@ -1769,9 +1784,9 @@ export default function DepartmentKanban() {
             </div>
           </Card>
 
-          <Card className="p-4 bg-green-50/40 border-green-100">
-            <div className="text-green-700 font-semibold">R1</div>
-            <div className="mt-2 text-sm text-green-700/80">
+          <Card className="rounded-2xl border-emerald-100 bg-emerald-50/60 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
+            <div className="text-emerald-700 font-semibold">R1</div>
+            <div className="mt-2 text-sm text-emerald-700/80">
               New project (first case) is handled with the manager.
             </div>
             <div className="mt-3 space-y-3">
@@ -1780,20 +1795,20 @@ export default function DepartmentKanban() {
                   <Link
                     key={t.id}
                     href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-green-100 bg-white px-4 py-3 hover:bg-green-50"
+                    className="block rounded-xl border border-emerald-100/80 bg-white/80 px-4 py-3 transition hover:bg-emerald-50 hover:shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{t.title}</div>
                       {t.assigned_to ? (
                         <div
-                          className="h-7 w-7 rounded-full bg-green-100 text-[10px] font-semibold text-green-700 flex items-center justify-center"
+                          className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
                           title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                         >
                           {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
                         </div>
                       ) : null}
                     </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-green-200 text-green-600">
+                    <Badge variant="outline" className="mt-2 text-xs border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
                       R1
                     </Badge>
                   </Link>
@@ -1905,7 +1920,7 @@ export default function DepartmentKanban() {
               const author = users.find((u) => u.id === note.created_by) || null
               const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
               return (
-                <Card key={note.id} className="border-orange-100 p-5">
+                <Card key={note.id} className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Badge
@@ -1953,7 +1968,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="text-xl font-semibold">Meetings</div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="p-5 space-y-4">
+            <Card className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm space-y-4">
               <div className="text-sm font-semibold">External Meetings</div>
               {!isReadOnly ? (
                 <div className="grid gap-3">
@@ -2002,7 +2017,7 @@ export default function DepartmentKanban() {
                       : null
                     const isEditing = !isReadOnly && editingMeetingId === meeting.id
                     return (
-                      <Card key={meeting.id} className="border border-muted p-4">
+                      <Card key={meeting.id} className="rounded-2xl border-border/60 bg-background/70 p-4 shadow-sm">
                         {isEditing ? (
                           <div className="space-y-3">
                             <Input
@@ -2072,7 +2087,7 @@ export default function DepartmentKanban() {
               </div>
             </Card>
 
-            <Card className="p-5 space-y-4">
+            <Card className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm space-y-4">
               <div className="text-sm font-semibold">Internal Meetings</div>
               <div>
                 <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
@@ -2080,15 +2095,17 @@ export default function DepartmentKanban() {
                   {INTERNAL_MEETING.team.join(", ")}
                 </div>
               </div>
-              <div className="inline-flex rounded-xl border bg-muted/40 p-1">
+              <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
                 {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
                   <button
                     key={slot}
                     type="button"
                     onClick={() => setInternalSlot(slot)}
                     className={[
-                      "rounded-lg px-4 py-2 text-sm font-medium transition",
-                      internalSlot === slot ? "bg-background shadow-sm" : "text-muted-foreground",
+                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                      internalSlot === slot
+                        ? "bg-foreground text-background shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
                     ].join(" ")}
                   >
                     {slot}
@@ -2099,7 +2116,7 @@ export default function DepartmentKanban() {
                 <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
                 <div className="space-y-2">
                   {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                    <div key={item} className="flex items-start gap-3 rounded-lg border px-3 py-2">
+                    <div key={item} className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/70 px-3 py-2">
                       <Checkbox checked={false} disabled />
                       <div className="text-sm text-muted-foreground">
                         {idx + 1}. {item}
@@ -2112,6 +2129,7 @@ export default function DepartmentKanban() {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   )
 }
