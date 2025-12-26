@@ -29,15 +29,10 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
-const PHASES = ["GENERAL", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["PROJEKTE"] as const
 
 const PHASE_LABELS: Record<string, string> = {
-  GENERAL: "General",
-  PLANIFIKIMI: "Planning",
-  ZHVILLIMI: "Development",
-  TESTIMI: "Testing",
-  DOKUMENTIMI: "Documentation",
-  MBYLLUR: "Closed",
+ PROJEKTE: "Projects",
 }
 
 const WEEKDAYS_SQ = [
