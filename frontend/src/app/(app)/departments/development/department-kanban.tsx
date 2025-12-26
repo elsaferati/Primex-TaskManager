@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, UserLookup } from "@/lib/types"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -893,8 +893,21 @@ export default function DepartmentKanban() {
     }
   }
 
-  if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
-  if (!department) return <div className="text-sm text-muted-foreground">Department not found.</div>
+  if (loading)
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-sky-500 border-r-transparent"></div>
+          <div className="mt-4 text-sm text-slate-600">Loading department...</div>
+        </div>
+      </div>
+    )
+  if (!department)
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white flex items-center justify-center">
+        <div className="text-sm text-slate-600">Department not found.</div>
+      </div>
+    )
 
   const closeGaNote = async (noteId: string) => {
     const res = await apiFetch(`/ga-notes/${noteId}`, {
@@ -918,270 +931,264 @@ export default function DepartmentKanban() {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 shadow-sm dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
-      <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
-      <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
-      <div className="relative space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
-            <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
-            <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden mb-6">
+          <div className="bg-gradient-to-r from-sky-100/50 via-blue-50/50 to-sky-100/50 px-6 py-5 border-b border-sky-100/50">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600/70">Department</div>
+                <div className="text-4xl font-bold text-slate-800 tracking-tight">{departmentName}</div>
+                <div className="text-sm text-slate-600">Manage projects and daily tasks.</div>
+              </div>
+              <div className="inline-flex rounded-xl border border-sky-200 bg-white/80 p-1 shadow-sm backdrop-blur">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("department")}
+                  className={[
+                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    viewMode === "department"
+                      ? "bg-sky-500 text-white shadow-md shadow-sky-200/50"
+                      : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                  ].join(" ")}
+                >
+                  Department
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("mine")}
+                  className={[
+                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    viewMode === "mine"
+                      ? "bg-sky-500 text-white shadow-md shadow-sky-200/50"
+                      : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                  ].join(" ")}
+                >
+                  My View
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-          <button
-            type="button"
-            onClick={() => setViewMode("department")}
-            className={[
-              "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-              viewMode === "department"
-                ? "bg-foreground text-background shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            ].join(" ")}
-          >
-            Department
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("mine")}
-            className={[
-              "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-              viewMode === "mine"
-                ? "bg-foreground text-background shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            ].join(" ")}
-          >
-            My View
-          </button>
-        </div>
-      </div>
+        </Card>
 
-      <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((tab) => {
-            const isActive = tab.id === activeTab
-            const badgeTone =
-              tab.tone === "blue"
-                ? "bg-blue-50 text-blue-600"
-                : tab.tone === "red"
-                  ? "bg-red-50 text-red-600"
-                  : "bg-muted text-foreground"
-            const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={[
-                  "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/70",
-                ].join(" ")}
-              >
-                {tab.label}
-                <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+        <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden mb-6">
+          <div className="px-6 py-3">
+            <div className="flex flex-wrap gap-2">
+              {TABS.map((tab) => {
+                const isActive = tab.id === activeTab
+                const badgeTone =
+                  tab.tone === "blue"
+                    ? "bg-sky-100 text-sky-700 border-sky-200"
+                    : tab.tone === "red"
+                      ? "bg-red-50 text-red-600 border-red-200"
+                      : "bg-slate-100 text-slate-700 border-slate-200"
+                const badgeClass = isActive ? "bg-sky-500 text-white border-sky-500" : badgeTone
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={[
+                      "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200",
+                      isActive
+                        ? "bg-sky-100 text-sky-700 shadow-sm"
+                        : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                    ].join(" ")}
+                  >
+                    {tab.label}
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${badgeClass}`}>
+                      {counts[tab.id]}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </Card>
 
-      {activeTab === "projects" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">Active Projects</div>
-            {canManage ? (
-              <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button className="rounded-xl">+ New Project</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add Project</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
+        {activeTab === "projects" ? (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xl font-semibold text-slate-800">Active Projects</div>
+              {canManage ? (
+                <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6">
+                      + New Project
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-2xl bg-white border-sky-100 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">Add Project</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="text-slate-700">Description</Label>
+                        <Textarea
+                          value={projectDescription}
+                          onChange={(e) => setProjectDescription(e.target.value)}
+                          placeholder="Enter the project description..."
+                          className="border-sky-200 focus:border-sky-400 rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Manager</Label>
+                        <Select value={projectManagerId} onValueChange={setProjectManagerId}>
+                          <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                            <SelectValue placeholder="Select manager" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                            {departmentUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || "-"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Phase</Label>
+                        <Select value={projectPhase} onValueChange={setProjectPhase}>
+                          <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                            <SelectValue placeholder="Phase" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PHASES.map((p) => (
+                              <SelectItem key={p} value={p}>
+                                {PHASE_LABELS[p]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex justify-end gap-2 md:col-span-2">
+                        <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-sky-200">
+                          Cancel
+                        </Button>
+                        <Button disabled={!projectTitle.trim() || creatingProject} onClick={() => void submitProject()} className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl">
+                          {creatingProject ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={projectDescription}
-                        onChange={(e) => setProjectDescription(e.target.value)}
-                        placeholder="Enter the project description..."
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Manager</Label>
-                      <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select manager" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Phase</Label>
-                      <Select value={projectPhase} onValueChange={setProjectPhase}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Phase" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PHASES.map((p) => (
-                            <SelectItem key={p} value={p}>
-                              {PHASE_LABELS[p]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={projectStatus} onValueChange={setProjectStatus}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="TODO">To do</SelectItem>
-                          <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                          <SelectItem value="REVIEW">Review</SelectItem>
-                          <SelectItem value="DONE">Done</SelectItem>
-                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!projectTitle.trim() || creatingProject} onClick={() => void submitProject()}>
-                        {creatingProject ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
+                  </DialogContent>
               </Dialog>
             ) : null}
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {filteredProjects.map((project) => {
-              const manager = project.manager_id ? userMap.get(project.manager_id) : null
-              const phase = project.current_phase || "TAKIMET"
-              return (
-                <Card key={project.id} className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-base font-semibold">{project.title || project.name}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{project.description || "-"}</div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {filteredProjects.map((project) => {
+                const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                const phase = project.current_phase || "TAKIMET"
+                return (
+                  <Card key={project.id} className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
+                        <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                      </div>
+                      <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
+                        {PHASE_LABELS[phase] || "Meetings"}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="text-xs">
-                      {PHASE_LABELS[phase] || "Meetings"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 text-xs text-muted-foreground">
-                    {PHASES.map((p, idx) => {
-                      const isCurrent = p === phase
-                      return (
-                        <span key={p}>
-                          <span className={isCurrent ? "text-emerald-600 font-semibold" : ""}>
-                            {PHASE_LABELS[p]}
+                    <div className="mt-4 text-xs text-slate-600">
+                      {PHASES.map((p, idx) => {
+                        const isCurrent = p === phase
+                        return (
+                          <span key={p}>
+                            <span className={isCurrent ? "text-sky-600 font-semibold" : ""}>
+                              {PHASE_LABELS[p]}
+                            </span>
+                            {idx < PHASES.length - 1 ? " → " : ""}
                           </span>
-                          {idx < PHASES.length - 1 ? " -> " : ""}
-                        </span>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {manager ? (
-                        <div className="h-8 w-8 rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700 flex items-center justify-center">
-                        {initials(manager.full_name || manager.username || "-")}
-                        </div>
-                      ) : (
-                        <div className="h-8 w-8 rounded-full bg-muted text-xs font-semibold flex items-center justify-center">
-                          -
-                        </div>
-                      )}
+                        )
+                      })}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Link
-                        href={`/projects/${project.id}`}
-                        className="text-sm font-semibold text-emerald-700 transition-colors hover:text-emerald-800 hover:underline"
-                      >
-                        View details -&gt;
-                      </Link>
+                    <div className="mt-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {manager ? (
+                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-100 to-blue-100 text-xs font-semibold text-sky-700 flex items-center justify-center shadow-sm">
+                            {initials(manager.full_name || manager.username || "-")}
+                          </div>
+                        ) : (
+                          <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
+                            -
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Link
+                          href={`/projects/${project.id}`}
+                          className="text-sm font-semibold text-sky-600 transition-colors hover:text-sky-700 hover:underline"
+                        >
+                          View details →
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              )
-            })}
+                  </Card>
+                )
+              })}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {activeTab === "all" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold tracking-tight">
-                {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
+        {activeTab === "all" ? (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-2xl font-bold tracking-tight text-slate-800">
+                  {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
+                </div>
+                <div className="text-sm text-slate-600 mt-1">
+                  {viewMode === "department"
+                    ? "All of today's tasks for the department team."
+                    : "All of today's tasks, organized in one place."}
+                </div>
               </div>
-              <div className="text-sm text-muted-foreground">
-                {viewMode === "department"
-                  ? "All of today's tasks for the department team."
-                  : "All of today's tasks, organized in one place."}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="rounded-xl border border-sky-200 bg-sky-100 px-4 py-2 text-xs font-semibold text-sky-700 shadow-sm">
+                  {formatToday()}
+                </div>
+                {viewMode === "department" && departmentUsers.length ? (
+                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                    <SelectTrigger className="h-9 w-48 border-sky-200 focus:border-sky-400 rounded-xl">
+                      <SelectValue placeholder="All users" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All users</SelectItem>
+                      {departmentUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name || u.username || "-"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+                {viewMode === "mine" ? <Button variant="outline" className="rounded-xl border-sky-200">Print</Button> : null}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
-                {formatToday()}
-              </div>
-              {viewMode === "department" && departmentUsers.length ? (
-                <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                  <SelectTrigger className="h-9 w-48">
-                    <SelectValue placeholder="All users" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All users</SelectItem>
-                    {departmentUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name || u.username || "-"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-              {viewMode === "mine" ? <Button variant="outline">Print</Button> : null}
+            <div className="grid gap-4 md:grid-cols-4">
+              {[
+                { label: "PROJECT TASKS", value: todayProjectTasks.length },
+                { label: "NO PROJECT", value: todayNoProjectTasks.length },
+                { label: "NOTES (OPEN)", value: todayOpenNotes.length },
+                { label: "SYSTEM", value: todaySystemTasks.length },
+              ].map((stat) => (
+                <Card key={stat.label} className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
+                  <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{stat.label}</div>
+                  <div className="mt-2 text-3xl font-bold text-slate-800">{stat.value}</div>
+                </Card>
+              ))}
             </div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-            {[
-              { label: "PROJECT TASKS", value: todayProjectTasks.length },
-              { label: "NO PROJECT", value: todayNoProjectTasks.length },
-              { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-              { label: "SYSTEM", value: todaySystemTasks.length },
-            ].map((stat) => (
-              <Card key={stat.label} className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
-                <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
-                <div className="mt-2 text-2xl font-semibold">{stat.value}</div>
-              </Card>
-            ))}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Project Tasks</div>
-                <Badge variant="secondary">{todayProjectTasks.length}</Badge>
-              </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
+                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayProjectTasks.length}</Badge>
+                </div>
               <div className="mt-4 space-y-4">
                 {todayProjectTaskGroups.length ? (
                   todayProjectTaskGroups.map((group) => (
@@ -1195,18 +1202,18 @@ export default function DepartmentKanban() {
                             <Link
                               key={task.id}
                               href={`/tasks/${task.id}`}
-                              className="block rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm transition hover:border-border hover:bg-background/90 hover:shadow-sm"
+                              className="block rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm transition-all hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
                             >
                               <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-xs">
+                                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                                   {task.status || "TODO"}
                                 </Badge>
-                                <Badge variant="secondary" className="text-xs">
+                                <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
                                   {phaseLabel}
                                 </Badge>
-                                <div className="font-medium">{task.title}</div>
+                                <div className="font-medium text-slate-800">{task.title}</div>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
+                              <div className="mt-1 text-xs text-slate-600">
                                 {assignee?.full_name || assignee?.username || "Unassigned"}
                               </div>
                             </Link>
@@ -1216,16 +1223,16 @@ export default function DepartmentKanban() {
                     </div>
                   ))
                 ) : (
-                  <div className="text-sm text-muted-foreground">No project tasks today.</div>
+                  <div className="text-sm text-slate-500">No project tasks today.</div>
                 )}
               </div>
             </Card>
 
             <div className="grid gap-4">
-              <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">No Project Tasks</div>
-                  <Badge variant="secondary">{todayNoProjectTasks.length}</Badge>
+                  <div className="text-sm font-semibold text-slate-800">No Project Tasks</div>
+                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayNoProjectTasks.length}</Badge>
                 </div>
                 <div className="mt-4 space-y-2">
                   {todayNoProjectTasks.length ? (
@@ -1243,53 +1250,53 @@ export default function DepartmentKanban() {
                         <Link
                           key={task.id}
                           href={`/tasks/${task.id}`}
-                          className="block rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm transition hover:border-border hover:bg-background/90 hover:shadow-sm"
+                          className="block rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm transition-all hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
                         >
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
+                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                               {typeLabel}
                             </Badge>
-                            <Badge variant="secondary" className="text-xs">
+                            <Badge className="bg-sky-100 text-sky-700 border-sky-200 text-xs">
                               {phaseLabel}
                             </Badge>
-                            <div className="font-medium">{task.title}</div>
+                            <div className="font-medium text-slate-800">{task.title}</div>
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
+                          <div className="mt-1 text-xs text-slate-600">
                             {assignee?.full_name || assignee?.username || "Unassigned"}
                           </div>
                         </Link>
                       )
                     })
                   ) : (
-                    <div className="text-sm text-muted-foreground">No tasks today.</div>
+                    <div className="text-sm text-slate-500">No tasks today.</div>
                   )}
                 </div>
               </Card>
 
-              <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">System Tasks</div>
-                  <Badge variant="secondary">{todaySystemTasks.length}</Badge>
+                  <div className="text-sm font-semibold text-slate-800">System Tasks</div>
+                  <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todaySystemTasks.length}</Badge>
                 </div>
                 <div className="mt-4 space-y-2">
                   {todaySystemTasks.length ? (
                     todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
-                        <div className="font-medium">{task.title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{task.description || "-"}</div>
+                      <div key={task.id} className="rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-sm">
+                        <div className="font-medium text-slate-800">{task.title}</div>
+                        <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
                       </div>
                     ))
                   ) : (
-                    <div className="text-sm text-muted-foreground">No system tasks today.</div>
+                    <div className="text-sm text-slate-500">No system tasks today.</div>
                   )}
                 </div>
               </Card>
             </div>
 
-            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">GA/KA Notes (Open)</div>
-                <Badge variant="secondary">{todayOpenNotes.length}</Badge>
+                <div className="text-sm font-semibold text-slate-800">GA/KA Notes (Open)</div>
+                <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayOpenNotes.length}</Badge>
               </div>
               <div className="mt-4 space-y-2">
                 {todayOpenNotes.length ? (
@@ -1858,7 +1865,7 @@ export default function DepartmentKanban() {
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Type</Label>
-                        <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                        <Select value={newGaNoteType} onValueChange={(v) => setNewGaNoteType(v as "GA" | "KA")}>
                           <SelectTrigger>
                             <SelectValue placeholder="GA/KA" />
                           </SelectTrigger>
@@ -1870,7 +1877,7 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label>Priority</Label>
-                        <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                        <Select value={newGaNotePriority} onValueChange={(v) => setNewGaNotePriority(v as typeof newGaNotePriority)}>
                           <SelectTrigger>
                             <SelectValue placeholder="Priority" />
                           </SelectTrigger>

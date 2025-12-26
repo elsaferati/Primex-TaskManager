@@ -556,7 +556,15 @@ export default function DevelopmentProjectPage() {
     [activePhase, project?.current_phase, tasks]
   )
 
-  if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
+  if (!project)
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-sky-500 border-r-transparent"></div>
+          <div className="mt-4 text-sm text-slate-600">Loading project...</div>
+        </div>
+      </div>
+    )
 
   const title = project.title || project.name || "Project"
   const phase = project.current_phase || "TAKIMET"
@@ -602,81 +610,650 @@ export default function DevelopmentProjectPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            &larr; Back to Projects
-          </button>
-          <div className="mt-3 text-3xl font-semibold">{title}</div>
-          <div className="mt-3">
-            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              {PHASE_LABELS[phase] || "Meetings"}
-            </Badge>
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Header Section with Soft Blue Background */}
+        <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-sky-100/50 via-blue-50/50 to-sky-100/50 px-6 py-5 border-b border-sky-100/50">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => router.back()}
+                  className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors mb-4 inline-flex items-center gap-1.5 font-medium"
+                >
+                  <span className="text-sky-500">←</span> Back to Projects
+                </button>
+                <h1 className="text-4xl font-bold text-slate-800 mb-4 tracking-tight">{title}</h1>
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <Badge className="bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-200/80 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm">
+                    {PHASE_LABELS[phase] || "Meetings"}
+                  </Badge>
+                  {activePhase !== phase && (
+                    <Badge variant="outline" className="bg-blue-50/50 text-blue-600 border-blue-200 px-3 py-1.5 text-xs font-medium rounded-lg">
+                      View: {PHASE_LABELS[activePhase] || "Meetings"}
+                    </Badge>
+                  )}
+                </div>
+                {/* Phase Navigation - Beautiful Soft Blue Pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {PHASES.map((p, idx) => {
+                    const isViewed = p === activePhase
+                    const isCurrent = p === phase
+                    return (
+                      <React.Fragment key={p}>
+                        <button
+                          type="button"
+                          onClick={() => setViewedPhase(p)}
+                          className={[
+                            "px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200",
+                            isViewed
+                              ? "bg-sky-500 text-white shadow-md shadow-sky-200/50 scale-105"
+                              : isCurrent
+                                ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80 border border-sky-200"
+                                : "bg-white/60 text-slate-500 hover:bg-sky-50/80 border border-slate-200 hover:border-sky-200",
+                          ].join(" ")}
+                          aria-pressed={isViewed}
+                        >
+                          {PHASE_LABELS[p]}
+                        </button>
+                        {idx < PHASES.length - 1 && (
+                          <span className="text-sky-300 text-lg font-light">→</span>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button className="bg-white hover:bg-sky-50 text-slate-700 border border-slate-200 shadow-sm rounded-xl px-4 py-2 font-medium transition-all">
+                  Settings
+                </Button>
+              </div>
+            </div>
           </div>
-          <div className="mt-3 text-sm text-muted-foreground">
-            {PHASES.map((p, idx) => {
-              const isViewed = p === activePhase
-              const isCurrent = p === phase
-              return (
-                <span key={p}>
+
+          {/* Close Phase Button */}
+          <div className="px-6 py-4 bg-white/50 flex justify-end">
+            <Button
+              variant="outline"
+              disabled={!canClosePhase || advancingPhase}
+              onClick={() => void advancePhase()}
+              className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {advancingPhase ? "Closing..." : "Close Phase"}
+            </Button>
+          </div>
+        </Card>
+
+        {/* Tabs Navigation - Soft Blue Design */}
+        <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+          <div className="px-6 py-1">
+            <div className="flex flex-wrap gap-1">
+              {visibleTabs.map((tab) => {
+                const isActive = tab.id === activeTab
+                const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
+                return (
                   <button
+                    key={tab.id}
                     type="button"
-                    onClick={() => setViewedPhase(p)}
+                    onClick={() => setActiveTab(tab.id)}
                     className={[
-                      "transition-colors",
-                      isViewed ? "text-blue-600 font-medium" : isCurrent ? "text-foreground" : "text-muted-foreground",
+                      "relative px-5 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                      tab.id === "ga" ? "ml-auto" : "",
+                      isActive
+                        ? "bg-sky-100 text-sky-700 shadow-sm"
+                        : "text-slate-500 hover:text-sky-600 hover:bg-sky-50/50",
                     ].join(" ")}
-                    aria-pressed={isViewed}
                   >
-                    {PHASE_LABELS[p]}
+                    {label}
+                    {isActive && (
+                      <span className="absolute inset-x-2 bottom-1.5 h-0.5 bg-sky-500 rounded-full" />
+                    )}
                   </button>
-                  {idx < PHASES.length - 1 ? " -> " : ""}
-                </span>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
-          {activePhase !== phase ? (
-            <div className="mt-2 text-xs text-muted-foreground">View: {PHASE_LABELS[activePhase] || "Meetings"}</div>
+        </Card>
+
+        {/* Tab Content Area with Soft Blue Design */}
+        <div className="min-h-[400px]">
+          {activeTab === "meeting-focus" ? (
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-6">
+                <div className="text-xl font-semibold text-slate-800 mb-2">Meeting Focus</div>
+                <div className="text-sm text-slate-500 mb-6">Main points to discuss in the meeting.</div>
+                <div className="space-y-3">
+                  {MEETING_POINTS.map((point) => (
+                    <div key={point} className="flex items-start gap-3 p-4 rounded-xl bg-sky-50/50 border border-sky-100/50">
+                      <span className="mt-1 h-2 w-2 rounded-full bg-sky-400 flex-shrink-0" aria-hidden />
+                      <span className="text-sm text-slate-700">{point}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
+          {activeTab === "meeting-checklist" ? (
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-6">
+                <div className="text-xl font-semibold text-slate-800 mb-6">Meeting Checklist</div>
+                <div className="space-y-3">
+                  {meetingChecklist.map((item) => (
+                    <div key={item.id} className="flex items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                      <Checkbox
+                        checked={item.isChecked}
+                        onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
+                        className="mt-1"
+                      />
+                      <Input
+                        value={item.content}
+                        onChange={(e) => updateMeetingChecklistItem(item.id, e.target.value)}
+                        className="flex-1 border-sky-200 focus:border-sky-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
+          {activeTab === "description" ? (
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-6">
+                {activePhase === "TAKIMET" ? (
+                  <>
+                    <div className="text-xl font-semibold text-slate-800 mb-2">Project Description</div>
+                    <Textarea
+                      value={editingDescription}
+                      onChange={(e) => setEditingDescription(e.target.value)}
+                      rows={6}
+                      className="mt-4 border-sky-200 focus:border-sky-400 rounded-xl"
+                    />
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        variant="outline"
+                        disabled={savingDescription}
+                        onClick={() => void saveDescription()}
+                        className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                      >
+                        {savingDescription ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                  </>
+                ) : activePhase === "TESTIMI" ? (
+                  <>
+                    <div className="text-xl font-semibold text-slate-800 mb-2">Testing Questions</div>
+                    <div className="mt-6 space-y-3">
+                      {[
+                        "What should we test and why?",
+                        "Who owns each test area?",
+                        "What environments or data are required?",
+                        "How will issues be tracked and fixed?",
+                        "What is the acceptance checklist to approve?",
+                      ].map((question, idx) => (
+                        <div key={idx} className="p-4 rounded-xl bg-sky-50/50 border border-sky-100/50 text-sm text-slate-700">
+                          {question}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xl font-semibold text-slate-800 mb-2">Project Description</div>
+                    <Textarea
+                      value={editingDescription}
+                      onChange={(e) => setEditingDescription(e.target.value)}
+                      rows={6}
+                      className="mt-4 border-sky-200 focus:border-sky-400 rounded-xl"
+                    />
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        variant="outline"
+                        disabled={savingDescription}
+                        onClick={() => void saveDescription()}
+                        className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                      >
+                        {savingDescription ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          ) : null}
+
+          {activeTab === "tasks" ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-end">
+                <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6">
+                      + Add Task
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-lg bg-white border-sky-100 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">New Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Description</Label>
+                        <Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Status</Label>
+                          <Select value={newStatus} onValueChange={(v) => setNewStatus(v as typeof newStatus)}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_STATUSES.map((s) => (
+                                <SelectItem key={s} value={s}>
+                                  {statusLabel(s)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Priority</Label>
+                          <Select value={newPriority} onValueChange={(v) => setNewPriority(v as typeof newPriority)}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_PRIORITIES.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {statusLabel(p)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Assign to</Label>
+                          <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Unassigned" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                              {allUsers.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.full_name || m.username || m.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Phase</Label>
+                          <Select value={newTaskPhase} onValueChange={setNewTaskPhase}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Select phase" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PHASES.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {PHASE_LABELS[p]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date</Label>
+                          <Input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          disabled={!newTitle.trim() || creating}
+                          onClick={() => void submitCreateTask()}
+                          className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                        >
+                          {creating ? "Creating..." : "Create"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-0">
+                <div className="divide-y divide-sky-100">
+                  {visibleTasks.length ? (
+                    visibleTasks.map((task) => {
+                      const assignedId = task.assigned_to || task.assigned_to_user_id || null
+                      const assigned = assignedId ? userMap.get(assignedId) : null
+                      return (
+                        <div key={task.id} className="grid grid-cols-4 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors">
+                          <div className="font-medium text-slate-800">{task.title}</div>
+                          <div className="text-slate-600">
+                            {assigned?.full_name || assigned?.username || "-"}
+                          </div>
+                          <div>
+                            <Badge className="bg-sky-100 text-sky-700 border-sky-200">{statusLabel(task.status)}</Badge>
+                          </div>
+                          <div className="text-slate-500">-</div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="px-6 py-8 text-sm text-slate-500 text-center">No tasks yet.</div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          ) : null}
+
+          {activeTab === "checklists" ? (
+            <div className="space-y-4">
+              {activePhase === "DOKUMENTIMI" ? (
+                <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+                  <div className="p-6">
+                    <div className="text-xl font-semibold text-slate-800 mb-6">Documentation Checklist</div>
+                    <div className="space-y-3">
+                      {documentationChecklist.map((item) => (
+                        <div key={item.id} className="flex items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                          <Checkbox
+                            checked={item.isChecked}
+                            onCheckedChange={(checked) => toggleDocumentationChecklistItem(item.id, Boolean(checked))}
+                            className="mt-1"
+                          />
+                          <div className={item.isChecked ? "text-slate-400 line-through" : "text-slate-700"}>
+                            {item.question}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-6">
+                      <div className="text-sm font-semibold text-slate-800 mb-3">Documentation File Paths</div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="Add file path..."
+                          value={documentationFilePath}
+                          onChange={(e) => setDocumentationFilePath(e.target.value)}
+                          className="border-sky-200 focus:border-sky-400 rounded-xl"
+                        />
+                        <Button
+                          variant="outline"
+                          disabled={!documentationFilePath.trim()}
+                          onClick={addDocumentationFilePath}
+                          className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl"
+                        >
+                          Add
+                        </Button>
+                      </div>
+                      {documentationFilePaths.length ? (
+                        <div className="mt-4 space-y-2">
+                          {documentationFilePaths.map((path, idx) => (
+                            <div key={`${path}-${idx}`} className="rounded-xl border border-sky-100 bg-sky-50/50 px-4 py-2 text-sm text-slate-700">
+                              {path}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-3 text-sm text-slate-500">No file paths added.</div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="Add item..."
+                      value={newChecklistContent}
+                      onChange={(e) => setNewChecklistContent(e.target.value)}
+                      className="border-sky-200 focus:border-sky-400 rounded-xl"
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!newChecklistContent.trim() || addingChecklist}
+                      onClick={() => void submitChecklistItem()}
+                      className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl"
+                    >
+                      {addingChecklist ? "Adding..." : "Add"}
+                    </Button>
+                  </div>
+                  {checklistItems.length ? (
+                    checklistItems.map((item) => (
+                      <Card
+                        key={item.id}
+                        className="cursor-pointer px-6 py-5 bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl hover:bg-sky-50/30 transition-all"
+                        onClick={() => void toggleChecklistItem(item.id, !item.is_checked)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Checkbox checked={item.is_checked} />
+                          <div className={item.is_checked ? "text-slate-400 line-through" : "text-slate-700"}>
+                            {item.content}
+                          </div>
+                        </div>
+                      </Card>
+                    ))
+                  ) : (
+                    <div className="text-sm text-slate-500 text-center py-8">No checklist items yet.</div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : null}
+
+          {activeTab === "members" ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-end">
+                <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6">
+                      + Add Members
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-lg bg-white border-sky-100 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">Select Members</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      {departmentUsers.length ? (
+                        departmentUsers.map((u) => (
+                          <div
+                            key={u.id}
+                            className="flex items-center justify-between rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors cursor-pointer"
+                            onClick={() => toggleMemberSelect(u.id)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Checkbox checked={selectedMemberIds.includes(u.id)} />
+                              <span className="text-slate-700">{u.full_name || u.username || u.email}</span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-sm text-slate-500">No department users found.</div>
+                      )}
+                      <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" onClick={() => setMembersOpen(false)} className="rounded-xl border-sky-200">
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={savingMembers || selectedMemberIds.length === 0}
+                          onClick={() => void submitMembers()}
+                          className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl"
+                        >
+                          {savingMembers ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {members.length ? (
+                  members.map((m) => (
+                    <Card key={m.id} className="flex flex-col items-center gap-3 text-center p-6 bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl hover:shadow-md transition-shadow">
+                      <div className="h-20 w-20 rounded-full bg-gradient-to-br from-sky-100 to-blue-100 text-lg font-semibold text-sky-700 flex items-center justify-center shadow-sm">
+                        {initials(m.full_name || m.username || m.email)}
+                      </div>
+                      <div className="text-sm font-semibold text-slate-800">{m.full_name || m.username || m.email}</div>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-sm text-slate-500 text-center py-8 col-span-full">No members yet.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "ga" ? (
+            <div className="space-y-4">
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+                <div className="p-6 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                      <SelectTrigger className="w-28 border-sky-200 focus:border-sky-400 rounded-xl">
+                        <SelectValue placeholder="GA/KA" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GA">GA</SelectItem>
+                        <SelectItem value="KA">KA</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                      <SelectTrigger className="w-40 border-sky-200 focus:border-sky-400 rounded-xl">
+                        <SelectValue placeholder="Priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No priority</SelectItem>
+                        <SelectItem value="LOW">Low</SelectItem>
+                        <SelectItem value="MEDIUM">Medium</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Textarea
+                      placeholder="Add GA/KA note..."
+                      value={newGaNote}
+                      onChange={(e) => setNewGaNote(e.target.value)}
+                      rows={3}
+                      className="border-sky-200 focus:border-sky-400 rounded-xl"
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!newGaNote.trim() || addingGaNote}
+                      onClick={() => void submitGaNote()}
+                      className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl"
+                    >
+                      {addingGaNote ? "Adding..." : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+              {gaNotes.length ? (
+                gaNotes.map((note) => (
+                  <Card key={note.id} className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-5 hover:shadow-md transition-shadow">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <Badge className={note.note_type === "KA" ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-sky-100 text-sky-700 border-sky-200"}>
+                          {note.note_type || "GA"}
+                        </Badge>
+                        <span>
+                          From {userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "-"}
+                        </span>
+                        <span>• {formatDateTime(note.created_at)}</span>
+                        {note.priority ? (
+                          <Badge className="bg-slate-100 text-slate-700 border-slate-200">{statusLabel(note.priority)}</Badge>
+                        ) : null}
+                      </div>
+                      {note.status !== "CLOSED" ? (
+                        <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)} className="rounded-xl border-sky-200 hover:bg-sky-50">
+                          Close
+                        </Button>
+                      ) : (
+                        <Badge className="bg-slate-100 text-slate-600 border-slate-200">Closed</Badge>
+                      )}
+                    </div>
+                    <div className="mt-3 text-sm text-slate-700">{note.content}</div>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500 text-center py-8">No GA/KA notes yet.</div>
+              )}
+            </div>
+          ) : null}
+
+          {activeTab === "prompts" ? (
+            <div className="grid gap-6 md:grid-cols-2">
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-6 space-y-4">
+                <div className="text-lg font-semibold text-slate-800">GA Prompt</div>
+                <Textarea value={gaPromptContent} onChange={(e) => setGaPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    disabled={savingGaPrompt}
+                    onClick={() => void savePrompt("GA_PROMPT")}
+                    className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                  >
+                    {savingGaPrompt ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                <div className="text-xs text-slate-500">Used for GA guidelines and standards.</div>
+                {prompts.filter((p) => p.type === "GA_PROMPT").length ? (
+                  <div className="space-y-3 pt-2">
+                    {prompts
+                      .filter((p) => p.type === "GA_PROMPT")
+                      .map((prompt) => (
+                        <Card key={prompt.id} className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl">
+                          <div className="text-xs text-slate-500">
+                            {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                          </div>
+                          <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
+                        </Card>
+                      ))}
+                  </div>
+                ) : null}
+              </Card>
+              <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-6 space-y-4">
+                <div className="text-lg font-semibold text-slate-800">Development Prompt</div>
+                <Textarea value={devPromptContent} onChange={(e) => setDevPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    disabled={savingDevPrompt}
+                    onClick={() => void savePrompt("ZHVILLIM_PROMPT")}
+                    className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                  >
+                    {savingDevPrompt ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                <div className="text-xs text-slate-500">Used by the development team.</div>
+                {prompts.filter((p) => p.type === "ZHVILLIM_PROMPT").length ? (
+                  <div className="space-y-3 pt-2">
+                    {prompts
+                      .filter((p) => p.type === "ZHVILLIM_PROMPT")
+                      .map((prompt) => (
+                        <Card key={prompt.id} className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl">
+                          <div className="text-xs text-slate-500">
+                            {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                          </div>
+                          <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
+                        </Card>
+                      ))}
+                  </div>
+                ) : null}
+              </Card>
+            </div>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <Button className="rounded-xl">Settings</Button>
-        </div>
       </div>
-
-      <div className="flex justify-end">
-        <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
-          {advancingPhase ? "Closing..." : "Close Phase"}
-        </Button>
-      </div>
-
-      <div className="border-b">
-        <div className="flex flex-wrap gap-6">
-          {visibleTabs.map((tab) => {
-            const isActive = tab.id === activeTab
-            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={["relative pb-3 text-sm font-medium", tab.id === "ga" ? "ml-auto" : "", isActive ? "text-blue-600" : "text-muted-foreground"].join(" ")}
-              >
-                {label}
-                {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* The rest of the original component's rendering logic (description, tasks, checklists, members, ga, prompts) remains unchanged and reused here. */}
-      {/* For brevity the rest of the rendering code is identical to the original page and preserved. */}
     </div>
   )
 }
