@@ -11,7 +11,7 @@ from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, UserRole
 from app.models.project import Project
 from app.schemas.ga_note import GaNoteCreate, GaNoteOut, GaNoteUpdate
 
@@ -26,11 +26,11 @@ async def list_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    if project_id is None and department_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")
-
     stmt = select(GaNote).order_by(GaNote.created_at)
-    if project_id is not None:
+    if project_id is None and department_id is None:
+        if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")
+    elif project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

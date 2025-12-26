@@ -16,7 +16,9 @@ class CommonEntry(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     category: Mapped[CommonCategory] = mapped_column(
-        Enum(CommonCategory, name="common_category"), nullable=False, index=True
+        Enum(CommonCategory, name="common_category", values_callable=lambda enums: [e.value for e in enums]),
+        nullable=False,
+        index=True,
     )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(String(8000))
