@@ -70,6 +70,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         id=task.id,
         title=task.title,
         description=task.description,
+        internal_notes=task.internal_notes,
         project_id=task.project_id,
         department_id=task.department_id,
         assigned_to=task.assigned_to,
@@ -79,6 +80,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         system_template_origin_id=task.system_template_origin_id,
         status=task.status,
         priority=task.priority,
+        finish_period=task.finish_period,
         phase=task.phase,
         progress_percentage=task.progress_percentage,
         start_date=task.start_date,
@@ -246,6 +248,7 @@ async def create_task(
     task = Task(
         title=payload.title,
         description=payload.description,
+        internal_notes=payload.internal_notes,
         project_id=payload.project_id,
         department_id=department_id,
         assigned_to=assignee_ids[0] if assignee_ids else None,
@@ -253,6 +256,7 @@ async def create_task(
         ga_note_origin_id=payload.ga_note_origin_id,
         status=status_value,
         priority=priority_value,
+        finish_period=payload.finish_period,
         phase=phase_value,
         progress_percentage=payload.progress_percentage or 0,
         start_date=payload.start_date or datetime.now(timezone.utc),
@@ -372,8 +376,10 @@ async def update_task(
     before = {
         "title": task.title,
         "description": task.description,
+        "internal_notes": task.internal_notes,
         "status": task.status.value,
         "priority": task.priority.value,
+        "finish_period": task.finish_period.value if task.finish_period else None,
         "phase": task.phase.value if task.phase else None,
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,
@@ -386,6 +392,8 @@ async def update_task(
         task.title = payload.title
     if payload.description is not None:
         task.description = payload.description
+    if payload.internal_notes is not None:
+        task.internal_notes = payload.internal_notes
 
     if payload.project_id is not None:
         ensure_manager_or_admin(user)
@@ -458,6 +466,8 @@ async def update_task(
 
     if payload.priority is not None:
         task.priority = payload.priority
+    if payload.finish_period is not None:
+        task.finish_period = payload.finish_period
     if payload.phase is not None:
         ensure_manager_or_admin(user)
         task.phase = payload.phase
@@ -508,8 +518,10 @@ async def update_task(
     after = {
         "title": task.title,
         "description": task.description,
+        "internal_notes": task.internal_notes,
         "status": task.status.value,
         "priority": task.priority.value,
+        "finish_period": task.finish_period.value if task.finish_period else None,
         "phase": task.phase.value if task.phase else None,
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,

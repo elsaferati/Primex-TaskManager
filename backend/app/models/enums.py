@@ -16,6 +16,11 @@ class TaskPriority(str, enum.Enum):
     URGENT = "URGENT"
 
 
+class TaskFinishPeriod(str, enum.Enum):
+    AM = "AM"
+    PM = "PM"
+
+
 class TaskStatus(str, enum.Enum):
     TODO = "TODO"
     IN_PROGRESS = "IN_PROGRESS"

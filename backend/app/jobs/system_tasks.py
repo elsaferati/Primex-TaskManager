@@ -29,11 +29,13 @@ async def generate_system_tasks() -> int:
                 task = Task(
                     title=tmpl.title,
                     description=tmpl.description,
+                    internal_notes=tmpl.internal_notes,
                     department_id=tmpl.department_id,
                     assigned_to=tmpl.default_assignee_id,
                     created_by=tmpl.default_assignee_id,
                     status=TaskStatus.TODO,
                     priority=tmpl.priority or TaskPriority.MEDIUM,
+                    finish_period=tmpl.finish_period,
                     system_template_origin_id=tmpl.id,
                     start_date=datetime.now(timezone.utc),
                     is_active=active_value,
@@ -49,8 +51,10 @@ async def generate_system_tasks() -> int:
             else:
                 task.title = tmpl.title
                 task.description = tmpl.description
+                task.internal_notes = tmpl.internal_notes
                 task.department_id = tmpl.department_id
                 task.assigned_to = tmpl.default_assignee_id
+                task.finish_period = tmpl.finish_period
                 task.is_active = active_value
 
         await db.commit()

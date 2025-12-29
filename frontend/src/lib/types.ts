@@ -4,6 +4,8 @@ export type TaskType = "adhoc" | "system" | "reminder"
 
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT"
 
+export type TaskFinishPeriod = "AM" | "PM"
+
 export type TemplateRecurrence = "daily" | "weekly" | "monthly" | "yearly"
 
 export type SystemTaskFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "3_MONTHS" | "6_MONTHS"
@@ -13,6 +15,7 @@ export interface SystemTaskTemplate {
   template_id?: string | null
   title: string
   description?: string | null
+  internal_notes?: string | null
   department_id?: string | null
   default_assignee_id?: string | null
   assignees?: TaskAssignee[] | null
@@ -21,6 +24,7 @@ export interface SystemTaskTemplate {
   day_of_month?: number | null
   month_of_year?: number | null
   priority?: TaskPriority | null
+  finish_period?: TaskFinishPeriod | null
   is_active: boolean
   created_at: string
 }
@@ -109,6 +113,7 @@ export interface Task {
   project_id?: string | null
   title: string
   description?: string | null
+  internal_notes?: string | null
   task_type?: TaskType
   status_id?: string
   position?: number
@@ -126,6 +131,7 @@ export interface Task {
   system_template_origin_id?: string | null
   status?: string
   priority?: string
+  finish_period?: TaskFinishPeriod | null
   phase?: string
   progress_percentage?: number
   start_date?: string | null

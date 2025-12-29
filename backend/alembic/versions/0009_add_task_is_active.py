@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0009_add_task_is_active"
@@ -18,10 +19,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "tasks",
-        sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
-    )
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("tasks")}
+    if "is_active" not in columns:
+        op.add_column(
+            "tasks",
+            sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+        )
     op.execute("UPDATE tasks SET is_active = true WHERE is_active IS NULL")
 
 

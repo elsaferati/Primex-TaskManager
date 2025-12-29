@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
 
 
 class TaskAssigneeOut(BaseModel):
@@ -19,6 +19,7 @@ class TaskOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None = None
+    internal_notes: str | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
@@ -28,6 +29,7 @@ class TaskOut(BaseModel):
     system_template_origin_id: uuid.UUID | None = None
     status: TaskStatus
     priority: TaskPriority
+    finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus
     progress_percentage: int
     start_date: datetime | None = None
@@ -44,6 +46,7 @@ class TaskOut(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None)
+    internal_notes: str | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID
     assigned_to: uuid.UUID | None = None
@@ -51,6 +54,7 @@ class TaskCreate(BaseModel):
     ga_note_origin_id: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
     start_date: datetime | None = None
@@ -64,12 +68,14 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = Field(default=None)
+    internal_notes: str | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
     start_date: datetime | None = None

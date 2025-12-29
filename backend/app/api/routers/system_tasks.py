@@ -84,11 +84,13 @@ async def _sync_task_for_template(
         task = Task(
             title=template.title,
             description=template.description,
+            internal_notes=template.internal_notes,
             department_id=template.department_id,
             assigned_to=template.default_assignee_id,
             created_by=creator_id,
             status=TaskStatus.TODO,
             priority=template.priority or TaskPriority.MEDIUM,
+            finish_period=template.finish_period,
             system_template_origin_id=template.id,
             start_date=datetime.now(timezone.utc),
             is_active=active_value,
@@ -99,8 +101,10 @@ async def _sync_task_for_template(
 
     task.title = template.title
     task.description = template.description
+    task.internal_notes = template.internal_notes
     task.department_id = template.department_id
     task.assigned_to = template.default_assignee_id
+    task.finish_period = template.finish_period
     task.is_active = active_value
     if task.priority is None:
         task.priority = template.priority or TaskPriority.MEDIUM
@@ -120,6 +124,7 @@ def _task_row_to_out(
         template_id=template.id,
         title=task.title,
         description=task.description,
+        internal_notes=template.internal_notes,
         department_id=task.department_id,
         default_assignee_id=task.assigned_to,
         assignees=assignees,
@@ -128,6 +133,7 @@ def _task_row_to_out(
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
         priority=priority_value,
+        finish_period=task.finish_period,
         is_active=task.is_active,
         created_at=task.created_at,
     )
@@ -250,6 +256,7 @@ async def create_system_task_template(
     template = SystemTaskTemplate(
         title=payload.title,
         description=payload.description,
+        internal_notes=payload.internal_notes,
         department_id=payload.department_id,
         default_assignee_id=assignee_ids[0] if assignee_ids else None,
         frequency=payload.frequency,
@@ -257,6 +264,7 @@ async def create_system_task_template(
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
         priority=priority_value,
+        finish_period=payload.finish_period,
         is_active=payload.is_active if payload.is_active is not None else True,
     )
 
@@ -359,6 +367,8 @@ async def update_system_task_template(
         template.title = payload.title
     if payload.description is not None:
         template.description = payload.description
+    if "internal_notes" in fields_set:
+        template.internal_notes = payload.internal_notes
     if department_set:
         template.department_id = payload.department_id
     if assignee_set and assignee_ids is not None:
@@ -373,6 +383,8 @@ async def update_system_task_template(
         template.month_of_year = payload.month_of_year
     if payload.priority is not None:
         template.priority = payload.priority
+    if "finish_period" in fields_set:
+        template.finish_period = payload.finish_period
     if payload.is_active is not None:
         template.is_active = payload.is_active
 

@@ -29,7 +29,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
-import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskPriority, User } from "@/lib/types"
+import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
@@ -38,7 +38,7 @@ const FREQUENCY_OPTIONS = [
   { value: "DAILY", label: "Daily" },
   { value: "WEEKLY", label: "Weekly" },
   { value: "MONTHLY", label: "Monthly" },
-  { value: "3_MONTHS", label: "Quarterly" },
+  { value: "3_MONTHS", label: "Every 3 months" },
   { value: "6_MONTHS", label: "Every 6 months" },
   { value: "YEARLY", label: "Yearly" },
 ] as const
@@ -52,28 +52,28 @@ const FREQUENCY_CHIPS = [
   { id: "DAILY", label: "Daily" },
   { id: "WEEKLY", label: "Weekly" },
   { id: "MONTHLY", label: "Monthly" },
-  { id: "3_6_MONTHS", label: "Quarterly/6 months" },
+  { id: "3_6_MONTHS", label: "Every 3/6 months" },
   { id: "YEARLY", label: "Yearly" },
 ]
 
-const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
+const PRIORITY_OPTIONS: TaskPriority[] = ["MEDIUM", "HIGH"]
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  LOW: "Low",
-  MEDIUM: "Medium",
+  LOW: "Normal",
+  MEDIUM: "Normal",
   HIGH: "High",
   URGENT: "High",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-yellow-300 bg-yellow-100 text-yellow-800",
+  LOW: "border-orange-300 bg-orange-100 text-orange-800",
   MEDIUM: "border-orange-300 bg-orange-100 text-orange-800",
   HIGH: "border-red-200 bg-red-50 text-red-700",
   URGENT: "border-red-200 bg-red-50 text-red-700",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-yellow-500",
+  LOW: "border-l-orange-500",
   MEDIUM: "border-l-orange-500",
   HIGH: "border-l-red-600",
   URGENT: "border-l-red-600",
@@ -87,9 +87,28 @@ const PRIORITY_CHIPS = [
 const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
   HIGH: 0,
   MEDIUM: 1,
-  LOW: 2,
+  LOW: 1,
   URGENT: 0,
 }
+
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+
+const FINISH_PERIOD_LABELS: Record<TaskFinishPeriod, string> = {
+  AM: "AM",
+  PM: "PM",
+}
+
+const INTERNAL_NOTE_FIELDS = [
+  { key: "REGJ", label: "REGJ", placeholder: "0" },
+  { key: "PATH", label: "PATH", placeholder: "S:\\03_HOMEFACE\\04_PLAN PRODUTION\\2023" },
+  { key: "CHECK", label: "CHECK", placeholder: "S:\\03_HOMEFACE\\01_CHECKLISTA\\01_CHECKLISTA" },
+  { key: "TRAINING", label: "TRAINING", placeholder: "Z:\\03_HOMEFACE\\04_PLAN PRODUCTION" },
+  { key: "BZ GROUP", label: "BZ GROUP", placeholder: "! BO PLAN PRODUCTION (PR 15:00 - H 10:00)" },
+]
+
+const INTERNAL_QA_FIELDS = [
+  { key: "QA", label: "Question/Answer", placeholder: "" },
+]
 
 const WEEK_DAYS = [
   { value: "0", label: "Monday" },
@@ -160,8 +179,37 @@ function csvEscape(value: unknown): string {
 
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
+  if (value === "LOW") return "MEDIUM"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
   return "MEDIUM"
+}
+
+function parseInternalNotes(value?: string | null): Record<string, string> {
+  const result: Record<string, string> = {}
+  if (!value) return result
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  for (const line of lines) {
+    const idx = line.indexOf(":")
+    if (idx === -1) continue
+    const key = line.slice(0, idx).trim()
+    const rest = line.slice(idx + 1).trim()
+    if (!key) continue
+    const normalizedKey = key.toLowerCase().replace(/\s+/g, "")
+    if (normalizedKey === "qa" || normalizedKey === "question/answer" || normalizedKey === "questionanswer") {
+      result.QA = rest
+      continue
+    }
+    if (normalizedKey === "q1" || normalizedKey === "q2" || normalizedKey === "q3" || normalizedKey === "q4" || normalizedKey === "q5") {
+      const existing = result.QA ? `${result.QA}\n${rest}` : rest
+      result.QA = existing
+      continue
+    }
+    result[key] = rest
+  }
+  return result
 }
 
 export default function SystemTasksPage() {
@@ -185,8 +233,11 @@ export default function SystemTasksPage() {
   const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
   const [assigneeQuery, setAssigneeQuery] = React.useState("")
   const [assigneeError, setAssigneeError] = React.useState<string | null>(null)
+  const [assigneeOpen, setAssigneeOpen] = React.useState(false)
   const [frequency, setFrequency] = React.useState<SystemTaskFrequency>("DAILY")
   const [priority, setPriority] = React.useState<TaskPriority>("MEDIUM")
+  const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
+  const [internalNotes, setInternalNotes] = React.useState<Record<string, string>>({})
   const [dayOfWeek, setDayOfWeek] = React.useState("")
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
@@ -198,8 +249,11 @@ export default function SystemTasksPage() {
   const [editAssigneeIds, setEditAssigneeIds] = React.useState<string[]>([])
   const [editAssigneeQuery, setEditAssigneeQuery] = React.useState("")
   const [editAssigneeError, setEditAssigneeError] = React.useState<string | null>(null)
+  const [editAssigneeOpen, setEditAssigneeOpen] = React.useState(false)
   const [editFrequency, setEditFrequency] = React.useState<SystemTaskFrequency>("DAILY")
   const [editPriority, setEditPriority] = React.useState<TaskPriority>("MEDIUM")
+  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
+  const [editInternalNotes, setEditInternalNotes] = React.useState<Record<string, string>>({})
   const [editDayOfWeek, setEditDayOfWeek] = React.useState("")
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
@@ -239,7 +293,7 @@ export default function SystemTasksPage() {
   React.useEffect(() => {
     if (departments.length === 0) return
     if (!departmentId) {
-      setDepartmentId(user?.department_id || departments[0].id)
+      setDepartmentId(ALL_DEPARTMENTS_VALUE)
     }
   }, [departments, departmentId, user?.department_id])
 
@@ -254,6 +308,8 @@ export default function SystemTasksPage() {
     setEditAssigneeIds(editIds)
     setEditFrequency(editTemplate.frequency)
     setEditPriority(normalizePriority(editTemplate.priority))
+    setEditFinishPeriod(editTemplate.finish_period ?? "AM")
+    setEditInternalNotes(parseInternalNotes(editTemplate.internal_notes))
     setEditDayOfWeek(editTemplate.day_of_week != null ? String(editTemplate.day_of_week) : "")
     setEditDayOfMonth(editTemplate.day_of_month != null ? String(editTemplate.day_of_month) : "")
     setEditMonthOfYear(
@@ -384,6 +440,14 @@ export default function SystemTasksPage() {
     setEditAssigneeError(null)
   }
 
+  const removeAssignee = (id: string) => {
+    handleAssigneesChange(assigneeIds.filter((item) => item !== id))
+  }
+
+  const removeEditAssignee = (id: string) => {
+    handleEditAssigneesChange(editAssigneeIds.filter((item) => item !== id))
+  }
+
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
     for (const value of FREQUENCY_VALUES) {
@@ -506,6 +570,8 @@ export default function SystemTasksPage() {
         assignees: assigneeIds,
         frequency,
         priority,
+        finish_period: finishPeriod,
+        internal_notes: buildInternalNotes(internalNotes),
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
         day_of_month: dayOfMonth ? Number(dayOfMonth) : null,
         month_of_year:
@@ -529,6 +595,8 @@ export default function SystemTasksPage() {
       setMonthOfYear(EMPTY_VALUE)
       setFrequency("DAILY")
       setPriority("MEDIUM")
+      setFinishPeriod("AM")
+      setInternalNotes({})
       setIsActive(true)
       await load()
     } finally {
@@ -570,6 +638,8 @@ export default function SystemTasksPage() {
         assignees: editAssigneeIds,
         frequency: editFrequency,
         priority: editPriority,
+        finish_period: editFinishPeriod,
+        internal_notes: buildInternalNotes(editInternalNotes),
         day_of_week: editDayOfWeek ? Number(editDayOfWeek) : null,
         day_of_month: editDayOfMonth ? Number(editDayOfMonth) : null,
         month_of_year:
@@ -660,6 +730,24 @@ export default function SystemTasksPage() {
     return `${list.length} people`
   }
 
+  const setInternalNoteValue = (
+    key: string,
+    value: string,
+    setter: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  ) => {
+    setter((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const buildInternalNotes = (values: Record<string, string>) => {
+    const lines = [...INTERNAL_NOTE_FIELDS, ...INTERNAL_QA_FIELDS]
+      .map(({ key, label }) => {
+        const raw = values[key]?.trim()
+        return raw ? `${label}: ${raw}` : ""
+      })
+      .filter(Boolean)
+    return lines.length ? lines.join("\n") : null
+  }
+
   const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
     const rows = templates.filter((template) => {
       if (mode === "active") return template.is_active
@@ -673,6 +761,7 @@ export default function SystemTasksPage() {
       "DepartmentCode",
       "Frequency",
       "Priority",
+      "FinishPeriod",
       "DayOfWeek",
       "DayOfMonth",
       "MonthOfYear",
@@ -689,6 +778,7 @@ export default function SystemTasksPage() {
         department ? department.code : "",
         template.frequency,
         normalizePriority(template.priority),
+        template.finish_period || "",
         template.day_of_week ?? "",
         template.day_of_month ?? "",
         template.month_of_year ?? "",
@@ -715,6 +805,7 @@ export default function SystemTasksPage() {
     const hasHeader = header.includes("title") || header.includes("frequency")
     const dataRows = hasHeader ? rows.slice(1) : rows
     const noHeaderHasPriority = !hasHeader && (dataRows[0]?.length ?? 0) >= 11
+    const noHeaderHasFinishPeriod = !hasHeader && (dataRows[0]?.length ?? 0) >= 12
 
     const getIndex = (name: string, aliases: string[] = []) => {
       const target = [name, ...aliases]
@@ -726,11 +817,46 @@ export default function SystemTasksPage() {
     const idxDepartment = hasHeader ? getIndex("department", ["departmentcode", "department_code"]) : 2
     const idxFrequency = hasHeader ? getIndex("frequency") : 3
     const idxPriority = hasHeader ? getIndex("priority") : noHeaderHasPriority ? 4 : -1
-    const idxDayOfWeek = hasHeader ? getIndex("dayofweek", ["day_of_week"]) : noHeaderHasPriority ? 5 : 4
-    const idxDayOfMonth = hasHeader ? getIndex("dayofmonth", ["day_of_month"]) : noHeaderHasPriority ? 6 : 5
-    const idxMonthOfYear = hasHeader ? getIndex("monthofyear", ["month_of_year"]) : noHeaderHasPriority ? 7 : 6
-    const idxAssignee = hasHeader ? getIndex("defaultassignee", ["assignee"]) : noHeaderHasPriority ? 8 : 7
-    const idxActive = hasHeader ? getIndex("active") : noHeaderHasPriority ? 9 : 8
+    const idxFinishPeriod = hasHeader
+      ? getIndex("finishperiod", ["finish_period", "finish"])
+      : noHeaderHasFinishPeriod
+        ? 5
+        : -1
+    const idxDayOfWeek = hasHeader
+      ? getIndex("dayofweek", ["day_of_week"])
+      : noHeaderHasFinishPeriod
+        ? 6
+        : noHeaderHasPriority
+          ? 5
+          : 4
+    const idxDayOfMonth = hasHeader
+      ? getIndex("dayofmonth", ["day_of_month"])
+      : noHeaderHasFinishPeriod
+        ? 7
+        : noHeaderHasPriority
+          ? 6
+          : 5
+    const idxMonthOfYear = hasHeader
+      ? getIndex("monthofyear", ["month_of_year"])
+      : noHeaderHasFinishPeriod
+        ? 8
+        : noHeaderHasPriority
+          ? 7
+          : 6
+    const idxAssignee = hasHeader
+      ? getIndex("defaultassignee", ["assignee"])
+      : noHeaderHasFinishPeriod
+        ? 9
+        : noHeaderHasPriority
+          ? 8
+          : 7
+    const idxActive = hasHeader
+      ? getIndex("active")
+      : noHeaderHasFinishPeriod
+        ? 10
+        : noHeaderHasPriority
+          ? 9
+          : 8
 
     const normalize = (value: string) => value.trim().toLowerCase()
     const frequencyForValue = (value: string): SystemTaskFrequency | null => {
@@ -761,6 +887,18 @@ export default function SystemTasksPage() {
       if (raw.includes("high")) return "HIGH"
       if (raw.includes("medium")) return "MEDIUM"
       if (raw.includes("low")) return "LOW"
+      return null
+    }
+
+    const finishPeriodForValue = (value: string): TaskFinishPeriod | null => {
+      const raw = normalize(value)
+      if (!raw) return null
+      const upper = value.trim().toUpperCase()
+      if ((FINISH_PERIOD_OPTIONS as string[]).includes(upper)) {
+        return upper as TaskFinishPeriod
+      }
+      if (raw.includes("am")) return "AM"
+      if (raw.includes("pm")) return "PM"
       return null
     }
 
@@ -821,6 +959,8 @@ export default function SystemTasksPage() {
       if (!frequencyValue) continue
       const priorityValue =
         idxPriority >= 0 ? priorityForValue(row[idxPriority] || "") : null
+      const finishPeriodValue =
+        idxFinishPeriod >= 0 ? finishPeriodForValue(row[idxFinishPeriod] || "") : null
 
       const payload = {
         title,
@@ -829,6 +969,7 @@ export default function SystemTasksPage() {
         default_assignee_id: assigneeIdForValue(row[idxAssignee] || ""),
         frequency: frequencyValue,
         priority: priorityValue,
+        finish_period: finishPeriodValue,
         day_of_week: dayOfWeekForValue(row[idxDayOfWeek] || ""),
         day_of_month: row[idxDayOfMonth] ? Number(row[idxDayOfMonth]) : null,
         month_of_year: row[idxMonthOfYear] ? Number(row[idxMonthOfYear]) : null,
@@ -884,36 +1025,38 @@ export default function SystemTasksPage() {
                 + Add Task
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle>Add system task</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Department</Label>
-                  <Select value={departmentId} onValueChange={handleDepartmentChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select department" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.name} ({dept.code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Select value={departmentId} onValueChange={handleDepartmentChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                        {departments.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.id}>
+                            {dept.name} ({dept.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Title</Label>
+                    <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Textarea value={description} onChange={(event) => setDescription(event.target.value)} />
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Repeat</Label>
                     <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
@@ -924,6 +1067,21 @@ export default function SystemTasksPage() {
                         {FREQUENCY_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Finish by</Label>
+                    <Select value={finishPeriod} onValueChange={(value) => setFinishPeriod(value as TaskFinishPeriod)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FINISH_PERIOD_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {FINISH_PERIOD_LABELS[value]}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -944,24 +1102,24 @@ export default function SystemTasksPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {frequency === "WEEKLY" ? (
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Day of week</Label>
-                      <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {WEEK_DAYS.map((day) => (
-                            <SelectItem key={day.value} value={day.value}>
-                              {day.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : null}
                 </div>
+                {frequency === "WEEKLY" ? (
+                  <div className="space-y-2">
+                    <Label>Day of week</Label>
+                    <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEK_DAYS.map((day) => (
+                          <SelectItem key={day.value} value={day.value}>
+                            {day.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
                 {(frequency === "MONTHLY" ||
                   frequency === "YEARLY" ||
                   frequency === "3_MONTHS" ||
@@ -996,6 +1154,37 @@ export default function SystemTasksPage() {
                     </div>
                   </div>
                 )}
+                <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                    More details
+                  </summary>
+                  <div className="mt-3 space-y-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {INTERNAL_NOTE_FIELDS.map((field) => (
+                        <div key={field.key} className="space-y-1">
+                          <Label className="text-sm">{field.label}</Label>
+                          <Input
+                            value={internalNotes[field.key] || ""}
+                            onChange={(event) =>
+                              setInternalNoteValue(field.key, event.target.value, setInternalNotes)
+                            }
+                            placeholder={field.placeholder}
+                            className="placeholder:text-muted-foreground/60"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                      <Textarea
+                        value={internalNotes.QA || ""}
+                        onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
+                        placeholder="Type any questions/answers..."
+                        className="placeholder:text-muted-foreground/60"
+                      />
+                    </div>
+                  </div>
+                </details>
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
                   {departmentId === ALL_DEPARTMENTS_VALUE ? (
@@ -1005,67 +1194,77 @@ export default function SystemTasksPage() {
                       </p>
                     ) : (
                       <p className="text-[13px] text-muted-foreground">
-                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                        When you select an owner, the department will appear here.
                       </p>
                     )
                   ) : null}
-                  <div className="space-y-2 rounded-md border border-border/60 p-2">
-                    <Input
-                      value={assigneeQuery}
-                      onChange={(event) => setAssigneeQuery(event.target.value)}
-                      placeholder="Search users..."
-                    />
-                    <div className="max-h-40 space-y-1 overflow-y-auto">
-                      {filteredAssignees.length ? (
-                        filteredAssignees.map((person) => {
-                          const isSelected = assigneeIds.includes(person.id)
-                          const nextIds = isSelected
-                            ? assigneeIds.filter((id) => id !== person.id)
-                            : [...assigneeIds, person.id]
-                          return (
-                            <div
-                              key={person.id}
-                              className="flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left hover:bg-muted/60"
-                              onClick={() => handleAssigneesChange(nextIds)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault()
-                                  handleAssigneesChange(nextIds)
-                                }
-                              }}
+                  <div className="rounded-lg border border-border/60 bg-white p-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {assigneeIds.map((id) => {
+                        const person = userMap.get(id)
+                        const label = person?.full_name || person?.username || person?.email || id
+                        return (
+                          <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => removeAssignee(id)}
+                              aria-label={`Remove ${label}`}
                             >
-                              <Checkbox checked={isSelected} />
-                              <span>{person.full_name || person.username || person.email}</span>
-                            </div>
-                          )
-                        })
-                      ) : (
-                        <div className="text-base text-muted-foreground">No users found.</div>
-                      )}
+                              ×
+                            </button>
+                          </span>
+                        )
+                      })}
+                      <Input
+                        value={assigneeQuery}
+                        onChange={(event) => setAssigneeQuery(event.target.value)}
+                        onFocus={() => setAssigneeOpen(true)}
+                        onBlur={() => setTimeout(() => setAssigneeOpen(false), 120)}
+                        placeholder="Search users..."
+                        className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
+                      />
                     </div>
-                    {assigneeIds.length ? (
-                      <div className="text-base text-muted-foreground">
-                        Selected:{" "}
-                        {assigneeIds
-                          .map((id) => {
-                            const person = userMap.get(id)
-                            return person?.full_name || person?.username || person?.email || id
+                    {assigneeOpen ? (
+                      <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
+                        {filteredAssignees.length ? (
+                          filteredAssignees.map((person) => {
+                            const isSelected = assigneeIds.includes(person.id)
+                            const nextIds = isSelected
+                              ? assigneeIds.filter((item) => item !== person.id)
+                              : [...assigneeIds, person.id]
+                            return (
+                              <button
+                                key={person.id}
+                                type="button"
+                                className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => handleAssigneesChange(nextIds)}
+                              >
+                                <span>{person.full_name || person.username || person.email}</span>
+                                {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
+                              </button>
+                            )
                           })
-                          .join(", ")}
+                        ) : (
+                          <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
+                        )}
                       </div>
                     ) : null}
-                    {assigneeError ? (
-                      <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
-                    ) : null}
                   </div>
+                  {assigneeError ? (
+                    <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
                   <span className="text-base">Active</span>
                 </div>
-                <div className="flex justify-end">
+                <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
+                  <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                    Cancel
+                  </Button>
                   <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
                     {saving ? "Saving..." : "Save task"}
                   </Button>
@@ -1080,30 +1279,32 @@ export default function SystemTasksPage() {
               if (!open) setEditTemplate(null)
             }}
           >
-            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle>Edit system task</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Department</Label>
-                  <Select value={editDepartmentId} onValueChange={handleEditDepartmentChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select department" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.name} ({dept.code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Select value={editDepartmentId} onValueChange={handleEditDepartmentChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                        {departments.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.id}>
+                            {dept.name} ({dept.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Title</Label>
+                    <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
@@ -1112,7 +1313,7 @@ export default function SystemTasksPage() {
                     onChange={(event) => setEditDescription(event.target.value)}
                   />
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Repeat</Label>
                     <Select
@@ -1126,6 +1327,24 @@ export default function SystemTasksPage() {
                         {FREQUENCY_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Finish by</Label>
+                    <Select
+                      value={editFinishPeriod}
+                      onValueChange={(value) => setEditFinishPeriod(value as TaskFinishPeriod)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FINISH_PERIOD_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {FINISH_PERIOD_LABELS[value]}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1146,24 +1365,24 @@ export default function SystemTasksPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {editFrequency === "WEEKLY" ? (
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Day of week</Label>
-                      <Select value={editDayOfWeek} onValueChange={setEditDayOfWeek}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {WEEK_DAYS.map((day) => (
-                            <SelectItem key={day.value} value={day.value}>
-                              {day.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : null}
                 </div>
+                {editFrequency === "WEEKLY" ? (
+                  <div className="space-y-2">
+                    <Label>Day of week</Label>
+                    <Select value={editDayOfWeek} onValueChange={setEditDayOfWeek}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEK_DAYS.map((day) => (
+                          <SelectItem key={day.value} value={day.value}>
+                            {day.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
                 {(editFrequency === "MONTHLY" ||
                   editFrequency === "YEARLY" ||
                   editFrequency === "3_MONTHS" ||
@@ -1198,6 +1417,37 @@ export default function SystemTasksPage() {
                     </div>
                   </div>
                 )}
+                <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                    More details
+                  </summary>
+                  <div className="mt-3 space-y-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {INTERNAL_NOTE_FIELDS.map((field) => (
+                        <div key={field.key} className="space-y-1">
+                          <Label className="text-sm">{field.label}</Label>
+                          <Input
+                            value={editInternalNotes[field.key] || ""}
+                            onChange={(event) =>
+                              setInternalNoteValue(field.key, event.target.value, setEditInternalNotes)
+                            }
+                            placeholder={field.placeholder}
+                            className="placeholder:text-muted-foreground/60"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                      <Textarea
+                        value={editInternalNotes.QA || ""}
+                        onChange={(event) => setInternalNoteValue("QA", event.target.value, setEditInternalNotes)}
+                        placeholder="Type any questions/answers..."
+                        className="placeholder:text-muted-foreground/60"
+                      />
+                    </div>
+                  </div>
+                </details>
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
                   {editDepartmentId === ALL_DEPARTMENTS_VALUE ? (
@@ -1207,67 +1457,77 @@ export default function SystemTasksPage() {
                       </p>
                     ) : (
                       <p className="text-[13px] text-muted-foreground">
-                        Kur zgjedh owner, departamenti do te shfaqet ketu.
+                        When you select an owner, the department will appear here.
                       </p>
                     )
                   ) : null}
-                  <div className="space-y-2 rounded-md border border-border/60 p-2">
-                    <Input
-                      value={editAssigneeQuery}
-                      onChange={(event) => setEditAssigneeQuery(event.target.value)}
-                      placeholder="Search users..."
-                    />
-                    <div className="max-h-40 space-y-1 overflow-y-auto">
-                      {filteredEditAssignees.length ? (
-                        filteredEditAssignees.map((person) => {
-                          const isSelected = editAssigneeIds.includes(person.id)
-                          const nextIds = isSelected
-                            ? editAssigneeIds.filter((id) => id !== person.id)
-                            : [...editAssigneeIds, person.id]
-                          return (
-                            <div
-                              key={person.id}
-                              className="flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left hover:bg-muted/60"
-                              onClick={() => handleEditAssigneesChange(nextIds)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault()
-                                  handleEditAssigneesChange(nextIds)
-                                }
-                              }}
+                  <div className="rounded-lg border border-border/60 bg-white p-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {editAssigneeIds.map((id) => {
+                        const person = userMap.get(id)
+                        const label = person?.full_name || person?.username || person?.email || id
+                        return (
+                          <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => removeEditAssignee(id)}
+                              aria-label={`Remove ${label}`}
                             >
-                              <Checkbox checked={isSelected} />
-                              <span>{person.full_name || person.username || person.email}</span>
-                            </div>
-                          )
-                        })
-                      ) : (
-                        <div className="text-base text-muted-foreground">No users found.</div>
-                      )}
+                              ×
+                            </button>
+                          </span>
+                        )
+                      })}
+                      <Input
+                        value={editAssigneeQuery}
+                        onChange={(event) => setEditAssigneeQuery(event.target.value)}
+                        onFocus={() => setEditAssigneeOpen(true)}
+                        onBlur={() => setTimeout(() => setEditAssigneeOpen(false), 120)}
+                        placeholder="Search users..."
+                        className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
+                      />
                     </div>
-                    {editAssigneeIds.length ? (
-                      <div className="text-base text-muted-foreground">
-                        Selected:{" "}
-                        {editAssigneeIds
-                          .map((id) => {
-                            const person = userMap.get(id)
-                            return person?.full_name || person?.username || person?.email || id
+                    {editAssigneeOpen ? (
+                      <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
+                        {filteredEditAssignees.length ? (
+                          filteredEditAssignees.map((person) => {
+                            const isSelected = editAssigneeIds.includes(person.id)
+                            const nextIds = isSelected
+                              ? editAssigneeIds.filter((item) => item !== person.id)
+                              : [...editAssigneeIds, person.id]
+                            return (
+                              <button
+                                key={person.id}
+                                type="button"
+                                className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => handleEditAssigneesChange(nextIds)}
+                              >
+                                <span>{person.full_name || person.username || person.email}</span>
+                                {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
+                              </button>
+                            )
                           })
-                          .join(", ")}
+                        ) : (
+                          <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
+                        )}
                       </div>
                     ) : null}
-                    {editAssigneeError ? (
-                      <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
-                    ) : null}
                   </div>
+                  {editAssigneeError ? (
+                    <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
                   <span className="text-base">Active</span>
                 </div>
-                <div className="flex justify-end">
+                <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
+                  <Button variant="outline" onClick={() => setEditOpen(false)}>
+                    Cancel
+                  </Button>
                   <Button
                     disabled={editSaving || !editTitle.trim() || !editDepartmentId}
                     onClick={() => void submitEdit()}
@@ -1382,12 +1642,13 @@ export default function SystemTasksPage() {
               </CardHeader>
               <CardContent className="space-y-0.5 pt-0">
                 <div className="overflow-x-auto">
-                  <div className="min-w-[760px] space-y-1">
-                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border bg-muted/30 px-2 py-2 text-[14px] font-semibold uppercase leading-tight tracking-[0.05em] text-slate-500">
+                  <div className="min-w-[880px] space-y-1">
+                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border bg-muted/30 px-2 py-2 text-[14px] font-semibold uppercase leading-tight tracking-[0.05em] text-slate-500">
                       <div>Task Title</div>
                       <div>Department</div>
                       <div>Owner</div>
                       <div className="whitespace-nowrap">Repeat</div>
+                      <div className="whitespace-nowrap">Finish by</div>
                       <div className="whitespace-nowrap">Priority</div>
                       <div className="text-center whitespace-nowrap text-muted-foreground" />
                     </div>
@@ -1413,7 +1674,7 @@ export default function SystemTasksPage() {
                             ) : null}
                             <div
                               className={cn(
-                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-l-4 px-3 py-3 text-[14px] font-normal leading-tight",
+                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-l-4 px-3 py-3 text-[14px] font-normal leading-tight",
                                 PRIORITY_BORDER_STYLES[priorityValue]
                               )}
                             >
@@ -1435,6 +1696,9 @@ export default function SystemTasksPage() {
                                 {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
                               </div>
                               <div className="text-[14px] font-normal text-black whitespace-nowrap">{frequencyLabel}</div>
+                              <div className="text-[14px] font-normal text-black whitespace-nowrap">
+                                {template.finish_period || "-"}
+                              </div>
                               <div className="flex items-center justify-start">
                                 <Badge
                                   variant="outline"

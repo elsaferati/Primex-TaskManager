@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import FrequencyType, TaskPriority
+from app.models.enums import FrequencyType, TaskFinishPeriod, TaskPriority
 
 
 class SystemTaskTemplate(Base):
@@ -17,6 +17,7 @@ class SystemTaskTemplate(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(String)
+    internal_notes: Mapped[str | None] = mapped_column(String)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
     default_assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
@@ -34,6 +35,9 @@ class SystemTaskTemplate(Base):
 
     priority: Mapped[TaskPriority | None] = mapped_column(
         Enum(TaskPriority, name="task_priority"), nullable=True, server_default="MEDIUM"
+    )
+    finish_period: Mapped[TaskFinishPeriod | None] = mapped_column(
+        Enum(TaskFinishPeriod, name="finish_period"), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

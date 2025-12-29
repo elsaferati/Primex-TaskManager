@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
 
 
 class Task(Base):
@@ -19,6 +19,7 @@ class Task(Base):
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String)
+    internal_notes: Mapped[str | None] = mapped_column(String)
 
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), index=True
@@ -38,6 +39,9 @@ class Task(Base):
     )
     priority: Mapped[TaskPriority] = mapped_column(
         Enum(TaskPriority, name="task_priority"), nullable=False, server_default="MEDIUM"
+    )
+    finish_period: Mapped[TaskFinishPeriod | None] = mapped_column(
+        Enum(TaskFinishPeriod, name="finish_period"), nullable=True
     )
     phase: Mapped[ProjectPhaseStatus] = mapped_column(
         Enum(ProjectPhaseStatus, name="project_phase_status"),

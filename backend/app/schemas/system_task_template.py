@@ -5,13 +5,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType, TaskPriority
+from app.models.enums import FrequencyType, TaskFinishPeriod, TaskPriority
 
 
 class SystemTaskTemplateOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None = None
+    internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
@@ -20,6 +21,7 @@ class SystemTaskTemplateOut(BaseModel):
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
     is_active: bool
     created_at: datetime
 
@@ -27,6 +29,7 @@ class SystemTaskTemplateOut(BaseModel):
 class SystemTaskTemplateCreate(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     description: str | None = None
+    internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
@@ -35,12 +38,14 @@ class SystemTaskTemplateCreate(BaseModel):
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
     is_active: bool | None = None
 
 
 class SystemTaskTemplateUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=200)
     description: str | None = None
+    internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
@@ -49,5 +54,6 @@ class SystemTaskTemplateUpdate(BaseModel):
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None
+    finish_period: TaskFinishPeriod | None = None
     is_active: bool | None = None
 
