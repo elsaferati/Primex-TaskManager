@@ -16,9 +16,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!loading && !user) router.push("/login")
   }, [loading, user, router])
 
-  if (loading || !user) {
+  if (loading) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading...</div>
   }
+  if (!user) return null
 
   return (
     <div className="flex min-h-screen">

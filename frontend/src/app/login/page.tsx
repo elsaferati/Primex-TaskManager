@@ -25,8 +25,12 @@ export default function LoginPage() {
     try {
       await login(email, password)
       router.push("/dashboard")
-    } catch {
-      setError("Invalid credentials")
+    } catch (error) {
+      if (error instanceof Error && error.message === "network_error") {
+        setError("Server unavailable. Make sure the backend is running.")
+      } else {
+        setError("Invalid credentials")
+      }
     } finally {
       setSubmitting(false)
     }

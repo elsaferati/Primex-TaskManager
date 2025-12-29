@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -12,6 +12,8 @@ from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, TaskStatus, UserRole
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
+from app.models.ga_note import GaNote
+from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
@@ -283,4 +285,33 @@ async def advance_project_phase(
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_200_OK)
+async def delete_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can delete projects")
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.department_id is not None:
+        ensure_department_access(user, project.department_id)
+
+    await db.execute(
+        update(Meeting).where(Meeting.project_id == project.id).values(project_id=None)
+    )
+    await db.execute(
+        update(GaNote).where(GaNote.project_id == project.id).values(project_id=None)
+    )
+    await db.execute(
+        update(Task).where(Task.project_id == project.id).values(project_id=None)
+    )
+
+    await db.delete(project)
+    await db.commit()
+    return {"status": "deleted"}
 

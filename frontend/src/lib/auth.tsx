@@ -18,6 +18,7 @@ type AuthContextValue = {
 const AuthContext = React.createContext<AuthContextValue | null>(null)
 
 const ACCESS_TOKEN_KEY = "primex_access_token"
+const FETCH_TIMEOUT_MS = 8000
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -30,8 +31,18 @@ function setStoredToken(token: string | null) {
   else window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
 async function fetchMe(token: string): Promise<User> {
-  const res = await fetch(`${API_HTTP_URL}/auth/me`, {
+  const res = await fetchWithTimeout(`${API_HTTP_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "include",
   })
@@ -42,7 +53,7 @@ async function fetchMe(token: string): Promise<User> {
 async function refreshAccessToken(): Promise<string | null> {
   let res: Response
   try {
-    res = await fetch(`${API_HTTP_URL}/auth/refresh`, {
+    res = await fetchWithTimeout(`${API_HTTP_URL}/auth/refresh`, {
       method: "POST",
       credentials: "include",
     })
@@ -157,12 +168,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 
   const login = React.useCallback(async (email: string, password: string) => {
-    const res = await fetch(`${API_HTTP_URL}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ email, password }),
-    })
+    let res: Response
+    try {
+      res = await fetchWithTimeout(`${API_HTTP_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      })
+    } catch {
+      throw new Error("network_error")
+    }
     if (!res.ok) throw new Error("login_failed")
     const data = (await res.json()) as { access_token: string }
     const me = await fetchMe(data.access_token)

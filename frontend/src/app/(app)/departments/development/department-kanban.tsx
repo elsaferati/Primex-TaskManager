@@ -20,7 +20,7 @@ import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, Ta
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
-  { id: "projects", label: "Projects", tone: "sky" },
+  { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
   { id: "no-project", label: "Tasks", tone: "blue" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
@@ -283,6 +283,7 @@ export default function DepartmentKanban() {
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
@@ -530,6 +531,7 @@ export default function DepartmentKanban() {
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
+  const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -638,20 +640,34 @@ export default function DepartmentKanban() {
   }
 
   const looksLikeFullName = (title: string): boolean => {
-    const trimmed = title.trim().toUpperCase()
-    if (trimmed.length <= 6) return false // Short names are likely shortcuts
-    
+    const trimmed = title.trim()
+    if (!trimmed) return false
+    const upper = trimmed.toUpperCase()
+
     // Check for common company suffixes
-    const companyWords = ["COMPANY", "COMP", "INC", "INCORPORATED", "LLC", "LTD", "LIMITED", "CORP", "CORPORATION", "GROUP", "ENTERPRISES", "SOLUTIONS", "SYSTEMS", "SERVICES"]
-    const hasCompanyWord = companyWords.some(word => trimmed.includes(word))
-    
-    // Check for multiple words (more than 2 words suggests full name)
-    const wordCount = trimmed.split(/\s+/).filter(w => w.length > 0).length
-    
-    // Check if it's longer than typical shortcuts (more than 8 chars)
-    const isLong = trimmed.length > 8
-    
-    return hasCompanyWord || (wordCount > 2) || (isLong && wordCount > 1)
+    const companyWords = [
+      "COMPANY",
+      "COMP",
+      "INC",
+      "INCORPORATED",
+      "LLC",
+      "LTD",
+      "LIMITED",
+      "CORP",
+      "CORPORATION",
+      "GROUP",
+      "ENTERPRISES",
+      "SOLUTIONS",
+      "SYSTEMS",
+      "SERVICES",
+    ]
+    const hasCompanyWord = companyWords.some((word) => upper.includes(word))
+
+    // Check for multiple words or long titles (shortcuts should be short).
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length
+    const isTooLong = upper.length > 6
+
+    return hasCompanyWord || wordCount > 1 || isTooLong
   }
 
   const handleProjectTitleChange = (value: string) => {
@@ -660,17 +676,11 @@ export default function DepartmentKanban() {
   }
 
   const attemptSubmitProject = () => {
-    if (!projectTitle.trim() || !department) return
-    
-    // Check if title looks like a full name
-    if (looksLikeFullName(projectTitle)) {
-      setPendingProjectTitle(projectTitle)
-      setShowTitleWarning(true)
-      return
-    }
-    
-    // If it looks like a shortcut, proceed directly
-    void submitProject()
+    const trimmedTitle = projectTitle.trim()
+    if (!trimmedTitle || !department) return
+
+    setPendingProjectTitle(trimmedTitle)
+    setShowTitleWarning(true)
   }
 
   const submitProject = async () => {
@@ -712,6 +722,32 @@ export default function DepartmentKanban() {
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
+    }
+  }
+
+  const deleteProject = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId)
+    const projectLabel = project?.title || project?.name || "this project"
+    if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
+
+    setDeletingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete project"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      toast.success("Project deleted")
+    } finally {
+      setDeletingProjectId((prev) => (prev === projectId ? null : prev))
     }
   }
 
@@ -1090,17 +1126,17 @@ export default function DepartmentKanban() {
         </Card>
 
         {activeTab === "projects" ? (
-          <div className="space-y-6">
+            <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xl font-semibold text-sky-700">Active Projects</div>
+              <div className="text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6">
+                    <Button className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl px-6">
                       + New Project
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-2xl bg-white border-sky-100 rounded-2xl">
+                  <DialogContent className="sm:max-w-2xl bg-white border-slate-200 rounded-2xl">
                     <DialogHeader>
                       <DialogTitle className="text-slate-800">Add Project</DialogTitle>
                     </DialogHeader>
@@ -1110,12 +1146,12 @@ export default function DepartmentKanban() {
                         <Input 
                           value={projectTitle} 
                           onChange={(e) => handleProjectTitleChange(e.target.value)} 
-                          className="border-sky-200 focus:border-sky-400 rounded-xl uppercase placeholder:normal-case" 
+                          className="border-slate-200 focus:border-slate-400 rounded-xl uppercase placeholder:normal-case" 
                           placeholder="Enter project shortcut (e.g., ABC, XYZ)"
                           style={{ textTransform: 'uppercase' }}
                         />
-                        <div className="text-xs text-sky-600 flex items-center gap-1.5">
-                          <span className="text-sky-500">ℹ️</span>
+                        <div className="text-xs text-slate-600 flex items-center gap-1.5">
+                          <span className="text-slate-500">i</span>
                           <span>Use a shortcut/abbreviation, not the full client name (e.g., "ABC" instead of "ABC Company")</span>
                         </div>
                       </div>
@@ -1125,13 +1161,13 @@ export default function DepartmentKanban() {
                           value={projectDescription}
                           onChange={(e) => setProjectDescription(e.target.value)}
                           placeholder="Enter the project description..."
-                          className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
                         />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Manager</Label>
                         <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                          <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Select manager" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1147,7 +1183,7 @@ export default function DepartmentKanban() {
                       <div className="space-y-2">
                         <Label className="text-slate-700">Phase</Label>
                         <Select value={projectPhase} onValueChange={setProjectPhase}>
-                          <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Phase" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1160,10 +1196,10 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
-                        <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-sky-200">
+                        <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
                         </Button>
-                        <Button disabled={!projectTitle.trim() || creatingProject} onClick={attemptSubmitProject} className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl">
+                        <Button disabled={!projectTitle.trim() || creatingProject} onClick={attemptSubmitProject} className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl">
                           {creatingProject ? "Saving..." : "Save"}
                         </Button>
                       </div>
@@ -1172,59 +1208,75 @@ export default function DepartmentKanban() {
               </Dialog>
             ) : null}
           </div>
-            <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid gap-4 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const phase = project.current_phase || "TAKIMET"
                 return (
-                  <Card key={project.id} className="bg-gradient-to-r from-sky-50/50 to-white border-l-4 border-sky-500 border-sky-100 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="h-3 w-3 rounded-full bg-sky-500 mt-2 flex-shrink-0"></div>
-                        <div>
-                          <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
-                          <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                  <Link key={project.id} href={`/projects/${project.id}`} className="group block">
+                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="h-3 w-3 rounded-full bg-slate-400 mt-2 flex-shrink-0"></div>
+                          <div>
+                            <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
+                            <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          {canDeleteProjects ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={deletingProjectId === project.id}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteProject(project.id)
+                              }}
+                              className="h-7 rounded-full border-red-200 px-3 text-xs text-red-600 hover:bg-red-50"
+                            >
+                              {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                            </Button>
+                          ) : null}
+                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs">
+                            {PHASE_LABELS[phase] || "Meetings"}
+                          </Badge>
                         </div>
                       </div>
-                      <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
-                        {PHASE_LABELS[phase] || "Meetings"}
-                      </Badge>
-                    </div>
-                    <div className="mt-4 text-xs text-slate-600">
-                      {PHASES.map((p, idx) => {
-                        const isCurrent = p === phase
-                        return (
-                          <span key={p}>
-                            <span className={isCurrent ? "text-sky-600 font-semibold" : ""}>
-                              {PHASE_LABELS[p]}
+                      <div className="mt-4 text-xs text-slate-600">
+                        {PHASES.map((p, idx) => {
+                          const isCurrent = p === phase
+                          return (
+                            <span key={p}>
+                              <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
+                                {PHASE_LABELS[p]}
+                              </span>
+                              {idx < PHASES.length - 1 ? " > " : ""}
                             </span>
-                            {idx < PHASES.length - 1 ? " → " : ""}
+                          )
+                        })}
+                      </div>
+                      <div className="mt-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {manager ? (
+                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                              {initials(manager.full_name || manager.username || "-")}
+                            </div>
+                          ) : (
+                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
+                              -
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline">
+                            View details -&gt;
                           </span>
-                        )
-                      })}
-                    </div>
-                    <div className="mt-4 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {manager ? (
-                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-100 to-rose-100 text-xs font-semibold text-sky-700 flex items-center justify-center shadow-sm">
-                            {initials(manager.full_name || manager.username || "-")}
-                          </div>
-                        ) : (
-                          <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
-                            -
-                          </div>
-                        )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Link
-                          href={`/projects/${project.id}`}
-                          className="text-sm font-semibold text-sky-600 transition-colors hover:text-sky-700 hover:underline"
-                        >
-                          View details →
-                        </Link>
-                      </div>
-                    </div>
-                  </Card>
+                    </Card>
+                  </Link>
                 )
               })}
             </div>
@@ -2263,20 +2315,25 @@ export default function DepartmentKanban() {
           <DialogContent className="sm:max-w-md bg-white border-amber-100 rounded-2xl">
             <DialogHeader>
               <DialogTitle className="text-amber-700 flex items-center gap-2">
-                <span className="text-2xl">⚠️</span>
-                <span>Possible Full Name Detected</span>
+                <span className="text-2xl">!</span>
+                <span>Confirm Project Title</span>
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="text-sm text-slate-700">
-                The title "<span className="font-semibold text-amber-700">{pendingProjectTitle}</span>" looks like it might be a full client name rather than a shortcut.
+                Please confirm the title "<span className="font-semibold text-amber-700">{pendingProjectTitle}</span>" is the correct shortcut to use.
               </div>
+              {looksLikeFullName(pendingProjectTitle) ? (
+                <div className="text-sm text-amber-700">
+                  This looks longer than a typical shortcut. Consider shortening it.
+                </div>
+              ) : null}
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                 <div className="text-sm font-semibold text-amber-800 mb-2">Remember:</div>
                 <div className="text-xs text-amber-700 space-y-1">
-                  <div>• Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
-                  <div>• Keep it short and simple (typically 2-6 characters)</div>
-                  <div>• Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
+                  <div>- Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
+                  <div>- Keep it short and simple (typically 2-6 characters)</div>
+                  <div>- Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
                 </div>
               </div>
               <div className="text-sm text-slate-600">
