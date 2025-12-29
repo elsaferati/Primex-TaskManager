@@ -33,6 +33,7 @@ import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPer
 
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
+const END_OF_MONTH_VALUE = "__end_of_month__"
 
 const FREQUENCY_OPTIONS = [
   { value: "DAILY", label: "Daily" },
@@ -66,17 +67,17 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-orange-300 bg-orange-100 text-orange-800",
-  MEDIUM: "border-orange-300 bg-orange-100 text-orange-800",
-  HIGH: "border-red-200 bg-red-50 text-red-700",
-  URGENT: "border-red-200 bg-red-50 text-red-700",
+  LOW: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
+  MEDIUM: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
+  HIGH: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
+  URGENT: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-orange-500",
-  MEDIUM: "border-l-orange-500",
-  HIGH: "border-l-red-600",
-  URGENT: "border-l-red-600",
+  LOW: "border-l-[#F97316]",
+  MEDIUM: "border-l-[#F97316]",
+  HIGH: "border-l-[#EF4444]",
+  URGENT: "border-l-[#EF4444]",
 }
 
 const PRIORITY_CHIPS = [
@@ -116,13 +117,16 @@ const WEEK_DAYS = [
   { value: "2", label: "Wednesday" },
   { value: "3", label: "Thursday" },
   { value: "4", label: "Friday" },
-  { value: "5", label: "Saturday" },
-  { value: "6", label: "Sunday" },
 ]
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   value: String(index + 1).padStart(2, "0"),
   label: new Date(0, index).toLocaleString("en-US", { month: "long" }),
+}))
+
+const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
+  value: String(index + 1),
+  label: String(index + 1),
 }))
 
 type Section = {
@@ -226,6 +230,8 @@ export default function SystemTasksPage() {
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null)
+  const [searchQuery, setSearchQuery] = React.useState("")
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -291,6 +297,17 @@ export default function SystemTasksPage() {
   }, [load])
 
   React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
+
+  React.useEffect(() => {
     if (departments.length === 0) return
     if (!departmentId) {
       setDepartmentId(ALL_DEPARTMENTS_VALUE)
@@ -311,7 +328,13 @@ export default function SystemTasksPage() {
     setEditFinishPeriod(editTemplate.finish_period ?? "AM")
     setEditInternalNotes(parseInternalNotes(editTemplate.internal_notes))
     setEditDayOfWeek(editTemplate.day_of_week != null ? String(editTemplate.day_of_week) : "")
-    setEditDayOfMonth(editTemplate.day_of_month != null ? String(editTemplate.day_of_month) : "")
+    setEditDayOfMonth(
+      editTemplate.day_of_month === 0
+        ? END_OF_MONTH_VALUE
+        : editTemplate.day_of_month != null
+          ? String(editTemplate.day_of_month)
+          : ""
+    )
     setEditMonthOfYear(
       editTemplate.month_of_year != null
         ? String(editTemplate.month_of_year).padStart(2, "0")
@@ -473,6 +496,14 @@ export default function SystemTasksPage() {
 
   const filteredTemplates = React.useMemo(() => {
     let filtered = templates
+    const query = searchQuery.trim().toLowerCase()
+    if (query) {
+      filtered = filtered.filter((template) => {
+        const title = template.title?.toLowerCase() || ""
+        const description = template.description?.toLowerCase() || ""
+        return title.includes(query) || description.includes(query)
+      })
+    }
     if (frequencyFilters.length) {
       const allowed = new Set(frequencyFilters)
       filtered = filtered.filter((template) => allowed.has(template.frequency))
@@ -482,7 +513,7 @@ export default function SystemTasksPage() {
       filtered = filtered.filter((template) => allowed.has(normalizePriority(template.priority)))
     }
     return filtered
-  }, [frequencyFilters, priorityFilters, templates])
+  }, [frequencyFilters, priorityFilters, searchQuery, templates])
 
 
   React.useEffect(() => {
@@ -573,7 +604,8 @@ export default function SystemTasksPage() {
         finish_period: finishPeriod,
         internal_notes: buildInternalNotes(internalNotes),
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
-        day_of_month: dayOfMonth ? Number(dayOfMonth) : null,
+        day_of_month:
+          dayOfMonth === END_OF_MONTH_VALUE ? 0 : dayOfMonth ? Number(dayOfMonth) : null,
         month_of_year:
           monthOfYear && monthOfYear !== EMPTY_VALUE ? Number(monthOfYear) : null,
         is_active: isActive,
@@ -641,7 +673,12 @@ export default function SystemTasksPage() {
         finish_period: editFinishPeriod,
         internal_notes: buildInternalNotes(editInternalNotes),
         day_of_week: editDayOfWeek ? Number(editDayOfWeek) : null,
-        day_of_month: editDayOfMonth ? Number(editDayOfMonth) : null,
+        day_of_month:
+          editDayOfMonth === END_OF_MONTH_VALUE
+            ? 0
+            : editDayOfMonth
+              ? Number(editDayOfMonth)
+              : null,
         month_of_year:
           editMonthOfYear && editMonthOfYear !== EMPTY_VALUE ? Number(editMonthOfYear) : null,
         is_active: editIsActive,
@@ -702,6 +739,11 @@ export default function SystemTasksPage() {
     frequencyFilters.length >= COMBINED_FREQUENCIES.length
   const allFrequenciesSelected = frequencyFilters.length === 0
   const allPrioritiesSelected = priorityFilters.length === 0
+  const frequencyFilterActive = !allFrequenciesSelected
+  const priorityFilterActive = !allPrioritiesSelected
+  const filterTriggerClass =
+    "h-8 rounded-full border border-slate-200 bg-slate-100 px-3 text-sm font-medium text-slate-700 hover:bg-slate-200"
+  const filterTriggerActiveClass = "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
   const frequencyLabel = React.useMemo(() => {
     if (allFrequenciesSelected) return "All frequencies"
     const labels: string[] = []
@@ -719,6 +761,8 @@ export default function SystemTasksPage() {
     : PRIORITY_LABELS[priorityFilters[0] as TaskPriority] || "Priority"
   const assigneeDeptNames = departmentNamesForOwnerIds(assigneeIds)
   const editAssigneeDeptNames = departmentNamesForOwnerIds(editAssigneeIds)
+  const weekendShiftHint =
+    "If the selected day falls on Saturday/Sunday, the task runs on Friday."
 
   const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
     if (!list || list.length === 0) return "-"
@@ -988,14 +1032,15 @@ export default function SystemTasksPage() {
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-lg font-semibold leading-tight">System Tasks</h3>
-          <p className="text-base leading-tight text-gray-600">
-            Department tasks organized by frequency and date.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+      <div className="rounded-lg border border-border/60 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-semibold leading-tight text-slate-900">System Tasks</h3>
+            <p className="text-sm font-normal leading-snug text-slate-500">
+              Department tasks organized by frequency and date.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -1012,16 +1057,25 @@ export default function SystemTasksPage() {
             disabled={!canCreate}
             onClick={() => fileInputRef.current?.click()}
             size="sm"
-            className="h-7 px-2 text-base"
+            className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
           >
             Import Excel
           </Button>
-          <Button variant="outline" onClick={() => exportTemplatesCSV("all")} size="sm" className="h-7 px-2 text-base">
+          <Button
+            variant="outline"
+            onClick={() => exportTemplatesCSV("all")}
+            size="sm"
+            className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+          >
             Export All
           </Button>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" disabled={!canCreate} size="sm" className="h-7 px-2 text-base">
+              <Button
+                disabled={!canCreate}
+                size="sm"
+                className="h-9 bg-blue-600 px-3 text-sm text-white hover:bg-blue-700"
+              >
                 + Add Task
               </Button>
             </DialogTrigger>
@@ -1127,14 +1181,20 @@ export default function SystemTasksPage() {
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Day of month</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={31}
-                        value={dayOfMonth}
-                        onChange={(event) => setDayOfMonth(event.target.value.replace(/[^0-9]/g, ""))}
-                        placeholder="1-31"
-                      />
+                      <Select value={dayOfMonth} onValueChange={setDayOfMonth}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={END_OF_MONTH_VALUE}>End of month</SelectItem>
+                          {DAY_OF_MONTH_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
                     </div>
                     <div className="space-y-2">
                       <Label>Month (optional)</Label>
@@ -1390,14 +1450,20 @@ export default function SystemTasksPage() {
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Day of month</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={31}
-                        value={editDayOfMonth}
-                        onChange={(event) => setEditDayOfMonth(event.target.value.replace(/[^0-9]/g, ""))}
-                        placeholder="1-31"
-                      />
+                      <Select value={editDayOfMonth} onValueChange={setEditDayOfMonth}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={END_OF_MONTH_VALUE}>End of month</SelectItem>
+                          {DAY_OF_MONTH_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
                     </div>
                     <div className="space-y-2">
                       <Label>Month (optional)</Label>
@@ -1542,112 +1608,148 @@ export default function SystemTasksPage() {
             <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
           ) : null}
         </div>
-      </div>
-
-      <div className="rounded-lg border border-border/70 bg-gradient-to-br from-muted/80 to-muted p-2 shadow-none">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-7 rounded-full px-2 text-base font-medium">
-                Repeat: {frequencyLabel}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-64">
-              <DropdownMenuLabel>Repeat</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {FREQUENCY_CHIPS.map((chip) => {
-                const isAll = chip.id === "all"
-                const isCombined = chip.id === "3_6_MONTHS"
-                const active = isAll
-                  ? allFrequenciesSelected
-                  : isCombined
-                    ? combinedSelected
-                    : frequencyFilters.includes(chip.id as SystemTaskFrequency)
-                const count = isAll
-                  ? templates.length
-                  : isCombined
-                    ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
-                    : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={chip.id}
-                    checked={active}
-                    onCheckedChange={() =>
-                      toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
-                    }
-                  >
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="relative flex min-w-[220px] flex-1 items-center">
+            <span className="pointer-events-none absolute left-3 text-slate-400">
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                <path
+                  d="M14.5 14.5L18 18"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <circle cx="8.75" cy="8.75" r="5.75" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </span>
+            <Input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by task name..."
+              className="h-9 border-slate-200 bg-white pl-9 pr-16 text-sm"
+            />
+            <span className="pointer-events-none absolute right-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-500">
+              Ctrl K
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(filterTriggerClass, frequencyFilterActive && filterTriggerActiveClass)}
+                >
+                  Frequency: {frequencyLabel}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-64">
+                <DropdownMenuLabel>Frequency</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {FREQUENCY_CHIPS.map((chip) => {
+                  const isAll = chip.id === "all"
+                  const isCombined = chip.id === "3_6_MONTHS"
+                  const active = isAll
+                    ? allFrequenciesSelected
+                    : isCombined
+                      ? combinedSelected
+                      : frequencyFilters.includes(chip.id as SystemTaskFrequency)
+                  const count = isAll
+                    ? templates.length
+                    : isCombined
+                      ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
+                      : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={chip.id}
+                      checked={active}
+                      onCheckedChange={() =>
+                        toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
+                      }
+                    >
+                      <span className="flex flex-1 items-center justify-between">
+                        <span>{chip.label}</span>
+                        <span className="text-base text-muted-foreground">({count})</span>
+                      </span>
+                    </DropdownMenuCheckboxItem>
+                  )
+                })}
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={frequencyMultiSelect}
+                  onCheckedChange={(value) => setFrequencyMultiSelect(Boolean(value))}
+                >
+                  Multi-select frequencies
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(filterTriggerClass, priorityFilterActive && filterTriggerActiveClass)}
+                >
+                  Priority: {priorityLabel}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56">
+                <DropdownMenuLabel>Priority</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup
+                  value={allPrioritiesSelected ? "all" : (priorityFilters[0] as TaskPriority)}
+                  onValueChange={(value) => togglePriorityFilter(value as TaskPriority | "all")}
+                >
+                  <DropdownMenuRadioItem value="all">
                     <span className="flex flex-1 items-center justify-between">
-                      <span>{chip.label}</span>
-                      <span className="text-base text-muted-foreground">({count})</span>
-                    </span>
-                  </DropdownMenuCheckboxItem>
-                )
-              })}
-              <DropdownMenuSeparator />
-              <DropdownMenuCheckboxItem
-                checked={frequencyMultiSelect}
-                onCheckedChange={(value) => setFrequencyMultiSelect(Boolean(value))}
-              >
-                Multi-select frequencies
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-7 rounded-full px-2 text-base font-medium">
-                Priority: {priorityLabel}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56">
-              <DropdownMenuLabel>Priority</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuRadioGroup
-                value={allPrioritiesSelected ? "all" : (priorityFilters[0] as TaskPriority)}
-                onValueChange={(value) => togglePriorityFilter(value as TaskPriority | "all")}
-              >
-                <DropdownMenuRadioItem value="all">
-                  <span className="flex flex-1 items-center justify-between">
-                    <span>All</span>
-                    <span className="text-base text-muted-foreground">({templates.length})</span>
-                  </span>
-                </DropdownMenuRadioItem>
-                {PRIORITY_OPTIONS.map((value) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <span className="flex flex-1 items-center justify-between">
-                      <span>{PRIORITY_LABELS[value]}</span>
-                      <span className="text-base text-muted-foreground">({priorityCounts.get(value) ?? 0})</span>
+                      <span>All</span>
+                      <span className="text-base text-muted-foreground">({templates.length})</span>
                     </span>
                   </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" onClick={resetFilters} size="sm" className="h-7 px-2 text-base font-medium">
-            Clear filters
-          </Button>
+                  {PRIORITY_OPTIONS.map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <span className="flex flex-1 items-center justify-between">
+                        <span>{PRIORITY_LABELS[value]}</span>
+                        <span className="text-base text-muted-foreground">({priorityCounts.get(value) ?? 0})</span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost"
+              onClick={resetFilters}
+              size="sm"
+              className="h-8 px-3 text-sm text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              Clear filters
+            </Button>
+          </div>
         </div>
       </div>
 
       {loading ? (
         <div className="text-base text-muted-foreground">Loading...</div>
       ) : sections.length ? (
-        <div id="system-task-sections" className="space-y-1.5">
+        <div id="system-task-sections" className="space-y-2">
           {sections.map((section) => (
-            <Card key={section.id} className="rounded-md border-border/70 shadow-none">
-              <CardHeader className="flex items-center justify-between py-1.5">
-                <CardTitle className="text-base font-semibold text-gray-800">
+            <Card key={section.id} className="rounded-lg border border-border/70 bg-white shadow-sm">
+              <CardHeader className="flex items-center justify-between border-b border-border/70 bg-slate-50 px-4 py-2">
+                <CardTitle className="text-base font-semibold text-slate-800">
                   {section.label}
                 </CardTitle>
                 <Badge variant="secondary">{section.templates.length}</Badge>
               </CardHeader>
-              <CardContent className="space-y-0.5 pt-0">
+              <CardContent className="space-y-0.5 pt-3">
                 <div className="overflow-x-auto">
                   <div className="min-w-[880px] space-y-1">
-                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border bg-muted/30 px-2 py-2 text-[14px] font-semibold uppercase leading-tight tracking-[0.05em] text-slate-500">
+                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
                       <div>Task Title</div>
                       <div>Department</div>
                       <div>Owner</div>
-                      <div className="whitespace-nowrap">Repeat</div>
+                      <div className="whitespace-nowrap">Frequency</div>
                       <div className="whitespace-nowrap">Finish by</div>
                       <div className="whitespace-nowrap">Priority</div>
                       <div className="text-center whitespace-nowrap text-muted-foreground" />
@@ -1674,16 +1776,16 @@ export default function SystemTasksPage() {
                             ) : null}
                             <div
                               className={cn(
-                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-l-4 px-3 py-3 text-[14px] font-normal leading-tight",
+                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
                                 PRIORITY_BORDER_STYLES[priorityValue]
                               )}
                             >
                               <div className="space-y-0">
-                                <div className="text-[15px] font-medium leading-tight text-black">
+                                <div className="text-[15px] font-semibold leading-tight text-slate-900">
                                   {template.title}
                                 </div>
                               </div>
-                              <div className="text-[14px] font-normal text-black">
+                              <div className="text-[14px] font-normal text-slate-700">
                                 {department
                                   ? department.name
                                   : assigneeDeptNames.length
@@ -1692,17 +1794,17 @@ export default function SystemTasksPage() {
                                       ? "NONE"
                                       : "ALL"}
                               </div>
-                              <div className="text-[14px] font-normal text-black">
+                              <div className="text-[14px] font-normal text-slate-700">
                                 {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
                               </div>
-                              <div className="text-[14px] font-normal text-black whitespace-nowrap">{frequencyLabel}</div>
-                              <div className="text-[14px] font-normal text-black whitespace-nowrap">
+                              <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">{frequencyLabel}</div>
+                              <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">
                                 {template.finish_period || "-"}
                               </div>
                               <div className="flex items-center justify-start">
                                 <Badge
                                   variant="outline"
-                                  className={cn("border px-2 py-0.5 text-[14px]", PRIORITY_BADGE_STYLES[priorityValue])}
+                                  className={cn("border px-2 py-0.5 text-[13px]", PRIORITY_BADGE_STYLES[priorityValue])}
                                 >
                                   {PRIORITY_LABELS[priorityValue]}
                                 </Badge>
@@ -1711,9 +1813,9 @@ export default function SystemTasksPage() {
                                 {canEdit ? (
                                   <Button
                                     type="button"
-                                    variant="outline"
+                                    variant="ghost"
                                     size="sm"
-                                    className="h-7 px-2 text-base"
+                                    className="h-7 px-2 text-sm text-slate-600 hover:bg-blue-50 hover:text-blue-700"
                                     onClick={() => startEdit(template)}
                                   >
                                     Edit
