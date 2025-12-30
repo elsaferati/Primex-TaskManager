@@ -8,6 +8,7 @@ from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.holiday import Holiday
 from app.models.meeting import Meeting
+from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -30,6 +31,7 @@ __all__ = [
     "GaNote",
     "Holiday",
     "Meeting",
+    "MicrosoftToken",
     "Notification",
     "Project",
     "ProjectMember",

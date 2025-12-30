@@ -141,6 +141,7 @@ export default function ProjectPage() {
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
+  const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
   const [membersOpen, setMembersOpen] = React.useState(false)
@@ -156,6 +157,7 @@ export default function ProjectPage() {
     MEETING_CHECKLIST_ITEMS.map((content, index) => ({
       id: `meeting-${index}`,
       content,
+      answer: "",
       isChecked: false,
     }))
   )
@@ -352,15 +354,40 @@ export default function ProjectPage() {
     }
   }
 
+  const updateTaskStatus = async (taskId: string, nextStatus: Task["status"]) => {
+    const previousStatus = tasks.find((task) => task.id === taskId)?.status
+    setUpdatingTaskId(taskId)
+    setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)))
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      if (!res.ok) {
+        throw new Error("Failed to update status")
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+    } catch {
+      setTasks((prev) =>
+        prev.map((task) => (task.id === taskId ? { ...task, status: previousStatus } : task))
+      )
+      toast.error("Failed to update task status")
+    } finally {
+      setUpdatingTaskId(null)
+    }
+  }
+
   const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
   }
 
-  const updateMeetingChecklistItem = (itemId: string, content: string) => {
+  const updateMeetingChecklistItem = (itemId: string, answer: string) => {
     setMeetingChecklist((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, content } : item))
+      prev.map((item) => (item.id === itemId ? { ...item, answer } : item))
     )
   }
 
@@ -421,18 +448,18 @@ export default function ProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
+    const isMeetingPhase = (project.current_phase || "TAKIMET") === "TAKIMET"
     const openTasks = tasks.filter(
       (task) => task.status !== "DONE" && task.status !== "CANCELLED"
     )
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
-    if (openTasks.length || uncheckedItems.length) {
-      if (openTasks.length && uncheckedItems.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura dhe ${uncheckedItems.length} checklist te pa kryera.`)
-      } else if (openTasks.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura.`)
-      } else {
-        toast.error(`Ka ${uncheckedItems.length} checklist te pa kryera.`)
-      }
+    const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
+    if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
+      const blockers: string[] = []
+      if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
+      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
+      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
+      toast.error(`Ka ${blockers.join(" dhe ")}.`)
       return
     }
     setAdvancingPhase(true)
@@ -519,7 +546,12 @@ export default function ProjectPage() {
   const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
   const visibleTabs = React.useMemo(() => {
     if (phaseValue === "TAKIMET") {
-      return [...MEETING_TABS, ...TABS.filter((tab) => tab.id === "ga")]
+      return [
+        ...MEETING_TABS.filter((tab) => tab.id === "meeting-focus"),
+        ...TABS.filter((tab) => tab.id === "description"),
+        ...MEETING_TABS.filter((tab) => tab.id === "meeting-checklist"),
+        ...TABS.filter((tab) => tab.id === "ga"),
+      ]
     }
     if (phaseValue === "PLANIFIKIMI") {
       return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
@@ -629,22 +661,33 @@ export default function ProjectPage() {
             </Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
-            {PHASES.map((p, idx) => {
-              const isViewed = p === activePhase
-              const isCurrent = p === phase
-              return (
-                <span key={p}>
-                  <button
-                    type="button"
-                    onClick={() => setViewedPhase(p)}
-                    className={[
-                      "transition-colors",
-                      isViewed ? "text-blue-600 font-medium" : isCurrent ? "text-foreground" : "text-muted-foreground",
-                    ].join(" ")}
-                    aria-pressed={isViewed}
-                  >
-                    {PHASE_LABELS[p]}
-                  </button>
+          {PHASES.map((p, idx) => {
+            const isViewed = p === activePhase
+            const isCurrent = p === phase
+            const isLocked = idx > phaseIndex
+            return (
+              <span key={p}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isLocked) return
+                    setViewedPhase(p)
+                  }}
+                  className={[
+                    "transition-colors",
+                    isLocked
+                      ? "text-slate-300 cursor-not-allowed"
+                      : isViewed
+                        ? "text-blue-600 font-medium"
+                        : isCurrent
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                  ].join(" ")}
+                  aria-pressed={isViewed}
+                  disabled={isLocked}
+                >
+                  {PHASE_LABELS[p]}
+                </button>
                   {idx < PHASES.length - 1 ? " -> " : ""}
                 </span>
               )
@@ -716,14 +759,17 @@ export default function ProjectPage() {
           <div className="mt-3 space-y-3">
             {meetingChecklist.map((item) => (
               <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                <div className="flex-1 space-y-2">
+                  <div className="text-sm font-semibold text-slate-700">{item.content}</div>
+                  <Input
+                    value={item.answer}
+                    onChange={(e) => updateMeetingChecklistItem(item.id, e.target.value)}
+                    placeholder="Write notes..."
+                  />
+                </div>
                 <Checkbox
                   checked={item.isChecked}
                   onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
-                />
-                <Input
-                  value={item.content}
-                  onChange={(e) => updateMeetingChecklistItem(item.id, e.target.value)}
-                  className="flex-1"
                 />
               </div>
             ))}
@@ -889,7 +935,22 @@ export default function ProjectPage() {
                         {assigned?.full_name || assigned?.username || "-"}
                       </div>
                       <div>
-                        <Badge variant="secondary">{statusLabel(task.status)}</Badge>
+                        <Select
+                          value={task.status || "TODO"}
+                          onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
+                          disabled={updatingTaskId === task.id}
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TASK_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {statusLabel(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="text-muted-foreground">-</div>
                     </div>

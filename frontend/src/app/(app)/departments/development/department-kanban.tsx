@@ -29,6 +29,17 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
+type MicrosoftEvent = {
+  id: string
+  subject: string | null
+  starts_at: string | null
+  ends_at: string | null
+  location?: string | null
+  is_all_day: boolean
+  organizer?: string | null
+  body_preview?: string | null
+}
+
 const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
 
 const PHASE_LABELS: Record<string, string> = {
@@ -228,6 +239,21 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function formatMsEventWindow(event: MicrosoftEvent) {
+  if (!event.starts_at) return "Time not set"
+  const start = new Date(event.starts_at)
+  if (Number.isNaN(start.getTime())) return "Time not set"
+  const end = event.ends_at ? new Date(event.ends_at) : null
+  const dateLabel = start.toLocaleDateString("en-US", { month: "short", day: "2-digit" })
+  if (event.is_all_day) return `${dateLabel} - All day`
+  const startTime = start.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  const endTime =
+    end && !Number.isNaN(end.getTime())
+      ? end.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+      : null
+  return endTime ? `${dateLabel} ${startTime} - ${endTime}` : `${dateLabel} ${startTime}`
+}
+
 function toMeetingInputValue(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
@@ -247,6 +273,7 @@ export default function DepartmentKanban() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get("tab")
+  const msParam = searchParams.get("ms")
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
@@ -258,6 +285,10 @@ export default function DepartmentKanban() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
+  const [msConnected, setMsConnected] = React.useState(false)
+  const [msEvents, setMsEvents] = React.useState<MicrosoftEvent[]>([])
+  const [loadingMsEvents, setLoadingMsEvents] = React.useState(false)
+  const [checkingMsStatus, setCheckingMsStatus] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
@@ -370,7 +401,6 @@ export default function DepartmentKanban() {
       setActiveTab(normalizedTab as TabId)
     }
   }, [isTabId, normalizedTab])
-
 
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const departmentUsers = React.useMemo(
@@ -947,6 +977,84 @@ export default function DepartmentKanban() {
     setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
     toast.success("Meeting deleted")
   }
+
+  const loadMicrosoftStatus = React.useCallback(async () => {
+    setCheckingMsStatus(true)
+    try {
+      const res = await apiFetch("/microsoft/status")
+      if (!res.ok) {
+        setMsConnected(false)
+        return
+      }
+      const data = (await res.json()) as { connected?: boolean }
+      setMsConnected(Boolean(data.connected))
+    } finally {
+      setCheckingMsStatus(false)
+    }
+  }, [apiFetch])
+
+  const connectMicrosoft = async () => {
+    const redirectTo = `${window.location.origin}${pathname}?tab=meetings`
+    const res = await apiFetch(`/microsoft/authorize-url?redirect_to=${encodeURIComponent(redirectTo)}`)
+    if (!res.ok) {
+      toast.error("Unable to start Microsoft auth")
+      return
+    }
+    const data = (await res.json()) as { url?: string }
+    if (data.url) {
+      window.location.href = data.url
+    } else {
+      toast.error("Missing Microsoft auth URL")
+    }
+  }
+
+  const disconnectMicrosoft = async () => {
+    const res = await apiFetch("/microsoft/disconnect", { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to disconnect Microsoft calendar")
+      return
+    }
+    setMsConnected(false)
+    setMsEvents([])
+  }
+
+  const loadMicrosoftEvents = React.useCallback(async () => {
+    if (!msConnected) return
+    setLoadingMsEvents(true)
+    try {
+      const start = new Date()
+      const end = new Date(start)
+      end.setDate(end.getDate() + 30)
+      const res = await apiFetch(
+        `/microsoft/events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+      )
+      if (!res.ok) {
+        toast.error("Failed to load Microsoft events")
+        return
+      }
+      const data = (await res.json()) as MicrosoftEvent[]
+      setMsEvents(data)
+    } finally {
+      setLoadingMsEvents(false)
+    }
+  }, [apiFetch, msConnected])
+
+  React.useEffect(() => {
+    if (activeTab !== "meetings") return
+    void loadMicrosoftStatus()
+  }, [activeTab, loadMicrosoftStatus])
+
+  React.useEffect(() => {
+    if (msParam === "connected") {
+      toast.success("Microsoft calendar connected")
+      void loadMicrosoftStatus()
+    }
+  }, [msParam, loadMicrosoftStatus])
+
+  React.useEffect(() => {
+    if (!msConnected || activeTab !== "meetings") return
+    void loadMicrosoftEvents()
+  }, [msConnected, activeTab, loadMicrosoftEvents])
 
   const submitGaNote = async () => {
     if (!newGaNote.trim()) return
@@ -2189,6 +2297,69 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
               ) : null}
+              <div className="rounded-xl border border-slate-200 bg-white/70 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
+                  <div className="flex items-center gap-2">
+                    {msConnected ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void loadMicrosoftEvents()}
+                        disabled={loadingMsEvents}
+                        className="rounded-full border-slate-200"
+                      >
+                        {loadingMsEvents ? "Syncing..." : "Sync"}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void connectMicrosoft()}
+                        disabled={checkingMsStatus}
+                        className="rounded-full border-slate-200"
+                      >
+                        {checkingMsStatus ? "Checking..." : "Connect"}
+                      </Button>
+                    )}
+                    {msConnected ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void disconnectMicrosoft()}
+                        className="rounded-full text-slate-500"
+                      >
+                        Disconnect
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                {msConnected ? (
+                  loadingMsEvents ? (
+                    <div className="text-xs text-muted-foreground">Loading events...</div>
+                  ) : msEvents.length ? (
+                    <div className="space-y-2">
+                      {msEvents.map((event) => (
+                        <div key={event.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <div className="text-sm font-semibold text-slate-800">
+                            {event.subject || "Untitled event"}
+                          </div>
+                          <div className="text-xs text-slate-600">{formatMsEventWindow(event)}</div>
+                          {event.location ? (
+                            <div className="text-xs text-slate-500">Location: {event.location}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">No upcoming events.</div>
+                  )
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    Connect your Microsoft account to read calendar events.
+                  </div>
+                )}
+              </div>
               <div className="space-y-3">
                 {visibleMeetings.length ? (
                   visibleMeetings.map((meeting) => {

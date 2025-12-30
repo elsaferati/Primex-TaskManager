@@ -141,6 +141,7 @@ export default function DevelopmentProjectPage() {
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
+  const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
   const [membersOpen, setMembersOpen] = React.useState(false)
@@ -271,6 +272,31 @@ export default function DevelopmentProjectPage() {
       toast.success("Task created")
     } finally {
       setCreating(false)
+    }
+  }
+
+  const updateTaskStatus = async (taskId: string, nextStatus: Task["status"]) => {
+    const previousStatus = tasks.find((task) => task.id === taskId)?.status
+    setUpdatingTaskId(taskId)
+    setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)))
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      if (!res.ok) {
+        throw new Error("Failed to update status")
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+    } catch {
+      setTasks((prev) =>
+        prev.map((task) => (task.id === taskId ? { ...task, status: previousStatus } : task))
+      )
+      toast.error("Failed to update task status")
+    } finally {
+      setUpdatingTaskId(null)
     }
   }
 
@@ -421,16 +447,16 @@ export default function DevelopmentProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
+    const isMeetingPhase = (project.current_phase || "TAKIMET") === "TAKIMET"
     const openTasks = tasks.filter((task) => task.status !== "DONE" && task.status !== "CANCELLED")
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
-    if (openTasks.length || uncheckedItems.length) {
-      if (openTasks.length && uncheckedItems.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura dhe ${uncheckedItems.length} checklist te pa kryera.`)
-      } else if (openTasks.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura.`)
-      } else {
-        toast.error(`Ka ${uncheckedItems.length} checklist te pa kryera.`)
-      }
+    const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
+    if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
+      const blockers: string[] = []
+      if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
+      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
+      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
+      toast.error(`Ka ${blockers.join(" dhe ")}.`)
       return
     }
     setAdvancingPhase(true)
@@ -517,7 +543,11 @@ export default function DevelopmentProjectPage() {
   const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
   const visibleTabs = React.useMemo(() => {
     if (phaseValue === "TAKIMET") {
-      return [...MEETING_TABS, ...TABS.filter((tab) => tab.id === "ga")]
+      return [
+        ...TABS.filter((tab) => tab.id === "description"),
+        ...MEETING_TABS,
+        ...TABS.filter((tab) => tab.id === "ga"),
+      ]
     }
     if (phaseValue === "PLANIFIKIMI") {
       return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
@@ -640,20 +670,27 @@ export default function DevelopmentProjectPage() {
             {PHASES.map((p, idx) => {
               const isViewed = p === activePhase
               const isCurrent = p === phase
+              const isLocked = idx > phaseIndex
               return (
                       <React.Fragment key={p}>
                   <button
                     type="button"
-                    onClick={() => setViewedPhase(p)}
+                    onClick={() => {
+                      if (isLocked) return
+                      setViewedPhase(p)
+                    }}
                     className={[
                             "px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200",
-                            isViewed
-                              ? "bg-sky-500 text-white shadow-md shadow-sky-200/50 scale-105"
-                              : isCurrent
-                                ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80 border border-sky-200"
-                                : "bg-white/60 text-slate-500 hover:bg-sky-50/80 border border-slate-200 hover:border-sky-200",
+                            isLocked
+                              ? "bg-white/60 text-slate-300 border border-slate-200 cursor-not-allowed"
+                              : isViewed
+                                ? "bg-sky-500 text-white shadow-md shadow-sky-200/50 scale-105"
+                                : isCurrent
+                                  ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80 border border-sky-200"
+                                  : "bg-white/60 text-slate-500 hover:bg-sky-50/80 border border-slate-200 hover:border-sky-200",
                     ].join(" ")}
                     aria-pressed={isViewed}
+                    disabled={isLocked}
                   >
                     {PHASE_LABELS[p]}
                   </button>
@@ -690,14 +727,14 @@ export default function DevelopmentProjectPage() {
         <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
           <div className="px-6 py-1">
             <div className="flex flex-wrap gap-1">
-          {visibleTabs.map((tab) => {
-            const isActive = tab.id === activeTab
-            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
+              {visibleTabs.map((tab) => {
+                const isActive = tab.id === activeTab
+                const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
                     className={[
                       "relative px-5 py-3 text-sm font-medium rounded-xl transition-all duration-200",
                       tab.id === "ga" ? "ml-auto" : "",
@@ -705,16 +742,14 @@ export default function DevelopmentProjectPage() {
                         ? "bg-sky-100 text-sky-700 shadow-sm"
                         : "text-slate-500 hover:text-sky-600 hover:bg-sky-50/50",
                     ].join(" ")}
-              >
-                {label}
-                    {isActive && (
-                      <span className="absolute inset-x-2 bottom-1.5 h-0.5 bg-sky-500 rounded-full" />
-                    )}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+                  >
+                    {label}
+                    {isActive && <span className="absolute inset-x-2 bottom-1.5 h-0.5 bg-sky-500 rounded-full" />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </Card>
 
         {/* Tab Content Area with Soft Blue Design */}
@@ -942,7 +977,22 @@ export default function DevelopmentProjectPage() {
                             {assigned?.full_name || assigned?.username || "-"}
                           </div>
                           <div>
-                            <Badge className="bg-sky-100 text-sky-700 border-sky-200">{statusLabel(task.status)}</Badge>
+                            <Select
+                              value={task.status || "TODO"}
+                              onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
+                              disabled={updatingTaskId === task.id}
+                            >
+                              <SelectTrigger className="h-8 border-sky-200 focus:border-sky-400 rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {TASK_STATUSES.map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {statusLabel(status)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="text-slate-500">-</div>
                         </div>

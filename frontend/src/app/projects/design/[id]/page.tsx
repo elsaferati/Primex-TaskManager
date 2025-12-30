@@ -421,16 +421,16 @@ export default function DesignProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
+    const isMeetingPhase = (project.current_phase || "BRIEFING") === "BRIEFING"
     const openTasks = tasks.filter((task) => task.status !== "DONE")
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
-    if (openTasks.length || uncheckedItems.length) {
-      if (openTasks.length && uncheckedItems.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura dhe ${uncheckedItems.length} checklist te pa kryera.`)
-      } else if (openTasks.length) {
-        toast.error(`Ka ${openTasks.length} detyra te hapura.`)
-      } else {
-        toast.error(`Ka ${uncheckedItems.length} checklist te pa kryera.`)
-      }
+    const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
+    if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
+      const blockers: string[] = []
+      if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
+      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
+      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
+      toast.error(`Ka ${blockers.join(" dhe ")}.`)
       return
     }
     setAdvancingPhase(true)
@@ -566,9 +566,28 @@ export default function DesignProjectPage() {
             {PHASES.map((p, idx) => {
               const isViewed = p === activePhase
               const isCurrent = p === phase
+              const isLocked = idx > phaseIndex
               return (
                 <span key={p}>
-                  <button type="button" onClick={() => setViewedPhase(p)} className={["transition-colors", isViewed ? "text-blue-600 font-medium" : isCurrent ? "text-foreground" : "text-muted-foreground"].join(" ")} aria-pressed={isViewed}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isLocked) return
+                      setViewedPhase(p)
+                    }}
+                    className={[
+                      "transition-colors",
+                      isLocked
+                        ? "text-slate-300 cursor-not-allowed"
+                        : isViewed
+                          ? "text-blue-600 font-medium"
+                          : isCurrent
+                            ? "text-foreground"
+                            : "text-muted-foreground",
+                    ].join(" ")}
+                    aria-pressed={isViewed}
+                    disabled={isLocked}
+                  >
                     {PHASE_LABELS[p]}
                   </button>
                   {idx < PHASES.length - 1 ? " -> " : ""}

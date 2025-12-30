@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     MS_CLIENT_ID: str | None = None
     MS_CLIENT_SECRET: str | None = None
     MS_TENANT_ID: str | None = None
+    MS_REDIRECT_URI: str | None = None
+
+    FRONTEND_URL: str = "http://localhost:3000"
 
     @property
     def cors_origin_list(self) -> list[str]:
