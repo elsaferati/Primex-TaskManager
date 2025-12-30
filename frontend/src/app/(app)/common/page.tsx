@@ -6,7 +6,7 @@ import type { User, Task, CommonEntry, GaNote, Department } from "@/lib/types"
 
 type CommonType = "late" | "absent" | "leave" | "ga" | "blocked" | "oneH" | "external" | "r1" | "feedback" | "priority"
 
-type LateItem = { person: string; date: string; until: string; note?: string }
+type LateItem = { person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { person: string; date: string; from: string; to: string; note?: string }
 type LeaveItem = { person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
 type GaNoteItem = { id: string; date: string; department: string; person?: string; note: string }
@@ -16,6 +16,231 @@ type ExternalItem = { title: string; date: string; time: string; platform: strin
 type R1Item = { title: string; date: string; owner: string; note?: string }
 type FeedbackItem = { title: string; person: string; date: string; note?: string }
 type PriorityItem = { person: string; date: string; items: Array<{ project: string; task: string; level: string }> }
+
+type SwimlaneCell = { title: string; subtitle?: string; accentClass?: string; placeholder?: boolean }
+type SwimlaneRow = {
+  id: CommonType
+  label: string
+  count: number
+  headerClass: string
+  badgeClass: string
+  items: SwimlaneCell[]
+}
+
+type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
+type MeetingColumn = { key: MeetingColumnKey; label: string; width?: string }
+type MeetingRow = { nr: number; day?: string; topic: string; owner?: string; time?: string }
+type MeetingTemplate = {
+  id: string
+  title: string
+  note?: string
+  columns: MeetingColumn[]
+  rows: MeetingRow[]
+  defaultOwner?: string
+  defaultTime?: string
+}
+
+const MEETING_TEMPLATES: MeetingTemplate[] = [
+  {
+    id: "tak-bord-ga",
+    title: "TAK BORD/GA",
+    defaultOwner: "DV",
+    defaultTime: "8:00",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "M1 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "MUNGESA/VONESA? A KEMI NDONJE MUNGESE QE E PRISH PLANIN?" },
+      { nr: 2, topic: "A KA NDRYSHIME TE PLANIT/PRIORITETEVE?" },
+      { nr: 3, topic: "KUSH ME CKA VAZHDON?" },
+      { nr: 4, topic: "EMAIL PX? primex.eu@gmail.com (KONTROLLO EDHE SPAM)" },
+      { nr: 5, topic: "EMAIL INFO PX? (KONTROLLO EDHE SPAM)" },
+      { nr: 6, topic: "EMAIL HF? (KONTROLLO EDHE SPAM)" },
+      { nr: 7, topic: "KOMENTET SHENIME GA" },
+      { nr: 8, topic: "KOMENTET BORD" },
+    ],
+  },
+  {
+    id: "orders-0805",
+    title: "ORDERS 08:05",
+    note: "!!! MOS HARRO, SEND/RECEIVE MENJEHERE PAS HAPJES SE OUTLOOK! poczta.zenbox.pl",
+    defaultOwner: "DM",
+    defaultTime: "8:05",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "M1 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "PIKAT NGA TEAMS DJE DHE SOT (!08:05-08:45 ORDERS HC)" },
+      { nr: 2, topic: "A KA DET TE REJA DHE TAKIM TE RI NGA TAKIMI DHE A JANE SHPERNDARE DETYRAT? NESE PO, KERKO DATE???" },
+      { nr: 3, topic: "CKA KEMI ME PERGADIT NGA PREZANTIMET SOT DHE NESER?" },
+      { nr: 4, topic: "A ESHTE PRANUAR TAKIMI NGA TE GJITHE PARTICIPANTET?" },
+      { nr: 5, topic: "A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
+      { nr: 6, topic: "A KEMI POROSI TE RE PER INTERLINE, CILI PRODUKT ESHTE, A ESHTE KRIJUAR ZO DHE TE PERCILLET PRODHIMI?" },
+      { nr: 7, topic: "DISKUTOHEN EMAILAT E REJA" },
+    ],
+  },
+  {
+    id: "permbl-m1",
+    title: "PERMBLEDHJA M1",
+    defaultOwner: "LM/DM",
+    defaultTime: "8:15",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "day", label: "DITA", width: "90px" },
+      { key: "topic", label: "M1 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, day: "E HENE", topic: "A ESHTE BERE KONTROLLI I TRANSFERIT TE THIRRJEVE NGA DE NE PRIMEX SIPAS TEMPLATE-IT" },
+      { nr: 2, day: "E HENE", topic: "ME MUR?" },
+      { nr: 3, day: "E HENE", topic: "A ESHTE BILANCI I GJENDJES X2 NE RREGULL?" },
+      { nr: 4, day: "E HENE", topic: "MUNGESA/VONESA SOT: PX-NESE PO?" },
+      { nr: 5, day: "CDO DITE", topic: "PUSHIM SOT: PX/HC/FD/HF" },
+      { nr: 6, day: "CDO DITE", topic: "FESTA: PASNESER/NESER/SOT: PX/HC/FD/HF/USA - NESE PO? / NESE KA DUHET TE" },
+      { nr: 7, day: "CDO DITE", topic: "LAJMROHEN KLIENTAT 1 JAVE ME HERET" },
+      { nr: 8, day: "CDO DITE", topic: "FESTA JAVA E ARDHSHME PX/PL/DE/USA" },
+      { nr: 9, day: "CDO DITE", topic: "TAKIME NGA KALENDARI SOT / NESER (A KA TAKIME TE JASHTME?)" },
+      { nr: 10, day: "E HENE", topic: "PRINTERI COLOR B&W" },
+      { nr: 11, day: "CDO DITE", topic: "ANKESA" },
+      { nr: 12, day: "CDO DITE", topic: "KERKESA" },
+      { nr: 13, day: "CDO DITE", topic: "PROPOZIME" },
+      { nr: 14, day: "CDO DITE", topic: "PIKA TE PERBASHKETA" },
+    ],
+  },
+  {
+    id: "takim-staf",
+    title: "TAKIMI ME STAF PER SQARIMIN E DET & NE FUND ME GA",
+    defaultOwner: "DV",
+    defaultTime: "8:30",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "M1 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "BZ PROJEKTET/SECILI INDIVIDUALISHT (BLIC DETYRAT)" },
+      { nr: 2, topic: "TT/VS/MST PRJK/MST FOTO/SMM" },
+      { nr: 3, topic: "KUSH NUK ESHTE BRENDA PLANIT & A KA PASUR PROBLEME?" },
+      { nr: 4, topic: "BZ PERMBLEDHJA ME GA (FIZIKISHT)- A KA DICKA TE RE QE KA SHTU GA NE PERMBLEDHJE?" },
+      { nr: 5, topic: "SOT/R1/1H, BLOK?" },
+      { nr: 6, topic: "SQARO DETYRA TE REJA TE SHPEJTA QE KRYHEN BRENDA DITES?" },
+      { nr: 7, topic: "A PRITET DICKA NE PAUZE PER KONTROLLE GA NGA ZHVILLIMI/PROJEKTET?" },
+    ],
+  },
+  {
+    id: "permbl-m2",
+    title: "PERMBLEDHJA M2",
+    defaultOwner: "DV",
+    defaultTime: "11:50",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "M2 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "PERSONALISHT SHENIMET GA?" },
+      { nr: 2, topic: "DETYRAT PERSONALISHT 1H/R1/SOT TE KRYERA DHE TE BZ" },
+      { nr: 3, topic: "URGJENCA/PROBLEME/1H!!!" },
+      { nr: 4, topic: "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?" },
+      { nr: 5, topic: "A KA DETYRA TE SHPEJTA QE KRYHEN BRENDA DITES, PER BARAZIM AM?" },
+      { nr: 6, topic: "A KA DETYRA TE REJA NGA TAKIMET EKSTERNE DHE A JANE SHPERNDARE DETYRA DHE A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
+      { nr: 7, topic: "A KA TAKIME TE REJA, KERKO DATEN E TAKIMIT TE RI?" },
+      { nr: 8, topic: "EMAIL/TAKIME A KA KERKESA TE REJA DICKA JASHTE STANDARDEVE" },
+      { nr: 9, topic: "PIKAT E BORDIT" },
+    ],
+  },
+  {
+    id: "permbl-pauze",
+    title: "PERMBLEDHJA PAS PAUZES",
+    defaultOwner: "DV",
+    defaultTime: "13:15",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "(GA) DET NGA EMAIL/ PX INFO" },
+      { nr: 2, topic: "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU" },
+      { nr: 3, topic: "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?" },
+      { nr: 4, topic: "(GA)SHENIME GA- PIKAT PAS PAUZE" },
+      { nr: 5, topic: "REPLY GA (DET. NGA STAFI) KOMENTE" },
+      { nr: 6, topic: "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?" },
+      { nr: 7, topic: "(GA) PIKAT E BORDIT" },
+      { nr: 8, topic: "(GA) PIKAT E BORDIT" },
+    ],
+  },
+  {
+    id: "permbl-1530",
+    title: "PERMBLEDHJA 15:30",
+    defaultOwner: "DV ME GA",
+    defaultTime: "15:45",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "M3 PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      {
+        nr: 1,
+        topic:
+          "BZ INDIVIDUALISHT ME SECILIN: 1. A JEMI BRENDA PLANIT? 2. SA PRODUKTE KOLONA JANE KRYER? 3. A KA PASUR NDRYSHIM TE PLANIT? 4. ME CKA VAZHDOHET NESER? 5. A JANE BERE DONE DETYRAT SE BASHKU ME PERGJEGJES?",
+        owner: "DV ME STAF",
+        time: "3:30 PM",
+      },
+      { nr: 2, topic: "PARREGULLSITE DHE DETYRAT SOT PER SOT (DISKUTOHEN EDHE WHEN ESHTE GA E NXENE)" },
+      { nr: 3, topic: "URGJENCAT" },
+      { nr: 4, topic: "MUST SOT" },
+      { nr: 5, topic: "BZ SHENIME \\ DETYRAT PERSONALISHT" },
+      { nr: 6, topic: "BZ PROGRESI TEK PROJEKTET? SA PRODUKTE/KOLONA JANE PERFUNDUAR?" },
+      { nr: 7, topic: "A KA DETYRA TE SHPEJTA QE KRYHEN BRENDA DITES, PER BARAZIM PM?" },
+      { nr: 8, topic: "A KA DETYRA TE REJA NGA TAKIMET EKSTERNE DHE A JANE SHPERNDARE DETYRA DHE A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
+      { nr: 9, topic: "NESE NUK MBAHET TAKIMI 16:20, DISKUTOHEN EDHE DET CKA JANE ME RENDESI PER NESER?" },
+      { nr: 10, topic: "EMAIL/TAKIME A KA KERKESA TE REJA DICKA JASHTE STANDARDEVE" },
+    ],
+  },
+  {
+    id: "mbyllja-dites",
+    title: "MBYLLJA E DITES",
+    defaultOwner: "DV",
+    defaultTime: "16:20",
+    columns: [
+      { key: "nr", label: "NR", width: "52px" },
+      { key: "topic", label: "PIKAT" },
+      { key: "check", label: "", width: "48px" },
+      { key: "owner", label: "WHO", width: "90px" },
+      { key: "time", label: "WHEN", width: "90px" },
+    ],
+    rows: [
+      { nr: 1, topic: "MBINGARKESE NESER (NESE PO PROPOZIM PER RIORGANIZIM)" },
+      { nr: 2, topic: "NENGARKESE NESER" },
+      { nr: 3, topic: "MUST NESER + DET. PERSONALSHT(TRELLO)" },
+      { nr: 4, topic: "DET PER NESER ME PRIORITET: PSH JAVORET, TAKIMET EXT" },
+      { nr: 5, topic: "DET NE PROCES SISTEMIT (RD/93)" },
+      { nr: 6, topic: "DET. PA PROGRES (TRELLO NOT DONE?)" },
+      { nr: 7, topic: "TAKIMET PA KRY (KONTROLLO TRELLO)" },
+      { nr: 8, topic: "NESER ME GA (KOF/takime/ankesa/kerkesa/propozime):" },
+    ],
+  },
+]
 
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
@@ -78,6 +303,7 @@ export default function CommonViewPage() {
   const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "feedback" | "gaNote">("late")
   const [formPerson, setFormPerson] = React.useState("")
   const [formDate, setFormDate] = React.useState(toISODate(new Date()))
+  const [formDelayStart, setFormDelayStart] = React.useState("08:00")
   const [formUntil, setFormUntil] = React.useState("09:00")
   const [formFrom, setFormFrom] = React.useState("08:00")
   const [formTo, setFormTo] = React.useState("12:00")
@@ -87,6 +313,8 @@ export default function CommonViewPage() {
   const [formNote, setFormNote] = React.useState("")
   const [formDept, setFormDept] = React.useState("All")
   const [gaAudience, setGaAudience] = React.useState<"all" | "department" | "person">("department")
+  const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
+  const [activeMeetingId, setActiveMeetingId] = React.useState(() => MEETING_TEMPLATES[0]?.id || "")
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
@@ -97,6 +325,16 @@ export default function CommonViewPage() {
       ),
     [users]
   )
+  const activeMeeting = React.useMemo(
+    () => MEETING_TEMPLATES.find((template) => template.id === activeMeetingId) || null,
+    [activeMeetingId]
+  )
+  const mergeOwnerColumn = React.useMemo(() => {
+    if (!activeMeeting) return false
+    const hasOwner = Boolean(activeMeeting.defaultOwner) || activeMeeting.rows.some((row) => row.owner)
+    if (!hasOwner) return false
+    return activeMeeting.rows.every((row, idx) => !row.owner || idx === 0)
+  }, [activeMeeting])
 
   // Load data on mount
   React.useEffect(() => {
@@ -150,7 +388,13 @@ export default function CommonViewPage() {
             if (e.category === "Delays") {
               // Parse until time from description
               let until = "09:00"
+              let start = "08:00"
               let note = e.description || ""
+              const startMatch = note.match(/Start:\s*(\d{1,2}:\d{2})/i)
+              if (startMatch) {
+                start = startMatch[1]
+                note = note.replace(/Start:\s*\d{1,2}:\d{2}/i, "").trim()
+              }
               const untilMatch = note.match(/Until:\s*(\d{1,2}:\d{2})/i)
               if (untilMatch) {
                 until = untilMatch[1]
@@ -163,6 +407,7 @@ export default function CommonViewPage() {
                 person: personName,
                 date,
                 until,
+                start,
                 note: note || undefined,
               })
             } else if (e.category === "Absences") {
@@ -516,6 +761,7 @@ export default function CommonViewPage() {
     setFormType("late")
     setFormPerson("")
     setFormDate(toISODate(new Date()))
+    setFormDelayStart("08:00")
     setFormUntil("09:00")
     setFormFrom("08:00")
     setFormTo("12:00")
@@ -633,8 +879,12 @@ export default function CommonViewPage() {
         let description = formNote || ""
         
         // Add time/date information based on type
-        if (formType === "late" && formUntil) {
-          description = description ? `${description}\n\nUntil: ${formUntil}` : `Until: ${formUntil}`
+        if (formType === "late") {
+          const startTime = formDelayStart || "08:00"
+          const startLine = `Start: ${startTime}`
+          const endLine = formUntil ? `Until: ${formUntil}` : ""
+          const delayLines = endLine ? `${startLine}\n${endLine}` : startLine
+          description = description ? `${description}\n\n${delayLines}` : delayLines
         } else if (formType === "absent" && formFrom && formTo) {
           description = description ? `${description}\n\nFrom: ${formFrom} - To: ${formTo}` : `From: ${formFrom} - To: ${formTo}`
         } else if (formType === "leave") {
@@ -690,10 +940,201 @@ export default function CommonViewPage() {
     return typeFilters.has(type)
   }
 
+  const buildSwimlaneCells = (items: SwimlaneCell[]) => {
+    const baseItems = items.length ? items : [{ title: "No data available.", placeholder: true }]
+    const totalCells = Math.max(3, Math.ceil(baseItems.length / 3) * 3)
+    return [
+      ...baseItems,
+      ...Array.from({ length: totalCells - baseItems.length }, () => null),
+    ]
+  }
+
+  const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
+    const lateItems: SwimlaneCell[] = filtered.late.map((x) => ({
+      title: x.person,
+      subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent delay",
+    }))
+    const absentItems: SwimlaneCell[] = filtered.absent.map((x) => ({
+      title: x.person,
+      subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent absence",
+    }))
+    const leaveItems: SwimlaneCell[] = filtered.leave.map((x) => {
+      const isRange = x.endDate && x.endDate !== x.startDate
+      const dateLabel = isRange
+        ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
+        : formatDateHuman(x.startDate)
+      const timeLabel = x.fullDay
+        ? "Full day"
+        : `${x.from || ""}${x.from && x.to ? " - " : ""}${x.to || ""}`.trim()
+      return {
+        title: x.person,
+        subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        accentClass: "swimlane-accent leave",
+      }
+    })
+    const blockedItems: SwimlaneCell[] = filtered.blocked.map((x) => ({
+      title: x.title,
+      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent blocked",
+    }))
+    const oneHItems: SwimlaneCell[] = filtered.oneH.map((x) => ({
+      title: x.title,
+      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent oneh",
+    }))
+    const gaItems: SwimlaneCell[] = filtered.ga.map((x) => ({
+      title: x.person || (x.department === "All" ? "All employees" : x.department),
+      subtitle: `${formatDateHuman(x.date)} - ${x.note}`,
+      accentClass: "swimlane-accent ga",
+    }))
+    const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
+      title: x.title,
+      subtitle: `${x.time} - ${formatDateHuman(x.date)} - ${x.platform} - ${x.owner}`,
+      accentClass: "swimlane-accent external",
+    }))
+    const r1Items: SwimlaneCell[] = filtered.r1.map((x) => ({
+      title: x.title,
+      subtitle: `Owner: ${x.owner} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent r1",
+    }))
+    const feedbackItems: SwimlaneCell[] = filtered.feedback.map((x) => ({
+      title: x.title,
+      subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent feedback",
+    }))
+    const priorityItems: SwimlaneCell[] = filtered.priority.flatMap((p) =>
+      p.items.map((item) => ({
+        title: `${p.person} - ${item.project}`,
+        subtitle: `${item.task} (${item.level}) - ${formatDateHuman(p.date)}`,
+        accentClass: "swimlane-accent priority",
+      }))
+    )
+
+    return [
+      {
+        id: "late",
+        label: "Delays",
+        count: filtered.late.length,
+        headerClass: "swimlane-header delay",
+        badgeClass: "swimlane-badge delay",
+        items: lateItems,
+      },
+      {
+        id: "absent",
+        label: "Absences",
+        count: filtered.absent.length,
+        headerClass: "swimlane-header absence",
+        badgeClass: "swimlane-badge absence",
+        items: absentItems,
+      },
+      {
+        id: "leave",
+        label: "Annual Leave",
+        count: filtered.leave.length,
+        headerClass: "swimlane-header leave",
+        badgeClass: "swimlane-badge leave",
+        items: leaveItems,
+      },
+      {
+        id: "ga",
+        label: "GA Notes",
+        count: filtered.ga.length,
+        headerClass: "swimlane-header ga",
+        badgeClass: "swimlane-badge ga",
+        items: gaItems,
+      },
+      {
+        id: "blocked",
+        label: "Blocked",
+        count: filtered.blocked.length,
+        headerClass: "swimlane-header blocked",
+        badgeClass: "swimlane-badge blocked",
+        items: blockedItems,
+      },
+      {
+        id: "oneH",
+        label: "1H Tasks",
+        count: filtered.oneH.length,
+        headerClass: "swimlane-header oneh",
+        badgeClass: "swimlane-badge oneh",
+        items: oneHItems,
+      },
+      {
+        id: "external",
+        label: "External Meetings",
+        count: filtered.external.length,
+        headerClass: "swimlane-header external",
+        badgeClass: "swimlane-badge external",
+        items: externalItems,
+      },
+      {
+        id: "r1",
+        label: "R1",
+        count: filtered.r1.length,
+        headerClass: "swimlane-header r1",
+        badgeClass: "swimlane-badge r1",
+        items: r1Items,
+      },
+      {
+        id: "feedback",
+        label: "Complaints/Requests/Proposals",
+        count: filtered.feedback.length,
+        headerClass: "swimlane-header feedback",
+        badgeClass: "swimlane-badge feedback",
+        items: feedbackItems,
+      },
+      {
+        id: "priority",
+        label: "Priority",
+        count: filtered.priority.reduce((sum, p) => sum + p.items.length, 0),
+        headerClass: "swimlane-header priority",
+        badgeClass: "swimlane-badge priority",
+        items: priorityItems,
+      },
+    ]
+  }, [filtered])
+
+  const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
+  const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
+    const node = swimlaneRowRefs.current[rowId]
+    if (!node) return
+    const delta = direction === "left" ? -320 : 320
+    node.scrollBy({ left: delta, behavior: "smooth" })
+  }, [])
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", overflow: "auto", background: "#ffffff" }}>
       <style>{`
         * { box-sizing: border-box; }
+        :root {
+          --swim-border: #d7dbe3;
+          --swim-text: #0f172a;
+          --swim-muted: #6b7280;
+          --delay-bg: #fff4e6;
+          --delay-accent: #f59e0b;
+          --absence-bg: #ffe9e9;
+          --absence-accent: #ef4444;
+          --leave-bg: #e9f9ef;
+          --leave-accent: #22c55e;
+          --blocked-bg: #ffe7ea;
+          --blocked-accent: #be123c;
+          --oneh-bg: #efe7ff;
+          --oneh-accent: #7c3aed;
+          --ga-bg: #f3f4f6;
+          --ga-accent: #9ca3af;
+          --external-bg: #e0f2fe;
+          --external-accent: #0284c7;
+          --r1-bg: #dcfce7;
+          --r1-accent: #16a34a;
+          --feedback-bg: #e2e8f0;
+          --feedback-accent: #64748b;
+          --priority-bg: #fef3c7;
+          --priority-accent: #d97706;
+          --cell-bg: #ffffff;
+          --cell-tint: #f9fafb;
+        }
         
         /* Modern Header */
         .top-header { 
@@ -760,6 +1201,284 @@ export default function CommonViewPage() {
           min-height: 0;
           background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%);
         }
+        .meeting-panel {
+          margin: 16px 24px 0;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 16px 18px;
+          box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
+        }
+        .meeting-panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .meeting-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .meeting-subtitle {
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 2px;
+        }
+        .meeting-tabs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .meeting-chip {
+          background: #f1f5f9;
+          border: 1px solid #e2e8f0;
+          color: #334155;
+          padding: 6px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .meeting-chip.active {
+          background: #2563eb;
+          border-color: #2563eb;
+          color: #ffffff;
+        }
+        .meeting-table-card {
+          margin-top: 14px;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          overflow: hidden;
+          background: #ffffff;
+        }
+        .meeting-table-header {
+          padding: 10px 12px;
+          background: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .meeting-table-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .meeting-table-meta {
+          font-size: 12px;
+          color: #64748b;
+        }
+        .meeting-note {
+          padding: 8px 10px;
+          background: #fff1f2;
+          color: #b91c1c;
+          font-size: 12px;
+          font-weight: 700;
+          border-bottom: 1px solid #fecdd3;
+        }
+        .meeting-table-wrap {
+          overflow-x: auto;
+        }
+        .meeting-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+        }
+        .meeting-table th {
+          background: #e2e8f0;
+          text-align: left;
+          padding: 8px 10px;
+          font-weight: 700;
+          color: #1f2937;
+          border-bottom: 1px solid #cbd5e1;
+        }
+        .meeting-table td {
+          border-top: 1px solid #e2e8f0;
+          padding: 8px 10px;
+          vertical-align: top;
+          color: #0f172a;
+        }
+        .meeting-check-cell {
+          text-align: center;
+          vertical-align: middle;
+        }
+        .meeting-check-cell input {
+          accent-color: #64748b;
+          width: 16px;
+          height: 16px;
+        }
+        .meeting-owner-cell {
+          text-align: center;
+          font-weight: 600;
+          color: #1f2937;
+        }
+        .meeting-empty {
+          margin-top: 12px;
+          font-size: 12px;
+          color: #94a3b8;
+        }
+
+        .swimlane-board {
+          border: 1px solid var(--swim-border);
+          border-radius: 12px;
+          overflow: hidden;
+          background: #ffffff;
+          box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+          width: 100%;
+        }
+        .swimlane-row {
+          display: flex;
+        }
+        .swimlane-row + .swimlane-row {
+          border-top: 1px solid var(--swim-border);
+        }
+        .swimlane-header {
+          width: 150px;
+          padding: 10px 10px;
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: center;
+          column-gap: 8px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+          border-right: 1px solid var(--swim-border);
+          color: var(--swim-text);
+          line-height: 1.1;
+          font-size: 12px;
+          word-break: break-word;
+        }
+        .swimlane-badge {
+          min-width: 24px;
+          height: 24px;
+          padding: 0 6px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #ffffff;
+          border: 1px solid rgba(15, 23, 42, 0.12);
+        }
+        .swimlane-content-shell {
+          position: relative;
+          flex: 1;
+          min-width: 0;
+        }
+        .swimlane-row-nav {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          display: flex;
+          gap: 4px;
+          z-index: 2;
+        }
+        .swimlane-row-nav button {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          color: #64748b;
+          border-radius: 8px;
+          width: 24px;
+          height: 24px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: none;
+          font-size: 12px;
+          opacity: 0.75;
+          transition: all 0.2s ease;
+        }
+        .swimlane-row-nav button:hover {
+          color: #334155;
+          background: #e2e8f0;
+          opacity: 1;
+        }
+        .swimlane-content-scroll {
+          overflow-x: auto;
+          padding-bottom: 6px;
+          scroll-behavior: smooth;
+          scrollbar-gutter: stable;
+          padding-right: 40px;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .swimlane-content-scroll::-webkit-scrollbar {
+          display: none;
+        }
+        .swimlane-content {
+          flex: 1;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(260px, 1fr));
+          grid-auto-flow: column;
+          grid-auto-columns: minmax(260px, 1fr);
+          min-width: 780px;
+        }
+        .swimlane-cell {
+          padding: 14px 16px;
+          border-right: 1px solid var(--swim-border);
+          border-bottom: 1px solid var(--swim-border);
+          min-height: 68px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 4px;
+          color: var(--swim-text);
+          background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
+        }
+        .swimlane-cell:nth-child(3n) {
+          border-right: 0;
+        }
+        .swimlane-cell.empty {
+          background: #ffffff;
+        }
+        .swimlane-cell.placeholder {
+          color: var(--swim-muted);
+          font-style: italic;
+        }
+        .swimlane-title {
+          font-weight: 700;
+          font-size: 14px;
+        }
+        .swimlane-subtitle {
+          font-size: 12px;
+          color: var(--swim-muted);
+        }
+        .swimlane-header.delay { background: var(--delay-bg); color: #c2410c; }
+        .swimlane-header.absence { background: var(--absence-bg); color: #b91c1c; }
+        .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
+        .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
+        .swimlane-header.oneh { background: var(--oneh-bg); color: #6d28d9; }
+        .swimlane-header.ga { background: var(--ga-bg); color: #6b7280; }
+        .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
+        .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
+        .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
+        .swimlane-header.priority { background: var(--priority-bg); color: #b45309; }
+        .swimlane-badge.delay { border-color: var(--delay-accent); color: #c2410c; }
+        .swimlane-badge.absence { border-color: var(--absence-accent); color: #b91c1c; }
+        .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
+        .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
+        .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #6d28d9; }
+        .swimlane-badge.ga { border-color: var(--ga-accent); color: #6b7280; }
+        .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
+        .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
+        .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
+        .swimlane-badge.priority { border-color: var(--priority-accent); color: #b45309; }
+        .swimlane-accent.delay { border-left: 4px solid var(--delay-accent); }
+        .swimlane-accent.absence { border-left: 4px solid var(--absence-accent); }
+        .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
+        .swimlane-accent.blocked { border-left: 4px solid var(--blocked-accent); }
+        .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
+        .swimlane-accent.ga { border-left: 4px solid var(--ga-accent); }
+        .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
+        .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
+        .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
+        .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
         
         /* Modern Toolbar */
         .common-toolbar { 
@@ -772,6 +1491,14 @@ export default function CommonViewPage() {
           align-items: center; 
           flex-shrink: 0;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        .toolbar-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .toolbar-group .chip-row {
+          margin-right: 0;
         }
         
         /* Elegant Chips */
@@ -1116,6 +1843,9 @@ export default function CommonViewPage() {
           <p>Daily/weekly view for key statuses and team priorities.</p>
         </div>
         <div>
+          <button className="btn-outline" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
+            Meeting
+          </button>
           <button className="btn-outline" type="button" onClick={() => openModal("gaNote")}>
             GA
           </button>
@@ -1126,7 +1856,8 @@ export default function CommonViewPage() {
       </header>
 
       <div className="common-toolbar">
-        <div className="chip-row">
+        <div className="toolbar-group">
+          <div className="chip-row">
           {weekISOs.map((iso) => {
             const d = fromISODate(iso)
             const label = `${alWeekdayShort(d)} ${formatDateHuman(iso)}`
@@ -1142,8 +1873,14 @@ export default function CommonViewPage() {
               </button>
             )
           })}
+          </div>
+          <label className="switch" title="When OFF: select only one. When ON: select multiple.">
+            <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
+            Multi-select (Days)
+          </label>
         </div>
-        <div className="chip-row">
+        <div className="toolbar-group">
+          <div className="chip-row">
           <button
             className={`chip ${typeFilters.size === 0 ? "active" : ""}`}
             type="button"
@@ -1221,15 +1958,12 @@ export default function CommonViewPage() {
           >
             Priority
           </button>
+          </div>
+          <label className="switch" title="When OFF: select only one. When ON: select multiple.">
+            <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
+            Multi-select (Types)
+          </label>
         </div>
-        <label className="switch" title="When OFF: select only one. When ON: select multiple.">
-          <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
-          Multi-select (Days)
-        </label>
-        <label className="switch" title="When OFF: select only one. When ON: select multiple.">
-          <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
-          Multi-select (Types)
-        </label>
         <input
           className="input"
           type="date"
@@ -1245,377 +1979,165 @@ export default function CommonViewPage() {
         </button>
       </div>
 
+      {meetingPanelOpen ? (
+        <section className="meeting-panel">
+          <div className="meeting-panel-header">
+            <div>
+              <div className="meeting-title">Meetings</div>
+              <div className="meeting-subtitle">Select a meeting to view the checklist table.</div>
+            </div>
+            <button className="btn-outline" type="button" onClick={() => setMeetingPanelOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="meeting-tabs">
+            {MEETING_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                className={`meeting-chip ${activeMeetingId === template.id ? "active" : ""}`}
+                type="button"
+                onClick={() => setActiveMeetingId(template.id)}
+              >
+                {template.title}
+              </button>
+            ))}
+          </div>
+          {activeMeeting ? (
+            <div className="meeting-table-card">
+              <div className="meeting-table-header">
+                <div className="meeting-table-title">{activeMeeting.title}</div>
+                {activeMeeting.defaultOwner || activeMeeting.defaultTime ? (
+                  <div className="meeting-table-meta">
+                    {activeMeeting.defaultOwner ? `WHO: ${activeMeeting.defaultOwner}` : null}
+                    {activeMeeting.defaultOwner && activeMeeting.defaultTime ? " | " : null}
+                    {activeMeeting.defaultTime ? `WHEN: ${activeMeeting.defaultTime}` : null}
+                  </div>
+                ) : null}
+              </div>
+              {activeMeeting.note ? <div className="meeting-note">{activeMeeting.note}</div> : null}
+              <div className="meeting-table-wrap">
+                <table className="meeting-table">
+                  <thead>
+                    <tr>
+                      {activeMeeting.columns.map((col) => (
+                        <th key={col.key} style={col.width ? { width: col.width } : undefined}>
+                          {col.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeMeeting.rows.map((row, rowIndex) => (
+                      <tr key={`${activeMeeting.id}-${row.nr}`}>
+                        {activeMeeting.columns.map((col) => {
+                          let value = ""
+                          if (col.key === "nr") value = String(row.nr)
+                          if (col.key === "day") value = row.day || ""
+                          if (col.key === "topic") value = row.topic
+                          if (col.key === "owner") {
+                            value = row.owner || (rowIndex === 0 ? activeMeeting.defaultOwner || "" : "")
+                          }
+                          if (col.key === "time") {
+                            value = row.time || (rowIndex === 0 ? activeMeeting.defaultTime || "" : "")
+                          }
+
+                          if (col.key === "owner" && mergeOwnerColumn) {
+                            if (rowIndex !== 0) return null
+                            return (
+                              <td
+                                key={`${activeMeeting.id}-${row.nr}-${col.key}`}
+                                rowSpan={activeMeeting.rows.length}
+                                className="meeting-owner-cell"
+                                style={col.width ? { width: col.width } : undefined}
+                              >
+                                {value}
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "check") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} className="meeting-check-cell">
+                                <input type="checkbox" aria-label={`Mark ${row.topic}`} />
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "topic") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                                {value}
+                              </td>
+                            )
+                          }
+
+                          return (
+                            <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                              {value}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="meeting-empty">No meeting selected.</div>
+          )}
+        </section>
+      ) : null}
+
       <div className="view-container">
-      <div className="common-grid">
-          {showCard("late") && (
-            <div className="common-card" data-common-type="late">
-              <div className="common-card-header" onClick={() => setTypeFilter("late")}>
-                <div className="common-card-title">
-                  <span className="badge bg-orange">Delays</span>
-                </div>
-                <span className="common-card-count">{filtered.late.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.late.length ? (
-                  <ul className="common-list">
-                    {filtered.late.map((x, i) => (
-                      <li key={i} className="common-item">
-                        <div className="common-item-title">
-                          {x.person} – delay until {x.until}
-                        </div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("absent") && (
-            <div className="common-card" data-common-type="absent">
-              <div className="common-card-header" onClick={() => setTypeFilter("absent")}>
-                <div className="common-card-title">
-                  <span className="badge bg-red-light">Absences</span>
-                </div>
-                <span className="common-card-count">{filtered.absent.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.absent.length ? (
-                  <ul className="common-list">
-                    {filtered.absent.map((x, i) => (
-                      <li key={i} className="common-item">
-                        <div className="common-item-title">
-                          {x.person} – absence {x.from}–{x.to}
-                        </div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("leave") && (
-            <div className="common-card" data-common-type="leave">
-              <div className="common-card-header" onClick={() => setTypeFilter("leave")}>
-                <div className="common-card-title">
-                  <span className="badge bg-green">Annual Leave</span>
-                </div>
-                <span className="common-card-count">{filtered.leave.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.leave.length ? (
-                  <ul className="common-list">
-                    {filtered.leave.map((x, i) => {
-                      const isRange = x.endDate && x.endDate !== x.startDate
-                      const dateLabel = isRange
-                        ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
-                        : formatDateHuman(x.startDate)
-                      const timeLabel = x.fullDay ? "Full day" : `${x.from || ""}${x.from ? "-" : ""}${x.to || ""}`
-                      return (
-                        <li key={i} className="common-item">
-                          <div className="common-item-title">{x.person} - PV</div>
-                          <div className="common-item-meta">
-                            <span>{dateLabel}</span>
-                            <span>•</span>
-                            <span>{timeLabel}</span>
-                            {x.note && (
-                              <>
-                                <span>•</span>
-                                <span>{x.note}</span>
-                              </>
-                            )}
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("ga") && (
-        <div className="common-card" data-common-type="ga">
-              <div className="common-card-header" onClick={() => setTypeFilter("ga")}>
-                <div className="common-card-title">
-                  <span className="badge bg-blue">GA Notes</span>
-                </div>
-                <span className="common-card-count">{filtered.ga.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.ga.length ? (
-                  <ul className="common-list">
-                    {filtered.ga.map((x, i) => {
-                      const dept = x.department === "All" ? "All employees" : x.department
-                      const target = x.person ? ` • ${x.person}` : ""
-                      return (
-                        <li key={i} className="common-item">
-                          <div className="common-item-title">GA: {x.note}</div>
-                          <div className="common-item-meta">
-                            <span>{formatDateHuman(x.date)}</span>
-                            <span>•</span>
-                            <span>
-                              {dept}
-                              {target}
-                            </span>
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("blocked") && (
-            <div className="common-card" data-common-type="blocked">
-              <div className="common-card-header" onClick={() => setTypeFilter("blocked")}>
-                <div className="common-card-title">
-                  <span className="badge bg-red-light">BLOCKED</span>
-                </div>
-                <span className="common-card-count">{filtered.blocked.length}</span>
-              </div>
-          <div className="common-card-body">
-                {filtered.blocked.length ? (
-                  <ul className="common-list">
-                    {filtered.blocked.map((x, i) => (
-                      <li key={i} className="common-item">
-                <div className="common-item-title">{x.title}</div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          <span>•</span>
-                          <span>
-                            Owner: <b>{x.person}</b>
-                          </span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {showCard("oneH") && (
-            <div className="common-card" data-common-type="oneH">
-              <div className="common-card-header" onClick={() => setTypeFilter("oneH")}>
-                <div className="common-card-title">
-                  <span className="badge bg-purple">1H</span>
-                </div>
-                <span className="common-card-count">{filtered.oneH.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.oneH.length ? (
-                  <ul className="common-list">
-                    {filtered.oneH.map((x, i) => (
-                      <li key={i} className="common-item">
-                        <div className="common-item-title">{x.title}</div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          <span>•</span>
-                          <span>
-                            Owner: <b>{x.person}</b>
-                          </span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("external") && (
-        <div className="common-card" data-common-type="external">
-              <div className="common-card-header" onClick={() => setTypeFilter("external")}>
-                <div className="common-card-title">
-                  <span className="badge bg-blue">External Meetings</span>
-                </div>
-                <span className="common-card-count">{filtered.external.length}</span>
-              </div>
-              <div className="common-card-body">
-                {filtered.external.length ? (
-                  <ul className="common-list">
-                    {filtered.external.map((x, i) => (
-                      <li key={i} className="common-item">
-                        <div className="common-item-title">
-                          {x.time} – {x.title}
-                        </div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          <span>•</span>
-                          <span>{x.platform}</span>
-                          <span>•</span>
-                          <span>
-                            Owner: <b>{x.owner}</b>
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-          </div>
-        </div>
-          )}
-
-          {showCard("r1") && (
-            <div className="common-card" data-common-type="r1">
-              <div className="common-card-header" onClick={() => setTypeFilter("r1")}>
-                <div className="common-card-title">
-                  <span className="badge bg-green">R1</span>
-                </div>
-                <span className="common-card-count">{filtered.r1.length}</span>
-              </div>
-          <div className="common-card-body">
-                {filtered.r1.length ? (
-                  <ul className="common-list">
-                    {filtered.r1.map((x, i) => (
-                      <li key={i} className="common-item">
-                <div className="common-item-title">{x.title}</div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          <span>•</span>
-                          <span>
-                            Owner: <b>{x.owner}</b>
-                          </span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {showCard("feedback") && (
-            <div className="common-card" data-common-type="feedback">
-              <div className="common-card-header" onClick={() => setTypeFilter("feedback")}>
-                <div className="common-card-title">
-                  <span className="badge bg-gray">Complaints/Requests/Proposals</span>
-          </div>
-                <span className="common-card-count">{filtered.feedback.length}</span>
-        </div>
-          <div className="common-card-body">
-                {filtered.feedback.length ? (
-                  <ul className="common-list">
-                    {filtered.feedback.map((x, i) => (
-                      <li key={i} className="common-item">
-                <div className="common-item-title">{x.title}</div>
-                        <div className="common-item-meta">
-                          <span>{formatDateHuman(x.date)}</span>
-                          <span>•</span>
-                          <span>{x.person}</span>
-                          {x.note && (
-                            <>
-                              <span>•</span>
-                              <span>{x.note}</span>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="common-empty">No data for the current filter.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {showCard("priority") && (
-            <div className="common-card common-priority" data-common-type="priority">
-              <div className="common-card-header" onClick={() => setTypeFilter("priority")}>
-                <div className="common-card-title">Priority Projects (for everyone)</div>
-                <span className="common-card-count">
-                  {filtered.priority.reduce((sum, p) => sum + p.items.length, 0)}
-                </span>
-              </div>
-              <div className="common-card-body">
-                <div className="common-person-grid">
-                  {commonPeople.map((person) => {
-                    const item = filtered.priority.find((p) => p.person === person) || null
-                    const tasks = item ? item.items : []
-                    const count = tasks.length
-                    return (
-                      <div key={person} className="common-person">
-                        <div className="common-person-header">
-                          <div className="common-person-name">{person}</div>
-                          <span className="common-card-count">{count}</span>
-                        </div>
-                        <div className="common-person-body">
-                          {count ? (
-                            <ul>
-                              {tasks.map((t, idx) => (
-                                <li key={idx}>
-                                  <b>{t.project}</b>: {t.task} <small>({t.level})</small>
-                                </li>
-                              ))}
-                            </ul>
+        <div className="swimlane-board">
+          {swimlaneRows
+            .filter((row) => showCard(row.id))
+            .map((row) => {
+              const cells = buildSwimlaneCells(row.items)
+              return (
+                <div key={row.id} className="swimlane-row">
+                  <div className={row.headerClass}>
+                    <span>{row.label}</span>
+                    <span className={row.badgeClass}>{row.count}</span>
+                  </div>
+                  <div className="swimlane-content-shell">
+                    <div className="swimlane-row-nav">
+                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "left")}>{"<"}</button>
+                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "right")}>{">"}</button>
+                    </div>
+                    <div
+                      className="swimlane-content-scroll"
+                      ref={(node) => {
+                        swimlaneRowRefs.current[row.id] = node
+                      }}
+                    >
+                      <div className="swimlane-content">
+                        {cells.map((cell, index) =>
+                          cell ? (
+                            <div
+                              key={`${row.id}-${index}`}
+                              className={[
+                                "swimlane-cell",
+                                cell.accentClass || "",
+                                cell.placeholder ? "placeholder" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                            >
+                              <div className="swimlane-title">{cell.title}</div>
+                              {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
+                            </div>
                           ) : (
-                            <div className="common-empty">No priority for the current filter.</div>
-                          )}
-          </div>
-        </div>
-                    )
-                  })}
+                            <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-          </div>
-          )}
+              )
+            })}
         </div>
       </div>
 
@@ -1781,16 +2303,28 @@ export default function CommonViewPage() {
                   </div>
 
                   {formType === "late" && (
-                    <div className="form-row">
-                      <label htmlFor="cv-until">Until time (for delay)</label>
-                      <input
-                        id="cv-until"
-                        className="input"
-                        type="time"
-                        value={formUntil}
-                        onChange={(e) => setFormUntil(e.target.value)}
-                      />
-                    </div>
+                    <>
+                      <div className="form-row">
+                        <label htmlFor="cv-start">Start time (delay)</label>
+                        <input
+                          id="cv-start"
+                          className="input"
+                          type="time"
+                          value={formDelayStart}
+                          onChange={(e) => setFormDelayStart(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label htmlFor="cv-until">End time (delay)</label>
+                        <input
+                          id="cv-until"
+                          className="input"
+                          type="time"
+                          value={formUntil}
+                          onChange={(e) => setFormUntil(e.target.value)}
+                        />
+                      </div>
+                    </>
                   )}
 
                   {formType === "absent" && (
