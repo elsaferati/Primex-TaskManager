@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -87,6 +87,9 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
 }
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -337,6 +340,9 @@ export default function DepartmentKanban() {
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
+  const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
@@ -348,6 +354,9 @@ export default function DepartmentKanban() {
   const [newGaNote, setNewGaNote] = React.useState("")
   const [gaNoteCreateTask, setGaNoteCreateTask] = React.useState(false)
   const [gaNoteTaskAssignee, setGaNoteTaskAssignee] = React.useState("__unassigned__")
+  const [gaNoteCreateTaskFinishPeriod, setGaNoteCreateTaskFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
   const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
   const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
   const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
@@ -355,6 +364,9 @@ export default function DepartmentKanban() {
   const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
   const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
+  const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
 
   React.useEffect(() => {
     const load = async () => {
@@ -840,6 +852,7 @@ export default function DepartmentKanban() {
         department_id: department.id,
         status: "TODO",
         priority: "NORMAL",
+        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
         is_bllok: noProjectType === "blocked",
         is_1h_report: noProjectType === "hourly",
         is_r1: noProjectType === "r1",
@@ -890,6 +903,7 @@ export default function DepartmentKanban() {
       setNoProjectType("normal")
       setNoProjectAssignee("__unassigned__")
       setNoProjectDueDate("")
+      setNoProjectFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -1122,8 +1136,10 @@ export default function DepartmentKanban() {
           department_id: department.id,
           assigned_to: gaNoteTaskAssignee === "__unassigned__" ? null : gaNoteTaskAssignee,
           status: "TODO",
-        priority: newGaNotePriority === "__none__" ? "NORMAL" : newGaNotePriority,
+          priority: newGaNotePriority === "__none__" ? "NORMAL" : newGaNotePriority,
           ga_note_origin_id: created.id,
+          finish_period:
+            gaNoteCreateTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteCreateTaskFinishPeriod,
         }
         const taskRes = await apiFetch("/tasks", {
           method: "POST",
@@ -1153,6 +1169,7 @@ export default function DepartmentKanban() {
       setNewGaNoteProjectId("__none__")
       setGaNoteCreateTask(false)
       setGaNoteTaskAssignee("__unassigned__")
+      setGaNoteCreateTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setGaNoteOpen(false)
       toast.success("GA/KA note added")
     } finally {
@@ -1180,6 +1197,7 @@ export default function DepartmentKanban() {
         priority: gaNoteTaskPriority,
         ga_note_origin_id: note.id,
         due_date: dueDateValue,
+        finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -1208,6 +1226,7 @@ export default function DepartmentKanban() {
       setGaNoteTaskDescription("")
       setGaNoteTaskPriority("NORMAL")
       setGaNoteTaskDueDate("")
+      setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
       setCreatingGaNoteTask(false)
@@ -1992,7 +2011,7 @@ export default function DepartmentKanban() {
                         className="border-blue-200 focus:border-blue-400 rounded-xl"
                       />
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-3">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Assign to</Label>
                         <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
@@ -2005,6 +2024,27 @@ export default function DepartmentKanban() {
                             {departmentUsers.map((u) => (
                               <SelectItem key={u.id} value={u.id}>
                                 {u.full_name || u.username || "-"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Finish by (optional)</Label>
+                        <Select
+                          value={noProjectFinishPeriod}
+                          onValueChange={(value) =>
+                            setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger className="border-blue-200 focus:border-blue-400 rounded-xl">
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2299,21 +2339,46 @@ export default function DepartmentKanban() {
                           <div className="text-sm font-medium">Create task from this note</div>
                         </div>
                         {gaNoteCreateTask ? (
-                          <div className="space-y-2">
-                            <Label>Assign to</Label>
-                            <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Unassigned" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                                {departmentUsers.map((member) => (
-                                  <SelectItem key={member.id} value={member.id}>
-                                    {member.full_name || member.username}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Assign to</Label>
+                              <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Unassigned" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                  {departmentUsers.map((member) => (
+                                    <SelectItem key={member.id} value={member.id}>
+                                      {member.full_name || member.username}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Finish by (optional)</Label>
+                              <Select
+                                value={gaNoteCreateTaskFinishPeriod}
+                                onValueChange={(value) =>
+                                  setGaNoteCreateTaskFinishPeriod(
+                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                  )
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select period" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
                         ) : null}
                       </div>
@@ -2357,7 +2422,7 @@ export default function DepartmentKanban() {
                     rows={4}
                   />
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Priority</Label>
                     <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
@@ -2367,6 +2432,27 @@ export default function DepartmentKanban() {
                       <SelectContent>
                         <SelectItem value="NORMAL">Normal</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Finish by (optional)</Label>
+                    <Select
+                      value={gaNoteTaskFinishPeriod}
+                      onValueChange={(value) =>
+                        setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                        {FINISH_PERIOD_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {value}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -2462,6 +2548,7 @@ export default function DepartmentKanban() {
                             setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
                             setGaNoteTaskDueDate("")
                             setGaNoteTaskAssigneeId("__unassigned__")
+                            setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                           }}
                         >
                           Create Task

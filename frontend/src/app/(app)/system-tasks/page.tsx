@@ -85,6 +85,8 @@ const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
 }
 
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = EMPTY_VALUE
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const FINISH_PERIOD_LABELS: Record<TaskFinishPeriod, string> = {
   AM: "AM",
@@ -234,7 +236,9 @@ export default function SystemTasksPage() {
   const [assigneeOpen, setAssigneeOpen] = React.useState(false)
   const [frequency, setFrequency] = React.useState<SystemTaskFrequency>("DAILY")
   const [priority, setPriority] = React.useState<TaskPriority>("NORMAL")
-  const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
+  const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [internalNotes, setInternalNotes] = React.useState<Record<string, string>>({})
   const [dayOfWeek, setDayOfWeek] = React.useState("")
   const [dayOfMonth, setDayOfMonth] = React.useState("")
@@ -250,7 +254,9 @@ export default function SystemTasksPage() {
   const [editAssigneeOpen, setEditAssigneeOpen] = React.useState(false)
   const [editFrequency, setEditFrequency] = React.useState<SystemTaskFrequency>("DAILY")
   const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
-  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
+  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [editInternalNotes, setEditInternalNotes] = React.useState<Record<string, string>>({})
   const [editDayOfWeek, setEditDayOfWeek] = React.useState("")
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
@@ -317,7 +323,7 @@ export default function SystemTasksPage() {
     setEditAssigneeIds(editIds)
     setEditFrequency(editTemplate.frequency)
     setEditPriority(normalizePriority(editTemplate.priority))
-    setEditFinishPeriod(editTemplate.finish_period ?? "AM")
+    setEditFinishPeriod(editTemplate.finish_period ?? FINISH_PERIOD_NONE_VALUE)
     setEditInternalNotes(parseInternalNotes(editTemplate.internal_notes))
     setEditDayOfWeek(editTemplate.day_of_week != null ? String(editTemplate.day_of_week) : "")
     setEditDayOfMonth(
@@ -607,7 +613,7 @@ export default function SystemTasksPage() {
         assignees: assigneeIds,
         frequency,
         priority,
-        finish_period: finishPeriod,
+        finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         internal_notes: buildInternalNotes(internalNotes),
         day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
         day_of_month:
@@ -633,7 +639,7 @@ export default function SystemTasksPage() {
       setMonthOfYear(EMPTY_VALUE)
       setFrequency("DAILY")
       setPriority("NORMAL")
-      setFinishPeriod("AM")
+      setFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setInternalNotes({})
       setIsActive(true)
       await load()
@@ -676,7 +682,7 @@ export default function SystemTasksPage() {
         assignees: editAssigneeIds,
         frequency: editFrequency,
         priority: editPriority,
-        finish_period: editFinishPeriod,
+        finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
         internal_notes: buildInternalNotes(editInternalNotes),
         day_of_week: editDayOfWeek ? Number(editDayOfWeek) : null,
         day_of_month:
@@ -942,6 +948,7 @@ export default function SystemTasksPage() {
     const finishPeriodForValue = (value: string): TaskFinishPeriod | null => {
       const raw = normalize(value)
       if (!raw) return null
+      if (raw.includes("none") || raw.includes("all day") || raw.includes("allday")) return null
       const upper = value.trim().toUpperCase()
       if ((FINISH_PERIOD_OPTIONS as string[]).includes(upper)) {
         return upper as TaskFinishPeriod
@@ -1132,12 +1139,18 @@ export default function SystemTasksPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Finish by</Label>
-                    <Select value={finishPeriod} onValueChange={(value) => setFinishPeriod(value as TaskFinishPeriod)}>
+                    <Label>Finish by (optional)</Label>
+                    <Select
+                      value={finishPeriod}
+                      onValueChange={(value) =>
+                        setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                      }
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select period" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
                         {FINISH_PERIOD_OPTIONS.map((value) => (
                           <SelectItem key={value} value={value}>
                             {FINISH_PERIOD_LABELS[value]}
@@ -1398,15 +1411,18 @@ export default function SystemTasksPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Finish by</Label>
+                    <Label>Finish by (optional)</Label>
                     <Select
                       value={editFinishPeriod}
-                      onValueChange={(value) => setEditFinishPeriod(value as TaskFinishPeriod)}
+                      onValueChange={(value) =>
+                        setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select period" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
                         {FINISH_PERIOD_OPTIONS.map((value) => (
                           <SelectItem key={value} value={value}>
                             {FINISH_PERIOD_LABELS[value]}
