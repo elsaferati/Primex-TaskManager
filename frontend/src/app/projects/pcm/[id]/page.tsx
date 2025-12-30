@@ -44,7 +44,7 @@ const MEETING_TABS = [
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED"] as const
-const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const
+const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
   "Confirm scope and stakeholder alignment.",
@@ -135,7 +135,7 @@ export default function PcmProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("MEDIUM")
+  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -149,7 +149,7 @@ export default function PcmProjectPage() {
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
     MEETING_CHECKLIST_ITEMS.map((content, index) => ({
@@ -263,7 +263,7 @@ export default function PcmProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("MEDIUM")
+      setNewPriority("NORMAL")
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
       setNewDueDate("")

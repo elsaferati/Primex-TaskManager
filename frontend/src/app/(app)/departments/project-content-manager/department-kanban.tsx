@@ -16,7 +16,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, UserLookup } from "@/lib/types"
+import { normalizeDueDateInput } from "@/lib/dates"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -64,27 +65,24 @@ const FREQUENCY_ORDER: SystemTaskTemplate["frequency"][] = [
 ]
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  LOW: "Low",
-  MEDIUM: "Medium",
+  NORMAL: "Normal",
   HIGH: "High",
-  URGENT: "High",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
+  NORMAL: "border-emerald-200 bg-emerald-50 text-emerald-700",
   HIGH: "border-red-200 bg-red-50 text-red-700",
-  URGENT: "border-red-200 bg-red-50 text-red-700",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-emerald-500",
-  MEDIUM: "border-l-amber-500",
+  NORMAL: "border-l-emerald-500",
   HIGH: "border-l-red-600",
-  URGENT: "border-l-red-600",
 }
 
-const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
+const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -241,8 +239,9 @@ function toMeetingInputValue(value?: string | null) {
 
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
+  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
-  return "MEDIUM"
+  return "NORMAL"
 }
 
 function truncateDescription(value: string, limit = 120) {
@@ -309,12 +308,15 @@ export default function DepartmentKanban() {
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
+  const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [newGaNoteProjectId, setNewGaNoteProjectId] = React.useState("__none__")
   const [newGaNoteType, setNewGaNoteType] = React.useState<"GA" | "KA">("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "LOW" | "MEDIUM" | "HIGH">(
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">(
     "__none__"
   )
   const [newGaNote, setNewGaNote] = React.useState("")
@@ -556,8 +558,7 @@ export default function DepartmentKanban() {
         items: items.sort((a, b) => {
           const rank = (value?: string | null) => {
             if (value === "HIGH") return 3
-            if (value === "MEDIUM") return 2
-            if (value === "LOW") return 1
+            if (value === "NORMAL") return 2
             return 0
           }
           const byPriority = rank(b.priority) - rank(a.priority)
@@ -701,7 +702,8 @@ export default function DepartmentKanban() {
         project_id: null,
         department_id: department.id,
         status: "TODO",
-        priority: "MEDIUM",
+        priority: "NORMAL",
+        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
         is_bllok: noProjectType === "blocked",
         is_1h_report: noProjectType === "hourly",
         is_r1: noProjectType === "r1",
@@ -752,6 +754,7 @@ export default function DepartmentKanban() {
       setNoProjectType("normal")
       setNoProjectAssignee("__unassigned__")
       setNoProjectDueDate("")
+      setNoProjectFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -1669,7 +1672,7 @@ export default function DepartmentKanban() {
                         rows={4}
                       />
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid gap-3 md:grid-cols-3">
                       <div className="space-y-2">
                         <Label>Assign to</Label>
                         <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
@@ -1688,11 +1691,32 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                       <div className="space-y-2">
+                        <Label>Finish by (optional)</Label>
+                        <Select
+                          value={noProjectFinishPeriod}
+                          onValueChange={(value) =>
+                            setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
                         <Label>Due date</Label>
                         <Input
                           type="date"
                           value={noProjectDueDate}
-                          onChange={(e) => setNoProjectDueDate(e.target.value)}
+                          onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
                         />
                       </div>
                     </div>
@@ -1943,8 +1967,8 @@ export default function DepartmentKanban() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">No priority</SelectItem>
-                            <SelectItem value="LOW">Low</SelectItem>
-                            <SelectItem value="MEDIUM">Medium</SelectItem>
+                            <SelectItem value="NORMAL">Normal</SelectItem>
+                            
                             <SelectItem value="HIGH">High</SelectItem>
                           </SelectContent>
                         </Select>
@@ -1975,7 +1999,7 @@ export default function DepartmentKanban() {
           {visibleGaNotes.length ? (
             [...visibleGaNotes]
               .sort((a, b) => {
-                const order = ["HIGH", "MEDIUM", "LOW"]
+                const order = ["HIGH", "NORMAL"]
                 const aRank = a.priority ? order.indexOf(a.priority) : order.length
                 const bRank = b.priority ? order.indexOf(b.priority) : order.length
                 if (aRank !== bRank) return aRank - bRank

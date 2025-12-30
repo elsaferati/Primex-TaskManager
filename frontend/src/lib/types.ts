@@ -2,7 +2,7 @@ export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
 export type TaskType = "adhoc" | "system" | "reminder"
 
-export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT"
+export type TaskPriority = "NORMAL" | "HIGH"
 
 export type TaskFinishPeriod = "AM" | "PM"
 
@@ -121,7 +121,6 @@ export interface Task {
   planned_for?: string | null
   is_carried_over?: boolean
   carried_over_from?: string | null
-  is_milestone?: boolean
   reminder_enabled?: boolean
   next_reminder_at?: string | null
   assigned_to?: string | null
@@ -158,7 +157,7 @@ export interface GaNote {
   created_by?: string | null
   note_type?: "GA" | "KA"
   status?: "OPEN" | "CLOSED"
-  priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT" | null
+  priority?: "NORMAL" | "HIGH" | null
   start_date: string
   due_date?: string | null
   completed_at?: string | null

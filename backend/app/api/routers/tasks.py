@@ -239,7 +239,7 @@ async def create_task(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
 
     status_value = payload.status or TaskStatus.TODO
-    priority_value = payload.priority or TaskPriority.MEDIUM
+    priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.TAKIMET)
     completed_at = payload.completed_at
     if completed_at is None and status_value in (TaskStatus.DONE, TaskStatus.CANCELLED):
@@ -387,6 +387,7 @@ async def update_task(
     }
 
     created_notifications: list[Notification] = []
+    assignee_users: list[User] = []
 
     if payload.title is not None:
         task.title = payload.title
@@ -409,6 +410,12 @@ async def update_task(
 
     if payload.assignees is not None:
         ensure_manager_or_admin(user)
+        rows = (
+            await db.execute(
+                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+            )
+        ).scalars().all()
+        existing_assignee_ids = set(rows)
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
         assignee_users = (
@@ -446,6 +453,7 @@ async def update_task(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
         task.assigned_to = payload.assigned_to
         await _replace_task_assignees(db, task, [payload.assigned_to])
+        assignee_users = [assigned_user]
         created_notifications.append(
             add_notification(
                 db=db,
@@ -547,8 +555,12 @@ async def update_task(
             pass
 
     await db.refresh(task)
-    assignee_out = [_user_to_assignee(a) for a in assignee_users] if assignee_users else []
-    return _task_to_out(task, assignee_out)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    return _task_to_out(task, assignee_map.get(task.id, []))
 
 
 @router.post("/{task_id}/deactivate", response_model=TaskOut)

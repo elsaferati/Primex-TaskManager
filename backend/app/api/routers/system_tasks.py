@@ -89,7 +89,7 @@ async def _sync_task_for_template(
             assigned_to=template.default_assignee_id,
             created_by=creator_id,
             status=TaskStatus.TODO,
-            priority=template.priority or TaskPriority.MEDIUM,
+            priority=template.priority or TaskPriority.NORMAL,
             finish_period=template.finish_period,
             system_template_origin_id=template.id,
             start_date=datetime.now(timezone.utc),
@@ -107,7 +107,7 @@ async def _sync_task_for_template(
     task.finish_period = template.finish_period
     task.is_active = active_value
     if task.priority is None:
-        task.priority = template.priority or TaskPriority.MEDIUM
+        task.priority = template.priority or TaskPriority.NORMAL
     return task, False
 
 
@@ -116,9 +116,7 @@ def _task_row_to_out(
     template: SystemTaskTemplate,
     assignees: list[TaskAssigneeOut],
 ) -> SystemTaskOut:
-    priority_value = task.priority or TaskPriority.MEDIUM
-    if priority_value == TaskPriority.URGENT:
-        priority_value = TaskPriority.HIGH
+    priority_value = task.priority or TaskPriority.NORMAL
     return SystemTaskOut(
         id=task.id,
         template_id=template.id,
@@ -249,9 +247,7 @@ async def create_system_task_template(
                         detail="Assignee must belong to the selected department",
                     )
 
-    priority_value = payload.priority or TaskPriority.MEDIUM
-    if priority_value == TaskPriority.URGENT:
-        priority_value = TaskPriority.HIGH
+    priority_value = payload.priority or TaskPriority.NORMAL
 
     template = SystemTaskTemplate(
         title=payload.title,

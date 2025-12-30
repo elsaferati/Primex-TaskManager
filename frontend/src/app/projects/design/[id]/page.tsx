@@ -46,7 +46,7 @@ type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 // Design task statuses
 const TASK_STATUSES = ["TODO", "DRAFTING", "INTERNAL_REVIEW", "CLIENT_REVIEW", "DONE"] as const
-const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const
+const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
   "Align on creative brief and goals.",
@@ -136,7 +136,7 @@ export default function DesignProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("MEDIUM")
+  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -150,7 +150,7 @@ export default function DesignProjectPage() {
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
     MEETING_CHECKLIST_ITEMS.map((content, index) => ({
@@ -264,7 +264,7 @@ export default function DesignProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("MEDIUM")
+      setNewPriority("NORMAL")
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
       setNewDueDate("")

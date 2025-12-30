@@ -38,7 +38,7 @@ class Task(Base):
         Enum(TaskStatus, name="task_status"), nullable=False, server_default="TODO"
     )
     priority: Mapped[TaskPriority] = mapped_column(
-        Enum(TaskPriority, name="task_priority"), nullable=False, server_default="MEDIUM"
+        Enum(TaskPriority, name="task_priority"), nullable=False, server_default="NORMAL"
     )
     finish_period: Mapped[TaskFinishPeriod | None] = mapped_column(
         Enum(TaskFinishPeriod, name="finish_period"), nullable=True

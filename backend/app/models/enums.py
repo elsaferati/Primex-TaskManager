@@ -10,10 +10,8 @@ class UserRole(str, enum.Enum):
 
 
 class TaskPriority(str, enum.Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
+    NORMAL = "NORMAL"
     HIGH = "HIGH"
-    URGENT = "URGENT"
 
 
 class TaskFinishPeriod(str, enum.Enum):
@@ -79,10 +77,8 @@ class GaNoteStatus(str, enum.Enum):
 
 
 class GaNotePriority(str, enum.Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
+    NORMAL = "NORMAL"
     HIGH = "HIGH"
-    URGENT = "URGENT"
 
 
 class HolidayType(str, enum.Enum):

@@ -577,7 +577,7 @@ export default function CommonViewPage() {
             }
 
             // Priority items
-            if (t.priority && (t.priority === "HIGH" || t.priority === "URGENT") && t.project_id && assignee) {
+            if (t.priority && t.priority === "HIGH" && t.project_id && assignee) {
               const key = `${ownerName}-${taskDate}`
               if (!priorityMap.has(key)) {
                 priorityMap.set(key, {

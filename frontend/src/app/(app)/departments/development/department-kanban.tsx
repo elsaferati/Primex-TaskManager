@@ -16,7 +16,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskPriority, UserLookup } from "@/lib/types"
+import { normalizeDueDateInput } from "@/lib/dates"
+import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -71,27 +72,24 @@ const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
 }
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  LOW: "Low",
-  MEDIUM: "Medium",
+  NORMAL: "Normal",
   HIGH: "High",
-  URGENT: "High",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
+  NORMAL: "border-emerald-200 bg-emerald-50 text-emerald-700",
   HIGH: "border-red-200 bg-red-50 text-red-700",
-  URGENT: "border-red-200 bg-red-50 text-red-700",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-emerald-500",
-  MEDIUM: "border-l-amber-500",
+  NORMAL: "border-l-emerald-500",
   HIGH: "border-l-red-600",
-  URGENT: "border-l-red-600",
 }
 
-const PRIORITY_OPTIONS: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"]
+const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -263,8 +261,16 @@ function toMeetingInputValue(value?: string | null) {
 
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
+  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
-  return "MEDIUM"
+  return "NORMAL"
+}
+
+function gaNoteTaskDefaultTitle(note: string) {
+  const cleaned = note.trim().replace(/\s+/g, " ")
+  if (!cleaned) return "GA/KA note task"
+  if (cleaned.length <= 80) return cleaned
+  return `${cleaned.slice(0, 77)}...`
 }
 
 export default function DepartmentKanban() {
@@ -334,15 +340,33 @@ export default function DepartmentKanban() {
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
+  const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [newGaNoteProjectId, setNewGaNoteProjectId] = React.useState("__none__")
   const [newGaNoteType, setNewGaNoteType] = React.useState<"GA" | "KA">("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "LOW" | "MEDIUM" | "HIGH">(
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">(
     "__none__"
   )
   const [newGaNote, setNewGaNote] = React.useState("")
+  const [gaNoteCreateTask, setGaNoteCreateTask] = React.useState(false)
+  const [gaNoteTaskAssignee, setGaNoteTaskAssignee] = React.useState("__unassigned__")
+  const [gaNoteCreateTaskFinishPeriod, setGaNoteCreateTaskFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
+  const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
+  const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
+  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
+  const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
+  const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
+  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
+  const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
 
   React.useEffect(() => {
     const load = async () => {
@@ -590,6 +614,79 @@ export default function DepartmentKanban() {
     return { normal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
 
+  const statusRows = [
+    {
+      id: "blocked",
+      title: "BLOCKED",
+      count: noProjectBuckets.blocked.length,
+      items: noProjectBuckets.blocked,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-red-600 border border-red-200",
+      borderClass: "border-red-500",
+      itemBadge: "Blocked",
+      itemBadgeClass: "bg-white text-red-600 border-red-200",
+    },
+    {
+      id: "one-hour",
+      title: "1H TASKS",
+      count: noProjectBuckets.oneHour.length,
+      items: noProjectBuckets.oneHour,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-indigo-600 border border-indigo-200",
+      borderClass: "border-indigo-500",
+      itemBadge: "1H",
+      itemBadgeClass: "bg-white text-indigo-600 border-indigo-200",
+    },
+    {
+      id: "r1",
+      title: "R1",
+      count: noProjectBuckets.r1.length,
+      items: noProjectBuckets.r1,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-emerald-600 border border-emerald-200",
+      borderClass: "border-emerald-500",
+      itemBadge: "R1",
+      itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
+    },
+    {
+      id: "ga",
+      title: "GA TASKS",
+      count: noProjectBuckets.ga.length,
+      items: noProjectBuckets.ga,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-sky-600 border border-slate-200",
+      borderClass: "border-sky-500",
+      itemBadge: "GA",
+      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
+    },
+    {
+      id: "normal",
+      title: "NORMAL",
+      count: noProjectBuckets.normal.length,
+      items: noProjectBuckets.normal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-blue-600 border border-slate-200",
+      borderClass: "border-blue-500",
+      itemBadge: "Normal",
+      itemBadgeClass: "bg-white text-blue-600 border-slate-200",
+    },
+  ] as const
+
+  const gaNoteTaskMap = React.useMemo(() => {
+    const map = new Map<string, Task>()
+    for (const task of departmentTasks) {
+      if (task.ga_note_origin_id) {
+        map.set(task.ga_note_origin_id, task)
+      }
+    }
+    return map
+  }, [departmentTasks])
+
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
     for (const t of visibleSystemTasks) {
@@ -603,8 +700,7 @@ export default function DepartmentKanban() {
       items: items.sort((a, b) => {
         const rank = (value?: string | null) => {
           if (value === "HIGH") return 3
-          if (value === "MEDIUM") return 2
-          if (value === "LOW") return 1
+          if (value === "NORMAL") return 2
           return 0
         }
         const byPriority = rank(b.priority) - rank(a.priority)
@@ -818,7 +914,8 @@ export default function DepartmentKanban() {
         project_id: null,
         department_id: department.id,
         status: "TODO",
-        priority: "MEDIUM",
+        priority: "NORMAL",
+        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
         is_bllok: noProjectType === "blocked",
         is_1h_report: noProjectType === "hourly",
         is_r1: noProjectType === "r1",
@@ -869,6 +966,7 @@ export default function DepartmentKanban() {
       setNoProjectType("normal")
       setNoProjectAssignee("__unassigned__")
       setNoProjectDueDate("")
+      setNoProjectFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -1093,10 +1191,48 @@ export default function DepartmentKanban() {
       }
       const created = (await res.json()) as GaNote
       setGaNotes((prev) => [created, ...prev])
+      if (gaNoteCreateTask) {
+        const taskPayload = {
+          title: gaNoteTaskDefaultTitle(newGaNote),
+          description: newGaNote.trim(),
+          project_id: created.project_id ?? null,
+          department_id: department.id,
+          assigned_to: gaNoteTaskAssignee === "__unassigned__" ? null : gaNoteTaskAssignee,
+          status: "TODO",
+          priority: newGaNotePriority === "__none__" ? "NORMAL" : newGaNotePriority,
+          ga_note_origin_id: created.id,
+          finish_period:
+            gaNoteCreateTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteCreateTaskFinishPeriod,
+        }
+        const taskRes = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskPayload),
+        })
+        if (!taskRes.ok) {
+          let detail = "GA/KA note saved, but task creation failed"
+          try {
+            const data = (await taskRes.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(detail)
+        } else {
+          const createdTask = (await taskRes.json()) as Task
+          setDepartmentTasks((prev) => [createdTask, ...prev])
+          if (!createdTask.project_id) {
+            setNoProjectTasks((prev) => [createdTask, ...prev])
+          }
+        }
+      }
       setNewGaNote("")
       setNewGaNoteType("GA")
       setNewGaNotePriority("__none__")
       setNewGaNoteProjectId("__none__")
+      setGaNoteCreateTask(false)
+      setGaNoteTaskAssignee("__unassigned__")
+      setGaNoteCreateTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setGaNoteOpen(false)
       toast.success("GA/KA note added")
     } finally {
@@ -1104,18 +1240,74 @@ export default function DepartmentKanban() {
     }
   }
 
+  const submitGaNoteTask = async () => {
+    if (!gaNoteTaskOpenId || !department) return
+    const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
+    if (!note) {
+      toast.error("GA/KA note not found.")
+      return
+    }
+    setCreatingGaNoteTask(true)
+    try {
+      const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
+      const taskPayload = {
+        title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(note.content || ""),
+        description: gaNoteTaskDescription.trim() || null,
+        project_id: note.project_id ?? null,
+        department_id: department.id,
+        assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+        status: "TODO",
+        priority: gaNoteTaskPriority,
+        ga_note_origin_id: note.id,
+        due_date: dueDateValue,
+        finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
+      }
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(taskPayload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const createdTask = (await res.json()) as Task
+      setDepartmentTasks((prev) => [createdTask, ...prev])
+      if (!createdTask.project_id) {
+        setNoProjectTasks((prev) => [createdTask, ...prev])
+      }
+      setGaNoteTaskOpenId(null)
+      setGaNoteTaskAssigneeId("__unassigned__")
+      setGaNoteTaskTitle("")
+      setGaNoteTaskDescription("")
+      setGaNoteTaskPriority("NORMAL")
+      setGaNoteTaskDueDate("")
+      setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+      toast.success("Task created")
+    } finally {
+      setCreatingGaNoteTask(false)
+    }
+  }
+
   if (loading)
     return (
-      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-sky-500 border-r-transparent"></div>
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-slate-400 border-r-transparent"></div>
           <div className="mt-4 text-sm text-slate-600">Loading department...</div>
         </div>
       </div>
     )
   if (!department)
     return (
-      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-sm text-slate-600">Department not found.</div>
       </div>
     )
@@ -1142,25 +1334,25 @@ export default function DepartmentKanban() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white">
+    <div className="min-h-screen bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden mb-6">
-          <div className="bg-gradient-to-r from-sky-100/50 via-blue-50/50 to-sky-100/50 px-6 py-5 border-b border-sky-100/50">
+        <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
+          <div className="px-6 py-5 border-b border-slate-200">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600/70">Department</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Department</div>
                 <div className="text-4xl font-bold text-slate-800 tracking-tight">{departmentName}</div>
                 <div className="text-sm text-slate-600">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-xl border border-sky-200 bg-white/80 p-1 shadow-sm backdrop-blur">
+              <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
                   className={[
                     "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
                     viewMode === "department"
-                      ? "bg-sky-500 text-white shadow-md shadow-sky-200/50"
-                      : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
                   ].join(" ")}
                 >
                   Department
@@ -1171,8 +1363,8 @@ export default function DepartmentKanban() {
                   className={[
                     "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
                     viewMode === "mine"
-                      ? "bg-sky-500 text-white shadow-md shadow-sky-200/50"
-                      : "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50",
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
                   ].join(" ")}
                 >
                   My View
@@ -1182,36 +1374,16 @@ export default function DepartmentKanban() {
           </div>
         </Card>
 
-        <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden mb-6">
+        <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
           <div className="px-6 py-3">
             <div className="flex flex-wrap gap-2">
               {TABS.map((tab) => {
                 const isActive = tab.id === activeTab
-                const badgeTone =
-                  tab.tone === "blue"
-                    ? "bg-blue-100 text-blue-700 border-blue-200"
-                    : tab.tone === "sky"
-                      ? "bg-sky-100 text-sky-700 border-sky-200"
-                      : "bg-slate-100 text-slate-700 border-slate-200"
-                const activeBadge =
-                  tab.tone === "blue"
-                    ? "bg-blue-500 text-white border-blue-500"
-                    : tab.tone === "sky"
-                      ? "bg-sky-500 text-white border-sky-500"
-                      : "bg-slate-500 text-white border-slate-500"
+                const badgeTone = "bg-slate-100 text-slate-600 border-slate-200"
+                const activeBadge = "bg-slate-900 text-white border-slate-900"
                 const badgeClass = isActive ? activeBadge : badgeTone
-                const activeTabClass =
-                  tab.tone === "blue"
-                    ? "bg-blue-100 text-blue-700 shadow-sm"
-                    : tab.tone === "sky"
-                      ? "bg-sky-100 text-sky-700 shadow-sm"
-                      : "bg-slate-100 text-slate-700 shadow-sm"
-                const inactiveTabClass =
-                  tab.tone === "blue"
-                    ? "text-slate-600 hover:text-blue-700 hover:bg-blue-50/50"
-                    : tab.tone === "sky"
-                      ? "text-slate-600 hover:text-sky-700 hover:bg-sky-50/50"
-                      : "text-slate-600 hover:text-slate-700 hover:bg-slate-50/50"
+                const activeTabClass = "bg-white text-slate-900 shadow-sm border border-slate-200"
+                const inactiveTabClass = "text-slate-500 hover:text-slate-900"
                 return (
                   <button
                     key={tab.id}
@@ -1405,12 +1577,12 @@ export default function DepartmentKanban() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="rounded-xl border border-sky-200 bg-sky-100 px-4 py-2 text-xs font-semibold text-sky-700 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
                   {formatToday()}
                 </div>
                 {viewMode === "department" && departmentUsers.length ? (
                   <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                    <SelectTrigger className="h-9 w-48 border-sky-200 focus:border-sky-400 rounded-xl">
+                    <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
                       <SelectValue placeholder="All users" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1423,7 +1595,7 @@ export default function DepartmentKanban() {
                     </SelectContent>
                   </Select>
                 ) : null}
-                {viewMode === "mine" ? <Button variant="outline" className="rounded-xl border-sky-200">Print</Button> : null}
+                {viewMode === "mine" ? <Button variant="outline" className="rounded-xl border-slate-200">Print</Button> : null}
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-4">
@@ -1433,182 +1605,200 @@ export default function DepartmentKanban() {
                 { label: "NOTES (OPEN)", value: todayOpenNotes.length, color: "sky" },
                 { label: "SYSTEM", value: todaySystemTasks.length, color: "blue" },
               ].map((stat) => (
-                <Card key={stat.label} className={`bg-gradient-to-br ${stat.color === "sky" ? "from-sky-50/40 to-white border-l-4 border-sky-500 border-sky-100" : "from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100"} shadow-sm rounded-2xl p-4`}>
-                  <div className={`text-xs font-semibold ${stat.color === "sky" ? "text-sky-600" : "text-blue-600"} uppercase tracking-wide`}>{stat.label}</div>
-                  <div className={`mt-2 text-3xl font-bold ${stat.color === "sky" ? "text-sky-700" : "text-blue-700"}`}>{stat.value}</div>
+                <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                  <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
                 </Card>
               ))}
             </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card className="bg-gradient-to-br from-sky-50/40 to-white border-l-4 border-sky-500 border-sky-100 shadow-sm rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-sky-500"></div>
-                    <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
-                  </div>
-                  <Badge className="bg-sky-500 text-white border-0 shadow-sm">{todayProjectTasks.length}</Badge>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">PROJECT TASKS</div>
+                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {todayProjectTasks.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Due today</div>
                 </div>
-              <div className="mt-4 space-y-4">
-                {todayProjectTaskGroups.length ? (
-                  todayProjectTaskGroups.map((group) => (
-                    <div key={group.id}>
-                      <div className="text-xs font-semibold text-sky-700">{group.name}</div>
-                      <div className="mt-2 space-y-2">
-                        {group.tasks.map((task) => {
-                          const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                          const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                          return (
-                        <Link
-                          key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="block rounded-xl border-l-4 border-sky-500 border-sky-200 bg-gradient-to-r from-sky-50/60 to-white px-3 py-2.5 text-sm transition-all hover:border-sky-600 hover:from-sky-50 hover:shadow-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-sky-500 flex-shrink-0"></div>
-                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                              {task.status || "TODO"}
-                            </Badge>
-                            <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
-                              {phaseLabel}
-                            </Badge>
-                            <div className="font-medium text-slate-800">{task.title}</div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  {todayProjectTaskGroups.length ? (
+                    <div className="space-y-3">
+                      {todayProjectTaskGroups.map((group) => (
+                        <div key={group.id}>
+                          <div className="text-xs font-semibold text-slate-700">{group.name}</div>
+                          <div className="mt-2 space-y-2">
+                            {group.tasks.map((task) => {
+                              const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                              const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                              return (
+                                <Link
+                                  key={task.id}
+                                  href={`/tasks/${task.id}`}
+                                  className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                      {task.status || "TODO"}
+                                    </Badge>
+                                    <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                                      {phaseLabel}
+                                    </Badge>
+                                    <div className="font-medium text-slate-800">{task.title}</div>
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    {assignee?.full_name || assignee?.username || "Unassigned"}
+                                  </div>
+                                </Link>
+                              )
+                            })}
                           </div>
-                              <div className="mt-1 text-xs text-slate-600">
-                                {assignee?.full_name || assignee?.username || "Unassigned"}
-                              </div>
-                            </Link>
-                          )
-                        })}
-                      </div>
+                        </div>
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-slate-500">No project tasks today.</div>
-                )}
-              </div>
-            </Card>
-
-            <div className="grid gap-4">
-              <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-                    <div className="text-sm font-semibold text-slate-800">No Project Tasks</div>
-                  </div>
-                  <Badge className="bg-blue-500 text-white border-0 shadow-sm">{todayNoProjectTasks.length}</Badge>
+                  ) : (
+                    <div className="text-sm text-slate-500">No project tasks today.</div>
+                  )}
                 </div>
-                <div className="mt-4 space-y-2">
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">NO PROJECT</div>
+                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {todayNoProjectTasks.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
+                </div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
                   {todayNoProjectTasks.length ? (
-                    todayNoProjectTasks.map((task) => {
-                      const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                      const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                      const typeLabel = task.is_bllok
-                        ? "Blocked"
-                        : task.is_1h_report
-                          ? "1H"
-                          : task.is_r1
-                            ? "R1"
-                            : "Normal"
-                      return (
-                        <Link
-                          key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="block rounded-xl border-l-4 border-blue-500 border-blue-200 bg-gradient-to-r from-blue-50/60 to-white px-3 py-2.5 text-sm transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                              {typeLabel}
-                            </Badge>
-                            <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
-                              {phaseLabel}
-                            </Badge>
-                            <div className="font-medium text-slate-800">{task.title}</div>
-                          </div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            {assignee?.full_name || assignee?.username || "Unassigned"}
-                          </div>
-                        </Link>
-                      )
-                    })
+                    <div className="space-y-2">
+                      {todayNoProjectTasks.map((task) => {
+                        const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                        const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                        const typeLabel = task.is_bllok
+                          ? "Blocked"
+                          : task.is_1h_report
+                            ? "1H"
+                            : task.is_r1
+                              ? "R1"
+                              : "Normal"
+                        return (
+                          <Link
+                            key={task.id}
+                            href={`/tasks/${task.id}`}
+                            className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                {typeLabel}
+                              </Badge>
+                              <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
+                                {phaseLabel}
+                              </Badge>
+                              <div className="font-medium text-slate-800">{task.title}</div>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              {assignee?.full_name || assignee?.username || "Unassigned"}
+                            </div>
+                          </Link>
+                        )
+                      })}
+                    </div>
                   ) : (
                     <div className="text-sm text-slate-500">No tasks today.</div>
                   )}
                 </div>
-              </Card>
+              </div>
 
-              <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-                  <div className="text-sm font-semibold text-blue-700">System Tasks</div>
-                  </div>
-                  <Badge className="bg-blue-500 text-white border-0 shadow-sm">{todaySystemTasks.length}</Badge>
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">NOTES (OPEN)</div>
+                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {todayOpenNotes.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Quick notes</div>
                 </div>
-                <div className="mt-4 space-y-2">
-                  {todaySystemTasks.length ? (
-                    todaySystemTasks.map((task) => (
-                      <div key={task.id} className="rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-3 py-2.5 text-sm">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                          <div className="font-medium text-slate-800">{task.title}</div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  {todayOpenNotes.length ? (
+                    <div className="space-y-2">
+                      {todayOpenNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {note.note_type || "GA"}
+                            </Badge>
+                            <div className="font-medium">{note.content}</div>
+                          </div>
                         </div>
-                        <div className="mt-1 text-xs text-slate-600 ml-4">{task.description || "-"}</div>
-                      </div>
-                    ))
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No open notes today.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">SYSTEM</div>
+                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {todaySystemTasks.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+                </div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  {todaySystemTasks.length ? (
+                    <div className="space-y-2">
+                      {todaySystemTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="font-medium text-slate-800">{task.title}</div>
+                          <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     <div className="text-sm text-slate-500">No system tasks today.</div>
                   )}
                 </div>
-              </Card>
-            </div>
+              </div>
 
-            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-slate-800">GA/KA Notes (Open)</div>
-                <Badge className="bg-sky-100 text-sky-700 border-sky-200">{todayOpenNotes.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-2">
-                {todayOpenNotes.length ? (
-                  todayOpenNotes.map((note) => (
-                    <div key={note.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <div className="font-medium">{note.content}</div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No open notes today.</div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="rounded-2xl border-border/60 bg-card/70 p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Meetings (Today)</div>
-                <Badge variant="secondary">{todayMeetings.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-2">
-                {todayMeetings.length ? (
-                  todayMeetings.map((meeting) => (
-                    <div key={meeting.id} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2 text-sm">
-                      <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                      {meeting.project_id ? (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">MEETINGS</div>
+                  <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                    {todayMeetings.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Today</div>
+                </div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  {todayMeetings.length ? (
+                    <div className="space-y-2">
+                      {todayMeetings.map((meeting) => (
+                        <div
+                          key={meeting.id}
+                          className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                          {meeting.project_id ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No meetings today.</div>
-                )}
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No meetings today.</div>
+                  )}
+                </div>
               </div>
-            </Card>
-          </div>
+            </div>
         </div>
       ) : null}
 
@@ -1616,7 +1806,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold text-blue-700">System Tasks</div>
+              <div className="text-xl font-semibold text-slate-900">System Tasks</div>
               <div className="text-sm text-muted-foreground">
                 Department tasks organized by frequency and date.
               </div>
@@ -1725,7 +1915,7 @@ export default function DepartmentKanban() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
               {[
                 { label: "Today", offset: 0 },
                 { label: "Yesterday", offset: -1 },
@@ -1770,53 +1960,52 @@ export default function DepartmentKanban() {
           <div className="space-y-4">
             {systemGroups.length ? (
               systemGroups.map((group) => (
-                <Card key={group.label} className="overflow-hidden rounded-2xl border-border/60 bg-card/70 shadow-sm">
+                <Card key={group.label} className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
                   <div className="flex items-center gap-3 border-b px-4 py-3">
-                    <Badge variant="outline" className="text-xs font-semibold">
-                      {group.label}
-                    </Badge>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                      {group.label.toUpperCase()}
+                    </span>
                     <Badge variant="secondary">{group.items.length}</Badge>
                   </div>
-                  <div className="grid grid-cols-7 gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground">
-                    <div className="col-span-2">TASK</div>
-                    <div>DEPARTMENT</div>
-                    <div>WHEN</div>
-                    <div>STATUS</div>
-                    <div>OWNER</div>
-                    <div>SET BY</div>
+                  <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)] gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-muted-foreground">
+                    <div>Task Title</div>
+                    <div>Dept</div>
+                    <div>Owner</div>
+                    <div>Frequency</div>
+                    <div>Finish By</div>
+                    <div>Priority</div>
                   </div>
                   <div className="divide-y">
                     {group.items.map((item) => {
                       const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
                       const priorityValue = normalizePriority(item.priority)
+                      const priorityBadgeClass =
+                        priorityValue === "HIGH"
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-orange-200 bg-orange-50 text-orange-700"
                       return (
                         <div
                           key={item.id}
-                          className={`grid grid-cols-7 gap-3 border-l-4 px-4 py-4 text-sm ${PRIORITY_BORDER_STYLES[priorityValue]}`}
+                          className={`grid grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)] gap-3 border-l-4 px-4 py-4 text-sm ${PRIORITY_BORDER_STYLES[priorityValue]}`}
                         >
-                          <div className="col-span-2">
+                          <div className="space-y-1">
                             <div className="font-medium">{item.title}</div>
                             <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
                           </div>
                           <div>{department.code}</div>
-                          <div className="whitespace-pre-line text-muted-foreground">
-                            {formatSchedule(item, systemDate)}
-                          </div>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="secondary">
-                                {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                              >
-                                {PRIORITY_LABELS[priorityValue]}
-                              </Badge>
-                            </div>
-                          </div>
                           <div>{owner?.full_name || owner?.username || "-"}</div>
-                          <div>{user?.full_name || user?.username || "-"}</div>
+                          <div className="text-muted-foreground">
+                            {FREQUENCY_LABELS[item.frequency] || item.frequency}
+                          </div>
+                          <div className="text-muted-foreground">{item.finish_period || "-"}</div>
+                          <div>
+                            <Badge
+                              variant="outline"
+                              className={`border px-2 py-0.5 text-[11px] ${priorityBadgeClass}`}
+                            >
+                              {PRIORITY_LABELS[priorityValue]}
+                            </Badge>
+                          </div>
                         </div>
                       )
                     })}
@@ -1834,7 +2023,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold text-blue-700">Tasks (No Project)</div>
+              <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
               <div className="text-sm text-slate-600">
                 Use these buckets to track non-project tasks and special cases.
               </div>
@@ -1842,11 +2031,11 @@ export default function DepartmentKanban() {
             {!isReadOnly ? (
               <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                 <DialogTrigger asChild>
-                  <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-md shadow-blue-200/50 rounded-xl px-6">
+                  <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
                     + Add Task
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-lg bg-white border-blue-100 rounded-2xl">
+                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
                   <DialogHeader>
                     <DialogTitle className="text-slate-800">New Task</DialogTitle>
                   </DialogHeader>
@@ -1854,7 +2043,7 @@ export default function DepartmentKanban() {
                     <div className="space-y-2">
                       <Label className="text-slate-700">Type</Label>
                       <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                        <SelectTrigger className="border-blue-200 focus:border-blue-400 rounded-xl">
+                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1871,7 +2060,7 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
-                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-blue-200 focus:border-blue-400 rounded-xl" />
+                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
@@ -1879,14 +2068,14 @@ export default function DepartmentKanban() {
                         value={noProjectDescription}
                         onChange={(e) => setNoProjectDescription(e.target.value)}
                         rows={4}
-                        className="border-blue-200 focus:border-blue-400 rounded-xl"
+                        className="border-slate-200 focus:border-slate-400 rounded-xl"
                       />
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-3">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Assign to</Label>
                         <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                          <SelectTrigger className="border-blue-200 focus:border-blue-400 rounded-xl">
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Select assignee" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1901,23 +2090,44 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                       <div className="space-y-2">
+                        <Label className="text-slate-700">Finish by (optional)</Label>
+                        <Select
+                          value={noProjectFinishPeriod}
+                          onValueChange={(value) =>
+                            setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
                         <Label className="text-slate-700">Due date</Label>
                         <Input
                           type="date"
                           value={noProjectDueDate}
-                          onChange={(e) => setNoProjectDueDate(e.target.value)}
-                          className="border-blue-200 focus:border-blue-400 rounded-xl"
+                          onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
                         />
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-blue-200">
+                      <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
                         Cancel
                       </Button>
                       <Button
                         disabled={!noProjectTitle.trim() || creatingNoProject}
                         onClick={() => void submitNoProjectTask()}
-                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-md shadow-blue-200/50 rounded-xl"
+                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                       >
                         {creatingNoProject ? "Creating..." : "Create"}
                       </Button>
@@ -1927,185 +2137,62 @@ export default function DepartmentKanban() {
               </Dialog>
             ) : null}
           </div>
-          <div className="grid gap-4 md:grid-cols-4">
-          <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-              <div className="text-sm font-semibold text-blue-700">Normal</div>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.normal.length ? (
-                noProjectBuckets.normal.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-4 py-3 transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
+          <div className="space-y-4">
+            {statusRows.map((row) => (
+              <div
+                key={row.id}
+                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+              >
+                <div
+                  className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
+                >
+                  <div className="text-sm font-semibold">{row.title}</div>
+                  <span
+                    className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-slate-800">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
-                          Normal
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center shadow-sm"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                    {row.count}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">
+                    {row.items.length ? "Active items" : "No items"}
+                  </div>
+                </div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  {row.items.length ? (
+                    <div className="flex flex-col gap-2">
+                      {row.items.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-slate-800">{t.title}</div>
+                            <div className="flex items-center gap-2">
+                              <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                {row.itemBadge}
+                              </Badge>
+                              {t.assigned_to ? (
+                                <div
+                                  className="h-7 w-7 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center"
+                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                >
+                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
-                        ) : null}
-                      </div>
+                          {t.description ? (
+                            <div className="mt-1 text-xs text-slate-500">{t.description}</div>
+                          ) : null}
+                        </Link>
+                      ))}
                     </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-slate-500">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-blue-50/50 to-white border-l-4 border-blue-500 border-blue-100 shadow-sm rounded-2xl p-4">
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-              <div className="text-sm font-semibold text-blue-700">GA</div>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.ga.length ? (
-                noProjectBuckets.ga.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border-l-4 border-blue-500 bg-gradient-to-r from-blue-50/60 to-white px-4 py-3 transition-all hover:border-blue-600 hover:from-blue-50 hover:shadow-sm"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-slate-800">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
-                          GA
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700 flex items-center justify-center shadow-sm"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-slate-500">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-rose-100 bg-rose-50/60 p-4 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/30">
-            <div className="flex items-center gap-2 text-rose-700 font-semibold">
-              <span className="h-5 w-5 rounded-full bg-rose-500" />
-              <span>BLOCKED</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.blocked.length ? (
-                noProjectBuckets.blocked.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-rose-100/80 bg-white/80 px-4 py-3 transition hover:bg-rose-50 hover:shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-200">
-                      BLOCKED
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-amber-100 bg-amber-50/60 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/25">
-            <div className="flex items-center gap-2 text-amber-700 font-semibold">
-              <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
-              <span>1H Report</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.oneHour.length ? (
-                noProjectBuckets.oneHour.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-amber-100/80 bg-white/80 px-4 py-3 transition hover:bg-amber-50 hover:shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-200">
-                      1H
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-emerald-100 bg-emerald-50/60 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
-            <div className="text-emerald-700 font-semibold">R1</div>
-            <div className="mt-2 text-sm text-emerald-700/80">
-              New project (first case) is handled with the manager.
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.r1.length ? (
-                noProjectBuckets.r1.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-emerald-100/80 bg-white/80 px-4 py-3 transition hover:bg-emerald-50 hover:shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
-                      R1
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
+                  ) : (
+                    <div className="text-sm text-slate-500">No tasks in this category.</div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
@@ -2164,8 +2251,7 @@ export default function DepartmentKanban() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">No priority</SelectItem>
-                            <SelectItem value="LOW">Low</SelectItem>
-                            <SelectItem value="MEDIUM">Medium</SelectItem>
+                            <SelectItem value="NORMAL">Normal</SelectItem>
                             <SelectItem value="HIGH">High</SelectItem>
                           </SelectContent>
                         </Select>
@@ -2180,6 +2266,60 @@ export default function DepartmentKanban() {
                         rows={4}
                       />
                     </div>
+                    {canCreate ? (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={gaNoteCreateTask}
+                            onCheckedChange={(value) => setGaNoteCreateTask(Boolean(value))}
+                          />
+                          <div className="text-sm font-medium">Create task from this note</div>
+                        </div>
+                        {gaNoteCreateTask ? (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Assign to</Label>
+                              <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Unassigned" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                  {departmentUsers.map((member) => (
+                                    <SelectItem key={member.id} value={member.id}>
+                                      {member.full_name || member.username}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Finish by (optional)</Label>
+                              <Select
+                                value={gaNoteCreateTaskFinishPeriod}
+                                onValueChange={(value) =>
+                                  setGaNoteCreateTaskFinishPeriod(
+                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                  )
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select period" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
                         Cancel
@@ -2193,62 +2333,200 @@ export default function DepartmentKanban() {
               </Dialog>
             ) : null}
           </div>
-          {visibleGaNotes.length ? (
-            [...visibleGaNotes]
-              .sort((a, b) => {
-                const order = ["HIGH", "MEDIUM", "LOW"]
-                const aRank = a.priority ? order.indexOf(a.priority) : order.length
-                const bRank = b.priority ? order.indexOf(b.priority) : order.length
-                if (aRank !== bRank) return aRank - bRank
-                const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-                const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
-                return bTime - aTime
-              })
-              .map((note) => {
-              const author = users.find((u) => u.id === note.created_by) || null
-              const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
-              return (
-                <Card key={note.id} className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Badge
-                        variant="outline"
-                        className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
-                        >
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <span>By {author?.full_name || author?.username || "-"}</span>
-                        <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
-                        {project ? (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            {project.title || project.name || "Project"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            General
-                          </Badge>
-                        )}
-                        {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
-                      </div>
-                    {note.status !== "CLOSED" ? (
-                      !isReadOnly ? (
-                        <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                          Close
-                        </Button>
-                      ) : (
-                        <Badge variant="secondary">Open</Badge>
-                      )
-                    ) : (
-                      <Badge variant="secondary">Closed</Badge>
-                    )}
+          <Dialog
+            open={Boolean(gaNoteTaskOpenId)}
+            onOpenChange={(open) => {
+              if (!open) setGaNoteTaskOpenId(null)
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create Task from Note</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="text-sm text-muted-foreground">
+                  This will create a task linked to the GA/KA note.
+                </div>
+                <div className="space-y-2">
+                  <Label>Title</Label>
+                  <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={gaNoteTaskDescription}
+                    onChange={(e) => setGaNoteTaskDescription(e.target.value)}
+                    rows={4}
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="NORMAL">Normal</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
-                </Card>
-              )
-            })
-            ) : (
-              <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
-            )}
+                  <div className="space-y-2">
+                    <Label>Finish by (optional)</Label>
+                    <Select
+                      value={gaNoteTaskFinishPeriod}
+                      onValueChange={(value) =>
+                        setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                        {FINISH_PERIOD_OPTIONS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {value}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Due date</Label>
+                    <Input
+                      type="date"
+                      value={gaNoteTaskDueDate}
+                      onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Assign to</Label>
+                  <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                      {departmentUsers.map((member) => (
+                        <SelectItem key={member.id} value={member.id}>
+                          {member.full_name || member.username}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
+                    Cancel
+                  </Button>
+                  <Button disabled={creatingGaNoteTask} onClick={() => void submitGaNoteTask()}>
+                    {creatingGaNoteTask ? "Creating..." : "Create Task"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+            <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+              <div className="text-sm font-semibold">GA/KA NOTES</div>
+              <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                {visibleGaNotes.length}
+              </span>
+              <div className="mt-2 text-xs text-slate-500">Quick reminders</div>
+            </div>
+            <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+              {visibleGaNotes.length ? (
+                <div className="space-y-3">
+                  {[...visibleGaNotes]
+                    .sort((a, b) => {
+                      const order = ["HIGH", "NORMAL"]
+                      const aRank = a.priority ? order.indexOf(a.priority) : order.length
+                      const bRank = b.priority ? order.indexOf(b.priority) : order.length
+                      if (aRank !== bRank) return aRank - bRank
+                      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+                      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+                      return bTime - aTime
+                    })
+                    .map((note) => {
+                      const author = users.find((u) => u.id === note.created_by) || null
+                      const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+                      const linkedTask = gaNoteTaskMap.get(note.id) || null
+                      return (
+                        <div
+                          key={note.id}
+                          className="rounded-xl border-l-4 border-sky-500 border border-slate-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Badge
+                                variant="outline"
+                                className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-slate-200 text-blue-600"}
+                              >
+                                {note.note_type || "GA"}
+                              </Badge>
+                              <span>By {author?.full_name || author?.username || "-"}</span>
+                              <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
+                              {project ? (
+                                <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                  {project.title || project.name || "Project"}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                  General
+                                </Badge>
+                              )}
+                              {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {linkedTask ? (
+                                <Button asChild variant="outline" size="sm">
+                                  <Link href={`/tasks/${linkedTask.id}?returnTo=${encodeURIComponent(returnToTasks)}`}>
+                                    View Task
+                                  </Link>
+                                </Button>
+                              ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setGaNoteTaskOpenId(note.id)
+                                    setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
+                                    setGaNoteTaskDescription(note.content || "")
+                                    setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                    setGaNoteTaskDueDate("")
+                                    setGaNoteTaskAssigneeId("__unassigned__")
+                                    setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                                  }}
+                                >
+                                  Create Task
+                                </Button>
+                              ) : null}
+                              {note.status !== "CLOSED" ? (
+                                !isReadOnly ? (
+                                  <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                                    Close
+                                  </Button>
+                                ) : (
+                                  <Badge variant="secondary">Open</Badge>
+                                )
+                              ) : (
+                                <Badge variant="secondary">Closed</Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
+                        </div>
+                      )
+                    })}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
+              )}
+            </div>
+          </div>
           </div>
         ) : null}
 
@@ -2256,7 +2534,7 @@ export default function DepartmentKanban() {
         <div className="space-y-4">
           <div className="text-xl font-semibold">Meetings</div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm space-y-4">
+            <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
               <div className="text-sm font-semibold">External Meetings</div>
               {!isReadOnly ? (
                 <div className="grid gap-3">
@@ -2297,7 +2575,7 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
               ) : null}
-              <div className="rounded-xl border border-slate-200 bg-white/70 p-3 space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
                   <div className="flex items-center gap-2">
@@ -2368,7 +2646,7 @@ export default function DepartmentKanban() {
                       : null
                     const isEditing = !isReadOnly && editingMeetingId === meeting.id
                     return (
-                      <Card key={meeting.id} className="rounded-2xl border-border/60 bg-background/70 p-4 shadow-sm">
+                      <Card key={meeting.id} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
                         {isEditing ? (
                           <div className="space-y-3">
                             <Input
@@ -2438,7 +2716,7 @@ export default function DepartmentKanban() {
               </div>
             </Card>
 
-            <Card className="rounded-2xl border-border/60 bg-card/70 p-5 shadow-sm space-y-4">
+            <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
               <div className="text-sm font-semibold">Internal Meetings</div>
               <div>
                 <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
@@ -2446,7 +2724,7 @@ export default function DepartmentKanban() {
                   {INTERNAL_MEETING.team.join(", ")}
                 </div>
               </div>
-              <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+              <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
                 {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
                   <button
                     key={slot}
@@ -2467,7 +2745,7 @@ export default function DepartmentKanban() {
                 <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
                 <div className="space-y-2">
                   {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                    <div key={item} className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/70 px-3 py-2">
+                    <div key={item} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                       <Checkbox checked={false} disabled />
                       <div className="text-sm text-muted-foreground">
                         {idx + 1}. {item}
@@ -2485,23 +2763,23 @@ export default function DepartmentKanban() {
         <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
           <DialogContent className="sm:max-w-md bg-white border-amber-100 rounded-2xl">
             <DialogHeader>
-              <DialogTitle className="text-amber-700 flex items-center gap-2">
+              <DialogTitle className="text-slate-900 flex items-center gap-2">
                 <span className="text-2xl">!</span>
                 <span>Confirm Project Title</span>
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="text-sm text-slate-700">
-                Please confirm the title "<span className="font-semibold text-amber-700">{pendingProjectTitle}</span>" is the correct shortcut to use.
+                Please confirm the title "<span className="font-semibold text-slate-900">{pendingProjectTitle}</span>" is the correct shortcut to use.
               </div>
               {looksLikeFullName(pendingProjectTitle) ? (
-                <div className="text-sm text-amber-700">
+                <div className="text-sm text-slate-600">
                   This looks longer than a typical shortcut. Consider shortening it.
                 </div>
               ) : null}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <div className="text-sm font-semibold text-amber-800 mb-2">Remember:</div>
-                <div className="text-xs text-amber-700 space-y-1">
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-sm font-semibold text-slate-900 mb-2">Remember:</div>
+                <div className="text-xs text-slate-600 space-y-1">
                   <div>- Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
                   <div>- Keep it short and simple (typically 2-6 characters)</div>
                   <div>- Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
@@ -2518,7 +2796,7 @@ export default function DepartmentKanban() {
                   setShowTitleWarning(false)
                   setPendingProjectTitle("")
                 }} 
-                className="rounded-xl border-amber-200 hover:bg-amber-50"
+                className="rounded-xl border-slate-200 hover:bg-slate-100"
               >
                 Go Back & Edit
               </Button>
@@ -2528,7 +2806,7 @@ export default function DepartmentKanban() {
                   setPendingProjectTitle("")
                   void submitProject()
                 }} 
-                className="bg-amber-500 hover:bg-amber-600 text-white border-0 shadow-md shadow-amber-200/50 rounded-xl"
+                className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl"
               >
                 Yes, Use This Title
               </Button>

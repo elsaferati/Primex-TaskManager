@@ -28,7 +28,6 @@ class MonthlyPlannerResponse(BaseModel):
     month_start: date
     month_end: date
     tasks: list[TaskOut]
-    milestones: list[TaskOut]
     recurring: list[TaskOut]
     summary: MonthlyPlannerSummary
 

@@ -34,7 +34,7 @@ class SystemTaskTemplate(Base):
     month_of_year: Mapped[int | None] = mapped_column(Integer)
 
     priority: Mapped[TaskPriority | None] = mapped_column(
-        Enum(TaskPriority, name="task_priority"), nullable=True, server_default="MEDIUM"
+        Enum(TaskPriority, name="task_priority"), nullable=True, server_default="NORMAL"
     )
     finish_period: Mapped[TaskFinishPeriod | None] = mapped_column(
         Enum(TaskFinishPeriod, name="finish_period"), nullable=True

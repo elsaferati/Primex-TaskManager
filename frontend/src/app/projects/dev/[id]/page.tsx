@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
+import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
 const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
@@ -44,7 +45,7 @@ const MEETING_TABS = [
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED"] as const
-const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const
+const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
   "Confirm scope and goals with the client.",
@@ -136,7 +137,7 @@ export default function DevelopmentProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("MEDIUM")
+  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -151,7 +152,7 @@ export default function DevelopmentProjectPage() {
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
-  const [newGaNotePriority, setNewGaNotePriority] = React.useState("__none__")
+  const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
     MEETING_CHECKLIST_ITEMS.map((content, index) => ({
@@ -265,7 +266,7 @@ export default function DevelopmentProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("MEDIUM")
+      setNewPriority("NORMAL")
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
       setNewDueDate("")
@@ -948,7 +949,12 @@ export default function DevelopmentProjectPage() {
                         </div>
                         <div className="space-y-2">
                           <Label className="text-slate-700">Due date</Label>
-                          <Input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                          <Input
+                            type="date"
+                            value={newDueDate}
+                            onChange={(e) => setNewDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
                         </div>
                       </div>
                       <div className="flex justify-end">
@@ -1182,8 +1188,8 @@ export default function DevelopmentProjectPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">No priority</SelectItem>
-                        <SelectItem value="LOW">Low</SelectItem>
-                        <SelectItem value="MEDIUM">Medium</SelectItem>
+                        <SelectItem value="NORMAL">Normal</SelectItem>
+                        
                         <SelectItem value="HIGH">High</SelectItem>
                       </SelectContent>
                     </Select>
