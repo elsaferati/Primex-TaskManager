@@ -57,27 +57,21 @@ const FREQUENCY_CHIPS = [
   { id: "YEARLY", label: "Yearly" },
 ]
 
-const PRIORITY_OPTIONS: TaskPriority[] = ["MEDIUM", "HIGH"]
+const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  LOW: "Normal",
-  MEDIUM: "Normal",
+  NORMAL: "Normal",
   HIGH: "High",
-  URGENT: "High",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
-  MEDIUM: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
+  NORMAL: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
   HIGH: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
-  URGENT: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  LOW: "border-l-[#F97316]",
-  MEDIUM: "border-l-[#F97316]",
+  NORMAL: "border-l-[#F97316]",
   HIGH: "border-l-[#EF4444]",
-  URGENT: "border-l-[#EF4444]",
 }
 
 const PRIORITY_CHIPS = [
@@ -87,9 +81,7 @@ const PRIORITY_CHIPS = [
 
 const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
   HIGH: 0,
-  MEDIUM: 1,
-  LOW: 1,
-  URGENT: 0,
+  NORMAL: 1,
 }
 
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -183,9 +175,9 @@ function csvEscape(value: unknown): string {
 
 function normalizePriority(value?: TaskPriority | null): TaskPriority {
   if (value === "URGENT") return "HIGH"
-  if (value === "LOW") return "MEDIUM"
+  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
   if (value && PRIORITY_OPTIONS.includes(value)) return value
-  return "MEDIUM"
+  return "NORMAL"
 }
 
 function parseInternalNotes(value?: string | null): Record<string, string> {
@@ -241,7 +233,7 @@ export default function SystemTasksPage() {
   const [assigneeError, setAssigneeError] = React.useState<string | null>(null)
   const [assigneeOpen, setAssigneeOpen] = React.useState(false)
   const [frequency, setFrequency] = React.useState<SystemTaskFrequency>("DAILY")
-  const [priority, setPriority] = React.useState<TaskPriority>("MEDIUM")
+  const [priority, setPriority] = React.useState<TaskPriority>("NORMAL")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
   const [internalNotes, setInternalNotes] = React.useState<Record<string, string>>({})
   const [dayOfWeek, setDayOfWeek] = React.useState("")
@@ -257,7 +249,7 @@ export default function SystemTasksPage() {
   const [editAssigneeError, setEditAssigneeError] = React.useState<string | null>(null)
   const [editAssigneeOpen, setEditAssigneeOpen] = React.useState(false)
   const [editFrequency, setEditFrequency] = React.useState<SystemTaskFrequency>("DAILY")
-  const [editPriority, setEditPriority] = React.useState<TaskPriority>("MEDIUM")
+  const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod>("AM")
   const [editInternalNotes, setEditInternalNotes] = React.useState<Record<string, string>>({})
   const [editDayOfWeek, setEditDayOfWeek] = React.useState("")
@@ -526,6 +518,14 @@ export default function SystemTasksPage() {
   }, [frequencyFilters, frequencyMultiSelect])
 
   const sections = React.useMemo<Section[]>(() => {
+    const frequencyOrder: Record<SystemTaskFrequency, number> = {
+      DAILY: 0,
+      WEEKLY: 1,
+      MONTHLY: 2,
+      "3_MONTHS": 3,
+      "6_MONTHS": 4,
+      YEARLY: 5,
+    }
     const sorted = [...filteredTemplates].sort((a, b) => {
       const aInactive = !a.is_active
       const bInactive = !b.is_active
@@ -533,6 +533,12 @@ export default function SystemTasksPage() {
       const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
       const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
       if (aPriority !== bPriority) return aPriority - bPriority
+      const aFrequency = frequencyOrder[a.frequency]
+      const bFrequency = frequencyOrder[b.frequency]
+      if (aFrequency !== bFrequency) return aFrequency - bFrequency
+      const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+      if (aCreated !== bCreated) return bCreated - aCreated
       return a.title.localeCompare(b.title)
     })
     return [
@@ -626,7 +632,7 @@ export default function SystemTasksPage() {
       setDayOfMonth("")
       setMonthOfYear(EMPTY_VALUE)
       setFrequency("DAILY")
-      setPriority("MEDIUM")
+      setPriority("NORMAL")
       setFinishPeriod("AM")
       setInternalNotes({})
       setIsActive(true)
@@ -929,8 +935,7 @@ export default function SystemTasksPage() {
       }
       if (raw.includes("urgent") || raw.includes("critical")) return "HIGH"
       if (raw.includes("high")) return "HIGH"
-      if (raw.includes("medium")) return "MEDIUM"
-      if (raw.includes("low")) return "LOW"
+      if (raw.includes("medium") || raw.includes("low") || raw.includes("normal")) return "NORMAL"
       return null
     }
 
@@ -1767,11 +1772,33 @@ export default function SystemTasksPage() {
                         const isInactive = template.is_active === false
                         const showInactiveDivider =
                           isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
+                        const prev = index > 0 ? section.templates[index - 1] : null
+                        const prevPriority = prev ? normalizePriority(prev.priority) : null
+                        const showPriorityDivider =
+                          prevPriority !== null && prevPriority !== priorityValue && priorityValue === "HIGH"
+                        const showFrequencyDivider =
+                          index === 0 ||
+                          (prev && prev.frequency !== template.frequency) ||
+                          (prevPriority !== null && prevPriority !== priorityValue)
                         return (
                           <React.Fragment key={template.id}>
                             {showInactiveDivider ? (
                               <div className="flex items-center gap-1.5 border-t border-dashed pt-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
                                 <span>Inactive tasks</span>
+                              </div>
+                            ) : null}
+                            {showPriorityDivider ? (
+                              <div className="flex items-center gap-2 border-t border-slate-200/70 bg-slate-50/60 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-500">
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </span>
+                              </div>
+                            ) : null}
+                            {showFrequencyDivider ? (
+                              <div className="flex items-center gap-2 border-t border-slate-200/70 bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-500">
+                                  {frequencyLabel}
+                                </span>
                               </div>
                             ) : null}
                             <div

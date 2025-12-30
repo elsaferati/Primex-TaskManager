@@ -15,7 +15,6 @@ type MonthlyResponse = {
   month_start: string
   month_end: string
   tasks: Task[]
-  milestones: Task[]
   recurring: Task[]
   summary: MonthlySummary
 }
@@ -153,10 +152,10 @@ export default function MonthlyPlannerPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Milestones / Recurring</CardTitle>
+                <CardTitle className="text-sm">Recurring</CardTitle>
               </CardHeader>
               <CardContent className="text-2xl font-semibold">
-                {data.milestones.length} / {data.recurring.length}
+                {data.recurring.length}
               </CardContent>
             </Card>
           </div>

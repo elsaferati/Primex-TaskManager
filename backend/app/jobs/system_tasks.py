@@ -34,7 +34,7 @@ async def generate_system_tasks() -> int:
                     assigned_to=tmpl.default_assignee_id,
                     created_by=tmpl.default_assignee_id,
                     status=TaskStatus.TODO,
-                    priority=tmpl.priority or TaskPriority.MEDIUM,
+                    priority=tmpl.priority or TaskPriority.NORMAL,
                     finish_period=tmpl.finish_period,
                     system_template_origin_id=tmpl.id,
                     start_date=datetime.now(timezone.utc),

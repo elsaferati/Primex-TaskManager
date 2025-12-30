@@ -49,7 +49,6 @@ def _task_to_out(t: Task) -> TaskOut:
         planned_for=t.planned_for,
         is_carried_over=t.is_carried_over,
         carried_over_from=t.carried_over_from,
-        is_milestone=t.is_milestone,
         reminder_enabled=t.reminder_enabled,
         next_reminder_at=t.next_reminder_at,
         is_active=t.is_active,
@@ -130,7 +129,6 @@ async def monthly_planner(
     tasks = (await db.execute(stmt.order_by(Task.planned_for, Task.created_at))).scalars().all()
     task_out = [_task_to_out(t) for t in tasks]
 
-    milestones = [t for t in task_out if t.is_milestone]
     recurring = [t for t in task_out if t.task_type.value == "system"]
 
     prev_month = month - 1
@@ -171,7 +169,6 @@ async def monthly_planner(
         month_start=month_start,
         month_end=month_end,
         tasks=task_out,
-        milestones=milestones,
         recurring=recurring,
         summary=MonthlyPlannerSummary(month_completed=month_completed, previous_month_completed=prev_completed),
     )

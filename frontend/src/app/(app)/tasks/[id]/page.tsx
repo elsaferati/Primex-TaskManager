@@ -12,16 +12,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
+import { normalizeDueDateInput } from "@/lib/dates"
 import type { Task, User } from "@/lib/types"
-
-type AuditLog = {
-  id: string
-  actor_user_id?: string | null
-  action: string
-  before?: Record<string, unknown> | null
-  after?: Record<string, unknown> | null
-  created_at: string
-}
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
@@ -31,11 +23,30 @@ const TASK_STATUS_OPTIONS = [
   { value: "CANCELLED", label: "Cancelled" },
 ] as const
 
+const TASK_PRIORITY_LABELS: Record<string, string> = {
+  NORMAL: "Normal",
+  HIGH: "High",
+}
+
 function toDateInput(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000)
+  return adjusted.toISOString().slice(0, 10)
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("en-US")
+}
+
+function statusLabel(value?: string | null) {
+  if (!value) return "-"
+  const hit = TASK_STATUS_OPTIONS.find((option) => option.value === value)
+  return hit?.label ?? value
 }
 
 export default function TaskDetailsPage() {
@@ -49,7 +60,6 @@ export default function TaskDetailsPage() {
 
   const [task, setTask] = React.useState<Task | null>(null)
   const [users, setUsers] = React.useState<User[]>([])
-  const [audit, setAudit] = React.useState<AuditLog[]>([])
 
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
@@ -58,9 +68,6 @@ export default function TaskDetailsPage() {
     if (!taskRes.ok) return
     const t = (await taskRes.json()) as Task
     setTask(t)
-
-    const aRes = await apiFetch(`/audit-logs?entity_type=task&entity_id=${t.id}`)
-    if (aRes.ok) setAudit((await aRes.json()) as AuditLog[])
 
     if (canManage) {
       const uRes = await apiFetch("/users")
@@ -77,7 +84,6 @@ export default function TaskDetailsPage() {
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
   const [dueDate, setDueDate] = React.useState("")
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
-  const [milestone, setMilestone] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
 
   React.useEffect(() => {
@@ -86,7 +92,6 @@ export default function TaskDetailsPage() {
     setStatusValue(task.status || "")
     setDueDate(toDateInput(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
-    setMilestone(task.is_milestone)
     setReminder(task.reminder_enabled)
   }, [task])
 
@@ -102,7 +107,6 @@ export default function TaskDetailsPage() {
       if (canManage) {
         payload.due_date = dueDate || null
         payload.assigned_to = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
-        payload.is_milestone = milestone
       }
 
       const res = await apiFetch(`/tasks/${task.id}`, {
@@ -123,125 +127,169 @@ export default function TaskDetailsPage() {
 
   if (!task) return <div className="text-sm text-muted-foreground">Loading...</div>
 
+  const assignedUser = users.find((u) => u.id === task.assigned_to) || null
+  const statusText = statusLabel(task.status)
+  const priorityText = task.priority ? TASK_PRIORITY_LABELS[task.priority] || task.priority : "-"
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (returnTo) {
-                router.push(returnTo)
-              } else {
-                router.back()
-              }
-            }}
-          >
-            Back
-          </Button>
-          <div className="text-lg font-semibold">{task.title}</div>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {task.task_type === "system" ? <Badge variant="secondary">System</Badge> : null}
-          {task.reminder_enabled ? <Badge variant="secondary">1h Reminder</Badge> : null}
-          {task.is_milestone ? <Badge variant="secondary">Milestone</Badge> : null}
-          {task.is_carried_over ? <Badge variant="secondary">Carried</Badge> : null}
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={statusValue} onValueChange={setStatusValue}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TASK_STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-            </div>
-
-            {canManage ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Due date</Label>
-                  <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Assign to</Label>
-                  <Select value={assignedTo} onValueChange={setAssignedTo}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                      {users
-                        .filter((u) => !u.department_id || u.department_id === task.department_id)
-                        .map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.full_name || u.username}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50">
+      <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
+        <Card className="border-slate-200/70 bg-white/80 shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (returnTo) {
+                      router.push(returnTo)
+                    } else {
+                      router.back()
+                    }
+                  }}
+                  className="px-0"
+                >
+                  Back
+                </Button>
+                <div className="text-2xl font-semibold text-slate-900">{task.title}</div>
+                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span>Status: {statusText}</span>
+                  <span>•</span>
+                  <span>Priority: {priorityText}</span>
+                  {task.phase ? (
+                    <>
+                      <span>•</span>
+                      <span>Phase: {task.phase}</span>
+                    </>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
+              <div className="flex flex-wrap gap-2">
+                {task.task_type === "system" ? <Badge variant="secondary">System</Badge> : null}
+                {task.reminder_enabled ? <Badge variant="secondary">1h Reminder</Badge> : null}
+                {task.is_carried_over ? <Badge variant="secondary">Carried</Badge> : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-            <div className="flex flex-wrap items-center gap-4 pt-1">
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-sm">Update Task</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={statusValue} onValueChange={setStatusValue}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TASK_STATUS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} />
+              </div>
+
               {canManage ? (
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={milestone} onCheckedChange={(v) => setMilestone(Boolean(v))} />
-                  Milestone
-                </label>
-              ) : null}
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={reminder} onCheckedChange={(v) => setReminder(Boolean(v))} />
-                1h Reminder
-              </label>
-            </div>
-
-            <div className="flex justify-end">
-              <Button disabled={saving} onClick={() => void save()}>
-                {saving ? "Saving..." : "Save"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Audit</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {audit.length ? (
-              audit.map((a) => (
-                <div key={a.id} className="rounded-md border p-3">
-                  <div className="text-sm font-medium">{a.action}</div>
-                  <div className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleString()}</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Due date</Label>
+                    <Input
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(normalizeDueDateInput(e.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Assign to</Label>
+                    <Select value={assignedTo} onValueChange={setAssignedTo}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Unassigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                        {users
+                          .filter((u) => !u.department_id || u.department_id === task.department_id)
+                          .map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              ))
-            ) : (
-              <div className="text-sm text-muted-foreground">No audit entries.</div>
-            )}
-          </CardContent>
-        </Card>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-4 pt-1">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={reminder} onCheckedChange={(v) => setReminder(Boolean(v))} />
+                  1h Reminder
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <Button disabled={saving} onClick={() => void save()}>
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-sm">Task Info</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                <div className="grid gap-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Assignee</span>
+                    <span className="font-medium text-slate-900">
+                      {assignedUser?.full_name || assignedUser?.username || (task.assigned_to ? "Assigned" : "Unassigned")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Due date</span>
+                    <span className="font-medium text-slate-900">{formatDate(task.due_date)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Created</span>
+                    <span className="font-medium text-slate-900">{formatDate(task.created_at)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Updated</span>
+                    <span className="font-medium text-slate-900">{formatDate(task.updated_at)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Flags</div>
+                <div className="flex flex-wrap gap-2">
+                  {task.is_bllok ? <Badge variant="secondary">Blocked</Badge> : null}
+                  {task.is_1h_report ? <Badge variant="secondary">1H Report</Badge> : null}
+                  {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
+                  {task.ga_note_origin_id ? <Badge variant="secondary">GA/KA Note</Badge> : null}
+                  {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.ga_note_origin_id ? (
+                    <span className="text-sm text-muted-foreground">No special flags.</span>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )
