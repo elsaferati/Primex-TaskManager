@@ -92,7 +92,7 @@ export default function TaskDetailsPage() {
     setStatusValue(task.status || "")
     setDueDate(toDateInput(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
-    setReminder(task.reminder_enabled)
+    setReminder(Boolean(task.reminder_enabled))
   }, [task])
 
   const save = async () => {
@@ -182,7 +182,7 @@ export default function TaskDetailsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={statusValue} onValueChange={setStatusValue}>
+                <Select value={statusValue} onValueChange={(value) => setStatusValue(value as typeof statusValue)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>

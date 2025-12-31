@@ -215,10 +215,11 @@ function toMeetingInputValue(value?: string | null) {
   return date.toISOString().slice(0, 16)
 }
 
-function normalizePriority(value?: TaskPriority | null): TaskPriority {
-  if (value === "URGENT") return "HIGH"
-  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
-  if (value && PRIORITY_OPTIONS.includes(value)) return value
+function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
+  const normalized = typeof value === "string" ? value.toUpperCase() : null
+  if (normalized === "URGENT") return "HIGH"
+  if (normalized === "LOW" || normalized === "MEDIUM") return "NORMAL"
+  if (normalized === "NORMAL" || normalized === "HIGH") return normalized
   return "NORMAL"
 }
 
@@ -874,7 +875,11 @@ export default function DepartmentKanban() {
                                             {/* Members Stack */}
                                             <div className="flex -space-x-2">
                                                 {members.length > 0 ? members.slice(0,4).map(m => (
-                                                    <div key={m?.id} className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-300" title={m?.full_name || m?.username}>
+                                                    <div
+                                                      key={m?.id}
+                                                      className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-300"
+                                                      title={m?.full_name || m?.username || "Unknown"}
+                                                    >
                                                         {initials(m?.full_name || "?")}
                                                     </div>
                                                 )) : <div className="text-xs text-slate-400">No members</div>}
@@ -920,7 +925,7 @@ export default function DepartmentKanban() {
                     <div className="grid gap-6 lg:grid-cols-2">
                         <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
                              <div className="mb-4 flex items-center justify-between"><h3 className="font-medium text-slate-900 dark:text-white">Project Tasks</h3><Badge variant="secondary" className="rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{todayProjectTasks.length}</Badge></div>
-                             <div className="space-y-6">{todayProjectTaskGroups.length > 0 ? todayProjectTaskGroups.map(group => (<div key={group.id}><h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">{group.name}</h4><div className="space-y-2">{group.tasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="group flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-emerald-900"><div className="flex items-center gap-3"><div className={`h-2 w-2 rounded-full ${task.status === "DONE" ? "bg-emerald-400" : "bg-slate-300"}`}></div><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span></div><span className="text-xs text-slate-400 group-hover:text-emerald-600">{assigneeLabel(userMap.get(task.assigned_to))}</span></Link>))}</div></div>)) : <div className="py-8 text-center text-sm text-slate-400">No project tasks for today.</div>}</div>
+                             <div className="space-y-6">{todayProjectTaskGroups.length > 0 ? todayProjectTaskGroups.map(group => (<div key={group.id}><h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">{group.name}</h4><div className="space-y-2">{group.tasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="group flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-emerald-900"><div className="flex items-center gap-3"><div className={`h-2 w-2 rounded-full ${task.status === "DONE" ? "bg-emerald-400" : "bg-slate-300"}`}></div><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span></div><span className="text-xs text-slate-400 group-hover:text-emerald-600">{assigneeLabel(task.assigned_to ? userMap.get(task.assigned_to) : null)}</span></Link>))}</div></div>)) : <div className="py-8 text-center text-sm text-slate-400">No project tasks for today.</div>}</div>
                         </div>
                         <div className="space-y-6">
                              <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">

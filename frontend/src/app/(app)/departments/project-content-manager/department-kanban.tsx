@@ -237,10 +237,11 @@ function toMeetingInputValue(value?: string | null) {
   return date.toISOString().slice(0, 16)
 }
 
-function normalizePriority(value?: TaskPriority | null): TaskPriority {
-  if (value === "URGENT") return "HIGH"
-  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
-  if (value && PRIORITY_OPTIONS.includes(value)) return value
+function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
+  const normalized = typeof value === "string" ? value.toUpperCase() : null
+  if (normalized === "URGENT") return "HIGH"
+  if (normalized === "LOW" || normalized === "MEDIUM") return "NORMAL"
+  if (normalized === "NORMAL" || normalized === "HIGH") return normalized
   return "NORMAL"
 }
 
@@ -1949,7 +1950,7 @@ export default function DepartmentKanban() {
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Type</Label>
-                        <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                        <Select value={newGaNoteType} onValueChange={(value) => setNewGaNoteType(value as "GA" | "KA")}>
                           <SelectTrigger>
                             <SelectValue placeholder="GA/KA" />
                           </SelectTrigger>
@@ -1961,7 +1962,10 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label>Priority</Label>
-                        <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                        <Select
+                          value={newGaNotePriority}
+                          onValueChange={(value) => setNewGaNotePriority(value as "NORMAL" | "HIGH" | "__none__")}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Priority" />
                           </SelectTrigger>

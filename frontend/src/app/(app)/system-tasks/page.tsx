@@ -175,10 +175,11 @@ function csvEscape(value: unknown): string {
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, "\"\"")}"` : str
 }
 
-function normalizePriority(value?: TaskPriority | null): TaskPriority {
-  if (value === "URGENT") return "HIGH"
-  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
-  if (value && PRIORITY_OPTIONS.includes(value)) return value
+function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
+  const normalized = typeof value === "string" ? value.toUpperCase() : null
+  if (normalized === "URGENT") return "HIGH"
+  if (normalized === "LOW" || normalized === "MEDIUM") return "NORMAL"
+  if (normalized === "NORMAL" || normalized === "HIGH") return normalized
   return "NORMAL"
 }
 

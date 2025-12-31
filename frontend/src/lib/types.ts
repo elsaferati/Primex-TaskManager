@@ -10,6 +10,14 @@ export type TemplateRecurrence = "daily" | "weekly" | "monthly" | "yearly"
 
 export type SystemTaskFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "3_MONTHS" | "6_MONTHS"
 
+export interface TaskAssignee {
+  id: string
+  email?: string | null
+  username?: string | null
+  full_name?: string | null
+  department_id?: string | null
+}
+
 export interface SystemTaskTemplate {
   id: string
   template_id?: string | null

@@ -1127,7 +1127,10 @@ export default function ProjectPage() {
                   <SelectItem value="KA">KA</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+              <Select
+                value={newGaNotePriority}
+                onValueChange={(value) => setNewGaNotePriority(value as "__none__" | "NORMAL" | "HIGH")}
+              >
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>

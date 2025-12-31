@@ -1173,7 +1173,7 @@ export default function DevelopmentProjectPage() {
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
                 <div className="p-6 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Select value={newGaNoteType} onValueChange={setNewGaNoteType}>
+                    <Select value={newGaNoteType} onValueChange={(value) => setNewGaNoteType(value as "GA" | "KA")}>
                       <SelectTrigger className="w-28 border-sky-200 focus:border-sky-400 rounded-xl">
                         <SelectValue placeholder="GA/KA" />
                       </SelectTrigger>
@@ -1182,7 +1182,10 @@ export default function DevelopmentProjectPage() {
                         <SelectItem value="KA">KA</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Select value={newGaNotePriority} onValueChange={setNewGaNotePriority}>
+                    <Select
+                      value={newGaNotePriority}
+                      onValueChange={(value) => setNewGaNotePriority(value as "__none__" | "NORMAL" | "HIGH")}
+                    >
                       <SelectTrigger className="w-40 border-sky-200 focus:border-sky-400 rounded-xl">
                         <SelectValue placeholder="Priority" />
                       </SelectTrigger>

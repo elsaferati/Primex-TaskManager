@@ -54,7 +54,7 @@ export function EditUserDialog({
     resolver: zodResolver(editUserSchema),
     defaultValues: {
       email: userRecord.email,
-      username: userRecord.username,
+      username: userRecord.username || "",
       full_name: userRecord.full_name || "",
       role: userRecord.role,
       department_id: userRecord.department_id || NONE_VALUE,
@@ -65,7 +65,7 @@ export function EditUserDialog({
   React.useEffect(() => {
     form.reset({
       email: userRecord.email,
-      username: userRecord.username,
+      username: userRecord.username || "",
       full_name: userRecord.full_name || "",
       role: userRecord.role,
       department_id: userRecord.department_id || NONE_VALUE,

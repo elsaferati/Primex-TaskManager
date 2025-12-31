@@ -259,10 +259,11 @@ function toMeetingInputValue(value?: string | null) {
   return date.toISOString().slice(0, 16)
 }
 
-function normalizePriority(value?: TaskPriority | null): TaskPriority {
-  if (value === "URGENT") return "HIGH"
-  if (value === "LOW" || value === "MEDIUM") return "NORMAL"
-  if (value && PRIORITY_OPTIONS.includes(value)) return value
+function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
+  const normalized = typeof value === "string" ? value.toUpperCase() : null
+  if (normalized === "URGENT") return "HIGH"
+  if (normalized === "LOW" || normalized === "MEDIUM") return "NORMAL"
+  if (normalized === "NORMAL" || normalized === "HIGH") return normalized
   return "NORMAL"
 }
 

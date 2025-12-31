@@ -209,8 +209,10 @@ export default function CommonViewPage() {
                   endDate = dateMatch[1]
                   note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
                 } else if (dateMatches.length) {
-                  startDate = dateMatches[0]
-                  endDate = dateMatches[1] || dateMatches[0]
+                  const firstDate = dateMatches[0] ?? date
+                  const secondDate = dateMatches[1] ?? firstDate
+                  startDate = firstDate
+                  endDate = secondDate
                 }
               }
               
