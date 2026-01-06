@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
+import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
 
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
@@ -214,9 +214,10 @@ function parseInternalNotes(value?: string | null): Record<string, string> {
 
 export default function SystemTasksPage() {
   const { apiFetch, user } = useAuth()
+  type AssigneeUser = User | UserLookup
   const [templates, setTemplates] = React.useState<SystemTaskTemplate[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
-  const [users, setUsers] = React.useState<User[]>([])
+  const [users, setUsers] = React.useState<AssigneeUser[]>([])
   const [loading, setLoading] = React.useState(true)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
@@ -266,7 +267,7 @@ export default function SystemTasksPage() {
   const [editIsActive, setEditIsActive] = React.useState(true)
 
   const canEdit = user?.role !== "STAFF"
-  const canCreate = canEdit
+  const canCreate = true
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -282,9 +283,9 @@ export default function SystemTasksPage() {
         setDepartments((await departmentsRes.json()) as Department[])
       }
       if (canCreate) {
-        const usersRes = await apiFetch("/users")
+        const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
         if (usersRes.ok) {
-          setUsers((await usersRes.json()) as User[])
+          setUsers((await usersRes.json()) as AssigneeUser[])
         }
       }
     } finally {
@@ -728,7 +729,8 @@ export default function SystemTasksPage() {
     const query = assigneeQuery.trim().toLowerCase()
     if (!query) return availableAssignees
     return availableAssignees.filter((person) => {
-      const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+      const email = "email" in person ? person.email || "" : ""
+      const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
       return name.includes(query)
     })
   }, [assigneeQuery, availableAssignees])
@@ -737,15 +739,18 @@ export default function SystemTasksPage() {
     const base = !query
       ? editAvailableAssignees
       : editAvailableAssignees.filter((person) => {
-          const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+          const email = "email" in person ? person.email || "" : ""
+          const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
           return name.includes(query)
         })
     return [...base].sort((a, b) => {
       const aSelected = editAssigneeIds.includes(a.id)
       const bSelected = editAssigneeIds.includes(b.id)
       if (aSelected !== bSelected) return aSelected ? -1 : 1
-      const aName = (a.full_name || a.username || a.email).toLowerCase()
-      const bName = (b.full_name || b.username || b.email).toLowerCase()
+      const aEmail = "email" in a ? a.email || "" : ""
+      const bEmail = "email" in b ? b.email || "" : ""
+      const aName = (a.full_name || a.username || aEmail).toLowerCase()
+      const bName = (b.full_name || b.username || bEmail).toLowerCase()
       return aName.localeCompare(bName)
     })
   }, [editAssigneeQuery, editAvailableAssignees, editAssigneeIds])
@@ -1283,7 +1288,8 @@ export default function SystemTasksPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {assigneeIds.map((id) => {
                         const person = userMap.get(id)
-                        const label = person?.full_name || person?.username || person?.email || id
+                        const email = person && "email" in person ? person.email || "" : ""
+                        const label = person?.full_name || person?.username || email || id
                         return (
                           <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
                             <span>{label}</span>
@@ -1323,7 +1329,7 @@ export default function SystemTasksPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => handleAssigneesChange(nextIds)}
                               >
-                                <span>{person.full_name || person.username || person.email}</span>
+                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
                                 {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
                               </button>
                             )
@@ -1555,7 +1561,8 @@ export default function SystemTasksPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {editAssigneeIds.map((id) => {
                         const person = userMap.get(id)
-                        const label = person?.full_name || person?.username || person?.email || id
+                            const email = person && "email" in person ? person.email || "" : ""
+                            const label = person?.full_name || person?.username || email || id
                         return (
                           <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
                             <span>{label}</span>
@@ -1595,7 +1602,7 @@ export default function SystemTasksPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => handleEditAssigneesChange(nextIds)}
                               >
-                                <span>{person.full_name || person.username || person.email}</span>
+                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
                                 {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
                               </button>
                             )
@@ -1769,7 +1776,7 @@ export default function SystemTasksPage() {
               <CardContent className="space-y-0.5 pt-3">
                 <div className="overflow-x-auto">
                   <div className="min-w-[880px] space-y-1">
-                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
+                    <div className="grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
                       <div>Task Title</div>
                       <div>Department</div>
                       <div>Owner</div>
@@ -1822,12 +1829,12 @@ export default function SystemTasksPage() {
                             ) : null}
                             <div
                               className={cn(
-                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
+                                "grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
                                 PRIORITY_BORDER_STYLES[priorityValue]
                               )}
                             >
                               <div className="space-y-0">
-                                <div className="text-[15px] font-semibold leading-tight text-slate-900">
+                                <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words">
                                   {template.title}
                                 </div>
                               </div>

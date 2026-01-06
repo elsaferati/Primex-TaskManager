@@ -214,10 +214,6 @@ async def create_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
-    ensure_manager_or_admin(user)
-    if payload.department_id is not None:
-        ensure_department_access(user, payload.department_id)
-
     if payload.department_id is not None:
         department = (
             await db.execute(select(Department).where(Department.id == payload.department_id))
