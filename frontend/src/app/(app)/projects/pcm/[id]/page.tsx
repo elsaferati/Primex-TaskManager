@@ -360,6 +360,8 @@ export default function PcmProjectPage() {
   const [newInlineTaskTotal, setNewInlineTaskTotal] = React.useState("")
   const [newInlineTaskCompleted, setNewInlineTaskCompleted] = React.useState("")
   const [creatingInlineTask, setCreatingInlineTask] = React.useState(false)
+  // Finalizimi checklist state
+  const [finalizationChecks, setFinalizationChecks] = React.useState<Record<string, boolean>>({})
   const [controlEdits, setControlEdits] = React.useState<
     Record<
       string,
@@ -1541,6 +1543,53 @@ export default function PcmProjectPage() {
                     </div>
                   ) : null}
                 </div>
+              </div>
+            </Card>
+          </>
+        ) : mstPhase === "FINALIZIMI" ? (
+          <>
+            <div className="border-b flex gap-6">
+              <button className="relative pb-3 text-sm font-medium text-blue-600">
+                Finalizimi
+                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+              </button>
+            </div>
+            <Card className="border-0 shadow-sm">
+              <div className="p-6 space-y-6">
+                <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
+                <div className="space-y-4">
+                  {[
+                    { id: "kontrollat", question: "A jane kryer kontrollat?" },
+                    { id: "files", question: "A eshte ruajtur projekti tek files?" },
+                  ].map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
+                    >
+                      <Checkbox
+                        id={item.id}
+                        checked={Boolean(finalizationChecks[item.id])}
+                        onCheckedChange={(checked) =>
+                          setFinalizationChecks((prev) => ({ ...prev, [item.id]: Boolean(checked) }))
+                        }
+                      />
+                      <label
+                        htmlFor={item.id}
+                        className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
+                      >
+                        {item.question}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                {Object.values(finalizationChecks).filter(Boolean).length === 2 && (
+                  <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                    <div className="flex items-center gap-2 text-emerald-700 font-medium">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                      Projekti eshte gati per mbyllje!
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           </>
