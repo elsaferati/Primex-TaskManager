@@ -9,6 +9,7 @@ export type TaskFinishPeriod = "AM" | "PM"
 export type TemplateRecurrence = "daily" | "weekly" | "monthly" | "yearly"
 
 export type SystemTaskFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "3_MONTHS" | "6_MONTHS"
+export type SystemTaskScope = "ALL" | "DEPARTMENT" | "GA"
 
 export interface TaskAssignee {
   id: string
@@ -27,6 +28,7 @@ export interface SystemTaskTemplate {
   department_id?: string | null
   default_assignee_id?: string | null
   assignees?: TaskAssignee[] | null
+  scope: SystemTaskScope
   frequency: SystemTaskFrequency
   day_of_week?: number | null
   day_of_month?: number | null

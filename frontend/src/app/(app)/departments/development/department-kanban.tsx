@@ -1994,7 +1994,7 @@ export default function DepartmentKanban() {
                             <div className="font-medium">{item.title}</div>
                             <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
                           </div>
-                          <div>{department.code}</div>
+                          <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
                           <div>{owner?.full_name || owner?.username || "-"}</div>
                           <div className="text-muted-foreground">
                             {FREQUENCY_LABELS[item.frequency] || item.frequency}

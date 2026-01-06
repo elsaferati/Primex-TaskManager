@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import FrequencyType, TaskFinishPeriod, TaskPriority
+from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
 
 
 class SystemTaskTemplate(Base):
@@ -20,6 +20,15 @@ class SystemTaskTemplate(Base):
     internal_notes: Mapped[str | None] = mapped_column(String)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
     default_assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    scope: Mapped[SystemTaskScope] = mapped_column(
+        Enum(
+            SystemTaskScope,
+            name="system_task_scope",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        nullable=False,
+        server_default="ALL",
+    )
 
     frequency: Mapped[FrequencyType] = mapped_column(
         Enum(

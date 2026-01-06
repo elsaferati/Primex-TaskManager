@@ -4,14 +4,14 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, insert, or_, select, text
+from sqlalchemy import and_, delete, insert, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import TaskPriority, TaskStatus, UserRole
+from app.models.enums import SystemTaskScope, TaskPriority, TaskStatus, UserRole
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.system_task_template import SystemTaskTemplate
@@ -126,6 +126,7 @@ def _task_row_to_out(
         department_id=task.department_id,
         default_assignee_id=task.assigned_to,
         assignees=assignees,
+        scope=template.scope,
         frequency=template.frequency,
         day_of_week=template.day_of_week,
         day_of_month=template.day_of_month,
@@ -148,22 +149,32 @@ async def list_system_tasks(
 
     if department_id is not None:
         if user.role != UserRole.ADMIN:
-            ensure_department_access(user, department_id)
+            if not (user.role == UserRole.MANAGER and user.department_id is None):
+                ensure_department_access(user, department_id)
         template_stmt = template_stmt.where(
             or_(
-                SystemTaskTemplate.department_id == department_id,
-                SystemTaskTemplate.department_id.is_(None),
+                and_(
+                    SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT,
+                    SystemTaskTemplate.department_id == department_id,
+                ),
+                SystemTaskTemplate.scope == SystemTaskScope.ALL,
             )
         )
     elif user.role != UserRole.ADMIN:
         if user.department_id is None:
-            return []
-        template_stmt = template_stmt.where(
-            or_(
-                SystemTaskTemplate.department_id == user.department_id,
-                SystemTaskTemplate.department_id.is_(None),
+            if user.role != UserRole.MANAGER:
+                return []
+        else:
+            template_stmt = template_stmt.where(
+                or_(
+                    SystemTaskTemplate.scope == SystemTaskScope.ALL,
+                    SystemTaskTemplate.scope == SystemTaskScope.GA,
+                    and_(
+                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT,
+                        SystemTaskTemplate.department_id == user.department_id,
+                    ),
+                )
             )
-        )
 
     templates = (await db.execute(template_stmt)).scalars().all()
     if not templates:
@@ -214,9 +225,22 @@ async def create_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
-    if payload.department_id is not None:
+    scope_value = payload.scope
+    if scope_value is None:
+        scope_value = SystemTaskScope.DEPARTMENT if payload.department_id is not None else SystemTaskScope.ALL
+
+    department_id = payload.department_id
+    if scope_value == SystemTaskScope.DEPARTMENT:
+        if department_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
+    else:
+        if department_id is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for this scope")
+        department_id = None
+
+    if department_id is not None:
         department = (
-            await db.execute(select(Department).where(Department.id == payload.department_id))
+            await db.execute(select(Department).where(Department.id == department_id))
         ).scalar_one_or_none()
         if department is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
@@ -235,9 +259,11 @@ async def create_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        if payload.department_id is not None:
+        if scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
             for assignee in assignee_users:
-                if assignee.department_id != payload.department_id:
+                if assignee.department_id is None:
+                    continue
+                if assignee.department_id != department_id:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Assignee must belong to the selected department",
@@ -249,8 +275,9 @@ async def create_system_task_template(
         title=payload.title,
         description=payload.description,
         internal_notes=payload.internal_notes,
-        department_id=payload.department_id,
+        department_id=department_id,
         default_assignee_id=assignee_ids[0] if assignee_ids else None,
+        scope=scope_value,
         frequency=payload.frequency,
         day_of_week=payload.day_of_week,
         day_of_month=payload.day_of_month,
@@ -318,16 +345,29 @@ async def update_system_task_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
 
     fields_set = payload.__fields_set__
+    scope_set = "scope" in fields_set
     department_set = "department_id" in fields_set
     assignee_set = "default_assignee_id" in fields_set or "assignees" in fields_set
 
-    if department_set and payload.department_id is None and template.department_id is not None:
-        ensure_department_access(user, template.department_id)
+    scope_value = template.scope
+    if scope_set:
+        if payload.scope is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scope is required")
+        scope_value = payload.scope
 
-    if department_set and payload.department_id is not None:
-        ensure_department_access(user, payload.department_id)
+    target_department = payload.department_id if department_set else template.department_id
+    if scope_value == SystemTaskScope.DEPARTMENT:
+        if target_department is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
+    else:
+        if department_set and payload.department_id is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for this scope")
+        target_department = None
+
+    if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
+        ensure_department_access(user, target_department)
         department = (
-            await db.execute(select(Department).where(Department.id == payload.department_id))
+            await db.execute(select(Department).where(Department.id == target_department))
         ).scalar_one_or_none()
         if department is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
@@ -346,9 +386,10 @@ async def update_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        target_department = payload.department_id if department_set else template.department_id
-        if target_department is not None:
+        if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
             for assignee in assignee_users:
+                if assignee.department_id is None:
+                    continue
                 if assignee.department_id != target_department:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -361,8 +402,13 @@ async def update_system_task_template(
         template.description = payload.description
     if "internal_notes" in fields_set:
         template.internal_notes = payload.internal_notes
-    if department_set:
-        template.department_id = payload.department_id
+    if scope_set:
+        template.scope = scope_value
+    if scope_value == SystemTaskScope.DEPARTMENT:
+        if department_set:
+            template.department_id = payload.department_id
+    else:
+        template.department_id = None
     if assignee_set and assignee_ids is not None:
         template.default_assignee_id = assignee_ids[0] if assignee_ids else None
     if payload.frequency is not None:
