@@ -44,6 +44,7 @@ import type {
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
 const GA_DEPARTMENTS_VALUE = "__ga__"
+const FIRST_WORKING_DAY_VALUE = "__first_working_day__"
 const END_OF_MONTH_VALUE = "__end_of_month__"
 
 const FREQUENCY_OPTIONS = [
@@ -267,7 +268,7 @@ export default function SystemTasksPage() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [internalNotes, setInternalNotes] = React.useState<Record<string, string>>({})
-  const [dayOfWeek, setDayOfWeek] = React.useState("")
+  const [daysOfWeek, setDaysOfWeek] = React.useState<string[]>([])
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
@@ -285,7 +286,7 @@ export default function SystemTasksPage() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [editInternalNotes, setEditInternalNotes] = React.useState<Record<string, string>>({})
-  const [editDayOfWeek, setEditDayOfWeek] = React.useState("")
+  const [editDaysOfWeek, setEditDaysOfWeek] = React.useState<string[]>([])
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
   const [editIsActive, setEditIsActive] = React.useState(true)
@@ -358,13 +359,21 @@ export default function SystemTasksPage() {
     setEditPriority(normalizePriority(editTemplate.priority))
     setEditFinishPeriod(editTemplate.finish_period ?? FINISH_PERIOD_NONE_VALUE)
     setEditInternalNotes(parseInternalNotes(editTemplate.internal_notes))
-    setEditDayOfWeek(editTemplate.day_of_week != null ? String(editTemplate.day_of_week) : "")
+    const editDays =
+      editTemplate.days_of_week && editTemplate.days_of_week.length
+        ? editTemplate.days_of_week
+        : editTemplate.day_of_week != null
+          ? [editTemplate.day_of_week]
+          : []
+    setEditDaysOfWeek(editDays.map((value) => String(value)))
     setEditDayOfMonth(
       editTemplate.day_of_month === 0
         ? END_OF_MONTH_VALUE
-        : editTemplate.day_of_month != null
-          ? String(editTemplate.day_of_month)
-          : ""
+        : editTemplate.day_of_month === -1
+          ? FIRST_WORKING_DAY_VALUE
+          : editTemplate.day_of_month != null
+            ? String(editTemplate.day_of_month)
+            : ""
     )
     setEditMonthOfYear(
       editTemplate.month_of_year != null
@@ -644,6 +653,7 @@ export default function SystemTasksPage() {
     }
     const finalDeptId = departmentId
     const scope = resolveScope(finalDeptId)
+    const weeklyDays = frequency === "WEEKLY" ? normalizeDayValues(daysOfWeek) : []
     setSaving(true)
     try {
       const payload = {
@@ -656,9 +666,16 @@ export default function SystemTasksPage() {
         priority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         internal_notes: buildInternalNotes(internalNotes),
-        day_of_week: dayOfWeek ? Number(dayOfWeek) : null,
+        day_of_week: weeklyDays.length ? weeklyDays[0] : null,
+        days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
-          dayOfMonth === END_OF_MONTH_VALUE ? 0 : dayOfMonth ? Number(dayOfMonth) : null,
+          dayOfMonth === END_OF_MONTH_VALUE
+            ? 0
+            : dayOfMonth === FIRST_WORKING_DAY_VALUE
+              ? -1
+              : dayOfMonth
+                ? Number(dayOfMonth)
+                : null,
         month_of_year:
           monthOfYear && monthOfYear !== EMPTY_VALUE ? Number(monthOfYear) : null,
         is_active: isActive,
@@ -675,7 +692,7 @@ export default function SystemTasksPage() {
       setAssigneeIds([])
       setAssigneeQuery("")
       setAssigneeError(null)
-      setDayOfWeek("")
+      setDaysOfWeek([])
       setDayOfMonth("")
       setMonthOfYear(EMPTY_VALUE)
       setFrequency("DAILY")
@@ -714,6 +731,7 @@ export default function SystemTasksPage() {
     }
     const finalDeptId = editDepartmentId
     const scope = resolveScope(finalDeptId)
+    const weeklyDays = editFrequency === "WEEKLY" ? normalizeDayValues(editDaysOfWeek) : []
     setEditSaving(true)
     try {
       const payload = {
@@ -726,13 +744,16 @@ export default function SystemTasksPage() {
         priority: editPriority,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
         internal_notes: buildInternalNotes(editInternalNotes),
-        day_of_week: editDayOfWeek ? Number(editDayOfWeek) : null,
+        day_of_week: weeklyDays.length ? weeklyDays[0] : null,
+        days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
           editDayOfMonth === END_OF_MONTH_VALUE
             ? 0
-            : editDayOfMonth
-              ? Number(editDayOfMonth)
-              : null,
+            : editDayOfMonth === FIRST_WORKING_DAY_VALUE
+              ? -1
+              : editDayOfMonth
+                ? Number(editDayOfMonth)
+                : null,
         month_of_year:
           editMonthOfYear && editMonthOfYear !== EMPTY_VALUE ? Number(editMonthOfYear) : null,
         is_active: editIsActive,
@@ -850,6 +871,25 @@ export default function SystemTasksPage() {
     return lines.length ? lines.join("\n") : null
   }
 
+  const normalizeDayValues = (values: string[]) => {
+    const cleaned = values
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+    return Array.from(new Set(cleaned)).sort((a, b) => a - b)
+  }
+
+  const toggleDayValue = (
+    value: string,
+    current: string[],
+    setter: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    const next = current.includes(value)
+      ? current.filter((item) => item !== value)
+      : [...current, value]
+    next.sort((a, b) => Number(a) - Number(b))
+    setter(next)
+  }
+
   const exportTemplatesCSV = (mode: "all" | "active" | "inactive") => {
     const rows = templates.filter((template) => {
       if (mode === "active") return template.is_active
@@ -870,6 +910,22 @@ export default function SystemTasksPage() {
       "DefaultAssignee",
       "Active",
     ]
+    const dayOfMonthLabel = (value?: number | null) => {
+      if (value == null) return ""
+      if (value === 0) return "end_of_month"
+      if (value === -1) return "first_working_day"
+      return String(value)
+    }
+    const dayOfWeekLabel = (template: SystemTaskTemplate) => {
+      const days =
+        template.days_of_week && template.days_of_week.length
+          ? template.days_of_week
+          : template.day_of_week != null
+            ? [template.day_of_week]
+            : []
+      return days.join("|")
+    }
+
     const body = rows.map((template) => {
       const department = template.department_id ? departmentMap.get(template.department_id) : null
       const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
@@ -891,8 +947,8 @@ export default function SystemTasksPage() {
         template.frequency,
         normalizePriority(template.priority),
         template.finish_period || "",
-        template.day_of_week ?? "",
-        template.day_of_month ?? "",
+        dayOfWeekLabel(template),
+        dayOfMonthLabel(template.day_of_month),
         template.month_of_year ?? "",
         assignee ? assignee.username || assignee.full_name || "" : "",
         template.is_active ? "true" : "false",
@@ -1014,11 +1070,9 @@ export default function SystemTasksPage() {
       return null
     }
 
-    const dayOfWeekForValue = (value: string) => {
+    const dayOfWeekForValue = (value: string): number[] | null => {
       const raw = normalize(value)
       if (!raw) return null
-      const numeric = Number(raw)
-      if (!Number.isNaN(numeric)) return numeric
       const map: Record<string, number> = {
         monday: 0,
         tuesday: 1,
@@ -1035,7 +1089,18 @@ export default function SystemTasksPage() {
         "e shtune": 5,
         "e diel": 6,
       }
-      return map[raw] ?? null
+      const parseToken = (token: string) => {
+        const cleaned = token.trim().toLowerCase()
+        if (!cleaned) return null
+        const numeric = Number(cleaned)
+        if (!Number.isNaN(numeric)) return numeric
+        return map[cleaned] ?? null
+      }
+      const segments = raw.split(/[|;,\s]+/).filter(Boolean)
+      const parsed = segments.map(parseToken).filter((day): day is number => day != null)
+      if (parsed.length) return Array.from(new Set(parsed)).sort((a, b) => a - b)
+      const single = parseToken(raw)
+      return single != null ? [single] : null
     }
 
     const scopeForValue = (value: string): { scope: SystemTaskScope; departmentId: string | null } => {
@@ -1069,6 +1134,15 @@ export default function SystemTasksPage() {
       return true
     }
 
+    const dayOfMonthForValue = (value: string) => {
+      const raw = normalize(value)
+      if (!raw) return null
+      if (raw.includes("first") && raw.includes("work")) return -1
+      if (raw.includes("end") && raw.includes("month")) return 0
+      const numeric = Number(raw)
+      return Number.isNaN(numeric) ? null : numeric
+    }
+
     for (const row of dataRows) {
       const title = row[idxTitle]?.trim()
       if (!title) continue
@@ -1080,6 +1154,7 @@ export default function SystemTasksPage() {
         idxFinishPeriod >= 0 ? finishPeriodForValue(row[idxFinishPeriod] || "") : null
 
       const scopeEntry = scopeForValue(row[idxDepartment] || "")
+      const dayOfWeekValue = dayOfWeekForValue(row[idxDayOfWeek] || "")
       const payload = {
         title,
         description: row[idxDescription]?.trim() || null,
@@ -1089,8 +1164,9 @@ export default function SystemTasksPage() {
         frequency: frequencyValue,
         priority: priorityValue,
         finish_period: finishPeriodValue,
-        day_of_week: dayOfWeekForValue(row[idxDayOfWeek] || ""),
-        day_of_month: row[idxDayOfMonth] ? Number(row[idxDayOfMonth]) : null,
+        day_of_week: dayOfWeekValue ? dayOfWeekValue[0] : null,
+        days_of_week: dayOfWeekValue,
+        day_of_month: dayOfMonthForValue(row[idxDayOfMonth] || ""),
         month_of_year: row[idxMonthOfYear] ? Number(row[idxMonthOfYear]) : null,
         is_active: activeForValue(row[idxActive] || ""),
       }
@@ -1241,19 +1317,22 @@ export default function SystemTasksPage() {
                 </div>
                 {frequency === "WEEKLY" ? (
                   <div className="space-y-2">
-                    <Label>Day of week</Label>
-                    <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select day" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {WEEK_DAYS.map((day) => (
-                          <SelectItem key={day.value} value={day.value}>
-                            {day.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label>Days of week</Label>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {WEEK_DAYS.map((day) => {
+                        const checked = daysOfWeek.includes(day.value)
+                        return (
+                          <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
+                            />
+                            <span>{day.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                   </div>
                 ) : null}
                 {(frequency === "MONTHLY" ||
@@ -1268,7 +1347,8 @@ export default function SystemTasksPage() {
                           <SelectValue placeholder="Select day" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={END_OF_MONTH_VALUE}>End of month</SelectItem>
+                          <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
+                          <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
                           {DAY_OF_MONTH_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               {option.label}
@@ -1515,19 +1595,24 @@ export default function SystemTasksPage() {
                 </div>
                 {editFrequency === "WEEKLY" ? (
                   <div className="space-y-2">
-                    <Label>Day of week</Label>
-                    <Select value={editDayOfWeek} onValueChange={setEditDayOfWeek}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select day" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {WEEK_DAYS.map((day) => (
-                          <SelectItem key={day.value} value={day.value}>
-                            {day.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label>Days of week</Label>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {WEEK_DAYS.map((day) => {
+                        const checked = editDaysOfWeek.includes(day.value)
+                        return (
+                          <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() =>
+                                toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
+                              }
+                            />
+                            <span>{day.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                   </div>
                 ) : null}
                 {(editFrequency === "MONTHLY" ||
@@ -1542,7 +1627,8 @@ export default function SystemTasksPage() {
                           <SelectValue placeholder="Select day" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={END_OF_MONTH_VALUE}>End of month</SelectItem>
+                          <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
+                          <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
                           {DAY_OF_MONTH_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               {option.label}

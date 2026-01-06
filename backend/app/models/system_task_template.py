@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +40,7 @@ class SystemTaskTemplate(Base):
         nullable=False,
     )
     day_of_week: Mapped[int | None] = mapped_column(Integer)
+    days_of_week: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
     day_of_month: Mapped[int | None] = mapped_column(Integer)
     month_of_year: Mapped[int | None] = mapped_column(Integer)
 

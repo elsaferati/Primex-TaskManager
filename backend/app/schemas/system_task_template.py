@@ -19,6 +19,7 @@ class SystemTaskTemplateOut(BaseModel):
     scope: SystemTaskScope
     frequency: FrequencyType
     day_of_week: int | None = None
+    days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None
@@ -37,6 +38,7 @@ class SystemTaskTemplateCreate(BaseModel):
     scope: SystemTaskScope | None = None
     frequency: FrequencyType
     day_of_week: int | None = None
+    days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None
@@ -54,6 +56,7 @@ class SystemTaskTemplateUpdate(BaseModel):
     scope: SystemTaskScope | None = None
     frequency: FrequencyType | None = None
     day_of_week: int | None = None
+    days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
     priority: TaskPriority | None = None

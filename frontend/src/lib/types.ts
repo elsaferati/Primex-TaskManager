@@ -31,6 +31,7 @@ export interface SystemTaskTemplate {
   scope: SystemTaskScope
   frequency: SystemTaskFrequency
   day_of_week?: number | null
+  days_of_week?: number[] | null
   day_of_month?: number | null
   month_of_year?: number | null
   priority?: TaskPriority | null

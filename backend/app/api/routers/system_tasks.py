@@ -129,6 +129,7 @@ def _task_row_to_out(
         scope=template.scope,
         frequency=template.frequency,
         day_of_week=template.day_of_week,
+        days_of_week=template.days_of_week,
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
         priority=priority_value,
@@ -225,6 +226,15 @@ async def create_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
+    days_of_week = payload.days_of_week
+    if days_of_week is None and payload.day_of_week is not None:
+        days_of_week = [payload.day_of_week]
+    if days_of_week:
+        cleaned_days = sorted({int(day) for day in days_of_week})
+        if any(day < 0 or day > 6 for day in cleaned_days):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
+        days_of_week = cleaned_days
+
     scope_value = payload.scope
     if scope_value is None:
         scope_value = SystemTaskScope.DEPARTMENT if payload.department_id is not None else SystemTaskScope.ALL
@@ -279,7 +289,8 @@ async def create_system_task_template(
         default_assignee_id=assignee_ids[0] if assignee_ids else None,
         scope=scope_value,
         frequency=payload.frequency,
-        day_of_week=payload.day_of_week,
+        day_of_week=days_of_week[0] if days_of_week else payload.day_of_week,
+        days_of_week=days_of_week,
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
         priority=priority_value,
@@ -348,6 +359,18 @@ async def update_system_task_template(
     scope_set = "scope" in fields_set
     department_set = "department_id" in fields_set
     assignee_set = "default_assignee_id" in fields_set or "assignees" in fields_set
+    days_set = "days_of_week" in fields_set or "day_of_week" in fields_set
+    days_of_week = payload.days_of_week
+    if days_of_week is None and "day_of_week" in fields_set:
+        if payload.day_of_week is not None:
+            days_of_week = [payload.day_of_week]
+        else:
+            days_of_week = []
+    if days_of_week is not None:
+        cleaned_days = sorted({int(day) for day in days_of_week})
+        if any(day < 0 or day > 6 for day in cleaned_days):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
+        days_of_week = cleaned_days
 
     scope_value = template.scope
     if scope_set:
@@ -413,8 +436,9 @@ async def update_system_task_template(
         template.default_assignee_id = assignee_ids[0] if assignee_ids else None
     if payload.frequency is not None:
         template.frequency = payload.frequency
-    if payload.day_of_week is not None:
-        template.day_of_week = payload.day_of_week
+    if days_set:
+        template.days_of_week = days_of_week or None
+        template.day_of_week = days_of_week[0] if days_of_week else payload.day_of_week
     if payload.day_of_month is not None:
         template.day_of_month = payload.day_of_month
     if payload.month_of_year is not None:

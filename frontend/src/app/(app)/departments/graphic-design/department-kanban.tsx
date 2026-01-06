@@ -159,29 +159,85 @@ function formatDayLabel(date: Date) {
   return prefix ? `${prefix} - ${weekday}` : weekday
 }
 
+function getLastDayOfMonth(year: number, monthIndex: number) {
+  return new Date(year, monthIndex + 1, 0).getDate()
+}
+
+function getFirstWorkingDay(year: number, monthIndex: number) {
+  const firstDay = new Date(year, monthIndex, 1)
+  const day = firstDay.getDay()
+  if (day === 6) return 3
+  if (day === 0) return 2
+  return 1
+}
+
+function getYearEndDate(year: number) {
+  const date = new Date(year, 11, 31)
+  const weekday = date.getDay()
+  if (weekday === 6) date.setDate(date.getDate() - 1)
+  if (weekday === 0) date.setDate(date.getDate() - 2)
+  return date
+}
+
+function getScheduledDateForMonth(t: SystemTaskTemplate, year: number, monthIndex: number) {
+  const lastDay = getLastDayOfMonth(year, monthIndex)
+  let day =
+    t.day_of_month == null ? 1 : t.day_of_month === 0 ? lastDay : t.day_of_month === -1 ? getFirstWorkingDay(year, monthIndex) : t.day_of_month
+  if (day < 1 || day > lastDay) return null
+  const scheduled = new Date(year, monthIndex, day)
+  if (t.day_of_month !== -1) {
+    const weekday = scheduled.getDay()
+    if (weekday === 6) scheduled.setDate(scheduled.getDate() - 1)
+    if (weekday === 0) scheduled.setDate(scheduled.getDate() - 2)
+  }
+  return scheduled
+}
+
 function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   if (t.frequency === "DAILY") return true
   if (t.frequency === "WEEKLY") {
     const dayIdx = date.getDay() === 0 ? 6 : date.getDay() - 1
-    return t.day_of_week == null ? dayIdx === 0 : t.day_of_week === dayIdx
+    const days =
+      t.days_of_week && t.days_of_week.length
+        ? t.days_of_week
+        : t.day_of_week != null
+          ? [t.day_of_week]
+          : null
+    return days ? days.includes(dayIdx) : dayIdx === 0
   }
   if (t.frequency === "MONTHLY") {
-    return t.day_of_month == null ? date.getDate() === 1 : t.day_of_month === date.getDate()
+    const current = getScheduledDateForMonth(t, date.getFullYear(), date.getMonth())
+    const next = getScheduledDateForMonth(t, date.getFullYear(), date.getMonth() + 1)
+    return (current && isSameDay(current, date)) || (next && isSameDay(next, date))
   }
   if (t.frequency === "YEARLY") {
-    if (t.month_of_year != null && t.month_of_year !== date.getMonth() + 1) return false
-    if (t.day_of_month != null && t.day_of_month !== date.getDate()) return false
-    return true
+    if (t.day_of_month === 0) {
+      const current = getYearEndDate(date.getFullYear())
+      const next = getYearEndDate(date.getFullYear() + 1)
+      return (current && isSameDay(current, date)) || (next && isSameDay(next, date))
+    }
+    if (t.month_of_year == null) {
+      const current = getScheduledDateForMonth(t, date.getFullYear(), date.getMonth())
+      const next = getScheduledDateForMonth(t, date.getFullYear(), date.getMonth() + 1)
+      return (current && isSameDay(current, date)) || (next && isSameDay(next, date))
+    }
+    const targetMonth = t.month_of_year - 1
+    const current = getScheduledDateForMonth(t, date.getFullYear(), targetMonth)
+    const next = getScheduledDateForMonth(t, date.getFullYear() + 1, targetMonth)
+    return (current && isSameDay(current, date)) || (next && isSameDay(next, date))
   }
-  if (t.frequency === "3_MONTHS") {
-    if (t.month_of_year != null && t.month_of_year !== date.getMonth() + 1) return false
-    if (t.day_of_month != null && t.day_of_month !== date.getDate()) return false
-    return (date.getMonth() + 1) % 3 === 0
-  }
-  if (t.frequency === "6_MONTHS") {
-    if (t.month_of_year != null && t.month_of_year !== date.getMonth() + 1) return false
-    if (t.day_of_month != null && t.day_of_month !== date.getDate()) return false
-    return (date.getMonth() + 1) % 6 === 0
+  if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
+    const interval = t.frequency === "3_MONTHS" ? 3 : 6
+    const monthValue = date.getMonth() + 1
+    const nextDate = new Date(date.getFullYear(), date.getMonth() + 1, 1)
+    const nextMonthValue = nextDate.getMonth() + 1
+    const targetMonth = t.month_of_year != null ? t.month_of_year : null
+    if (targetMonth != null && targetMonth !== monthValue && targetMonth !== nextMonthValue) return false
+    const current =
+      monthValue % interval === 0 ? getScheduledDateForMonth(t, date.getFullYear(), date.getMonth()) : null
+    const next =
+      nextMonthValue % interval === 0 ? getScheduledDateForMonth(t, nextDate.getFullYear(), nextDate.getMonth()) : null
+    return (current && isSameDay(current, date)) || (next && isSameDay(next, date))
   }
   return false
 }
@@ -551,6 +607,7 @@ export default function DepartmentKanban() {
         default_assignee_id: systemOwnerId === "__unassigned__" ? null : systemOwnerId,
         frequency: systemFrequency,
         day_of_week: systemFrequency === "WEEKLY" ? dayIdx : null,
+        days_of_week: systemFrequency === "WEEKLY" ? [dayIdx] : null,
         day_of_month: systemFrequency !== "WEEKLY" && systemFrequency !== "DAILY" ? dayOfMonth : null,
         month_of_year:
           systemFrequency === "YEARLY" || systemFrequency === "3_MONTHS" || systemFrequency === "6_MONTHS"
