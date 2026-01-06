@@ -27,6 +27,173 @@ const PHASE_LABELS: Record<string, string> = {
   MBYLLJA: "Closed",
 }
 
+// MST-specific phases (Albanian labels for the requested UI)
+const MST_PHASES = ["PLANIFIKIMI", "PRODUKTE", "KONTROLLI", "FINALIZIMI"] as const
+const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
+  PLANIFIKIMI: "Planifikimi",
+  PRODUKTE: "Produkte",
+  KONTROLLI: "Kontrolli",
+  FINALIZIMI: "Finalizimi",
+}
+
+const MST_PLANNING_QUESTIONS = [
+  "A eshte hapur grupi ne Teams?",
+  "A eshte hapur projekti ne chat GPT?",
+  "A jane pranuar te gjitha dokumentet e nevojshme (PDF, Stammdaten, Artikelliste)?",
+  "A eshte analizuar kategoria dhe PDF?",
+  "A jane identifikuar karakteristikat e programit?",
+  "A eshte bere plani kur parashihet me u perfundu projekti?",
+]
+
+type MstChecklistRow = {
+  path: string
+  detyrat: string
+  keywords: string
+  pershkrimi: string
+  shembull?: string
+  kategoria: string
+  incl: string
+}
+
+const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
+  {
+    path: "Z:\\\\03_MUS\\\\01_CHECKLISTA",
+    detyrat: "Hapja e projektit",
+    keywords: "GRUPI",
+    pershkrimi:
+      "Hapet grupi ne Teams per program, dhe dergohen te gjitha dokumentet duke perfshire: AI/PDF PRICELIST/ EXCEL-ARTIKLE DATEN & FOTOT",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "CHECKLISTA",
+    detyrat: "Shtypet Checklista per klient",
+    keywords: "CHECKLISTA",
+    pershkrimi: "Shtypet Checklista per klient, nese nuk kemi duke e punuar rastin e pare krijohet checklista",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "TEMPLATE",
+    detyrat: "Hapet template paraprak",
+    keywords: "TEMPLATE",
+    pershkrimi: "Hapet template paraprak - nese kemi kategori te njejte qe e kemi punuar me heret",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "TRELLO",
+    detyrat: "Hapet projekti ne Trello",
+    keywords: "TRELLO",
+    pershkrimi: "Hapet projekti ne Trello, dhe krijohet checklista me te gjithe hapat, ndahen detyrat",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "REGJISTRATOR",
+    detyrat: "Regjistratori",
+    keywords: "DOKUMENTET",
+    pershkrimi:
+      "Dokumentet e shtypura dhe Checklistat ruhen ne regj. Nese nuk kemi, duhet te krijohet regjistratori per klient",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "Rast 1",
+    detyrat: "R1",
+    keywords: "R1",
+    pershkrimi:
+      "Kur kemi rast te ri per kategori/subkategori qe nuk e kemi punuar me heret, hulumtojme funksione te reja dhe top seller ne portale.",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "Krahasimi i dimensioneve/kg-ve dhe atributeve tjera",
+    detyrat: "DOKUMENTET",
+    keywords: "DOKUMENTET",
+    pershkrimi:
+      "Krahaso te dhenat kg/dim dhe atributet tjera ne: 1. PDF (pricelist) 2. Excel databaza 3. Assembly Instructions 4. Portale (OTTO).",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "BESONDERE MERKMALE",
+    detyrat: "BESONDERE",
+    keywords: "BESONDERE",
+    pershkrimi: "Besondere Merkmale max. 70 karaktere. T'i cekim me te vecantat e produktit.",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "SELLING POINTS",
+    detyrat: "SELLING POINTS",
+    keywords: "SELLING POINTS",
+    pershkrimi:
+      "Selling points te shkurta. Produkte identike me ngjyra ndryshe nuk duhet te kene pershkrime te ndryshme.",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  { path: "SELLING POINT 1", detyrat: "5 JAHRE GARANTIE", keywords: "GARANTIE", pershkrimi: "", kategoria: "GJENERALE", incl: "DV, LM" },
+  {
+    path: "SELLING POINT 2",
+    detyrat: "MATERIALI & DIZAJNI",
+    keywords: "MATERIALI",
+    pershkrimi: "",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "SELLING POINT 3",
+    detyrat: "180°/Funksionet",
+    keywords: "FUNKSIONET",
+    pershkrimi: "",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "SELLING POINT 4",
+    detyrat: "GESTELL/NGJYRA/DIMENSIONI",
+    keywords: "DIMENSIONI",
+    pershkrimi: "",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "SELLING POINT 5",
+    detyrat: "MADE IN GERMANY",
+    keywords: "MADE IN DE",
+    pershkrimi: "",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "MARKENINFORMATIONEN",
+    detyrat: "MARKENINFORMATIONEN",
+    keywords: "MARKEN",
+    pershkrimi:
+      "Tekstet copy/paste: 1) Set One by MST ... 2) MST ... (shiko checkliste per tekstin e plote).",
+    kategoria: "GJENERALE",
+    incl: "DV, LM",
+  },
+  {
+    path: "SPECIFIKA PER KARRIGE, SET APO TYPE",
+    detyrat: "SET/TYPE",
+    keywords: "CHAIRS",
+    pershkrimi: "Pyet klientin nese shitet si set apo type (2,4,6,8). Konfirmo per kategori karrigesh.",
+    kategoria: "CHAIRS",
+    incl: "DV, LM",
+  },
+  {
+    path: "SPECIFIKA PER SOFA, SET APO TYPE",
+    detyrat: "SET/TYPE",
+    keywords: "SOFA",
+    pershkrimi:
+      "Kontrollo mekanizmat e perfshire apo extra cmim. Kerkohen foto per konfirmim ngjyrash. BZ1N1 me PDF duhet te perputhen me LDB/bullet points.",
+    kategoria: "SOFA",
+    incl: "DV, LM",
+  },
+]
+
 const TABS = [
   { id: "description", label: "Description" },
   { id: "tasks", label: "Tasks" },
@@ -113,6 +280,12 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function isMstProject(project?: Project | null) {
+  if (!project) return false
+  const title = (project.title || project.name || "").toUpperCase()
+  return title.includes("MST")
+}
+
 export default function PcmProjectPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
@@ -171,6 +344,27 @@ export default function PcmProjectPage() {
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
+  const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANIFIKIMI")
+  const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
+  const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
+  const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
+  const [programName, setProgramName] = React.useState("")
+  const [productTab, setProductTab] = React.useState<"tasks" | "checklists" | "members" | "ga">("tasks")
+  const [newMemberId, setNewMemberId] = React.useState<string>("")
+  const [controlTitle, setControlTitle] = React.useState("")
+  const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
+  const [creatingControlTask, setCreatingControlTask] = React.useState(false)
+  const [controlEdits, setControlEdits] = React.useState<
+    Record<
+      string,
+      {
+        total: string
+        completed: string
+        assigned_to: string | null
+        status: Task["status"]
+      }
+    >
+  >({})
 
   React.useEffect(() => {
     const load = async () => {
@@ -201,6 +395,9 @@ export default function PcmProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
+      if (isMstProject(p)) {
+        setMstPhase(MST_PHASES[0])
+      }
     }
     void load()
   }, [apiFetch, projectId])
@@ -208,6 +405,8 @@ export default function PcmProjectPage() {
   React.useEffect(() => {
     if (project?.current_phase) setViewedPhase(project.current_phase)
   }, [project?.current_phase])
+
+  const isMst = React.useMemo(() => isMstProject(project), [project])
 
   React.useEffect(() => {
     if (!prompts.length) return
@@ -541,6 +740,29 @@ export default function PcmProjectPage() {
     }
   }, [activeTab, visibleTabs])
 
+  React.useEffect(() => {
+    // Initialize control edits from tasks (parse totals from internal_notes if present)
+    const next: Record<string, { total: string; completed: string; assigned_to: string | null; status: Task["status"] }> =
+      {}
+    for (const t of tasks) {
+      let total = ""
+      let completed = ""
+      if (t.internal_notes) {
+        const totalMatch = t.internal_notes.match(/total_products[:=]\s*(\d+)/i)
+        const completedMatch = t.internal_notes.match(/completed_products[:=]\s*(\d+)/i)
+        if (totalMatch) total = totalMatch[1]
+        if (completedMatch) completed = completedMatch[1]
+      }
+      next[t.id] = {
+        total,
+        completed,
+        assigned_to: t.assigned_to || null,
+        status: t.status,
+      }
+    }
+    setControlEdits(next)
+  }, [tasks])
+
   const activePhase = phaseValue
   const visibleTasks = React.useMemo(
     () =>
@@ -558,6 +780,502 @@ export default function PcmProjectPage() {
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "MBYLLJA" && phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
+
+  if (isMst) {
+    const planningChecks = mstPlanningChecks
+    const togglePlanning = (q: string) =>
+      setMstPlanningChecks((prev) => ({ ...prev, [q]: !prev[q] }))
+    const toggleFinalChecklist = (path: string) =>
+      setMstChecklistChecked((prev) => ({ ...prev, [path]: !prev[path] }))
+    const memberLabel = (id?: string | null) => {
+      if (!id) return "-"
+      const u = userMap.get(id)
+      return u?.full_name || u?.username || "-"
+    }
+    const controlledBy = (assignedTo?: string | null) => {
+      const other = members.find((m) => m.id !== assignedTo) || allUsers.find((m) => m.id !== assignedTo)
+      return other ? memberLabel(other.id) : "-"
+    }
+
+    return (
+      <div className="space-y-5 max-w-6xl mx-auto px-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+            <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
+              &larr; Back to Projects
+            </button>
+            <div className="text-3xl font-semibold">{title}</div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {MST_PHASES.map((p) => {
+                const isActive = p === mstPhase
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setMstPhase(p)}
+                    className={[
+                      "rounded-full border px-3 py-1 transition-colors",
+                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {MST_PHASE_LABELS[p]}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {MST_PHASES.map((p, idx) => (
+                <span key={p}>
+                  <button
+                    type="button"
+                    onClick={() => setMstPhase(p)}
+                    className={p === mstPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
+                  >
+                    {MST_PHASE_LABELS[p]}
+                  </button>
+                  {idx < MST_PHASES.length - 1 ? " -> " : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
+              MST
+            </Badge>
+          </div>
+        </div>
+
+        {mstPhase === "PLANIFIKIMI" ? (
+          <>
+            <div className="border-b flex gap-6">
+              <button className="relative pb-3 text-sm font-medium text-blue-600">
+                Description
+                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+              </button>
+            </div>
+            <Card>
+              <div className="p-4 space-y-4">
+                <div className="text-lg font-semibold">Planifikimi</div>
+                <div className="grid gap-3">
+                  {[
+                    "A eshte hapur grupi ne Teams?",
+                    "A eshte hapur projekti ne chat GPT?",
+                  ].map((q, idx) => (
+                    <div key={q} className="grid grid-cols-12 gap-3 items-center">
+                      <div className="col-span-9 flex items-center gap-3">
+                        <Checkbox
+                          checked={Boolean(descriptionChecks[q])}
+                          onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                        />
+                        <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
+                      </div>
+                      <div className="col-span-3">
+                        {idx === 1 ? (
+                          <Textarea
+                            placeholder="Shkruaj emrin e programit..."
+                            value={programName}
+                            onChange={(e) => setProgramName(e.target.value)}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
+                  <div className="col-span-10">Description/General Points (me checkbox)</div>
+                  <div className="col-span-2 text-right">Status/Koment</div>
+                </div>
+
+                <div className="divide-y border rounded-lg">
+                  {MST_PLANNING_QUESTIONS.slice(2).map((q) => (
+                    <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
+                      <div className="col-span-10 flex items-start gap-3">
+                        <Checkbox
+                          checked={Boolean(descriptionChecks[q])}
+                          onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                        />
+                        <span className="text-sm">{q}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <Input placeholder="Koment" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </>
+        ) : mstPhase === "PRODUKTE" ? (
+          <>
+            <div className="border-b flex gap-6">
+              {[
+                { id: "tasks", label: "Tasks (Detyrat)" },
+                { id: "checklists", label: "Checklists" },
+                { id: "members", label: "Members" },
+                { id: "ga", label: "Shenime GA/KA" },
+              ].map((tab) => {
+                const isActive = productTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setProductTab(tab.id as typeof productTab)}
+                    className={["relative pb-3 text-sm font-medium", isActive ? "text-blue-600" : "text-muted-foreground"].join(" ")}
+                  >
+                    {tab.label}
+                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                  </button>
+                )
+              })}
+            </div>
+
+            {productTab === "tasks" ? (
+              <Card>
+                <div className="p-4 space-y-3">
+                  <div className="text-lg font-semibold">Tasks</div>
+                  <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                    <div className="col-span-5 uppercase tracking-wide">Tasks</div>
+                    <div className="col-span-2 uppercase tracking-wide">Assigned to</div>
+                    <div className="col-span-2 uppercase tracking-wide">Total nr i produkteve</div>
+                    <div className="col-span-2 uppercase tracking-wide">Nr i produkteve te perfunduara</div>
+                    <div className="col-span-1 uppercase tracking-wide text-right">Status</div>
+                  </div>
+                  <div className="divide-y">
+                    {tasks.map((task) => (
+                      <div key={task.id} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
+                        <div className="col-span-5 font-medium">{task.title}</div>
+                        <div className="col-span-2">{memberLabel(task.assigned_to)}</div>
+                        <div className="col-span-2">
+                          <Input defaultValue={task.progress_percentage ?? ""} />
+                        </div>
+                        <div className="col-span-2">
+                          <Input defaultValue={task.completed_at ? 1 : 0} />
+                        </div>
+                        <div className="col-span-1 text-right">
+                          <Badge variant="outline">{statusLabel(task.status)}</Badge>
+                        </div>
+                      </div>
+                    ))}
+                    {tasks.length === 0 ? <div className="py-3 text-sm text-muted-foreground">No tasks yet.</div> : null}
+                  </div>
+                </div>
+              </Card>
+            ) : null}
+
+            {productTab === "checklists" ? (
+              <Card>
+                <div className="p-4 space-y-4">
+                  <div className="text-lg font-semibold">Checklists</div>
+                  <div className="text-sm text-red-600 space-y-1">
+                    <div>!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER</div>
+                    <div>!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA</div>
+                    <div>!!! KRAHASO TE DHENAT QE DERGOHEN TE PLOTESUARA, A JANE NE PERPUTHSHMERI ME DROPDOWN DHE ME TE DHENAT QE NA I KANE DERGUAR NE PDF/EXCEL</div>
+                    <div>!!! BESONDERE MERKMALE - MAX 70 CHARACTERS</div>
+                    <div>!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)</div>
+                    <div>!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.</div>
+                  </div>
+                  <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                    <div className="col-span-2">PATH</div>
+                    <div className="col-span-2">DETYRAT</div>
+                    <div className="col-span-2">KEYWORDS</div>
+                    <div className="col-span-3">PERSHKRIMI</div>
+                    <div className="col-span-1">KATEGORIA</div>
+                    <div className="col-span-1">CHECK</div>
+                    <div className="col-span-1">INCL</div>
+                    <div className="col-span-1">COMENT</div>
+                  </div>
+                  <div className="divide-y">
+                    {MST_FINAL_CHECKLIST.map((row) => (
+                      <div key={row.path + row.detyrat} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
+                        <div className="col-span-2">{row.path}</div>
+                        <div className="col-span-2 font-semibold">{row.detyrat}</div>
+                        <div className="col-span-2">{row.keywords}</div>
+                        <div className="col-span-3">{row.pershkrimi}</div>
+                        <div className="col-span-1">{row.kategoria}</div>
+                        <div className="col-span-1 flex justify-center">
+                          <Checkbox
+                            checked={Boolean(mstChecklistChecked[row.path + row.detyrat])}
+                            onCheckedChange={() => toggleFinalChecklist(row.path + row.detyrat)}
+                          />
+                        </div>
+                        <div className="col-span-1">{row.incl}</div>
+                        <div className="col-span-1">
+                          <Input placeholder="Koment" className="h-8" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            ) : null}
+
+            {productTab === "members" ? (
+              <Card>
+                <div className="p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-lg font-semibold">Members</div>
+                    <div className="flex items-center gap-2">
+                      <Select value={newMemberId} onValueChange={setNewMemberId}>
+                        <SelectTrigger className="w-56">
+                          <SelectValue placeholder="Select member" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departmentUsers
+                            .filter((u) => !members.some((m) => m.id === u.id))
+                            .map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || u.email}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={async () => {
+                          if (!project || !newMemberId) return
+                          setSavingMembers(true)
+                          try {
+                            const res = await apiFetch("/project-members", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ project_id: project.id, user_ids: [newMemberId] }),
+                            })
+                            if (!res?.ok) {
+                              toast.error("Failed to add member")
+                              return
+                            }
+                            const added = (await res.json()) as User[]
+                            const map = new Map(members.map((m) => [m.id, m]))
+                            added.forEach((u) => map.set(u.id, u))
+                            setMembers(Array.from(map.values()))
+                            setNewMemberId("")
+                            toast.success("Member added")
+                          } finally {
+                            setSavingMembers(false)
+                          }
+                        }}
+                        disabled={savingMembers || !newMemberId}
+                      >
+                        {savingMembers ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    {members.length ? (
+                      members.map((m, idx) => {
+                        const initialsText = initials(m.full_name || m.username || m.email || "-")
+                        const colors = ["bg-blue-100 text-blue-800", "bg-green-100 text-green-800", "bg-purple-100 text-purple-800", "bg-rose-100 text-rose-800", "bg-amber-100 text-amber-800"]
+                        const colorClass = colors[idx % colors.length]
+                        return (
+                          <div key={m.id} className="flex flex-col items-center gap-2">
+                            <div className={`h-16 w-16 rounded-full flex items-center justify-center text-lg font-semibold ${colorClass}`}>
+                              {initialsText}
+                            </div>
+                            <div className="text-sm font-semibold">{m.full_name || m.username || m.email}</div>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No members added.</div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ) : null}
+
+            {productTab === "ga" ? (
+              <Card>
+                <div className="p-4 space-y-4">
+                  <div className="text-lg font-semibold">Shenime GA/KA</div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <Select value={newGaNoteType} onValueChange={(v) => setNewGaNoteType(v as "GA" | "KA")}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GA">GA</SelectItem>
+                        <SelectItem value="KA">KA</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={newGaNotePriority} onValueChange={(v) => setNewGaNotePriority(v as any)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="No priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No priority</SelectItem>
+                        <SelectItem value="NORMAL">Normal</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="md:col-span-2 flex gap-2">
+                      <Textarea
+                        placeholder="Add GA/KA note..."
+                        value={newGaNote}
+                        onChange={(e) => setNewGaNote(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={async () => {
+                          if (!project || !newGaNote.trim()) return
+                          setAddingGaNote(true)
+                          try {
+                            const res = await apiFetch("/ga-notes", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                content: newGaNote.trim(),
+                                project_id: project.id,
+                                note_type: newGaNoteType,
+                                priority: newGaNotePriority === "__none__" ? null : newGaNotePriority,
+                              }),
+                            })
+                            if (!res?.ok) {
+                              toast.error("Failed to add note")
+                              return
+                            }
+                            const created = (await res.json()) as GaNote
+                            setGaNotes((prev) => [...prev, created])
+                            setNewGaNote("")
+                            setNewGaNotePriority("__none__")
+                          } finally {
+                            setAddingGaNote(false)
+                          }
+                        }}
+                        disabled={addingGaNote || !newGaNote.trim()}
+                      >
+                        {addingGaNote ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {gaNotes.map((note) => {
+                      const creator = userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "Unknown"
+                      return (
+                        <Card key={note.id} className="border border-amber-100 bg-amber-50/50">
+                          <div className="p-3 flex flex-col gap-2">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant="secondary">{note.note_type}</Badge>
+                              <span>From {creator}</span>
+                              <span>•</span>
+                              <span>{note.created_at ? new Date(note.created_at).toLocaleString("sq-AL") : "-"}</span>
+                              <Badge variant="outline" className="ml-auto">{note.priority || "Normal"}</Badge>
+                              <Badge variant={note.status === "CLOSED" ? "secondary" : "outline"}>{note.status}</Badge>
+                            </div>
+                            <div className="text-sm whitespace-pre-wrap">{note.content}</div>
+                          </div>
+                        </Card>
+                      )
+                    })}
+                    {gaNotes.length === 0 ? <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div> : null}
+                  </div>
+                </div>
+              </Card>
+            ) : null}
+          </>
+        ) : mstPhase === "KONTROLLI" ? (
+          <>
+            <div className="border-b flex gap-6">
+              <button className="relative pb-3 text-sm font-medium text-blue-600">
+                Tasks (Detyrat)
+                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+              </button>
+            </div>
+            <Card>
+              <div className="p-4 space-y-3">
+                <div className="text-lg font-semibold">Kontrolli</div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Input
+                    placeholder="Titulli i detyres"
+                    value={controlTitle}
+                    onChange={(e) => setControlTitle(e.target.value)}
+                  />
+                  <Select value={controlAssignee} onValueChange={setControlAssignee}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Assigned to" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                      {departmentUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name || u.username || u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={async () => {
+                      if (!project || !controlTitle.trim()) return
+                      setCreatingControlTask(true)
+                      try {
+                        const res = await apiFetch("/tasks", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: controlTitle.trim(),
+                            project_id: project.id,
+                            department_id: project.department_id,
+                            assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
+                            status: "IN_PROGRESS",
+                            priority: "NORMAL",
+                          }),
+                        })
+                        if (!res?.ok) {
+                          toast.error("Failed to add task")
+                          return
+                        }
+                        const created = (await res.json()) as Task
+                        setTasks((prev) => [...prev, created])
+                        setControlTitle("")
+                        setControlAssignee("__unassigned__")
+                      } finally {
+                        setCreatingControlTask(false)
+                      }
+                    }}
+                    disabled={creatingControlTask || !controlTitle.trim()}
+                  >
+                    {creatingControlTask ? "Adding..." : "Add Task"}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                  <div className="col-span-5 uppercase tracking-wide">Tasks</div>
+                  <div className="col-span-2 uppercase tracking-wide">Assigned to</div>
+                  <div className="col-span-2 uppercase tracking-wide">Total nr i produkteve</div>
+                  <div className="col-span-2 uppercase tracking-wide">Nr i produkteve te perfunduara</div>
+                  <div className="col-span-1 uppercase tracking-wide text-right">Status</div>
+                </div>
+                <div className="divide-y">
+                  {tasks.map((task) => (
+                    <div key={task.id} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
+                      <div className="col-span-5 font-medium">{task.title}</div>
+                      <div className="col-span-2">{memberLabel(task.assigned_to)}</div>
+                      <div className="col-span-2">
+                        <Input defaultValue={task.progress_percentage ?? ""} />
+                      </div>
+                      <div className="col-span-2">
+                        <Input defaultValue={task.completed_at ? 1 : 0} />
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <Badge variant="outline">{statusLabel(task.status)}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {tasks.length === 0 ? <div className="py-3 text-sm text-muted-foreground">No tasks yet.</div> : null}
+                </div>
+              </div>
+            </Card>
+          </>
+        ) : (
+          <Card>
+            <div className="p-4 space-y-3">
+              <div className="text-lg font-semibold">{MST_PHASE_LABELS[mstPhase]}</div>
+              <div className="text-sm text-muted-foreground">{project.description || "No description."}</div>
+            </div>
+          </Card>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

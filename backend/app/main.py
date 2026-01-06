@@ -26,6 +26,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 
+listener_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
@@ -34,7 +35,20 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    asyncio.create_task(start_notification_listener())
+    global listener_task
+    listener_task = asyncio.create_task(start_notification_listener())
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    global listener_task
+    if listener_task is not None:
+        listener_task.cancel()
+        try:
+            await listener_task
+        except asyncio.CancelledError:
+            pass
+        listener_task = None
 
 
 @app.websocket("/ws/notifications")
