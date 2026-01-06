@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { formatDepartmentName } from "@/lib/department-name"
 import type { User, Task, CommonEntry, GaNote, Department } from "@/lib/types"
 
 type CommonType = "late" | "absent" | "leave" | "ga" | "blocked" | "oneH" | "external" | "r1" | "feedback" | "priority"
@@ -2254,7 +2255,7 @@ export default function CommonViewPage() {
                             ) : (
                               departments.map((dept) => (
                                 <option key={dept.id} value={dept.name}>
-                                  {dept.name}
+                                  {formatDepartmentName(dept.name)}
                                 </option>
                               ))
                             )}

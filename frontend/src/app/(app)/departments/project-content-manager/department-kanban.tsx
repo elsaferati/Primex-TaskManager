@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
@@ -251,7 +252,8 @@ function truncateDescription(value: string, limit = 120) {
 }
 
 export default function DepartmentKanban() {
-  const departmentName = "Project Content Manager"
+  const departmentLookupName = "Project Content Manager"
+  const departmentDisplayName = "Product Content"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -330,7 +332,7 @@ export default function DepartmentKanban() {
         const depRes = await apiFetch("/departments")
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
-        const dep = deps.find((d) => d.name === departmentName) || null
+        const dep = deps.find((d) => d.name === departmentLookupName) || null
         setDepartment(dep)
         if (!dep) return
 
@@ -363,7 +365,7 @@ export default function DepartmentKanban() {
       }
     }
     void load()
-  }, [apiFetch, departmentName, user?.role])
+  }, [apiFetch, departmentLookupName, user?.role])
 
   React.useEffect(() => {
     if (isTabId) {
@@ -948,7 +950,7 @@ export default function DepartmentKanban() {
               Department
             </div>
             <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
-              {departmentName}
+              {departmentDisplayName}
             </div>
             <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
           </div>
@@ -1458,7 +1460,7 @@ export default function DepartmentKanban() {
                           <SelectValue placeholder="Department" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={department.id}>{department.name}</SelectItem>
+                          <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2228,3 +2230,4 @@ export default function DepartmentKanban() {
     </div>
   )
 }
+

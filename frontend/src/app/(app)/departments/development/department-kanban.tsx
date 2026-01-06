@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
@@ -1877,7 +1878,7 @@ export default function DepartmentKanban() {
                           <SelectValue placeholder="Department" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={department.id}>{department.name}</SelectItem>
+                          <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

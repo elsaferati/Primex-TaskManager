@@ -29,6 +29,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
+import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 
 const EMPTY_VALUE = "__none__"
@@ -376,9 +377,10 @@ export default function SystemTasksPage() {
 
   const formatDepartmentNames = React.useCallback((names: string[]) => {
     if (!names.length) return "All departments"
-    if (names.length === 1) return names[0]
-    if (names.length === 2) return `${names[0]}, ${names[1]}`
-    return `${names[0]}, ${names[1]} +${names.length - 2}`
+    const formatted = names.map((name) => formatDepartmentName(name))
+    if (formatted.length === 1) return formatted[0]
+    if (formatted.length === 2) return `${formatted[0]}, ${formatted[1]}`
+    return `${formatted[0]}, ${formatted[1]} +${formatted.length - 2}`
   }, [])
 
   const ownerDepartmentId = React.useCallback(
@@ -831,7 +833,7 @@ export default function SystemTasksPage() {
       return [
         template.title,
         template.description || "",
-        department ? department.name : "All departments",
+        department ? formatDepartmentName(department.name) : "All departments",
         department ? department.code : "",
         template.frequency,
         normalizePriority(template.priority),
@@ -1108,7 +1110,7 @@ export default function SystemTasksPage() {
                         <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
                         {departments.map((dept) => (
                           <SelectItem key={dept.id} value={dept.id}>
-                            {dept.name} ({dept.code})
+                            {formatDepartmentName(dept.name)} ({dept.code})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1374,7 +1376,7 @@ export default function SystemTasksPage() {
                         <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
                         {departments.map((dept) => (
                           <SelectItem key={dept.id} value={dept.id}>
-                            {dept.name} ({dept.code})
+                            {formatDepartmentName(dept.name)} ({dept.code})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1831,7 +1833,7 @@ export default function SystemTasksPage() {
                               </div>
                               <div className="text-[14px] font-normal text-slate-700">
                                 {department
-                                  ? department.name
+                                  ? formatDepartmentName(department.name)
                                   : assigneeDeptNames.length
                                     ? formatDepartmentNames(assigneeDeptNames)
                                     : isInactive && isUnassignedAll

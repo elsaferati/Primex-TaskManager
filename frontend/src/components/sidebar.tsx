@@ -53,7 +53,7 @@ const items: NavItem[] = [
   },
     { 
       href: "/departments/project-content-manager", 
-      label: "Project Content Manager", 
+      label: "Product Content", 
       icon: FileText 
     },
   { 
@@ -135,4 +135,5 @@ export function Sidebar({ role }: { role: UserRole }) {
     </aside>
   )
 }
+
 
