@@ -2142,17 +2142,24 @@ export default function SystemTasksPage() {
                 <Badge variant="secondary">{section.templates.length}</Badge>
               </CardHeader>
               <CardContent className="space-y-0.5 pt-3">
-                <div className="overflow-x-auto">
-                  <div className="min-w-[880px] space-y-1">
-                    <div className="grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
-                      <div>Task Title</div>
-                      <div>Department</div>
-                      <div>Owner</div>
-                      <div className="whitespace-nowrap">Frequency</div>
-                      <div className="whitespace-nowrap">Finish by</div>
-                      <div className="whitespace-nowrap">Priority</div>
-                      <div className="text-center whitespace-nowrap text-muted-foreground" />
-                    </div>
+                <div className="relative">
+                  <div className="overflow-x-auto pr-14">
+                    <div className="min-w-[650px] space-y-1">
+                      <div className="relative">
+                        <div className="grid grid-cols-[minmax(180px,2fr)_minmax(90px,1fr)_minmax(100px,1fr)_minmax(70px,0.7fr)_minmax(60px,0.5fr)_minmax(70px,0.6fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
+                          <div>Task Title</div>
+                          <div>Department</div>
+                          <div>Owner</div>
+                          <div className="whitespace-nowrap">Frequency</div>
+                          <div className="whitespace-nowrap">Finish by</div>
+                          <div className="whitespace-nowrap">Priority</div>
+                        </div>
+                        {canEdit && (
+                          <div className="absolute right-0 top-0 bottom-0 flex items-center bg-slate-50 px-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-500 border-y border-r border-slate-200">
+                            Actions
+                          </div>
+                        )}
+                      </div>
                     {section.templates.length ? (
                       section.templates.map((template, index) => {
                         const priorityValue = normalizePriority(template.priority)
@@ -2203,37 +2210,39 @@ export default function SystemTasksPage() {
                                 </span>
                               </div>
                             ) : null}
-                            <div
-                              className={cn(
-                                "grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
-                                PRIORITY_BORDER_STYLES[priorityValue]
-                              )}
-                            >
-                              <div className="space-y-0">
-                                <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words">
-                                  {template.title}
+                            <div className="relative group">
+                              <div
+                                className={cn(
+                                  "grid grid-cols-[minmax(180px,2fr)_minmax(90px,1fr)_minmax(100px,1fr)_minmax(70px,0.7fr)_minmax(60px,0.5fr)_minmax(70px,0.6fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
+                                  PRIORITY_BORDER_STYLES[priorityValue]
+                                )}
+                              >
+                                <div className="space-y-0">
+                                  <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words">
+                                    {template.title}
+                                  </div>
+                                </div>
+                                <div className="text-[14px] font-normal text-slate-700">
+                                  {departmentLabel}
+                                </div>
+                                <div className="text-[14px] font-normal text-slate-700">
+                                  {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
+                                </div>
+                                <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">{frequencyLabel}</div>
+                                <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">
+                                  {template.finish_period || "-"}
+                                </div>
+                                <div className="flex items-center justify-start">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn("border px-2 py-0.5 text-[13px]", PRIORITY_BADGE_STYLES[priorityValue])}
+                                  >
+                                    {PRIORITY_LABELS[priorityValue]}
+                                  </Badge>
                                 </div>
                               </div>
-                              <div className="text-[14px] font-normal text-slate-700">
-                                {departmentLabel}
-                              </div>
-                              <div className="text-[14px] font-normal text-slate-700">
-                                {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
-                              </div>
-                              <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">{frequencyLabel}</div>
-                              <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">
-                                {template.finish_period || "-"}
-                              </div>
-                              <div className="flex items-center justify-start">
-                                <Badge
-                                  variant="outline"
-                                  className={cn("border px-2 py-0.5 text-[13px]", PRIORITY_BADGE_STYLES[priorityValue])}
-                                >
-                                  {PRIORITY_LABELS[priorityValue]}
-                                </Badge>
-                              </div>
-                              <div className="flex items-center justify-center">
-                                {canEdit ? (
+                              {canEdit ? (
+                                <div className="absolute right-0 top-0 bottom-0 flex items-center bg-gradient-to-l from-white via-white to-transparent pl-6 pr-2">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -2243,8 +2252,8 @@ export default function SystemTasksPage() {
                                   >
                                     Edit
                                   </Button>
-                                ) : null}
-                              </div>
+                                </div>
+                              ) : null}
                             </div>
                           </React.Fragment>
                         )
@@ -2257,6 +2266,7 @@ export default function SystemTasksPage() {
                         Inactive tasks are listed at the bottom.
                       </div>
                     ) : null}
+                    </div>
                   </div>
                 </div>
               </CardContent>
