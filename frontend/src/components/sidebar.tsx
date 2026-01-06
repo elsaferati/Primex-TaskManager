@@ -15,6 +15,7 @@ import {
   Settings,
   Layers,
   Hexagon,
+  StickyNote,
   type LucideIcon
 } from "lucide-react"
 
@@ -40,6 +41,11 @@ const items: NavItem[] = [
     href: "/common", 
     label: "Common View", 
     icon: Globe 
+  },
+  {
+    href: "/ga-ka-notes",
+    label: "GA/KA Notes",
+    icon: StickyNote,
   },
   {
     href: "/system-tasks",

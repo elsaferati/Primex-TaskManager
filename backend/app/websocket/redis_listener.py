@@ -34,7 +34,8 @@ async def start_notification_listener() -> None:
                 except Exception:
                     logger.exception("Failed to process notification message")
         except asyncio.CancelledError:
-            raise
+            # graceful shutdown: break the loop after cleanup
+            break
         except Exception:
             logger.exception("Redis listener failed; retrying soon")
         finally:

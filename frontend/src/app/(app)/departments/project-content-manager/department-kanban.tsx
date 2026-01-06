@@ -1202,7 +1202,7 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="flex items-center gap-3">
                       <Link
-                        href={`/projects/${project.id}`}
+                        href={`/projects/pcm/${project.id}`}
                         className="text-sm font-semibold text-rose-700 transition-colors hover:text-rose-800 hover:underline dark:text-rose-200 dark:hover:text-rose-100"
                       >
                         View details -&gt;

@@ -724,6 +724,10 @@ export default function CommonViewPage() {
     setSelectedDates(new Set([toISODate(today)]))
   }
 
+  const handlePrint = () => {
+    window.print()
+  }
+
   const setWeek = (dateStr: string) => {
     const base = dateStr ? fromISODate(dateStr) : new Date()
     const monday = getMonday(base)
@@ -1194,6 +1198,19 @@ export default function CommonViewPage() {
         .btn-outline:hover { 
           background: rgba(255, 255, 255, 0.3);
           border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .no-print { display: inline-flex; }
+        @media print {
+          .no-print { display: none !important; }
+          body, html { background: white; }
+          .top-header { background: white; color: #0f172a; box-shadow: none; border-bottom: 1px solid #e2e8f0; }
+          .top-header h1 { color: #0f172a; }
+          .view-container { padding: 0; }
+          .swimlane-board { gap: 12px; }
+          .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
+          .swimlane-content-scroll { overflow: visible !important; }
+          .card { box-shadow: none !important; }
         }
         
         /* View Container */
@@ -1845,20 +1862,23 @@ export default function CommonViewPage() {
           <h1>Common View</h1>
           <p>Daily/weekly view for key statuses and team priorities.</p>
         </div>
-        <div>
-          <button className="btn-outline" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
+        <div className="flex items-center gap-2">
+          <button className="btn-primary no-print" type="button" onClick={handlePrint}>
+            Export / Print
+          </button>
+          <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
             Meeting
           </button>
-          <button className="btn-outline" type="button" onClick={() => openModal("gaNote")}>
+          <button className="btn-outline no-print" type="button" onClick={() => openModal("gaNote")}>
             GA
           </button>
-          <button className="btn-outline" type="button" onClick={() => openModal()}>
+          <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
             + Add
           </button>
         </div>
       </header>
 
-      <div className="common-toolbar">
+      <div className="common-toolbar no-print">
         <div className="toolbar-group">
           <div className="chip-row">
           {weekISOs.map((iso) => {
