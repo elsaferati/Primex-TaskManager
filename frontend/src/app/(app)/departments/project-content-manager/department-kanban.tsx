@@ -292,7 +292,6 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
-  const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
@@ -635,7 +634,6 @@ export default function DepartmentKanban() {
         description: projectDescription.trim() || null,
         department_id: department.id,
         manager_id: projectManagerId === "__unassigned__" ? null : projectManagerId,
-        current_phase: projectPhase,
         status: projectStatus,
       }
       const res = await apiFetch("/projects", {
@@ -646,8 +644,12 @@ export default function DepartmentKanban() {
       if (!res.ok) {
         let detail = "Failed to create project"
         try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
+          const data = await res.json()
+          if (typeof data?.detail === "string") {
+            detail = data.detail
+          } else if (Array.isArray(data?.detail) && data.detail[0]?.msg) {
+            detail = data.detail[0].msg
+          }
         } catch {
           // ignore
         }
@@ -660,7 +662,6 @@ export default function DepartmentKanban() {
       setProjectTitle("")
       setProjectDescription("")
       setProjectManagerId("__unassigned__")
-      setProjectPhase("TAKIMET")
       setProjectStatus("TODO")
       toast.success("Project created")
     } finally {
@@ -1052,21 +1053,6 @@ export default function DepartmentKanban() {
                           {departmentUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Phase</Label>
-                      <Select value={projectPhase} onValueChange={setProjectPhase}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Phase" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PHASES.map((p) => (
-                            <SelectItem key={p} value={p}>
-                              {PHASE_LABELS[p]}
                             </SelectItem>
                           ))}
                         </SelectContent>

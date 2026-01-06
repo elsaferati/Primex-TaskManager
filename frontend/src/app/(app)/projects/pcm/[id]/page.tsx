@@ -354,6 +354,12 @@ export default function PcmProjectPage() {
   const [controlTitle, setControlTitle] = React.useState("")
   const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
+  // Inline task form state for Produkte phase
+  const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
+  const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
+  const [newInlineTaskTotal, setNewInlineTaskTotal] = React.useState("")
+  const [newInlineTaskCompleted, setNewInlineTaskCompleted] = React.useState("")
+  const [creatingInlineTask, setCreatingInlineTask] = React.useState(false)
   const [controlEdits, setControlEdits] = React.useState<
     Record<
       string,
@@ -931,33 +937,192 @@ export default function PcmProjectPage() {
             </div>
 
             {productTab === "tasks" ? (
-              <Card>
-                <div className="p-4 space-y-3">
-                  <div className="text-lg font-semibold">Tasks</div>
-                  <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
-                    <div className="col-span-5 uppercase tracking-wide">Tasks</div>
-                    <div className="col-span-2 uppercase tracking-wide">Assigned to</div>
-                    <div className="col-span-2 uppercase tracking-wide">Total nr i produkteve</div>
-                    <div className="col-span-2 uppercase tracking-wide">Nr i produkteve te perfunduara</div>
-                    <div className="col-span-1 uppercase tracking-wide text-right">Status</div>
+              <Card className="border-0 shadow-sm">
+                <div className="p-6 space-y-4">
+                  <div className="text-lg font-semibold tracking-tight">Tasks</div>
+                  {/* Table header */}
+                  <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
+                    <div className="col-span-4">Task</div>
+                    <div className="col-span-1">Assigned</div>
+                    <div className="col-span-2">Total</div>
+                    <div className="col-span-2">Completed</div>
+                    <div className="col-span-2">Status</div>
+                    <div className="col-span-1"></div>
                   </div>
-                  <div className="divide-y">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
-                        <div className="col-span-5 font-medium">{task.title}</div>
-                        <div className="col-span-2">{memberLabel(task.assigned_to)}</div>
-                        <div className="col-span-2">
-                          <Input defaultValue={task.progress_percentage ?? ""} />
+                  {/* Inline form row */}
+                  <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                    <div className="col-span-4">
+                      <input
+                        type="text"
+                        placeholder="Enter task name..."
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        value={newInlineTaskTitle}
+                        onChange={(e) => setNewInlineTaskTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <Select value={newInlineTaskAssignee} onValueChange={setNewInlineTaskAssignee}>
+                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                          <SelectValue placeholder="-" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__unassigned__">-</SelectItem>
+                          {departmentUsers
+                            .filter((u) => u.role !== "ADMIN")
+                            .map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || u.email}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        value={newInlineTaskTotal}
+                        onChange={(e) => setNewInlineTaskTotal(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        value={newInlineTaskCompleted}
+                        onChange={(e) => setNewInlineTaskCompleted(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Button
+                        size="sm"
+                        className="rounded-full px-5 shadow-sm"
+                        onClick={async () => {
+                          if (!project || !newInlineTaskTitle.trim()) return
+                          setCreatingInlineTask(true)
+                          try {
+                            const res = await apiFetch("/tasks", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                title: newInlineTaskTitle.trim(),
+                                project_id: project.id,
+                                department_id: project.department_id,
+                                assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
+                                status: "IN_PROGRESS",
+                                priority: "NORMAL",
+                                internal_notes: `total_products=${newInlineTaskTotal || 0}; completed_products=${newInlineTaskCompleted || 0}`,
+                              }),
+                            })
+                            if (!res?.ok) {
+                              toast.error("Failed to add task")
+                              return
+                            }
+                            const created = (await res.json()) as Task
+                            setTasks((prev) => [...prev, created])
+                            setNewInlineTaskTitle("")
+                            setNewInlineTaskAssignee("__unassigned__")
+                            setNewInlineTaskTotal("")
+                            setNewInlineTaskCompleted("")
+                            toast.success("Task added")
+                          } finally {
+                            setCreatingInlineTask(false)
+                          }
+                        }}
+                        disabled={creatingInlineTask || !newInlineTaskTitle.trim()}
+                      >
+                        {creatingInlineTask ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                    <div className="col-span-1"></div>
+                  </div>
+                  {/* Task rows */}
+                  <div className="divide-y divide-slate-100">
+                    {tasks.map((task) => {
+                      const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
+                      return (
+                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div className="col-span-4 font-medium text-slate-700">{task.title}</div>
+                          <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
+                          <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
+                          <div className="col-span-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max={totalVal > 0 ? totalVal : undefined}
+                              className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
+                              value={controlEdits[task.id]?.completed || ""}
+                              onChange={async (e) => {
+                                let completedNum = parseInt(e.target.value, 10) || 0
+                                // Cap at total value
+                                if (totalVal > 0 && completedNum > totalVal) {
+                                  completedNum = totalVal
+                                }
+                                const newCompleted = completedNum.toString()
+                                const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
+
+                                // Update local state immediately
+                                setControlEdits((prev) => ({
+                                  ...prev,
+                                  [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                }))
+
+                                // Update task on server
+                                const res = await apiFetch(`/tasks/${task.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                    status: newStatus,
+                                  }),
+                                })
+                                if (res?.ok) {
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  if (shouldMarkDone && task.status !== "DONE") {
+                                    toast.success("Task marked as Done!")
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Badge 
+                              variant={task.status === "DONE" ? "default" : "outline"}
+                              className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                            >
+                              {statusLabel(controlEdits[task.id]?.status || task.status)}
+                            </Badge>
+                          </div>
+                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                              onClick={async () => {
+                                const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                if (!res?.ok) {
+                                  toast.error("Failed to delete task")
+                                  return
+                                }
+                                setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                toast.success("Task deleted")
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                            </Button>
+                          </div>
                         </div>
-                        <div className="col-span-2">
-                          <Input defaultValue={task.completed_at ? 1 : 0} />
-                        </div>
-                        <div className="col-span-1 text-right">
-                          <Badge variant="outline">{statusLabel(task.status)}</Badge>
-                        </div>
+                      )
+                    })}
+                    {tasks.length === 0 ? (
+                      <div className="py-8 text-center text-sm text-slate-400">
+                        No tasks yet. Add one above to get started.
                       </div>
-                    ))}
-                    {tasks.length === 0 ? <div className="py-3 text-sm text-muted-foreground">No tasks yet.</div> : null}
+                    ) : null}
                   </div>
                 </div>
               </Card>
@@ -1181,86 +1346,200 @@ export default function PcmProjectPage() {
                 <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
               </button>
             </div>
-            <Card>
-              <div className="p-4 space-y-3">
-                <div className="text-lg font-semibold">Kontrolli</div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Input
-                    placeholder="Titulli i detyres"
-                    value={controlTitle}
-                    onChange={(e) => setControlTitle(e.target.value)}
-                  />
-                  <Select value={controlAssignee} onValueChange={setControlAssignee}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Assigned to" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                      {departmentUsers.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.full_name || u.username || u.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={async () => {
-                      if (!project || !controlTitle.trim()) return
-                      setCreatingControlTask(true)
-                      try {
-                        const res = await apiFetch("/tasks", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            title: controlTitle.trim(),
-                            project_id: project.id,
-                            department_id: project.department_id,
-                            assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                            status: "IN_PROGRESS",
-                            priority: "NORMAL",
-                          }),
-                        })
-                        if (!res?.ok) {
-                          toast.error("Failed to add task")
-                          return
+            <Card className="border-0 shadow-sm">
+              <div className="p-6 space-y-4">
+                <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
+                {/* Table header */}
+                <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
+                  <div className="col-span-3">Task</div>
+                  <div className="col-span-1">Assigned</div>
+                  <div className="col-span-2">Total</div>
+                  <div className="col-span-2">Completed</div>
+                  <div className="col-span-1">KO</div>
+                  <div className="col-span-2">Status</div>
+                  <div className="col-span-1"></div>
+                </div>
+                {/* Inline form row */}
+                <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                  <div className="col-span-3">
+                    <input
+                      type="text"
+                      placeholder="Enter task name..."
+                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                      value={controlTitle}
+                      onChange={(e) => setControlTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="col-span-1">
+                    <Select value={controlAssignee} onValueChange={setControlAssignee}>
+                      <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                        <SelectValue placeholder="-" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__unassigned__">-</SelectItem>
+                        {departmentUsers
+                          .filter((u) => u.role !== "ADMIN")
+                          .map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || u.email}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    />
+                  </div>
+                  <div className="col-span-1 text-sm text-slate-400">
+                    {(() => {
+                      if (controlAssignee === "__unassigned__") return "-"
+                      const assignedUser = departmentUsers.find((u) => u.id === controlAssignee)
+                      const assignedName = assignedUser?.full_name?.toLowerCase() || ""
+                      if (assignedName.includes("diellza")) return "Lea Murturi"
+                      if (assignedName.includes("lea")) return "Diellza Veliu"
+                      return "Elsa Ferati"
+                    })()}
+                  </div>
+                  <div className="col-span-2">
+                    <Button
+                      size="sm"
+                      className="rounded-full px-5 shadow-sm"
+                      onClick={async () => {
+                        if (!project || !controlTitle.trim()) return
+                        setCreatingControlTask(true)
+                        try {
+                          const res = await apiFetch("/tasks", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              title: controlTitle.trim(),
+                              project_id: project.id,
+                              department_id: project.department_id,
+                              assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
+                              status: "IN_PROGRESS",
+                              priority: "NORMAL",
+                            }),
+                          })
+                          if (!res?.ok) {
+                            toast.error("Failed to add task")
+                            return
+                          }
+                          const created = (await res.json()) as Task
+                          setTasks((prev) => [...prev, created])
+                          setControlTitle("")
+                          setControlAssignee("__unassigned__")
+                          toast.success("Task added")
+                        } finally {
+                          setCreatingControlTask(false)
                         }
-                        const created = (await res.json()) as Task
-                        setTasks((prev) => [...prev, created])
-                        setControlTitle("")
-                        setControlAssignee("__unassigned__")
-                      } finally {
-                        setCreatingControlTask(false)
-                      }
-                    }}
-                    disabled={creatingControlTask || !controlTitle.trim()}
-                  >
-                    {creatingControlTask ? "Adding..." : "Add Task"}
-                  </Button>
+                      }}
+                      disabled={creatingControlTask || !controlTitle.trim()}
+                    >
+                      {creatingControlTask ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                  <div className="col-span-1"></div>
                 </div>
-                <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
-                  <div className="col-span-5 uppercase tracking-wide">Tasks</div>
-                  <div className="col-span-2 uppercase tracking-wide">Assigned to</div>
-                  <div className="col-span-2 uppercase tracking-wide">Total nr i produkteve</div>
-                  <div className="col-span-2 uppercase tracking-wide">Nr i produkteve te perfunduara</div>
-                  <div className="col-span-1 uppercase tracking-wide text-right">Status</div>
-                </div>
-                <div className="divide-y">
-                  {tasks.map((task) => (
-                    <div key={task.id} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
-                      <div className="col-span-5 font-medium">{task.title}</div>
-                      <div className="col-span-2">{memberLabel(task.assigned_to)}</div>
-                      <div className="col-span-2">
-                        <Input defaultValue={task.progress_percentage ?? ""} />
+                {/* Task rows */}
+                <div className="divide-y divide-slate-100">
+                  {tasks.map((task) => {
+                    const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
+                    const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
+                    const assignedName = assignedUser?.full_name?.toLowerCase() || ""
+                    const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
+                    return (
+                      <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                        <div className="col-span-3 font-medium text-slate-700">{task.title}</div>
+                        <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
+                        <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
+                        <div className="col-span-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max={totalVal > 0 ? totalVal : undefined}
+                            className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
+                            value={controlEdits[task.id]?.completed || ""}
+                            onChange={async (e) => {
+                              let completedNum = parseInt(e.target.value, 10) || 0
+                              // Cap at total value
+                              if (totalVal > 0 && completedNum > totalVal) {
+                                completedNum = totalVal
+                              }
+                              const newCompleted = completedNum.toString()
+                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                              const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
+
+                              // Update local state immediately
+                              setControlEdits((prev) => ({
+                                ...prev,
+                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                              }))
+
+                              // Update task on server
+                              const res = await apiFetch(`/tasks/${task.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                  status: newStatus,
+                                }),
+                              })
+                              if (res?.ok) {
+                                const updated = (await res.json()) as Task
+                                setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                if (shouldMarkDone && task.status !== "DONE") {
+                                  toast.success("Task marked as Done!")
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-1 text-slate-500">{koName}</div>
+                        <div className="col-span-2">
+                          <Badge 
+                            variant={task.status === "DONE" ? "default" : "outline"}
+                            className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                          >
+                            {statusLabel(controlEdits[task.id]?.status || task.status)}
+                          </Badge>
+                        </div>
+                        <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            onClick={async () => {
+                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                              if (!res?.ok) {
+                                toast.error("Failed to delete task")
+                                return
+                              }
+                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                              toast.success("Task deleted")
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                          </Button>
+                        </div>
                       </div>
-                      <div className="col-span-2">
-                        <Input defaultValue={task.completed_at ? 1 : 0} />
-                      </div>
-                      <div className="col-span-1 text-right">
-                        <Badge variant="outline">{statusLabel(task.status)}</Badge>
-                      </div>
+                    )
+                  })}
+                  {tasks.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-slate-400">
+                      No tasks yet. Add one above to get started.
                     </div>
-                  ))}
-                  {tasks.length === 0 ? <div className="py-3 text-sm text-muted-foreground">No tasks yet.</div> : null}
+                  ) : null}
                 </div>
               </div>
             </Card>
