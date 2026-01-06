@@ -42,6 +42,12 @@ class FrequencyType(str, enum.Enum):
     SIX_MONTHS = "6_MONTHS"
 
 
+class SystemTaskScope(str, enum.Enum):
+    ALL = "ALL"
+    DEPARTMENT = "DEPARTMENT"
+    GA = "GA"
+
+
 class TemplateRecurrence(str, enum.Enum):
     daily = "daily"
     weekly = "weekly"

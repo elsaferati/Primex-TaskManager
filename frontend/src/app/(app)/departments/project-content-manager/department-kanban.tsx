@@ -1594,7 +1594,7 @@ export default function DepartmentKanban() {
                               )
                             })()}
                           </div>
-                          <div>{department.code}</div>
+                          <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
                           <div className="whitespace-pre-line text-muted-foreground">
                             {formatSchedule(item, systemDate)}
                           </div>

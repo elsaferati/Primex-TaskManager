@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType, TaskFinishPeriod, TaskPriority
+from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
 from app.schemas.task import TaskAssigneeOut
 
 
@@ -18,6 +18,7 @@ class SystemTaskOut(BaseModel):
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
+    scope: SystemTaskScope
     frequency: FrequencyType
     day_of_week: int | None = None
     day_of_month: int | None = None

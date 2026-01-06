@@ -30,10 +30,20 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { Department, SystemTaskFrequency, SystemTaskTemplate, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
+import type {
+  Department,
+  SystemTaskFrequency,
+  SystemTaskScope,
+  SystemTaskTemplate,
+  TaskFinishPeriod,
+  TaskPriority,
+  User,
+  UserLookup,
+} from "@/lib/types"
 
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
+const GA_DEPARTMENTS_VALUE = "__ga__"
 const END_OF_MONTH_VALUE = "__end_of_month__"
 
 const FREQUENCY_OPTIONS = [
@@ -131,6 +141,20 @@ type Section = {
   templates: SystemTaskTemplate[]
 }
 
+function resolveScope(value: string): SystemTaskScope {
+  if (value === GA_DEPARTMENTS_VALUE) return "GA"
+  if (value === ALL_DEPARTMENTS_VALUE) return "ALL"
+  return "DEPARTMENT"
+}
+
+function resolveDepartmentId(value: string): string | null {
+  return resolveScope(value) === "DEPARTMENT" ? value : null
+}
+
+function isGlobalScopeValue(value: string) {
+  return value === ALL_DEPARTMENTS_VALUE || value === GA_DEPARTMENTS_VALUE
+}
+
 function parseCSV(text: string): string[][] {
   const rows: string[][] = []
   let row: string[] = []
@@ -214,9 +238,10 @@ function parseInternalNotes(value?: string | null): Record<string, string> {
 
 export default function SystemTasksPage() {
   const { apiFetch, user } = useAuth()
+  type AssigneeUser = User | UserLookup
   const [templates, setTemplates] = React.useState<SystemTaskTemplate[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
-  const [users, setUsers] = React.useState<User[]>([])
+  const [users, setUsers] = React.useState<AssigneeUser[]>([])
   const [loading, setLoading] = React.useState(true)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
@@ -266,7 +291,7 @@ export default function SystemTasksPage() {
   const [editIsActive, setEditIsActive] = React.useState(true)
 
   const canEdit = user?.role !== "STAFF"
-  const canCreate = canEdit
+  const canCreate = true
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -282,9 +307,9 @@ export default function SystemTasksPage() {
         setDepartments((await departmentsRes.json()) as Department[])
       }
       if (canCreate) {
-        const usersRes = await apiFetch("/users")
+        const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
         if (usersRes.ok) {
-          setUsers((await usersRes.json()) as User[])
+          setUsers((await usersRes.json()) as AssigneeUser[])
         }
       }
     } finally {
@@ -318,7 +343,13 @@ export default function SystemTasksPage() {
     if (!editTemplate) return
     setEditTitle(editTemplate.title || "")
     setEditDescription(editTemplate.description || "")
-    setEditDepartmentId(editTemplate.department_id ?? ALL_DEPARTMENTS_VALUE)
+    const editDeptValue =
+      editTemplate.scope === "GA"
+        ? GA_DEPARTMENTS_VALUE
+        : editTemplate.scope === "ALL"
+          ? ALL_DEPARTMENTS_VALUE
+          : editTemplate.department_id ?? ALL_DEPARTMENTS_VALUE
+    setEditDepartmentId(editDeptValue)
     const editIds =
       editTemplate.assignees?.map((assignee) => assignee.id) ??
       (editTemplate.default_assignee_id ? [editTemplate.default_assignee_id] : [])
@@ -388,11 +419,21 @@ export default function SystemTasksPage() {
     [userMap]
   )
 
+  const isAssigneeAllowedForDepartment = React.useCallback(
+    (deptId: string, ownerId: string) => {
+      if (!deptId || isGlobalScopeValue(deptId)) return true
+      const ownerDept = ownerDepartmentId(ownerId)
+      if (!ownerDept) return true
+      return ownerDept === deptId
+    },
+    [ownerDepartmentId]
+  )
+
   const validateOwners = React.useCallback(
     (deptId: string, ownerIds: string[]) => {
       if (!ownerIds.length) return { ok: true }
-      if (!deptId || deptId === ALL_DEPARTMENTS_VALUE) return { ok: true }
-      const allMatch = ownerIds.every((id) => ownerDepartmentId(id) === deptId)
+      if (!deptId || isGlobalScopeValue(deptId)) return { ok: true }
+      const allMatch = ownerIds.every((id) => isAssigneeAllowedForDepartment(deptId, id))
       if (!allMatch) {
         return {
           ok: false,
@@ -401,28 +442,28 @@ export default function SystemTasksPage() {
       }
       return { ok: true }
     },
-    [ownerDepartmentId]
+    [isAssigneeAllowedForDepartment]
   )
 
   const handleDepartmentChange = (nextDeptId: string) => {
     setDepartmentId(nextDeptId)
-    if (nextDeptId === ALL_DEPARTMENTS_VALUE) {
+    if (isGlobalScopeValue(nextDeptId)) {
       setAssigneeIds([])
       setAssigneeError(null)
       return
     }
-    setAssigneeIds((prev) => prev.filter((id) => ownerDepartmentId(id) === nextDeptId))
+    setAssigneeIds((prev) => prev.filter((id) => isAssigneeAllowedForDepartment(nextDeptId, id)))
     setAssigneeError(null)
   }
 
   const handleEditDepartmentChange = (nextDeptId: string) => {
     setEditDepartmentId(nextDeptId)
-    if (nextDeptId === ALL_DEPARTMENTS_VALUE) {
+    if (isGlobalScopeValue(nextDeptId)) {
       setEditAssigneeIds([])
       setEditAssigneeError(null)
       return
     }
-    setEditAssigneeIds((prev) => prev.filter((id) => ownerDepartmentId(id) === nextDeptId))
+    setEditAssigneeIds((prev) => prev.filter((id) => isAssigneeAllowedForDepartment(nextDeptId, id)))
     setEditAssigneeError(null)
   }
 
@@ -432,10 +473,8 @@ export default function SystemTasksPage() {
       setAssigneeError(null)
       return
     }
-    const firstDept = ownerDepartmentId(nextOwnerIds[0])
-    if (!firstDept) return
-    if (departmentId !== ALL_DEPARTMENTS_VALUE) {
-      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === departmentId)
+    if (!isGlobalScopeValue(departmentId)) {
+      const allMatch = nextOwnerIds.every((id) => isAssigneeAllowedForDepartment(departmentId, id))
       if (!allMatch) {
         setAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
         return
@@ -451,10 +490,8 @@ export default function SystemTasksPage() {
       setEditAssigneeError(null)
       return
     }
-    const firstDept = ownerDepartmentId(nextOwnerIds[0])
-    if (!firstDept) return
-    if (editDepartmentId !== ALL_DEPARTMENTS_VALUE) {
-      const allMatch = nextOwnerIds.every((id) => ownerDepartmentId(id) === editDepartmentId)
+    if (!isGlobalScopeValue(editDepartmentId)) {
+      const allMatch = nextOwnerIds.every((id) => isAssigneeAllowedForDepartment(editDepartmentId, id))
       if (!allMatch) {
         setEditAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
         return
@@ -606,13 +643,14 @@ export default function SystemTasksPage() {
       return
     }
     const finalDeptId = departmentId
+    const scope = resolveScope(finalDeptId)
     setSaving(true)
     try {
       const payload = {
         title: title.trim(),
         description: description.trim() || null,
-        department_id:
-          finalDeptId === ALL_DEPARTMENTS_VALUE ? null : finalDeptId,
+        scope,
+        department_id: resolveDepartmentId(finalDeptId),
         assignees: assigneeIds,
         frequency,
         priority,
@@ -675,13 +713,14 @@ export default function SystemTasksPage() {
       return
     }
     const finalDeptId = editDepartmentId
+    const scope = resolveScope(finalDeptId)
     setEditSaving(true)
     try {
       const payload = {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
-        department_id:
-          finalDeptId === ALL_DEPARTMENTS_VALUE ? null : finalDeptId,
+        scope,
+        department_id: resolveDepartmentId(finalDeptId),
         assignees: editAssigneeIds,
         frequency: editFrequency,
         priority: editPriority,
@@ -717,18 +756,19 @@ export default function SystemTasksPage() {
   }
 
   const availableAssignees = React.useMemo(() => {
-    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return users
-    return users.filter((u) => u.department_id === departmentId)
+    if (!departmentId || isGlobalScopeValue(departmentId)) return users
+    return users.filter((u) => u.department_id === departmentId || !u.department_id)
   }, [departmentId, users])
   const editAvailableAssignees = React.useMemo(() => {
-    if (!editDepartmentId || editDepartmentId === ALL_DEPARTMENTS_VALUE) return users
-    return users.filter((u) => u.department_id === editDepartmentId)
+    if (!editDepartmentId || isGlobalScopeValue(editDepartmentId)) return users
+    return users.filter((u) => u.department_id === editDepartmentId || !u.department_id)
   }, [editDepartmentId, users])
   const filteredAssignees = React.useMemo(() => {
     const query = assigneeQuery.trim().toLowerCase()
     if (!query) return availableAssignees
     return availableAssignees.filter((person) => {
-      const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+      const email = "email" in person ? person.email || "" : ""
+      const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
       return name.includes(query)
     })
   }, [assigneeQuery, availableAssignees])
@@ -737,15 +777,18 @@ export default function SystemTasksPage() {
     const base = !query
       ? editAvailableAssignees
       : editAvailableAssignees.filter((person) => {
-          const name = `${person.full_name || ""} ${person.username || ""} ${person.email}`.toLowerCase()
+          const email = "email" in person ? person.email || "" : ""
+          const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
           return name.includes(query)
         })
     return [...base].sort((a, b) => {
       const aSelected = editAssigneeIds.includes(a.id)
       const bSelected = editAssigneeIds.includes(b.id)
       if (aSelected !== bSelected) return aSelected ? -1 : 1
-      const aName = (a.full_name || a.username || a.email).toLowerCase()
-      const bName = (b.full_name || b.username || b.email).toLowerCase()
+      const aEmail = "email" in a ? a.email || "" : ""
+      const bEmail = "email" in b ? b.email || "" : ""
+      const aName = (a.full_name || a.username || aEmail).toLowerCase()
+      const bName = (b.full_name || b.username || bEmail).toLowerCase()
       return aName.localeCompare(bName)
     })
   }, [editAssigneeQuery, editAvailableAssignees, editAssigneeIds])
@@ -830,11 +873,21 @@ export default function SystemTasksPage() {
     const body = rows.map((template) => {
       const department = template.department_id ? departmentMap.get(template.department_id) : null
       const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
+      const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+      const departmentLabel =
+        scope === "GA"
+          ? "GA"
+          : scope === "ALL"
+            ? "ALL"
+            : department
+              ? formatDepartmentName(department.name)
+              : ""
+      const departmentCode = scope === "DEPARTMENT" && department ? department.code : ""
       return [
         template.title,
         template.description || "",
-        department ? formatDepartmentName(department.name) : "All departments",
-        department ? department.code : "",
+        departmentLabel,
+        departmentCode,
         template.frequency,
         normalizePriority(template.priority),
         template.finish_period || "",
@@ -985,13 +1038,18 @@ export default function SystemTasksPage() {
       return map[raw] ?? null
     }
 
-    const departmentIdForValue = (value: string) => {
+    const scopeForValue = (value: string): { scope: SystemTaskScope; departmentId: string | null } => {
       const raw = normalize(value)
-      if (!raw || raw === "all" || raw === "all departments") return null
+      if (!raw || raw === "all" || raw === "all departments") {
+        return { scope: "ALL", departmentId: null }
+      }
+      if (raw === "ga") {
+        return { scope: "GA", departmentId: null }
+      }
       const byCode = departments.find((dept) => dept.code.toLowerCase() === raw)
-      if (byCode) return byCode.id
+      if (byCode) return { scope: "DEPARTMENT", departmentId: byCode.id }
       const byName = departments.find((dept) => dept.name.toLowerCase() === raw)
-      return byName?.id ?? null
+      return { scope: "DEPARTMENT", departmentId: byName?.id ?? null }
     }
 
     const assigneeIdForValue = (value: string) => {
@@ -1021,10 +1079,12 @@ export default function SystemTasksPage() {
       const finishPeriodValue =
         idxFinishPeriod >= 0 ? finishPeriodForValue(row[idxFinishPeriod] || "") : null
 
+      const scopeEntry = scopeForValue(row[idxDepartment] || "")
       const payload = {
         title,
         description: row[idxDescription]?.trim() || null,
-        department_id: departmentIdForValue(row[idxDepartment] || ""),
+        scope: scopeEntry.scope,
+        department_id: scopeEntry.departmentId,
         default_assignee_id: assigneeIdForValue(row[idxAssignee] || ""),
         frequency: frequencyValue,
         priority: priorityValue,
@@ -1107,7 +1167,8 @@ export default function SystemTasksPage() {
                         <SelectValue placeholder="Select department" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                          <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                          <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
                         {departments.map((dept) => (
                           <SelectItem key={dept.id} value={dept.id}>
                             {formatDepartmentName(dept.name)} ({dept.code})
@@ -1268,7 +1329,7 @@ export default function SystemTasksPage() {
                 </details>
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
-                  {departmentId === ALL_DEPARTMENTS_VALUE ? (
+                  {isGlobalScopeValue(departmentId) ? (
                     assigneeDeptNames.length ? (
                       <p className="text-[13px] text-muted-foreground">
                         Departments: {formatDepartmentNames(assigneeDeptNames)}
@@ -1283,7 +1344,8 @@ export default function SystemTasksPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {assigneeIds.map((id) => {
                         const person = userMap.get(id)
-                        const label = person?.full_name || person?.username || person?.email || id
+                        const email = person && "email" in person ? person.email || "" : ""
+                        const label = person?.full_name || person?.username || email || id
                         return (
                           <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
                             <span>{label}</span>
@@ -1323,7 +1385,7 @@ export default function SystemTasksPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => handleAssigneesChange(nextIds)}
                               >
-                                <span>{person.full_name || person.username || person.email}</span>
+                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
                                 {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
                               </button>
                             )
@@ -1373,7 +1435,8 @@ export default function SystemTasksPage() {
                         <SelectValue placeholder="Select department" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                          <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                          <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
                         {departments.map((dept) => (
                           <SelectItem key={dept.id} value={dept.id}>
                             {formatDepartmentName(dept.name)} ({dept.code})
@@ -1540,7 +1603,7 @@ export default function SystemTasksPage() {
                 </details>
                 <div className="space-y-2">
                   <Label>Assignees (optional)</Label>
-                  {editDepartmentId === ALL_DEPARTMENTS_VALUE ? (
+                  {isGlobalScopeValue(editDepartmentId) ? (
                     editAssigneeDeptNames.length ? (
                       <p className="text-[13px] text-muted-foreground">
                         Departments: {formatDepartmentNames(editAssigneeDeptNames)}
@@ -1555,7 +1618,8 @@ export default function SystemTasksPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {editAssigneeIds.map((id) => {
                         const person = userMap.get(id)
-                        const label = person?.full_name || person?.username || person?.email || id
+                            const email = person && "email" in person ? person.email || "" : ""
+                            const label = person?.full_name || person?.username || email || id
                         return (
                           <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
                             <span>{label}</span>
@@ -1595,7 +1659,7 @@ export default function SystemTasksPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => handleEditAssigneesChange(nextIds)}
                               >
-                                <span>{person.full_name || person.username || person.email}</span>
+                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
                                 {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
                               </button>
                             )
@@ -1769,7 +1833,7 @@ export default function SystemTasksPage() {
               <CardContent className="space-y-0.5 pt-3">
                 <div className="overflow-x-auto">
                   <div className="min-w-[880px] space-y-1">
-                    <div className="grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
+                    <div className="grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
                       <div>Task Title</div>
                       <div>Department</div>
                       <div>Owner</div>
@@ -1782,7 +1846,15 @@ export default function SystemTasksPage() {
                       section.templates.map((template, index) => {
                         const priorityValue = normalizePriority(template.priority)
                         const department = template.department_id ? departmentMap.get(template.department_id) : null
-                        const assigneeDeptNames = departmentNamesForAssignees(template.assignees)
+                        const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+                        const departmentLabel =
+                          scope === "GA"
+                            ? "GA"
+                            : scope === "ALL"
+                              ? "ALL"
+                              : department
+                                ? formatDepartmentName(department.name)
+                                : "-"
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =
@@ -1822,23 +1894,17 @@ export default function SystemTasksPage() {
                             ) : null}
                             <div
                               className={cn(
-                                "grid grid-cols-[minmax(260px,1.6fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,0.6fr)_minmax(110px,0.5fr)_minmax(110px,0.5fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
+                                "grid grid-cols-[minmax(340px,2.2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(130px,0.7fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(90px,0.4fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
                                 PRIORITY_BORDER_STYLES[priorityValue]
                               )}
                             >
                               <div className="space-y-0">
-                                <div className="text-[15px] font-semibold leading-tight text-slate-900">
+                                <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words">
                                   {template.title}
                                 </div>
                               </div>
                               <div className="text-[14px] font-normal text-slate-700">
-                                {department
-                                  ? formatDepartmentName(department.name)
-                                  : assigneeDeptNames.length
-                                    ? formatDepartmentNames(assigneeDeptNames)
-                                    : isInactive && isUnassignedAll
-                                      ? "NONE"
-                                      : "ALL"}
+                                {departmentLabel}
                               </div>
                               <div className="text-[14px] font-normal text-slate-700">
                                 {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
