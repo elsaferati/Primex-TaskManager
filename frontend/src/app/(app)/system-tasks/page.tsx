@@ -362,22 +362,37 @@ function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
     onChange(raw)
   }, [onChange])
 
+  const [isBold, setIsBold] = React.useState(false)
+
+  const checkBoldState = React.useCallback(() => {
+    if (typeof document !== "undefined") {
+      setIsBold(document.queryCommandState("bold"))
+    }
+  }, [])
+
   const applyBold = React.useCallback(() => {
     if (!editorRef.current) return
-    // Use native execCommand for bold - it handles everything cleanly
+    editorRef.current.focus()
+    // Use native execCommand for bold - it toggles bold on/off
     document.execCommand("bold", false)
+    checkBoldState()
     commitChange()
-  }, [commitChange])
+  }, [commitChange, checkBoldState])
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm font-semibold shadow-sm transition ${
+            isBold
+              ? "border-blue-500 bg-blue-100 text-blue-700"
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={applyBold}
           aria-label="Bold"
+          aria-pressed={isBold}
         >
           B
         </button>
@@ -391,6 +406,9 @@ function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
         className="border-input focus-visible:border-ring focus-visible:ring-ring/50 min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] md:text-sm whitespace-pre-wrap"
         onInput={handleInput}
         onBlur={commitChange}
+        onSelect={checkBoldState}
+        onKeyUp={checkBoldState}
+        onMouseUp={checkBoldState}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault()
