@@ -383,8 +383,9 @@ export default function DepartmentKanban() {
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
-          setDepartmentTasks(taskRows)
-          setNoProjectTasks(taskRows.filter((t) => !t.project_id))
+          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+          setDepartmentTasks(nonSystemTasks)
+          setNoProjectTasks(nonSystemTasks.filter((t) => !t.project_id))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
