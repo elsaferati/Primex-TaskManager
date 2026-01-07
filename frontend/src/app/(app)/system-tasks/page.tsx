@@ -123,7 +123,11 @@ const WEEK_DAYS = [
   { value: "2", label: "Wednesday" },
   { value: "3", label: "Thursday" },
   { value: "4", label: "Friday" },
+  { value: "5", label: "Saturday" },
+  { value: "6", label: "Sunday" },
 ]
+const WEEKDAY_OPTIONS = WEEK_DAYS.slice(0, 5)
+const WEEKEND_OPTIONS = WEEK_DAYS.slice(5)
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   value: String(index + 1).padStart(2, "0"),
@@ -480,6 +484,7 @@ export default function SystemTasksPage() {
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
+  const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [editTemplate, setEditTemplate] = React.useState<SystemTaskTemplate | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
@@ -498,6 +503,7 @@ export default function SystemTasksPage() {
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
   const [editIsActive, setEditIsActive] = React.useState(true)
+  const [editShowWeekendDays, setEditShowWeekendDays] = React.useState(false)
 
   const canEdit = user?.role !== "STAFF"
   const canCreate = true
@@ -1547,7 +1553,7 @@ export default function SystemTasksPage() {
                   <div className="space-y-2">
                     <Label>Days of week</Label>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {WEEK_DAYS.map((day) => {
+                      {WEEKDAY_OPTIONS.map((day) => {
                         const checked = daysOfWeek.includes(day.value)
                         return (
                           <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
@@ -1559,7 +1565,30 @@ export default function SystemTasksPage() {
                           </label>
                         )
                       })}
+                      <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
+                        <Checkbox
+                          checked={showWeekendDays}
+                          onCheckedChange={(value) => setShowWeekendDays(Boolean(value))}
+                        />
+                        <span>Show weekend days</span>
+                      </label>
                     </div>
+                    {showWeekendDays ? (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {WEEKEND_OPTIONS.map((day) => {
+                          const checked = daysOfWeek.includes(day.value)
+                          return (
+                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
+                              />
+                              <span>{day.label}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                     <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                   </div>
                 ) : null}
@@ -1822,7 +1851,7 @@ export default function SystemTasksPage() {
                   <div className="space-y-2">
                     <Label>Days of week</Label>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {WEEK_DAYS.map((day) => {
+                      {WEEKDAY_OPTIONS.map((day) => {
                         const checked = editDaysOfWeek.includes(day.value)
                         return (
                           <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
@@ -1836,7 +1865,32 @@ export default function SystemTasksPage() {
                           </label>
                         )
                       })}
+                      <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
+                        <Checkbox
+                          checked={editShowWeekendDays}
+                          onCheckedChange={(value) => setEditShowWeekendDays(Boolean(value))}
+                        />
+                        <span>Show weekend days</span>
+                      </label>
                     </div>
+                    {editShowWeekendDays ? (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {WEEKEND_OPTIONS.map((day) => {
+                          const checked = editDaysOfWeek.includes(day.value)
+                          return (
+                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() =>
+                                  toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
+                                }
+                              />
+                              <span>{day.label}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                     <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                   </div>
                 ) : null}
@@ -2281,5 +2335,3 @@ export default function SystemTasksPage() {
     </div>
   )
 }
-
-
