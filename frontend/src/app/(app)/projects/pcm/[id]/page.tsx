@@ -38,15 +38,15 @@ const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
 }
 const VS_VL_PHASES = ["PROJECT_ACCEPTANCE", "AMAZONE", "CONTROL", "DREAMROBOT"] as const
 const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
-  PROJECT_ACCEPTANCE: "Project Acceptance",
-  AMAZONE: "AMAZONE",
-  CONTROL: "CONTROL",
+  PROJECT_ACCEPTANCE: "PLANNING",
+  AMAZONE: "AMAZON",
+  CONTROL: "CHECK",
   DREAMROBOT: "DREAMROBOT",
 }
 const VS_VL_ACCEPTANCE_QUESTIONS = [
-  "A ESHTE HAPUR GRUPI NE TEAMS",
-  "A JANE VENDOSUR PIKAT NE TRELLO",
-  "A ESHTE HAPUR PROJEKTI NE CHATGPT",
+  "A ESHTE HAPUR GRUPI NE TEAMS?",
+  "A JANE VENDOSUR PIKAT NE TRELLO?",
+  "A ESHTE HAPUR PROJEKTI NE CHATGPT?",
 ]
 const VS_VL_META_PREFIX = "VS_VL_META:"
 
@@ -73,6 +73,7 @@ type VsVlTaskMeta = {
   dependency_text?: string
   checklist?: string
   dependency_task_id?: string
+  comment?: string
 }
 
 const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
@@ -450,9 +451,11 @@ export default function PcmProjectPage() {
   const [vsVlTaskDate, setVsVlTaskDate] = React.useState("")
   const [vsVlTaskPriority, setVsVlTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [vsVlTaskStatus, setVsVlTaskStatus] = React.useState<Task["status"]>("TODO")
-  const [vsVlTaskAssignee, setVsVlTaskAssignee] = React.useState("__unassigned__")
+  const [vsVlTaskAssignees, setVsVlTaskAssignees] = React.useState<string[]>([])
   const [vsVlTaskDependencyId, setVsVlTaskDependencyId] = React.useState("__none__")
   const [vsVlTaskChecklist, setVsVlTaskChecklist] = React.useState("")
+  const [vsVlTaskComment, setVsVlTaskComment] = React.useState("")
+  const [vsVlCommentEdits, setVsVlCommentEdits] = React.useState<Record<string, string>>({})
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
   const vsVlScrollRef = React.useRef<HTMLDivElement | null>(null)
   const vsVlDraggingRef = React.useRef(false)
@@ -629,6 +632,21 @@ export default function PcmProjectPage() {
   React.useEffect(() => {
     if (!prompts.length) return
   }, [prompts])
+
+  React.useEffect(() => {
+    if (!isVsVl) return
+    setVsVlCommentEdits((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const task of tasks) {
+        if (next[task.id] !== undefined) continue
+        const meta = parseVsVlMeta(task.internal_notes)
+        next[task.id] = meta?.comment || ""
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [isVsVl, tasks])
 
   React.useEffect(() => {
     if (!membersOpen) return
@@ -1011,6 +1029,13 @@ export default function PcmProjectPage() {
       const u = userMap.get(id)
       return u?.full_name || u?.username || "-"
     }
+    const assignableUsers = departmentUsers.filter((u) => u.role !== "ADMIN")
+    const taskAssigneeIds = (task: Task) => {
+      const ids = task.assignees?.map((a) => a.id) || []
+      if (ids.length) return ids
+      if (task.assigned_to) return [task.assigned_to]
+      return []
+    }
     const vsVlTasks = tasks.filter((task) => {
       const meta = parseVsVlMeta(task.internal_notes)
       if (!meta?.vs_vl_phase) {
@@ -1145,13 +1170,14 @@ export default function PcmProjectPage() {
             </div>
             <Card>
               <div className="p-4 space-y-4">
-                <div className="text-lg font-semibold">Project Acceptance</div>
+                <div className="text-lg font-semibold">Planning</div>
                 <div className="grid gap-3">
                   {VS_VL_ACCEPTANCE_QUESTIONS.map((q) => (
                     <div key={q} className="flex items-center gap-3">
                       <Checkbox
                         checked={Boolean(vsVlAcceptanceChecks[q])}
                         onCheckedChange={() => setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                        className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                       />
                       <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
                     </div>
@@ -1192,6 +1218,7 @@ export default function PcmProjectPage() {
                         <th className="border px-2 py-2 text-left">USERID</th>
                         <th className="border px-2 py-2 text-left">VARESIA</th>
                         <th className="border px-2 py-2 text-left">STATUS</th>
+                        <th className="border px-2 py-2 text-left">COMMENT</th>
                         <th className="border px-2 py-2 text-left">CHECKLISTA</th>
                       </tr>
                     </thead>
@@ -1237,21 +1264,30 @@ export default function PcmProjectPage() {
                           </Select>
                         </td>
                         <td className="border px-2 py-2">
-                          <Select value={vsVlTaskAssignee} onValueChange={setVsVlTaskAssignee}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="-" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__unassigned__">-</SelectItem>
-                              {departmentUsers
-                                .filter((u) => u.role !== "ADMIN")
-                                .map((u) => (
-                                  <SelectItem key={u.id} value={u.id}>
-                                    {u.full_name || u.username || u.email}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                            {assignableUsers.length ? (
+                              assignableUsers.map((u) => {
+                                const checked = vsVlTaskAssignees.includes(u.id)
+                                return (
+                                  <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                    <input
+                                      type="checkbox"
+                                      className="h-3 w-3 rounded border-slate-300"
+                                      checked={checked}
+                                      onChange={() =>
+                                        setVsVlTaskAssignees((prev) =>
+                                          checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                                        )
+                                      }
+                                    />
+                                    <span className="truncate">{u.full_name || u.username || u.email}</span>
+                                  </label>
+                                )
+                              })
+                            ) : (
+                              <div className="text-[11px] text-slate-400">-</div>
+                            )}
+                          </div>
                         </td>
                         <td className="border px-2 py-2">
                           <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
@@ -1282,6 +1318,15 @@ export default function PcmProjectPage() {
                             </SelectContent>
                           </Select>
                         </td>
+                        <td className="border px-2 py-2">
+                          <Textarea
+                            value={vsVlTaskComment}
+                            onChange={(e) => setVsVlTaskComment(e.target.value)}
+                            placeholder="Koment..."
+                            rows={2}
+                            className="text-xs"
+                          />
+                        </td>
                         <td className="border px-2 py-2 space-y-2">
                           <Textarea
                             value={vsVlTaskChecklist}
@@ -1301,6 +1346,7 @@ export default function PcmProjectPage() {
                                 const meta: VsVlTaskMeta = {
                                   vs_vl_phase: vsVlPhase,
                                   checklist: vsVlTaskChecklist.trim() || undefined,
+                                  comment: vsVlTaskComment.trim() || undefined,
                                 }
                                 const res = await apiFetch("/tasks", {
                                   method: "POST",
@@ -1310,7 +1356,7 @@ export default function PcmProjectPage() {
                                     description: vsVlTaskDetail.trim() || null,
                                     project_id: project.id,
                                     department_id: project.department_id,
-                                    assigned_to: vsVlTaskAssignee === "__unassigned__" ? null : vsVlTaskAssignee,
+                                    assignees: vsVlTaskAssignees,
                                     dependency_task_id:
                                       vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
                                     status: vsVlTaskStatus || "TODO",
@@ -1330,9 +1376,10 @@ export default function PcmProjectPage() {
                                 setVsVlTaskDate("")
                                 setVsVlTaskPriority("NORMAL")
                                 setVsVlTaskStatus("TODO")
-                                setVsVlTaskAssignee("__unassigned__")
+                                setVsVlTaskAssignees([])
                                 setVsVlTaskDependencyId("__none__")
                                 setVsVlTaskChecklist("")
+                                setVsVlTaskComment("")
                                 toast.success("Task added")
                               } finally {
                                 setCreatingVsVlTask(false)
@@ -1354,6 +1401,8 @@ export default function PcmProjectPage() {
                           const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
                           const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
                           const isLocked = isDependencyLocked
+                          const selectedAssignees = taskAssigneeIds(task)
+                          const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
                           return (
                             <tr key={task.id} className="align-top">
                               <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
@@ -1384,7 +1433,52 @@ export default function PcmProjectPage() {
                                 />
                               </td>
                               <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
-                              <td className="border px-2 py-2">{memberLabel(task.assigned_to)}</td>
+                              <td className="border px-2 py-2">
+                                <div className="space-y-2">
+                                  <div className="text-[11px] text-slate-500">
+                                    {selectedAssignees.length
+                                      ? selectedAssignees.map((id) => memberLabel(id)).join(", ")
+                                      : "-"}
+                                  </div>
+                                  <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                                    {assignableUsers.length ? (
+                                      assignableUsers.map((u) => {
+                                        const checked = selectedAssignees.includes(u.id)
+                                        return (
+                                          <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                            <input
+                                              type="checkbox"
+                                              className="h-3 w-3 rounded border-slate-300"
+                                              checked={checked}
+                                              disabled={isLocked}
+                                              onChange={async () => {
+                                                if (isLocked) return
+                                                const nextIds = checked
+                                                  ? selectedAssignees.filter((id) => id !== u.id)
+                                                  : [...selectedAssignees, u.id]
+                                                const res = await apiFetch(`/tasks/${task.id}`, {
+                                                  method: "PATCH",
+                                                  headers: { "Content-Type": "application/json" },
+                                                  body: JSON.stringify({ assignees: nextIds }),
+                                                })
+                                                if (!res.ok) {
+                                                  toast.error("Failed to update assignees")
+                                                  return
+                                                }
+                                                const updated = (await res.json()) as Task
+                                                setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                              }}
+                                            />
+                                            <span className="truncate">{u.full_name || u.username || u.email}</span>
+                                          </label>
+                                        )
+                                      })
+                                    ) : (
+                                      <div className="text-[11px] text-slate-400">-</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
                               <td className="border px-2 py-2">
                                 <Select
                                   value={
@@ -1453,13 +1547,52 @@ export default function PcmProjectPage() {
                                   </SelectContent>
                                 </Select>
                               </td>
+                              <td className="border px-2 py-2">
+                                <Textarea
+                                  value={commentValue}
+                                  onChange={(e) =>
+                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                  }
+                                  onBlur={async (e) => {
+                                    if (isLocked) return
+                                    const nextValue = e.target.value.trim()
+                                    const currentValue = meta?.comment || ""
+                                    if (nextValue === currentValue) return
+                                    const nextMeta: VsVlTaskMeta = {
+                                      ...(meta || {}),
+                                      vs_vl_phase: meta?.vs_vl_phase || vsVlPhase,
+                                    }
+                                    if (nextValue) {
+                                      nextMeta.comment = nextValue
+                                    } else {
+                                      delete nextMeta.comment
+                                    }
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
+                                    })
+                                    if (!res.ok) {
+                                      toast.error("Failed to update comment")
+                                      return
+                                    }
+                                    const updated = (await res.json()) as Task
+                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                  }}
+                                  placeholder="Koment..."
+                                  rows={2}
+                                  className="text-xs"
+                                  disabled={isLocked}
+                                />
+                              </td>
                               <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.checklist || "-"}</td>
                             </tr>
                           )
                         })
                       ) : (
                         <tr>
-                          <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={9}>
+                          <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={10}>
                             No tasks yet.
                           </td>
                         </tr>
