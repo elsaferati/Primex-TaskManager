@@ -4,7 +4,7 @@ import * as React from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -41,6 +41,8 @@ import type {
   UserLookup,
 } from "@/lib/types"
 
+// --- Constants & Types ---
+
 const EMPTY_VALUE = "__none__"
 const ALL_DEPARTMENTS_VALUE = "__all_departments__"
 const GA_DEPARTMENTS_VALUE = "__ga__"
@@ -57,7 +59,6 @@ const FREQUENCY_OPTIONS = [
 ] as const
 
 const FREQUENCY_VALUES = FREQUENCY_OPTIONS.map((option) => option.value)
-
 const COMBINED_FREQUENCIES: SystemTaskFrequency[] = ["3_MONTHS", "6_MONTHS"]
 
 const FREQUENCY_CHIPS = [
@@ -81,15 +82,11 @@ const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
 }
 
+// Restored specific left-border colors
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  NORMAL: "border-l-[#F97316]",
-  HIGH: "border-l-[#EF4444]",
+  NORMAL: "border-l-[#F97316]", // Specific Orange
+  HIGH: "border-l-[#EF4444]",   // Specific Red
 }
-
-const PRIORITY_CHIPS = [
-  { id: "all", label: "All" },
-  ...PRIORITY_OPTIONS.map((value) => ({ id: value, label: PRIORITY_LABELS[value] })),
-]
 
 const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
   HIGH: 0,
@@ -139,12 +136,18 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
   label: String(index + 1),
 }))
 
+// Define the grid layout once so header and body always match.
+// Columns: Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
+const GRID_CLASS = "grid grid-cols-[1fr_150px_150px_120px_100px_100px_80px] gap-4 items-center px-4"
+
 type Section = {
   id: string
   label: string
   date: Date
   templates: SystemTaskTemplate[]
 }
+
+// --- Helpers ---
 
 function resolveScope(value: string): SystemTaskScope {
   if (value === GA_DEPARTMENTS_VALUE) return "GA"
@@ -696,9 +699,7 @@ export default function SystemTasksPage() {
       setAssigneeError(null)
       return
     }
-    // If department is global scope and assignee has a department, auto-set the department
     if (isGlobalScopeValue(departmentId)) {
-      // Find the first assignee with a department
       for (const id of nextOwnerIds) {
         const assigneeDeptId = ownerDepartmentId(id)
         if (assigneeDeptId) {
@@ -723,9 +724,7 @@ export default function SystemTasksPage() {
       setEditAssigneeError(null)
       return
     }
-    // If department is global scope and assignee has a department, auto-set the department
     if (isGlobalScopeValue(editDepartmentId)) {
-      // Find the first assignee with a department
       for (const id of nextOwnerIds) {
         const assigneeDeptId = ownerDepartmentId(id)
         if (assigneeDeptId) {
@@ -1416,7 +1415,8 @@ export default function SystemTasksPage() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4 pb-12">
+      {/* Header Area */}
       <div className="rounded-lg border border-border/60 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1426,45 +1426,46 @@ export default function SystemTasksPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={async (event) => {
-              const file = event.target.files?.[0]
-              if (file) await importTemplatesFromFile(file)
-              event.target.value = ""
-            }}
-          />
-          <Button
-            variant="outline"
-            disabled={!canCreate}
-            onClick={() => fileInputRef.current?.click()}
-            size="sm"
-            className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-          >
-            Import Excel
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => exportTemplatesCSV("all")}
-            size="sm"
-            className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-          >
-            Export All
-          </Button>
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button
-                disabled={!canCreate}
-                size="sm"
-                className="h-9 bg-blue-600 px-3 text-sm text-white hover:bg-blue-700"
-              >
-                + Add Task
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={async (event) => {
+                const file = event.target.files?.[0]
+                if (file) await importTemplatesFromFile(file)
+                event.target.value = ""
+              }}
+            />
+            <Button
+              variant="outline"
+              disabled={!canCreate}
+              onClick={() => fileInputRef.current?.click()}
+              size="sm"
+              className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+            >
+              Import Excel
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => exportTemplatesCSV("all")}
+              size="sm"
+              className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+            >
+              Export All
+            </Button>
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  disabled={!canCreate}
+                  size="sm"
+                  className="h-9 bg-blue-600 px-3 text-sm text-white hover:bg-blue-700"
+                >
+                  + Add Task
+                </Button>
+              </DialogTrigger>
+              {/* CREATE DIALOG CONTENT (Omitted for brevity, assumed same as original) */}
+               <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle>Add system task</DialogTitle>
               </DialogHeader>
@@ -1751,15 +1752,18 @@ export default function SystemTasksPage() {
                 </div>
               </div>
             </DialogContent>
-          </Dialog>
-          <Dialog
-            open={editOpen}
-            onOpenChange={(open) => {
-              setEditOpen(open)
-              if (!open) setEditTemplate(null)
-            }}
-          >
-            <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+            </Dialog>
+
+            {/* EDIT DIALOG */}
+            <Dialog
+              open={editOpen}
+              onOpenChange={(open) => {
+                setEditOpen(open)
+                if (!open) setEditTemplate(null)
+              }}
+            >
+              {/* EDIT DIALOG CONTENT (Same structure as create) */}
+              <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle>Edit system task</DialogTitle>
               </DialogHeader>
@@ -2056,13 +2060,16 @@ export default function SystemTasksPage() {
                 </div>
               </div>
             </DialogContent>
-          </Dialog>
-          {!canCreate ? (
-            <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
-          ) : null}
+            </Dialog>
+
+            {!canCreate ? (
+              <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
+            ) : null}
+          </div>
         </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+
+        {/* Filters Bar */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
           <div className="relative flex min-w-[220px] flex-1 items-center">
             <span className="pointer-events-none absolute left-3 text-slate-400">
               <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4">
@@ -2080,9 +2087,9 @@ export default function SystemTasksPage() {
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search by task name..."
-              className="h-9 border-slate-200 bg-white pl-9 pr-16 text-sm"
+              className="h-9 border-slate-200 bg-slate-50 pl-9 pr-16 text-sm focus:bg-white transition-colors"
             />
-            <span className="pointer-events-none absolute right-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-500">
+            <span className="pointer-events-none absolute right-2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500">
               Ctrl K
             </span>
           </div>
@@ -2184,151 +2191,154 @@ export default function SystemTasksPage() {
       </div>
 
       {loading ? (
-        <div className="text-base text-muted-foreground">Loading...</div>
+        <div className="py-8 text-center text-sm text-muted-foreground">Loading tasks...</div>
       ) : sections.length ? (
-        <div id="system-task-sections" className="space-y-2">
-          {sections.map((section) => (
-            <Card key={section.id} className="rounded-lg border border-border/70 bg-white shadow-sm">
-              <CardHeader className="flex items-center justify-between border-b border-border/70 bg-slate-50 px-4 py-2">
-                <CardTitle className="text-base font-semibold text-slate-800">
-                  {section.label}
-                </CardTitle>
-                <Badge variant="secondary">{section.templates.length}</Badge>
-              </CardHeader>
-              <CardContent className="space-y-0.5 pt-3">
-                <div className="relative">
-                  <div className="overflow-x-auto pr-14">
-                    <div className="min-w-[650px] space-y-1">
-                      <div className="relative">
-                        <div className="grid grid-cols-[minmax(180px,2fr)_minmax(90px,1fr)_minmax(100px,1fr)_minmax(70px,0.7fr)_minmax(60px,0.5fr)_minmax(70px,0.6fr)] items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold uppercase leading-tight tracking-[0.08em] text-slate-500">
-                          <div>Task Title</div>
-                          <div>Department</div>
-                          <div>Owner</div>
-                          <div className="whitespace-nowrap">Frequency</div>
-                          <div className="whitespace-nowrap">Finish by</div>
-                          <div className="whitespace-nowrap">Priority</div>
-                        </div>
-                        {canEdit && (
-                          <div className="absolute right-0 top-0 bottom-0 flex items-center bg-slate-50 px-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-500 border-y border-r border-slate-200">
-                            Actions
-                          </div>
+        <div id="system-task-table" className="relative min-w-[800px] overflow-visible rounded-lg border bg-white shadow-sm">
+          {/* STICKY HEADER ROW */}
+          <div className={cn(
+            GRID_CLASS,
+            "sticky top-0 z-40 border-b bg-slate-50/95 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
+          )}>
+            <div>Task Title</div>
+            <div>Department</div>
+            <div>Owner</div>
+            <div>Frequency</div>
+            <div>Finish by</div>
+            <div>Priority</div>
+            <div className="text-right">Actions</div>
+          </div>
+
+          {/* TABLE BODY */}
+          <div className="p-4 space-y-2 bg-slate-50">
+            {sections.map((section) => (
+              <React.Fragment key={section.id}>
+                {section.templates.length ? (
+                  section.templates.map((template, index) => {
+                    const priorityValue = normalizePriority(template.priority)
+                    const department = template.department_id ? departmentMap.get(template.department_id) : null
+                    const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+                    const departmentLabel =
+                      scope === "GA"
+                        ? "GA"
+                        : scope === "ALL"
+                          ? "ALL"
+                          : department
+                            ? formatDepartmentName(department.name)
+                            : "-"
+                    const ownerLabel = assigneeSummary(template.assignees)
+                    const isUnassignedAll = !template.department_id && !template.default_assignee_id
+                    const frequencyLabel =
+                      FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
+                      template.frequency
+                    
+                    const isInactive = template.is_active === false
+                    const showInactiveDivider =
+                      isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
+                    
+                    // Grouping Logic
+                    const prev = index > 0 ? section.templates[index - 1] : null
+                    const prevPriority = prev ? normalizePriority(prev.priority) : null
+                    const showPriorityDivider =
+                      !isInactive &&
+                      prevPriority !== null &&
+                      prevPriority !== priorityValue &&
+                      priorityValue === "HIGH"
+
+                    const showFrequencyDivider =
+                        !isInactive &&
+                        (index === 0 ||
+                        (prev && prev.frequency !== template.frequency) ||
+                        (prevPriority !== null && prevPriority !== priorityValue))
+
+                    return (
+                      <React.Fragment key={template.id}>
+                        {/* Dividers */}
+                        {showInactiveDivider && (
+                           <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400">
+                             Inactive Tasks
+                           </div>
                         )}
-                      </div>
-                    {section.templates.length ? (
-                      section.templates.map((template, index) => {
-                        const priorityValue = normalizePriority(template.priority)
-                        const department = template.department_id ? departmentMap.get(template.department_id) : null
-                        const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-                        const departmentLabel =
-                          scope === "GA"
-                            ? "GA"
-                            : scope === "ALL"
-                              ? "ALL"
-                              : department
-                                ? formatDepartmentName(department.name)
-                                : "-"
-                        const ownerLabel = assigneeSummary(template.assignees)
-                        const isUnassignedAll = !template.department_id && !template.default_assignee_id
-                        const frequencyLabel =
-                          FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
-                          template.frequency
-                        const isInactive = template.is_active === false
-                        const showInactiveDivider =
-                          isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
-                        const prev = index > 0 ? section.templates[index - 1] : null
-                        const prevPriority = prev ? normalizePriority(prev.priority) : null
-                        const showPriorityDivider =
-                          prevPriority !== null && prevPriority !== priorityValue && priorityValue === "HIGH"
-                        const showFrequencyDivider =
-                          index === 0 ||
-                          (prev && prev.frequency !== template.frequency) ||
-                          (prevPriority !== null && prevPriority !== priorityValue)
-                        return (
-                          <React.Fragment key={template.id}>
-                            {showInactiveDivider ? (
-                              <div className="flex items-center gap-1.5 border-t border-dashed pt-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
-                                <span>Inactive tasks</span>
-                              </div>
-                            ) : null}
-                            {showPriorityDivider ? (
-                              <div className="flex items-center gap-2 border-t border-slate-200/70 bg-slate-50/60 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-500">
-                                  {PRIORITY_LABELS[priorityValue]}
-                                </span>
-                              </div>
-                            ) : null}
-                            {showFrequencyDivider ? (
-                              <div className="flex items-center gap-2 border-t border-slate-200/70 bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-500">
-                                  {frequencyLabel}
-                                </span>
-                              </div>
-                            ) : null}
-                            <div className="relative group">
-                              <div
-                                className={cn(
-                                  "grid grid-cols-[minmax(180px,2fr)_minmax(90px,1fr)_minmax(100px,1fr)_minmax(70px,0.7fr)_minmax(60px,0.5fr)_minmax(70px,0.6fr)] items-center gap-2 border border-slate-200 border-l-4 bg-white px-3 py-3 text-[14px] font-normal leading-tight transition-colors hover:bg-blue-50/40",
-                                  PRIORITY_BORDER_STYLES[priorityValue]
-                                )}
-                              >
-                                <div className="space-y-0">
-                                  <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words">
-                                    {template.title}
-                                  </div>
-                                </div>
-                                <div className="text-[14px] font-normal text-slate-700">
-                                  {departmentLabel}
-                                </div>
-                                <div className="text-[14px] font-normal text-slate-700">
-                                  {ownerLabel === "-" && isUnassignedAll ? "-" : ownerLabel}
-                                </div>
-                                <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">{frequencyLabel}</div>
-                                <div className="text-[14px] font-normal text-slate-700 whitespace-nowrap">
-                                  {template.finish_period || "-"}
-                                </div>
-                                <div className="flex items-center justify-start">
-                                  <Badge
-                                    variant="outline"
-                                    className={cn("border px-2 py-0.5 text-[13px]", PRIORITY_BADGE_STYLES[priorityValue])}
-                                  >
-                                    {PRIORITY_LABELS[priorityValue]}
-                                  </Badge>
-                                </div>
-                              </div>
-                              {canEdit ? (
-                                <div className="absolute right-0 top-0 bottom-0 flex items-center bg-gradient-to-l from-white via-white to-transparent pl-6 pr-2">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 px-2 text-sm text-slate-600 hover:bg-blue-50 hover:text-blue-700"
-                                    onClick={() => startEdit(template)}
-                                  >
-                                    Edit
-                                  </Button>
-                                </div>
-                              ) : null}
+                        {showPriorityDivider && (
+                           <div className="col-span-full rounded border-l-4 border-l-transparent bg-red-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400">
+                             High Priority
+                           </div>
+                        )}
+                        {showFrequencyDivider && !showPriorityDivider && (
+                           <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                             {frequencyLabel}
+                           </div>
+                        )}
+
+                        {/* Task Row (Card Style) */}
+                        <div
+                          className={cn(
+                            GRID_CLASS,
+                            "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
+                            PRIORITY_BORDER_STYLES[priorityValue],
+                            isInactive && "opacity-60 grayscale"
+                          )}
+                        >
+                          {/* Title Only (Description removed from list view) */}
+                          <div className="min-w-0 pr-4">
+                            <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                              {template.title}
                             </div>
-                          </React.Fragment>
-                        )
-                      })
-                    ) : (
-                      <div className="text-base text-muted-foreground">No scheduled tasks.</div>
-                    )}
-                    {section.templates.some((template) => template.is_active === false) ? (
-                      <div className="border-t pt-3 text-base text-muted-foreground">
-                        Inactive tasks are listed at the bottom.
-                      </div>
-                    ) : null}
-                    </div>
+                          </div>
+                          
+                          <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                            {departmentLabel}
+                          </div>
+                          
+                          <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                            {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
+                          </div>
+
+                          <div>
+                             <span className="text-sm text-slate-700 font-normal">
+                                {frequencyLabel}
+                             </span>
+                          </div>
+
+                          <div className="text-sm text-slate-700 font-normal">
+                            {template.finish_period || "-"}
+                          </div>
+
+                          <div>
+                            <Badge
+                              variant="outline"
+                              className={cn("px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
+                            >
+                              {PRIORITY_LABELS[priorityValue]}
+                            </Badge>
+                          </div>
+
+                          <div className="text-right">
+                             {canEdit && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-full border border-transparent text-xs text-slate-500 hover:border-slate-200 hover:bg-white hover:text-blue-600"
+                                  onClick={() => startEdit(template)}
+                                >
+                                  Edit
+                                </Button>
+                             )}
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    )
+                  })
+                ) : (
+                  <div className="py-12 text-center text-sm text-muted-foreground">
+                    No scheduled tasks found.
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                )}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-border p-4 text-base text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-muted-foreground bg-slate-50">
           No system tasks match the current filters.
         </div>
       )}
