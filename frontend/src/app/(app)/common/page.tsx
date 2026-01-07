@@ -330,6 +330,17 @@ export default function CommonViewPage() {
     () => MEETING_TEMPLATES.find((template) => template.id === activeMeetingId) || null,
     [activeMeetingId]
   )
+  const boardMeetingIds = React.useMemo(() => {
+    if (!MEETING_TEMPLATES.length) return []
+    const firstId = MEETING_TEMPLATES[0]?.id
+    const lastId = MEETING_TEMPLATES[MEETING_TEMPLATES.length - 1]?.id
+    const boardIds = new Set([firstId, lastId, "permbl-pauze"])
+    return MEETING_TEMPLATES.map((m) => m.id).filter((id) => boardIds.has(id))
+  }, [])
+  const staffMeetingIds = React.useMemo(
+    () => MEETING_TEMPLATES.map((m) => m.id).filter((id) => !boardMeetingIds.includes(id)),
+    [boardMeetingIds]
+  )
   const mergeOwnerColumn = React.useMemo(() => {
     if (!activeMeeting) return false
     const hasOwner = Boolean(activeMeeting.defaultOwner) || activeMeeting.rows.some((row) => row.owner)
@@ -956,6 +967,7 @@ export default function CommonViewPage() {
     ]
   }
 
+
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
     const lateItems: SwimlaneCell[] = filtered.late.map((x) => ({
       title: x.person,
@@ -1203,14 +1215,49 @@ export default function CommonViewPage() {
         .no-print { display: inline-flex; }
         @media print {
           .no-print { display: none !important; }
+          aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
+            display: none !important;
+          }
           body, html { background: white; }
-          .top-header { background: white; color: #0f172a; box-shadow: none; border-bottom: 1px solid #e2e8f0; }
-          .top-header h1 { color: #0f172a; }
-          .view-container { padding: 0; }
+          main { padding: 0 !important; }
+          .view-container { padding: 0; background: white; }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
-          .swimlane-content-scroll { overflow: visible !important; }
-          .card { box-shadow: none !important; }
+          .swimlane-row-nav { display: none !important; }
+          .swimlane-content-scroll { overflow: visible !important; padding-right: 0; }
+          .swimlane-content {
+            grid-auto-flow: row !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            grid-auto-columns: auto !important;
+            min-width: 0 !important;
+            width: 100% !important;
+          }
+          .swimlane-board {
+            border: 1px solid #111827 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+          }
+          .swimlane-row + .swimlane-row {
+            border-top: 2px solid #111827 !important;
+          }
+          .swimlane-row {
+            margin-top: 6px;
+          }
+          .swimlane-header,
+          .swimlane-cell {
+            padding-top: 18px;
+            padding-bottom: 18px;
+          }
+          .swimlane-header,
+          .swimlane-badge,
+          .swimlane-cell {
+            background: #ffffff !important;
+            color: #111827 !important;
+          }
+          .swimlane-header,
+          .swimlane-cell {
+            border-color: #111827 !important;
+          }
         }
         
         /* View Container */
@@ -1248,8 +1295,28 @@ export default function CommonViewPage() {
         .meeting-tabs {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 12px;
           margin-top: 12px;
+        }
+        .meeting-dropdown {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          min-width: 220px;
+        }
+        .meeting-dropdown label {
+          font-size: 12px;
+          font-weight: 700;
+          color: #475569;
+        }
+        .meeting-dropdown select {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 8px 10px;
+          background: #ffffff;
+          color: #0f172a;
+          font-size: 12px;
+          font-weight: 600;
         }
         .meeting-chip {
           background: #f1f5f9;
@@ -2014,16 +2081,40 @@ export default function CommonViewPage() {
             </button>
           </div>
           <div className="meeting-tabs">
-            {MEETING_TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                className={`meeting-chip ${activeMeetingId === template.id ? "active" : ""}`}
-                type="button"
-                onClick={() => setActiveMeetingId(template.id)}
+            <div className="meeting-dropdown">
+              <label htmlFor="meeting-board-ga">BORD/GA</label>
+              <select
+                id="meeting-board-ga"
+                value={boardMeetingIds.includes(activeMeetingId) ? activeMeetingId : ""}
+                onChange={(e) => setActiveMeetingId(e.target.value)}
               >
-                {template.title}
-              </button>
-            ))}
+                <option value="" disabled>
+                  Select meeting
+                </option>
+                {MEETING_TEMPLATES.filter((t) => boardMeetingIds.includes(t.id)).map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="meeting-dropdown">
+              <label htmlFor="meeting-staff-ga">STAFF/GA</label>
+              <select
+                id="meeting-staff-ga"
+                value={staffMeetingIds.includes(activeMeetingId) ? activeMeetingId : ""}
+                onChange={(e) => setActiveMeetingId(e.target.value)}
+              >
+                <option value="" disabled>
+                  Select meeting
+                </option>
+                {MEETING_TEMPLATES.filter((t) => staffMeetingIds.includes(t.id)).map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {activeMeeting ? (
             <div className="meeting-table-card">

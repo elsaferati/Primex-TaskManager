@@ -345,6 +345,7 @@ export default function DepartmentKanban() {
   const [systemStatus, setSystemStatus] = React.useState<(typeof STATUS_OPTIONS)[number]>("OPEN")
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
@@ -570,6 +571,7 @@ export default function DepartmentKanban() {
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
+  const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -724,6 +726,34 @@ export default function DepartmentKanban() {
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
+    }
+  }
+
+  const deleteProject = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId)
+    const projectLabel = project?.title || project?.name || "this project"
+    if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
+
+    setDeletingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete project"
+        try {
+          const data = await res.json()
+          if (typeof data?.detail === "string") {
+            detail = data.detail
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      toast.success("Project deleted")
+    } finally {
+      setDeletingProjectId((prev) => (prev === projectId ? null : prev))
     }
   }
 
@@ -1158,9 +1188,22 @@ export default function DepartmentKanban() {
                       <div className="text-base font-semibold">{project.title || project.name}</div>
                       <div className="mt-1 text-sm text-muted-foreground">{project.description || "-"}</div>
                     </div>
-                    <Badge variant="outline" className="text-xs">
-                      {PHASE_LABELS[phase] || "Meetings"}
-                    </Badge>
+                    <div className="flex flex-col items-end gap-2">
+                      {canDeleteProjects ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={deletingProjectId === project.id}
+                          onClick={() => void deleteProject(project.id)}
+                          className="h-7 rounded-full border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50"
+                        >
+                          {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                        </Button>
+                      ) : null}
+                      <Badge variant="outline" className="text-xs">
+                        {PHASE_LABELS[phase] || "Meetings"}
+                      </Badge>
+                    </div>
                   </div>
                   <div className="mt-4 text-xs text-muted-foreground">
                     {PHASES.map((p, idx) => {

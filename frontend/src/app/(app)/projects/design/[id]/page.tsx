@@ -421,8 +421,14 @@ export default function DesignProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
-    const isMeetingPhase = (project.current_phase || "BRIEFING") === "BRIEFING"
-    const openTasks = tasks.filter((task) => task.status !== "DONE")
+    const currentPhase = project.current_phase || "BRIEFING"
+    const isMeetingPhase = currentPhase === "BRIEFING"
+    const openTasks = tasks.filter(
+      (task) =>
+        task.status !== "DONE" &&
+        task.status !== "CANCELLED" &&
+        (task.phase || currentPhase) === currentPhase
+    )
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
     if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
