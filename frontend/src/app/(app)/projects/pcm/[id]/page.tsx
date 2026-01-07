@@ -15,7 +15,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
+import { normalizeDueDateInput } from "@/lib/dates"
+import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
 // PCM phases (Albanian labels)
 const PHASES = ["INICIMI", "PLANIFIKIMI", "EKZEKUTIMI", "MONITORIMI", "MBYLLJA"] as const
@@ -35,6 +36,19 @@ const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
   KONTROLLI: "Kontrolli",
   FINALIZIMI: "Finalizimi",
 }
+const VS_VL_PHASES = ["PROJECT_ACCEPTANCE", "AMAZONE", "CONTROL", "DREAMROBOT"] as const
+const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
+  PROJECT_ACCEPTANCE: "Project Acceptance",
+  AMAZONE: "AMAZONE",
+  CONTROL: "CONTROL",
+  DREAMROBOT: "DREAMROBOT",
+}
+const VS_VL_ACCEPTANCE_QUESTIONS = [
+  "A ESHTE HAPUR GRUPI NE TEAMS",
+  "A JANE VENDOSUR PIKAT NE TRELLO",
+  "A ESHTE HAPUR PROJEKTI NE CHATGPT",
+]
+const VS_VL_META_PREFIX = "VS_VL_META:"
 
 const MST_PLANNING_QUESTIONS = [
   "A eshte hapur grupi ne Teams?",
@@ -53,6 +67,11 @@ type MstChecklistRow = {
   shembull?: string
   kategoria: string
   incl: string
+}
+type VsVlTaskMeta = {
+  vs_vl_phase?: (typeof VS_VL_PHASES)[number]
+  dependency?: string
+  checklist?: string
 }
 
 const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
@@ -280,10 +299,39 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
 function isMstProject(project?: Project | null) {
   if (!project) return false
   const title = (project.title || project.name || "").toUpperCase()
   return title.includes("MST")
+}
+function isVsVlProject(project?: Project | null) {
+  if (!project) return false
+  const title = (project.title || project.name || "").toUpperCase()
+  return title.includes("VS/VL")
+}
+
+function parseVsVlMeta(notes?: string | null): VsVlTaskMeta | null {
+  if (!notes || !notes.startsWith(VS_VL_META_PREFIX)) return null
+  try {
+    return JSON.parse(notes.slice(VS_VL_META_PREFIX.length)) as VsVlTaskMeta
+  } catch {
+    return null
+  }
+}
+
+function serializeVsVlMeta(meta: VsVlTaskMeta): string {
+  return `${VS_VL_META_PREFIX}${JSON.stringify(meta)}`
+}
+
+function vsVlPriorityLabel(priority?: string | null) {
+  return priority === "HIGH" ? "I LARTE" : "NORMAL"
 }
 
 export default function PcmProjectPage() {
@@ -345,9 +393,25 @@ export default function PcmProjectPage() {
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
   const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANIFIKIMI")
+  const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PROJECT_ACCEPTANCE")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
+  const [vsVlAcceptanceChecks, setVsVlAcceptanceChecks] = React.useState<Record<string, boolean>>({})
+  const [vsVlTaskTitle, setVsVlTaskTitle] = React.useState("")
+  const [vsVlTaskDetail, setVsVlTaskDetail] = React.useState("")
+  const [vsVlTaskDate, setVsVlTaskDate] = React.useState("")
+  const [vsVlTaskPriority, setVsVlTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [vsVlTaskStatus, setVsVlTaskStatus] = React.useState<Task["status"]>("TODO")
+  const [vsVlTaskAssignee, setVsVlTaskAssignee] = React.useState("__unassigned__")
+  const [vsVlTaskDependency, setVsVlTaskDependency] = React.useState("")
+  const [vsVlTaskChecklist, setVsVlTaskChecklist] = React.useState("")
+  const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
+  const vsVlScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const vsVlDraggingRef = React.useRef(false)
+  const vsVlPointerIdRef = React.useRef<number | null>(null)
+  const vsVlDragStartXRef = React.useRef(0)
+  const vsVlDragScrollLeftRef = React.useRef(0)
   const [programName, setProgramName] = React.useState("")
   const [productTab, setProductTab] = React.useState<"tasks" | "checklists" | "members" | "ga">("tasks")
   const [newMemberId, setNewMemberId] = React.useState<string>("")
@@ -406,6 +470,9 @@ export default function PcmProjectPage() {
       if (isMstProject(p)) {
         setMstPhase(MST_PHASES[0])
       }
+      if (isVsVlProject(p)) {
+        setVsVlPhase(VS_VL_PHASES[0])
+      }
     }
     void load()
   }, [apiFetch, projectId])
@@ -415,6 +482,7 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
+  const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
 
   React.useEffect(() => {
     if (!prompts.length) return
@@ -627,8 +695,14 @@ export default function PcmProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
-    const isMeetingPhase = (project.current_phase || "INICIMI") === "INICIMI"
-    const openTasks = tasks.filter((task) => task.status !== "DONE" && task.status !== "CANCELLED")
+    const currentPhase = project.current_phase || "INICIMI"
+    const isMeetingPhase = currentPhase === "INICIMI"
+    const openTasks = tasks.filter(
+      (task) =>
+        task.status !== "DONE" &&
+        task.status !== "CANCELLED" &&
+        (task.phase || currentPhase) === currentPhase
+    )
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
     if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
@@ -788,6 +862,394 @@ export default function PcmProjectPage() {
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "MBYLLJA" && phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
+
+  if (isVsVl) {
+    const memberLabel = (id?: string | null) => {
+      if (!id) return "-"
+      const u = userMap.get(id)
+      return u?.full_name || u?.username || "-"
+    }
+    const vsVlTasks = tasks.filter((task) => {
+      const meta = parseVsVlMeta(task.internal_notes)
+      if (!meta?.vs_vl_phase) {
+        return vsVlPhase === "AMAZONE"
+      }
+      return meta.vs_vl_phase === vsVlPhase
+    })
+    const shouldIgnoreDragTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      if (target.isContentEditable) return true
+      return Boolean(target.closest("input, textarea, select, option, button, label"))
+    }
+    const handleVsVlPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 && event.pointerType !== "touch") return
+      if (shouldIgnoreDragTarget(event.target)) return
+      const node = vsVlScrollRef.current
+      if (!node) return
+      vsVlPointerIdRef.current = event.pointerId
+      vsVlDragStartXRef.current = event.clientX
+      vsVlDragScrollLeftRef.current = node.scrollLeft
+      vsVlDraggingRef.current = false
+    }
+    const handleVsVlPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+      if (vsVlPointerIdRef.current !== event.pointerId) return
+      const node = vsVlScrollRef.current
+      if (!node) return
+      const delta = event.clientX - vsVlDragStartXRef.current
+      if (!vsVlDraggingRef.current) {
+        if (Math.abs(delta) < 6) return
+        vsVlDraggingRef.current = true
+        node.setPointerCapture(event.pointerId)
+      }
+      node.scrollLeft = vsVlDragScrollLeftRef.current - delta
+      event.preventDefault()
+    }
+    const handleVsVlPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+      if (vsVlPointerIdRef.current !== event.pointerId) return
+      const node = vsVlScrollRef.current
+      if (node && vsVlDraggingRef.current) {
+        try {
+          node.releasePointerCapture(event.pointerId)
+        } catch {
+          // ignore
+        }
+      }
+      vsVlDraggingRef.current = false
+      vsVlPointerIdRef.current = null
+    }
+
+    return (
+      <div className="space-y-5 max-w-6xl mx-auto px-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+            <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
+              &larr; Back to Projects
+            </button>
+            <div className="text-3xl font-semibold">{title}</div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {VS_VL_PHASES.map((p) => {
+                const isActive = p === vsVlPhase
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setVsVlPhase(p)}
+                    className={[
+                      "rounded-full border px-3 py-1 transition-colors",
+                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {VS_VL_PHASE_LABELS[p]}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {VS_VL_PHASES.map((p, idx) => (
+                <span key={p}>
+                  <button
+                    type="button"
+                    onClick={() => setVsVlPhase(p)}
+                    className={p === vsVlPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
+                  >
+                    {VS_VL_PHASE_LABELS[p]}
+                  </button>
+                  {idx < VS_VL_PHASES.length - 1 ? " -> " : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
+              VS/VL
+            </Badge>
+          </div>
+        </div>
+
+        {vsVlPhase === "PROJECT_ACCEPTANCE" ? (
+          <>
+            <div className="border-b flex gap-6">
+              <button className="relative pb-3 text-sm font-medium text-blue-600">
+                Description
+                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+              </button>
+            </div>
+            <Card>
+              <div className="p-4 space-y-4">
+                <div className="text-lg font-semibold">Project Acceptance</div>
+                <div className="grid gap-3">
+                  {VS_VL_ACCEPTANCE_QUESTIONS.map((q) => (
+                    <div key={q} className="flex items-center gap-3">
+                      <Checkbox
+                        checked={Boolean(vsVlAcceptanceChecks[q])}
+                        onCheckedChange={() => setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                      />
+                      <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </>
+        ) : (
+          <>
+            <div className="border-b flex gap-6">
+              <button className="relative pb-3 text-sm font-medium text-blue-600">
+                Tasks
+                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+              </button>
+            </div>
+            <Card className="border-0 shadow-sm">
+              <div className="p-6 space-y-4">
+                <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
+                <div
+                  ref={vsVlScrollRef}
+                  className="overflow-x-auto border rounded-lg cursor-grab active:cursor-grabbing"
+                  style={{ touchAction: "pan-x" }}
+                  onPointerDown={handleVsVlPointerDown}
+                  onPointerMove={handleVsVlPointerMove}
+                  onPointerUp={handleVsVlPointerUp}
+                  onPointerLeave={handleVsVlPointerUp}
+                  onPointerCancel={handleVsVlPointerUp}
+                >
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-600 uppercase tracking-wide">
+                      <tr>
+                        <th className="border px-2 py-2 text-left">PLATFORMA</th>
+                        <th className="border px-2 py-2 text-left">PERSHKRIMI</th>
+                        <th className="border px-2 py-2 text-left">PERSHKRIMI/DETAL</th>
+                        <th className="border px-2 py-2 text-left">DATA E SHFAQJES</th>
+                        <th className="border px-2 py-2 text-left">PRIORITETI</th>
+                        <th className="border px-2 py-2 text-left">USERID</th>
+                        <th className="border px-2 py-2 text-left">VARESIA</th>
+                        <th className="border px-2 py-2 text-left">STATUS</th>
+                        <th className="border px-2 py-2 text-left">CHECKLISTA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="align-top bg-slate-50">
+                        <td className="border px-2 py-2 text-[11px] font-semibold text-slate-600">
+                          {VS_VL_PHASE_LABELS[vsVlPhase]}
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Input
+                            value={vsVlTaskTitle}
+                            onChange={(e) => setVsVlTaskTitle(e.target.value)}
+                            placeholder="Pershkrimi..."
+                            className="h-8 text-xs"
+                          />
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Textarea
+                            value={vsVlTaskDetail}
+                            onChange={(e) => setVsVlTaskDetail(e.target.value)}
+                            placeholder="Pershkrimi/Detaj"
+                            rows={3}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Input
+                            value={vsVlTaskDate}
+                            onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
+                            type="date"
+                            className="h-8 text-xs"
+                          />
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="NORMAL">NORMAL</SelectItem>
+                              <SelectItem value="HIGH">I LARTE</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Select value={vsVlTaskAssignee} onValueChange={setVsVlTaskAssignee}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="-" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">-</SelectItem>
+                              {departmentUsers
+                                .filter((u) => u.role !== "ADMIN")
+                                .map((u) => (
+                                  <SelectItem key={u.id} value={u.id}>
+                                    {u.full_name || u.username || u.email}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Textarea
+                            value={vsVlTaskDependency}
+                            onChange={(e) => setVsVlTaskDependency(e.target.value)}
+                            placeholder="Varesia..."
+                            rows={2}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="border px-2 py-2">
+                          <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_STATUSES.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {statusLabel(status)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="border px-2 py-2 space-y-2">
+                          <Textarea
+                            value={vsVlTaskChecklist}
+                            onChange={(e) => setVsVlTaskChecklist(e.target.value)}
+                            placeholder="Checklist..."
+                            rows={2}
+                            className="text-xs"
+                          />
+                          <Button
+                            size="sm"
+                            className="w-full"
+                            disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
+                            onClick={async () => {
+                              if (!project || !vsVlTaskTitle.trim()) return
+                              setCreatingVsVlTask(true)
+                              try {
+                                const meta: VsVlTaskMeta = {
+                                  vs_vl_phase: vsVlPhase,
+                                  dependency: vsVlTaskDependency.trim() || undefined,
+                                  checklist: vsVlTaskChecklist.trim() || undefined,
+                                }
+                                const res = await apiFetch("/tasks", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    title: vsVlTaskTitle.trim(),
+                                    description: vsVlTaskDetail.trim() || null,
+                                    project_id: project.id,
+                                    department_id: project.department_id,
+                                    assigned_to: vsVlTaskAssignee === "__unassigned__" ? null : vsVlTaskAssignee,
+                                    status: vsVlTaskStatus || "TODO",
+                                    priority: vsVlTaskPriority,
+                                    due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
+                                    internal_notes: serializeVsVlMeta(meta),
+                                  }),
+                                })
+                                if (!res?.ok) {
+                                  toast.error("Failed to add task")
+                                  return
+                                }
+                                const created = (await res.json()) as Task
+                                setTasks((prev) => [...prev, created])
+                                setVsVlTaskTitle("")
+                                setVsVlTaskDetail("")
+                                setVsVlTaskDate("")
+                                setVsVlTaskPriority("NORMAL")
+                                setVsVlTaskStatus("TODO")
+                                setVsVlTaskAssignee("__unassigned__")
+                                setVsVlTaskDependency("")
+                                setVsVlTaskChecklist("")
+                                toast.success("Task added")
+                              } finally {
+                                setCreatingVsVlTask(false)
+                              }
+                            }}
+                          >
+                            {creatingVsVlTask ? "Saving..." : "Save"}
+                          </Button>
+                        </td>
+                      </tr>
+                      {vsVlTasks.length ? (
+                        vsVlTasks.map((task) => {
+                          const meta = parseVsVlMeta(task.internal_notes)
+                          return (
+                            <tr key={task.id} className="align-top">
+                              <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
+                              <td className="border px-2 py-2 font-medium">{task.title}</td>
+                              <td className="border px-2 py-2 whitespace-pre-wrap">{task.description || "-"}</td>
+                              <td className="border px-2 py-2">
+                                <Input
+                                  value={toDateInput(task.due_date)}
+                                  onChange={async (e) => {
+                                    const nextValue = normalizeDueDateInput(e.target.value)
+                                    const dueDate = nextValue ? new Date(nextValue).toISOString() : null
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ due_date: dueDate }),
+                                    })
+                                    if (!res.ok) {
+                                      toast.error("Failed to update date")
+                                      return
+                                    }
+                                    const updated = (await res.json()) as Task
+                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  }}
+                                  type="date"
+                                  className="h-8 text-xs"
+                                />
+                              </td>
+                              <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
+                              <td className="border px-2 py-2">{memberLabel(task.assigned_to)}</td>
+                              <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.dependency || "-"}</td>
+                              <td className="border px-2 py-2">
+                                <Select
+                                  value={task.status || "TODO"}
+                                  onValueChange={async (value) => {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ status: value }),
+                                    })
+                                    if (!res.ok) {
+                                      toast.error("Failed to update status")
+                                      return
+                                    }
+                                    const updated = (await res.json()) as Task
+                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  }}
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {TASK_STATUSES.map((status) => (
+                                      <SelectItem key={status} value={status}>
+                                        {statusLabel(status)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                              <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.checklist || "-"}</td>
+                            </tr>
+                          )
+                        })
+                      ) : (
+                        <tr>
+                          <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={9}>
+                            No tasks yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Card>
+          </>
+        )}
+      </div>
+    )
+  }
 
   if (isMst) {
     const planningChecks = mstPlanningChecks

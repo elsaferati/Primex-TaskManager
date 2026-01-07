@@ -243,6 +243,7 @@ async def advance_project_phase(
         await db.execute(
             select(func.count(Task.id)).where(
                 Task.project_id == project.id,
+                Task.phase == project.current_phase,
                 Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
             )
         )

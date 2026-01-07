@@ -32,6 +32,13 @@ PCM_PROJECTS = [
         "progress_percentage": 48,
     },
     {
+        "title": "VS/VL",
+        "description": "VS/VL project phases: Project Acceptance, Amazone, Control, Dreamrobot.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.PLANIFIKIMI,
+        "progress_percentage": 0,
+    },
+    {
         "title": "Set One",
         "description": "Programi i perfunduar javen e kaluar.",
         "status": TaskStatus.DONE,
