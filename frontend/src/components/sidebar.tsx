@@ -111,7 +111,7 @@ export function Sidebar({ role }: { role: UserRole }) {
       <div className="flex h-16 items-center border-b px-6">
         <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
           <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
-          <span>Primex Nexus</span>
+          <span>PrimeFlow</span>
         </div>
       </div>
 

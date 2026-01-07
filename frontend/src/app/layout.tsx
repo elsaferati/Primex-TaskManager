@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Primex Nexus",
+  title: "PrimeFlow",
   description: "Internal task & project management",
 };
 
