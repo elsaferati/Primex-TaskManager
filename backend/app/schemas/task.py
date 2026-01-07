@@ -21,6 +21,7 @@ class TaskOut(BaseModel):
     description: str | None = None
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None
+    dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
@@ -48,6 +49,7 @@ class TaskCreate(BaseModel):
     description: str | None = Field(default=None)
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None
+    dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = Field(default=None)
     assigned_to: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
@@ -70,6 +72,7 @@ class TaskUpdate(BaseModel):
     description: str | None = Field(default=None)
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None
+    dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None

@@ -72,6 +72,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         description=task.description,
         internal_notes=task.internal_notes,
         project_id=task.project_id,
+        dependency_task_id=task.dependency_task_id,
         department_id=task.department_id,
         assigned_to=task.assigned_to,
         assignees=assignees,
@@ -218,6 +219,18 @@ async def create_task(
     if department_id is not None:
         ensure_department_access(user, department_id)
 
+    dependency_task_id = payload.dependency_task_id
+    if dependency_task_id is not None:
+        if payload.project_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency requires a project")
+        dependency_task = (
+            await db.execute(select(Task).where(Task.id == dependency_task_id))
+        ).scalar_one_or_none()
+        if dependency_task is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency task not found")
+        if dependency_task.project_id != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency must be in the same project")
+
     if payload.ga_note_origin_id is not None:
         ga_note = (
             await db.execute(select(GaNote).where(GaNote.id == payload.ga_note_origin_id))
@@ -259,6 +272,7 @@ async def create_task(
         description=payload.description,
         internal_notes=payload.internal_notes,
         project_id=payload.project_id,
+        dependency_task_id=dependency_task_id,
         department_id=department_id,
         assigned_to=assignee_ids[0] if assignee_ids else None,
         created_by=user.id,
@@ -371,6 +385,7 @@ async def update_task(
             "title": payload.title,
             "project_id": payload.project_id,
             "department_id": payload.department_id,
+            "dependency_task_id": payload.dependency_task_id,
             "assigned_to": payload.assigned_to,
             "assignees": payload.assignees,
             "priority": payload.priority,
@@ -386,6 +401,7 @@ async def update_task(
         "title": task.title,
         "description": task.description,
         "internal_notes": task.internal_notes,
+        "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
         "status": task.status.value,
         "priority": task.priority.value,
         "finish_period": task.finish_period.value if task.finish_period else None,
@@ -404,6 +420,25 @@ async def update_task(
         task.description = payload.description
     if payload.internal_notes is not None:
         task.internal_notes = payload.internal_notes
+    dependency_set = False
+    if hasattr(payload, "model_fields_set"):
+        dependency_set = "dependency_task_id" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        dependency_set = "dependency_task_id" in payload.__fields_set__  # type: ignore[attr-defined]
+
+    if dependency_set:
+        ensure_manager_or_admin(user)
+        if payload.dependency_task_id is None:
+            task.dependency_task_id = None
+        else:
+            dependency_task = (
+                await db.execute(select(Task).where(Task.id == payload.dependency_task_id))
+            ).scalar_one_or_none()
+            if dependency_task is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency task not found")
+            if task.project_id is None or dependency_task.project_id != task.project_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency must be in the same project")
+            task.dependency_task_id = payload.dependency_task_id
 
     if payload.project_id is not None:
         ensure_manager_or_admin(user)
@@ -536,6 +571,7 @@ async def update_task(
         "title": task.title,
         "description": task.description,
         "internal_notes": task.internal_notes,
+        "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
         "status": task.status.value,
         "priority": task.priority.value,
         "finish_period": task.finish_period.value if task.finish_period else None,

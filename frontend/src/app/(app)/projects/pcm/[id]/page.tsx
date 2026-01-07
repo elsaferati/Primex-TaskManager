@@ -70,8 +70,9 @@ type MstChecklistRow = {
 }
 type VsVlTaskMeta = {
   vs_vl_phase?: (typeof VS_VL_PHASES)[number]
-  dependency?: string
+  dependency_text?: string
   checklist?: string
+  dependency_task_id?: string
 }
 
 const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
@@ -334,6 +335,52 @@ function vsVlPriorityLabel(priority?: string | null) {
   return priority === "HIGH" ? "I LARTE" : "NORMAL"
 }
 
+function normalizeTaskTitle(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+}
+
+function addBusinessDaysToIso(baseIso: string, days: number) {
+  const base = new Date(baseIso)
+  if (Number.isNaN(base.getTime())) return null
+  if (days === 0) return base.toISOString()
+  let remaining = Math.max(0, days)
+  const direction = remaining >= 0 ? 1 : -1
+  while (remaining > 0) {
+    base.setUTCDate(base.getUTCDate() + direction)
+    const day = base.getUTCDay()
+    if (day !== 0 && day !== 6) {
+      remaining -= 1
+    }
+  }
+  return base.toISOString()
+}
+
+function sameDate(value?: string | null, other?: string | null) {
+  return toDateInput(value) === toDateInput(other)
+}
+
+const VS_VL_TASK_TITLES = {
+  base: normalizeTaskTitle("ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE"),
+  template: normalizeTaskTitle("PLOTESIMI I TEMPLATE-IT TE AMAZONIT"),
+  prices: normalizeTaskTitle("KALKULIMI I CMIMEVE"),
+  photos: normalizeTaskTitle("GJENERIMI I FOTOVE"),
+  kontrol: normalizeTaskTitle("KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON"),
+  ko1: normalizeTaskTitle("KO1 E PROJEKTIT VS"),
+  ko2: normalizeTaskTitle("KO2 E PROJEKTIT VS"),
+  dreamVs: normalizeTaskTitle("DREAM ROBOT VS"),
+  dreamVl: normalizeTaskTitle("DREAM ROBOT VL"),
+  dreamWeights: normalizeTaskTitle("KALKULIMI I PESHAVE"),
+}
+
+function findVsVlTask(tasks: Task[], titleKey: string) {
+  return tasks.find((task) => normalizeTaskTitle(task.title) === titleKey)
+}
+
 export default function PcmProjectPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
@@ -404,7 +451,7 @@ export default function PcmProjectPage() {
   const [vsVlTaskPriority, setVsVlTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [vsVlTaskStatus, setVsVlTaskStatus] = React.useState<Task["status"]>("TODO")
   const [vsVlTaskAssignee, setVsVlTaskAssignee] = React.useState("__unassigned__")
-  const [vsVlTaskDependency, setVsVlTaskDependency] = React.useState("")
+  const [vsVlTaskDependencyId, setVsVlTaskDependencyId] = React.useState("__none__")
   const [vsVlTaskChecklist, setVsVlTaskChecklist] = React.useState("")
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
   const vsVlScrollRef = React.useRef<HTMLDivElement | null>(null)
@@ -483,6 +530,101 @@ export default function PcmProjectPage() {
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
+
+  React.useEffect(() => {
+    if (!isVsVl || !project?.id) return
+    const baseTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.base)
+    if (baseTask?.dependency_task_id) {
+      void (async () => {
+        const res = await apiFetch(`/tasks/${baseTask.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dependency_task_id: null }),
+        })
+        if (!res.ok) return
+        const updated = (await res.json()) as Task
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      })()
+    }
+    if (!baseTask?.due_date) return
+
+    const baseDate = baseTask.due_date
+    const templateTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.template)
+    const pricesTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.prices)
+    const photosTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.photos)
+    const kontrolTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.kontrol)
+    const ko1Task = findVsVlTask(tasks, VS_VL_TASK_TITLES.ko1)
+    const ko2Task = findVsVlTask(tasks, VS_VL_TASK_TITLES.ko2)
+    const dreamVsTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.dreamVs)
+    const dreamVlTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.dreamVl)
+    const dreamWeightsTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.dreamWeights)
+
+    const updates: Array<{ task: Task; patch: Record<string, unknown> }> = []
+
+    if (baseTask.dependency_task_id) {
+      updates.push({ task: baseTask, patch: { dependency_task_id: null } })
+    }
+
+    const applyRule = (
+      task: Task | undefined,
+      offsetDays: number,
+      dependencyId?: string | null
+    ) => {
+      if (!task) return
+      const expectedDate = addBusinessDaysToIso(baseDate, offsetDays)
+      if (!expectedDate) return
+      const patch: Record<string, unknown> = {}
+      if (!sameDate(task.due_date, expectedDate)) {
+        patch.due_date = expectedDate
+      }
+      if (dependencyId !== undefined && (task.dependency_task_id || null) !== dependencyId) {
+        patch.dependency_task_id = dependencyId
+      }
+      if (Object.keys(patch).length) {
+        updates.push({ task, patch })
+      }
+    }
+
+    applyRule(templateTask, 2, baseTask.id)
+    applyRule(pricesTask, 3, null)
+    applyRule(photosTask, 3, null)
+    applyRule(ko1Task, 4, baseTask.id)
+    if (ko2Task && ko1Task) {
+      applyRule(ko2Task, 4, ko1Task.id)
+    } else {
+      applyRule(ko2Task, 4, undefined)
+    }
+    if (kontrolTask) {
+      const dependencyId = ko2Task?.id
+      applyRule(kontrolTask, 5, dependencyId ?? undefined)
+    }
+    if (dreamVsTask || dreamVlTask || dreamWeightsTask) {
+      const dependencyId = kontrolTask?.id
+      applyRule(dreamVsTask, 6, dependencyId ?? undefined)
+      applyRule(dreamVlTask, 6, dependencyId ?? undefined)
+      applyRule(dreamWeightsTask, 6, null)
+    }
+
+    if (!updates.length) return
+    let cancelled = false
+    const run = async () => {
+      for (const { task, patch } of updates) {
+        const res = await apiFetch(`/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        })
+        if (!res.ok) continue
+        const updated = (await res.json()) as Task
+        if (cancelled) return
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, isVsVl, project?.id, tasks])
 
   React.useEffect(() => {
     if (!prompts.length) return
@@ -876,6 +1018,33 @@ export default function PcmProjectPage() {
       }
       return meta.vs_vl_phase === vsVlPhase
     })
+    const phaseOrder =
+      vsVlPhase === "AMAZONE"
+        ? [
+            VS_VL_TASK_TITLES.base,
+            VS_VL_TASK_TITLES.template,
+            VS_VL_TASK_TITLES.prices,
+            VS_VL_TASK_TITLES.photos,
+            VS_VL_TASK_TITLES.kontrol,
+          ]
+        : vsVlPhase === "CONTROL"
+          ? [VS_VL_TASK_TITLES.ko1, VS_VL_TASK_TITLES.ko2]
+          : vsVlPhase === "DREAMROBOT"
+            ? [VS_VL_TASK_TITLES.dreamVs, VS_VL_TASK_TITLES.dreamVl, VS_VL_TASK_TITLES.dreamWeights]
+          : []
+    const orderMap = new Map(phaseOrder.map((key, idx) => [key, idx]))
+    const orderedVsVlTasks = [...vsVlTasks].sort((a, b) => {
+      const aKey = normalizeTaskTitle(a.title)
+      const bKey = normalizeTaskTitle(b.title)
+      const aIndex = orderMap.get(aKey) ?? 999
+      const bIndex = orderMap.get(bKey) ?? 999
+      if (aIndex !== bIndex) return aIndex - bIndex
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+      return aTime - bTime
+    })
+    const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
+    const dependencyOptions = tasks
     const shouldIgnoreDragTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false
       if (target.isContentEditable) return true
@@ -1085,13 +1254,19 @@ export default function PcmProjectPage() {
                           </Select>
                         </td>
                         <td className="border px-2 py-2">
-                          <Textarea
-                            value={vsVlTaskDependency}
-                            onChange={(e) => setVsVlTaskDependency(e.target.value)}
-                            placeholder="Varesia..."
-                            rows={2}
-                            className="text-xs"
-                          />
+                          <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="-" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-</SelectItem>
+                              {dependencyOptions.map((task) => (
+                                <SelectItem key={task.id} value={task.id}>
+                                  {task.title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </td>
                         <td className="border px-2 py-2">
                           <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
@@ -1125,7 +1300,6 @@ export default function PcmProjectPage() {
                               try {
                                 const meta: VsVlTaskMeta = {
                                   vs_vl_phase: vsVlPhase,
-                                  dependency: vsVlTaskDependency.trim() || undefined,
                                   checklist: vsVlTaskChecklist.trim() || undefined,
                                 }
                                 const res = await apiFetch("/tasks", {
@@ -1137,6 +1311,8 @@ export default function PcmProjectPage() {
                                     project_id: project.id,
                                     department_id: project.department_id,
                                     assigned_to: vsVlTaskAssignee === "__unassigned__" ? null : vsVlTaskAssignee,
+                                    dependency_task_id:
+                                      vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
                                     status: vsVlTaskStatus || "TODO",
                                     priority: vsVlTaskPriority,
                                     due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
@@ -1155,7 +1331,7 @@ export default function PcmProjectPage() {
                                 setVsVlTaskPriority("NORMAL")
                                 setVsVlTaskStatus("TODO")
                                 setVsVlTaskAssignee("__unassigned__")
-                                setVsVlTaskDependency("")
+                                setVsVlTaskDependencyId("__none__")
                                 setVsVlTaskChecklist("")
                                 toast.success("Task added")
                               } finally {
@@ -1167,9 +1343,17 @@ export default function PcmProjectPage() {
                           </Button>
                         </td>
                       </tr>
-                      {vsVlTasks.length ? (
-                        vsVlTasks.map((task) => {
+                      {orderedVsVlTasks.length ? (
+                        orderedVsVlTasks.map((task) => {
                           const meta = parseVsVlMeta(task.internal_notes)
+                          const titleKey = normalizeTaskTitle(task.title)
+                          const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
+                          const dependencyId = isBaseTask
+                            ? null
+                            : task.dependency_task_id || meta?.dependency_task_id || null
+                          const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
+                          const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
+                          const isLocked = isDependencyLocked
                           return (
                             <tr key={task.id} className="align-top">
                               <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
@@ -1179,6 +1363,7 @@ export default function PcmProjectPage() {
                                 <Input
                                   value={toDateInput(task.due_date)}
                                   onChange={async (e) => {
+                                    if (isLocked) return
                                     const nextValue = normalizeDueDateInput(e.target.value)
                                     const dueDate = nextValue ? new Date(nextValue).toISOString() : null
                                     const res = await apiFetch(`/tasks/${task.id}`, {
@@ -1195,15 +1380,53 @@ export default function PcmProjectPage() {
                                   }}
                                   type="date"
                                   className="h-8 text-xs"
+                                  disabled={isLocked}
                                 />
                               </td>
                               <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
                               <td className="border px-2 py-2">{memberLabel(task.assigned_to)}</td>
-                              <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.dependency || "-"}</td>
+                              <td className="border px-2 py-2">
+                                <Select
+                                  value={
+                                    isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
+                                  }
+                                  onValueChange={async (value) => {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        dependency_task_id: value === "__none__" ? null : value,
+                                      }),
+                                    })
+                                    if (!res.ok) {
+                                      toast.error("Failed to update dependency")
+                                      return
+                                    }
+                                    const updated = (await res.json()) as Task
+                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  }}
+                                  disabled={isBaseTask}
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue placeholder="-" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">-</SelectItem>
+                                    {dependencyOptions
+                                      .filter((opt) => opt.id !== task.id)
+                                      .map((opt) => (
+                                        <SelectItem key={opt.id} value={opt.id}>
+                                          {opt.title}
+                                        </SelectItem>
+                                      ))}
+                                  </SelectContent>
+                                </Select>
+                              </td>
                               <td className="border px-2 py-2">
                                 <Select
                                   value={task.status || "TODO"}
                                   onValueChange={async (value) => {
+                                    if (isLocked) return
                                     const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
@@ -1216,6 +1439,7 @@ export default function PcmProjectPage() {
                                     const updated = (await res.json()) as Task
                                     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
                                   }}
+                                  disabled={isLocked}
                                 >
                                   <SelectTrigger className="h-8 text-xs">
                                     <SelectValue />

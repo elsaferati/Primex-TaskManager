@@ -122,6 +122,7 @@ export interface Task {
   department_id?: string
   board_id?: string
   project_id?: string | null
+  dependency_task_id?: string | null
   title: string
   description?: string | null
   internal_notes?: string | null
