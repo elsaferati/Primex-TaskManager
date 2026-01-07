@@ -130,7 +130,15 @@ async def list_tasks(
 ) -> list[TaskOut]:
     stmt = select(Task)
 
-    if user.role != UserRole.ADMIN:
+    if user.role == UserRole.ADMIN:
+        pass  # Admin can see all tasks
+    elif user.role == UserRole.MANAGER:
+        # Manager can see their department's tasks OR tasks without a department (GA tasks)
+        if user.department_id is not None:
+            stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
+        # If manager has no department, they can see tasks without a department
+    else:
+        # STAFF can only see their department's tasks
         if user.department_id is None:
             return []
         stmt = stmt.where(Task.department_id == user.department_id)
@@ -207,7 +215,8 @@ async def create_task(
         if project.department_id is not None and project.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
 
-    ensure_department_access(user, department_id)
+    if department_id is not None:
+        ensure_department_access(user, department_id)
 
     if payload.ga_note_origin_id is not None:
         ga_note = (

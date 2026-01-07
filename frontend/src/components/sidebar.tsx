@@ -14,6 +14,7 @@ import {
   Users, 
   Settings,
   Layers,
+  ClipboardCheck,
   Hexagon,
   StickyNote,
   type LucideIcon
@@ -46,6 +47,11 @@ const items: NavItem[] = [
     href: "/ga-ka-notes",
     label: "GA/KA Notes",
     icon: StickyNote,
+  },
+  {
+    href: "/ga-ka-tasks",
+    label: "GA/KA Tasks",
+    icon: ClipboardCheck,
   },
   {
     href: "/system-tasks",

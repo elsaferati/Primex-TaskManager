@@ -48,7 +48,7 @@ class TaskCreate(BaseModel):
     description: str | None = Field(default=None)
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None
-    department_id: uuid.UUID
+    department_id: uuid.UUID | None = Field(default=None)
     assigned_to: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
     ga_note_origin_id: uuid.UUID | None = None

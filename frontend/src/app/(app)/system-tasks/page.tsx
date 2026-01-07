@@ -216,6 +216,63 @@ function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
   return "NORMAL"
 }
 
+function getMondayBasedDay(date: Date) {
+  return (date.getDay() + 6) % 7
+}
+
+function getFirstWorkingDayOfMonth(year: number, monthIndex: number) {
+  for (let day = 1; day <= 7; day += 1) {
+    const date = new Date(year, monthIndex, day)
+    const dayOfWeek = getMondayBasedDay(date)
+    if (dayOfWeek <= 4) return day
+  }
+  return 1
+}
+
+function matchesTemplateDayOfWeek(template: SystemTaskTemplate, targetDay: number) {
+  if (template.days_of_week && template.days_of_week.length) {
+    return template.days_of_week.includes(targetDay)
+  }
+  if (template.day_of_week != null) return template.day_of_week === targetDay
+  return false
+}
+
+function matchesTemplateDate(template: SystemTaskTemplate, date: Date) {
+  const dayOfWeek = getMondayBasedDay(date)
+  const dayOfMonth = date.getDate()
+  const monthIndex = date.getMonth()
+  const year = date.getFullYear()
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+
+  if (template.frequency === "DAILY") return true
+  if (template.frequency === "WEEKLY") {
+    return matchesTemplateDayOfWeek(template, dayOfWeek)
+  }
+
+  const templateDay = template.day_of_month
+  const resolvedDay =
+    templateDay == null
+      ? null
+      : templateDay === 0
+        ? lastDay
+        : templateDay === -1
+          ? getFirstWorkingDayOfMonth(year, monthIndex)
+          : templateDay
+
+  if (template.frequency === "MONTHLY" || template.frequency === "3_MONTHS" || template.frequency === "6_MONTHS") {
+    return resolvedDay == null ? true : resolvedDay === dayOfMonth
+  }
+
+  if (template.frequency === "YEARLY") {
+    const matchesMonth =
+      template.month_of_year == null ? true : template.month_of_year === monthIndex + 1
+    const matchesDay = resolvedDay == null ? true : resolvedDay === dayOfMonth
+    return matchesMonth && matchesDay
+  }
+
+  return true
+}
+
 function parseInternalNotes(value?: string | null): Record<string, string> {
   const result: Record<string, string> = {}
   if (!value) return result
@@ -332,6 +389,11 @@ function escapeHtml(value: string) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
+}
+
+function resolveTemplateScope(template: SystemTaskTemplate): SystemTaskScope {
+  if (template.scope) return template.scope
+  return template.department_id ? "DEPARTMENT" : "ALL"
 }
 
 type BoldOnlyEditorProps = {
@@ -452,7 +514,27 @@ function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
   )
 }
 
-export default function SystemTasksPage() {
+type SystemTasksViewProps = {
+  scopeFilter?: SystemTaskScope
+  headingTitle?: string
+  headingDescription?: string
+  showSystemActions?: boolean
+  showFilters?: boolean
+  externalPriorityFilter?: TaskPriority | "all"
+  externalDayFilter?: string | "all"
+  externalDateFilter?: string | null
+}
+
+export function SystemTasksView({
+  scopeFilter,
+  headingTitle,
+  headingDescription,
+  showSystemActions = true,
+  showFilters = true,
+  externalPriorityFilter = "all",
+  externalDayFilter = "all",
+  externalDateFilter = null,
+}: SystemTasksViewProps) {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
   const [templates, setTemplates] = React.useState<SystemTaskTemplate[]>([])
@@ -472,7 +554,9 @@ export default function SystemTasksPage() {
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
-  const [departmentId, setDepartmentId] = React.useState("")
+  const [departmentId, setDepartmentId] = React.useState(
+    scopeFilter === "GA" ? GA_DEPARTMENTS_VALUE : ""
+  )
   const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
   const [assigneeQuery, setAssigneeQuery] = React.useState("")
   const [assigneeError, setAssigneeError] = React.useState<string | null>(null)
@@ -508,8 +592,8 @@ export default function SystemTasksPage() {
   const [editIsActive, setEditIsActive] = React.useState(true)
   const [editShowWeekendDays, setEditShowWeekendDays] = React.useState(false)
 
-  const canEdit = user?.role !== "STAFF"
-  const canCreate = true
+  const canEdit = showSystemActions && user?.role !== "STAFF"
+  const canCreate = showSystemActions
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -524,11 +608,9 @@ export default function SystemTasksPage() {
       if (departmentsRes.ok) {
         setDepartments((await departmentsRes.json()) as Department[])
       }
-      if (canCreate) {
-        const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
-        if (usersRes.ok) {
-          setUsers((await usersRes.json()) as AssigneeUser[])
-        }
+      const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
+      if (usersRes.ok) {
+        setUsers((await usersRes.json()) as AssigneeUser[])
       }
     } finally {
       setLoading(false)
@@ -553,9 +635,9 @@ export default function SystemTasksPage() {
   React.useEffect(() => {
     if (departments.length === 0) return
     if (!departmentId) {
-      setDepartmentId(ALL_DEPARTMENTS_VALUE)
+      setDepartmentId(scopeFilter === "GA" ? GA_DEPARTMENTS_VALUE : ALL_DEPARTMENTS_VALUE)
     }
-  }, [departments, departmentId, user?.department_id])
+  }, [departments, departmentId, scopeFilter, user?.department_id])
 
   React.useEffect(() => {
     if (!editTemplate) return
@@ -751,32 +833,55 @@ export default function SystemTasksPage() {
     handleEditAssigneesChange(editAssigneeIds.filter((item) => item !== id))
   }
 
+  const scopeTemplates = React.useMemo(() => {
+    if (!scopeFilter) return templates
+    return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
+  }, [scopeFilter, templates])
+
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
     for (const value of FREQUENCY_VALUES) {
       counts.set(value as SystemTaskFrequency, 0)
     }
-    for (const template of templates) {
+    for (const template of scopeTemplates) {
       counts.set(template.frequency, (counts.get(template.frequency) || 0) + 1)
     }
     return counts
-  }, [templates])
+  }, [scopeTemplates])
 
   const priorityCounts = React.useMemo(() => {
     const counts = new Map<TaskPriority, number>()
     for (const value of PRIORITY_OPTIONS) {
       counts.set(value, 0)
     }
-    for (const template of templates) {
+    for (const template of scopeTemplates) {
       const normalized = normalizePriority(template.priority)
       counts.set(normalized, (counts.get(normalized) || 0) + 1)
     }
     return counts
-  }, [templates])
+  }, [scopeTemplates])
 
   const filteredTemplates = React.useMemo(() => {
-    let filtered = templates
+    let filtered = scopeTemplates
     const query = searchQuery.trim().toLowerCase()
+    const dayFilterValue =
+      externalDayFilter === "all" ? null : Number.isNaN(Number(externalDayFilter)) ? null : Number(externalDayFilter)
+    const dateValue = externalDateFilter ? new Date(`${externalDateFilter}T00:00:00`) : null
+    const hasValidDate = Boolean(dateValue && !Number.isNaN(dateValue.getTime()))
+
+    if (externalPriorityFilter !== "all") {
+      filtered = filtered.filter((template) => normalizePriority(template.priority) === externalPriorityFilter)
+    }
+    if (hasValidDate && dateValue) {
+      filtered = filtered.filter((template) => matchesTemplateDate(template, dateValue))
+    }
+    if (dayFilterValue != null) {
+      filtered = filtered.filter((template) => {
+        if (template.frequency === "DAILY") return true
+        if (matchesTemplateDayOfWeek(template, dayFilterValue)) return true
+        return false
+      })
+    }
     if (query) {
       filtered = filtered.filter((template) => {
         const title = template.title?.toLowerCase() || ""
@@ -793,7 +898,15 @@ export default function SystemTasksPage() {
       filtered = filtered.filter((template) => allowed.has(normalizePriority(template.priority)))
     }
     return filtered
-  }, [frequencyFilters, priorityFilters, searchQuery, templates])
+  }, [
+    externalDateFilter,
+    externalDayFilter,
+    externalPriorityFilter,
+    frequencyFilters,
+    priorityFilters,
+    scopeTemplates,
+    searchQuery,
+  ])
 
 
   React.useEffect(() => {
@@ -1414,150 +1527,159 @@ export default function SystemTasksPage() {
     await load()
   }
 
+  const effectiveHeadingTitle =
+    headingTitle ?? (scopeFilter === "GA" ? "GA/KA System Tasks" : "System Tasks")
+  const effectiveHeadingDescription =
+    headingDescription ??
+    (scopeFilter === "GA"
+      ? "System tasks scoped for GA/KA."
+      : "Department tasks organized by frequency and date.")
+
   return (
     <div className="space-y-4 pb-12">
       {/* Header Area */}
       <div className="rounded-lg border border-border/60 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-xl font-semibold leading-tight text-slate-900">System Tasks</h3>
+            <h3 className="text-xl font-semibold leading-tight text-slate-900">{effectiveHeadingTitle}</h3>
             <p className="text-sm font-normal leading-snug text-slate-500">
-              Department tasks organized by frequency and date.
+              {effectiveHeadingDescription}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={async (event) => {
-                const file = event.target.files?.[0]
-                if (file) await importTemplatesFromFile(file)
-                event.target.value = ""
-              }}
-            />
-            <Button
-              variant="outline"
-              disabled={!canCreate}
-              onClick={() => fileInputRef.current?.click()}
-              size="sm"
-              className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-            >
-              Import Excel
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => exportTemplatesCSV("all")}
-              size="sm"
-              className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-            >
-              Export All
-            </Button>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  disabled={!canCreate}
-                  size="sm"
-                  className="h-9 bg-blue-600 px-3 text-sm text-white hover:bg-blue-700"
-                >
-                  + Add Task
-                </Button>
-              </DialogTrigger>
-              {/* CREATE DIALOG CONTENT (Omitted for brevity, assumed same as original) */}
-               <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Add system task</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-5">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Department</Label>
-                    <Select value={departmentId} onValueChange={handleDepartmentChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                          <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
-                        {departments.map((dept) => (
-                          <SelectItem key={dept.id} value={dept.id}>
-                            {formatDepartmentName(dept.name)} ({dept.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+          {showSystemActions ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0]
+                  if (file) await importTemplatesFromFile(file)
+                  event.target.value = ""
+                }}
+              />
+              <Button
+                variant="outline"
+                disabled={!canCreate}
+                onClick={() => fileInputRef.current?.click()}
+                size="sm"
+                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+              >
+                Import Excel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => exportTemplatesCSV("all")}
+                size="sm"
+                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+              >
+                Export All
+              </Button>
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    disabled={!canCreate}
+                    size="sm"
+                    className="h-9 bg-blue-600 px-3 text-sm text-white hover:bg-blue-700"
+                  >
+                    + Add Task
+                  </Button>
+                </DialogTrigger>
+                {/* CREATE DIALOG CONTENT (Omitted for brevity, assumed same as original) */}
+                 <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Add system task</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Department</Label>
+                      <Select value={departmentId} onValueChange={handleDepartmentChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                            <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
+                          {departments.map((dept) => (
+                            <SelectItem key={dept.id} value={dept.id}>
+                              {formatDepartmentName(dept.name)} ({dept.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Title</Label>
+                      <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
+                    </div>
                   </div>
                   <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
+                    <Label>Description</Label>
+                    <BoldOnlyEditor value={description} onChange={setDescription} />
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <BoldOnlyEditor value={description} onChange={setDescription} />
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Repeat</Label>
-                    <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select repeat" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FREQUENCY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label>Repeat</Label>
+                      <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select repeat" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FREQUENCY_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Finish by (optional)</Label>
+                      <Select
+                        value={finishPeriod}
+                        onValueChange={(value) =>
+                          setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select period" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {FINISH_PERIOD_LABELS[value]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Priority</Label>
+                      <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PRIORITY_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {PRIORITY_LABELS[value]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Finish by (optional)</Label>
-                    <Select
-                      value={finishPeriod}
-                      onValueChange={(value) =>
-                        setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select period" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                        {FINISH_PERIOD_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {FINISH_PERIOD_LABELS[value]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PRIORITY_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {PRIORITY_LABELS[value]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {frequency === "WEEKLY" ? (
-                  <div className="space-y-2">
-                    <Label>Days of week</Label>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {WEEKDAY_OPTIONS.map((day) => {
-                        const checked = daysOfWeek.includes(day.value)
-                        return (
-                          <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                  {frequency === "WEEKLY" ? (
+                    <div className="space-y-2">
+                      <Label>Days of week</Label>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {WEEKDAY_OPTIONS.map((day) => {
+                          const checked = daysOfWeek.includes(day.value)
+                          return (
+                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
                             <Checkbox
                               checked={checked}
                               onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
@@ -2066,128 +2188,130 @@ export default function SystemTasksPage() {
               <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
             ) : null}
           </div>
+          ) : null}
         </div>
 
-        {/* Filters Bar */}
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-          <div className="relative flex min-w-[220px] flex-1 items-center">
-            <span className="pointer-events-none absolute left-3 text-slate-400">
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4">
-                <path
-                  d="M14.5 14.5L18 18"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <circle cx="8.75" cy="8.75" r="5.75" stroke="currentColor" strokeWidth="1.5" />
-              </svg>
-            </span>
-            <Input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by task name..."
-              className="h-9 border-slate-200 bg-slate-50 pl-9 pr-16 text-sm focus:bg-white transition-colors"
-            />
-            <span className="pointer-events-none absolute right-2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500">
-              Ctrl K
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(filterTriggerClass, frequencyFilterActive && filterTriggerActiveClass)}
-                >
-                  Frequency: {frequencyLabel}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-64">
-                <DropdownMenuLabel>Frequency</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {FREQUENCY_CHIPS.map((chip) => {
-                  const isAll = chip.id === "all"
-                  const isCombined = chip.id === "3_6_MONTHS"
-                  const active = isAll
-                    ? allFrequenciesSelected
-                    : isCombined
-                      ? combinedSelected
-                      : frequencyFilters.includes(chip.id as SystemTaskFrequency)
-                  const count = isAll
-                    ? templates.length
-                    : isCombined
-                      ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
-                      : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={chip.id}
-                      checked={active}
-                      onCheckedChange={() =>
-                        toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
-                      }
-                    >
+        {showFilters ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+            <div className="relative flex min-w-[220px] flex-1 items-center">
+              <span className="pointer-events-none absolute left-3 text-slate-400">
+                <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                  <path
+                    d="M14.5 14.5L18 18"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="8.75" cy="8.75" r="5.75" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              </span>
+              <Input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search by task name..."
+                className="h-9 border-slate-200 bg-slate-50 pl-9 pr-16 text-sm focus:bg-white transition-colors"
+              />
+              <span className="pointer-events-none absolute right-2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500">
+                Ctrl K
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(filterTriggerClass, frequencyFilterActive && filterTriggerActiveClass)}
+                  >
+                    Frequency: {frequencyLabel}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-64">
+                  <DropdownMenuLabel>Frequency</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {FREQUENCY_CHIPS.map((chip) => {
+                    const isAll = chip.id === "all"
+                    const isCombined = chip.id === "3_6_MONTHS"
+                    const active = isAll
+                      ? allFrequenciesSelected
+                      : isCombined
+                        ? combinedSelected
+                        : frequencyFilters.includes(chip.id as SystemTaskFrequency)
+                    const count = isAll
+                      ? scopeTemplates.length
+                      : isCombined
+                        ? (frequencyCounts.get("3_MONTHS") ?? 0) + (frequencyCounts.get("6_MONTHS") ?? 0)
+                        : frequencyCounts.get(chip.id as SystemTaskFrequency) ?? 0
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={chip.id}
+                        checked={active}
+                        onCheckedChange={() =>
+                          toggleFrequencyFilter(chip.id as SystemTaskFrequency | "all" | "3_6_MONTHS")
+                        }
+                      >
+                        <span className="flex flex-1 items-center justify-between">
+                          <span>{chip.label}</span>
+                          <span className="text-base text-muted-foreground">({count})</span>
+                        </span>
+                      </DropdownMenuCheckboxItem>
+                    )
+                  })}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={frequencyMultiSelect}
+                    onCheckedChange={(value) => setFrequencyMultiSelect(Boolean(value))}
+                  >
+                    Multi-select frequencies
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(filterTriggerClass, priorityFilterActive && filterTriggerActiveClass)}
+                  >
+                    Priority: {priorityLabel}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56">
+                  <DropdownMenuLabel>Priority</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuRadioGroup
+                    value={allPrioritiesSelected ? "all" : (priorityFilters[0] as TaskPriority)}
+                    onValueChange={(value) => togglePriorityFilter(value as TaskPriority | "all")}
+                  >
+                    <DropdownMenuRadioItem value="all">
                       <span className="flex flex-1 items-center justify-between">
-                        <span>{chip.label}</span>
-                        <span className="text-base text-muted-foreground">({count})</span>
-                      </span>
-                    </DropdownMenuCheckboxItem>
-                  )
-                })}
-                <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
-                  checked={frequencyMultiSelect}
-                  onCheckedChange={(value) => setFrequencyMultiSelect(Boolean(value))}
-                >
-                  Multi-select frequencies
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(filterTriggerClass, priorityFilterActive && filterTriggerActiveClass)}
-                >
-                  Priority: {priorityLabel}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56">
-                <DropdownMenuLabel>Priority</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup
-                  value={allPrioritiesSelected ? "all" : (priorityFilters[0] as TaskPriority)}
-                  onValueChange={(value) => togglePriorityFilter(value as TaskPriority | "all")}
-                >
-                  <DropdownMenuRadioItem value="all">
-                    <span className="flex flex-1 items-center justify-between">
-                      <span>All</span>
-                      <span className="text-base text-muted-foreground">({templates.length})</span>
-                    </span>
-                  </DropdownMenuRadioItem>
-                  {PRIORITY_OPTIONS.map((value) => (
-                    <DropdownMenuRadioItem key={value} value={value}>
-                      <span className="flex flex-1 items-center justify-between">
-                        <span>{PRIORITY_LABELS[value]}</span>
-                        <span className="text-base text-muted-foreground">({priorityCounts.get(value) ?? 0})</span>
+                        <span>All</span>
+                        <span className="text-base text-muted-foreground">({scopeTemplates.length})</span>
                       </span>
                     </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              variant="ghost"
-              onClick={resetFilters}
-              size="sm"
-              className="h-8 px-3 text-sm text-red-600 hover:bg-red-50 hover:text-red-700"
-            >
-              Clear filters
-            </Button>
+                    {PRIORITY_OPTIONS.map((value) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
+                        <span className="flex flex-1 items-center justify-between">
+                          <span>{PRIORITY_LABELS[value]}</span>
+                          <span className="text-base text-muted-foreground">({priorityCounts.get(value) ?? 0})</span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="ghost"
+                onClick={resetFilters}
+                size="sm"
+                className="h-8 px-3 text-sm text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                Clear filters
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
       {loading ? (
@@ -2344,4 +2468,8 @@ export default function SystemTasksPage() {
       )}
     </div>
   )
+}
+
+export default function SystemTasksPage() {
+  return <SystemTasksView />
 }
