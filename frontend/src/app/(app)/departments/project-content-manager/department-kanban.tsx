@@ -403,6 +403,36 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function startOfWeekMonday(date: Date) {
+  const day = date.getDay()
+  const diff = (day + 6) % 7
+  const start = new Date(date)
+  start.setDate(date.getDate() - diff)
+  start.setHours(0, 0, 0, 0)
+  return start
+}
+
+function formatPrintDay(date: Date) {
+  const weekday = date.toLocaleDateString("en-US", { weekday: "short" })
+  const day = date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })
+  return `${weekday} ${day}`
+}
+
+function noProjectTypeLabel(task: Task) {
+  if (task.is_bllok) return "Blocked"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  return "Normal"
+}
+
+function formatMeetingPrintLabel(meeting: Meeting) {
+  if (!meeting.starts_at) return meeting.title || "Meeting"
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return meeting.title || "Meeting"
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return `${timeLabel} ${meeting.title || "Meeting"}`
+}
+
 function toMeetingInputValue(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
@@ -482,6 +512,7 @@ export default function DepartmentKanban() {
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [multiSelect, setMultiSelect] = React.useState(false)
+  const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
   const [creatingSystem, setCreatingSystem] = React.useState(false)
   const [systemTitle, setSystemTitle] = React.useState("")
@@ -643,6 +674,12 @@ export default function DepartmentKanban() {
     [department, users]
   )
   const todayDate = React.useMemo(() => new Date(), [])
+  const weekDates = React.useMemo(() => {
+    const start = startOfWeekMonday(todayDate)
+    return Array.from({ length: 5 }, (_, index) => {
+      return new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
+    })
+  }, [todayDate])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
     if (viewMode === "mine" && user?.id) {
@@ -724,6 +761,138 @@ export default function DepartmentKanban() {
       }),
     [visibleMeetings, todayDate]
   )
+  const weekProjectTasks = React.useMemo(() => {
+    return weekDates.map((date) => {
+      return projectTasks
+        .filter((task) => {
+          const taskDate = toDate(task.due_date || task.start_date || task.created_at)
+          return taskDate ? isSameDay(taskDate, date) : false
+        })
+        .map((task) => {
+          const project = projects.find((p) => p.id === task.project_id) || null
+          const projectLabel = project?.title || project?.name || "Project"
+          return `${projectLabel}: ${task.title}`
+        })
+        .sort((a, b) => a.localeCompare(b))
+    })
+  }, [projectTasks, projects, weekDates])
+  const weekNoProjectTasks = React.useMemo(() => {
+    const fallbackDate =
+      weekDates.find((date) => isSameDay(date, todayDate)) || weekDates[0]
+    return weekDates.map((date) => {
+      return visibleNoProjectTasks
+        .filter((task) => {
+          const taskDate = toDate(task.due_date || task.start_date || task.planned_for)
+          const resolvedDate = taskDate || fallbackDate
+          return resolvedDate ? isSameDay(resolvedDate, date) : false
+        })
+        .map((task) => `${noProjectTypeLabel(task)}: ${task.title}`)
+        .sort((a, b) => a.localeCompare(b))
+    })
+  }, [visibleNoProjectTasks, weekDates])
+  const weekNotes = React.useMemo(() => {
+    return weekDates.map((date) => {
+      return openNotes
+        .filter((note) => {
+          const noteDate = toDate(note.created_at)
+          return noteDate ? isSameDay(noteDate, date) : false
+        })
+        .map((note) => note.content || "Note")
+        .sort((a, b) => a.localeCompare(b))
+    })
+  }, [openNotes, weekDates])
+  const weekSystemTasks = React.useMemo(() => {
+    return weekDates.map((date) => {
+      return visibleSystemTemplates
+        .filter((task) => shouldShowTemplate(task, date))
+        .map((task) => task.title || "System task")
+        .sort((a, b) => a.localeCompare(b))
+    })
+  }, [visibleSystemTemplates, weekDates])
+  const weekMeetings = React.useMemo(() => {
+    return weekDates.map((date) => {
+      return visibleMeetings
+        .filter((meeting) => {
+          if (!meeting.starts_at) return false
+          const start = new Date(meeting.starts_at)
+          if (Number.isNaN(start.getTime())) return false
+          return isSameDay(start, date)
+        })
+        .map(formatMeetingPrintLabel)
+        .sort((a, b) => a.localeCompare(b))
+    })
+  }, [visibleMeetings, weekDates])
+  const printRows = React.useMemo(
+    () => [
+      { id: "project", label: "Project tasks", itemsByDay: weekProjectTasks },
+      { id: "no-project", label: "Fast tasks", itemsByDay: weekNoProjectTasks },
+      { id: "notes", label: "GA/KA notes", itemsByDay: weekNotes },
+      { id: "system", label: "System tasks", itemsByDay: weekSystemTasks },
+      { id: "meetings", label: "Meetings", itemsByDay: weekMeetings },
+    ],
+    [weekMeetings, weekNoProjectTasks, weekNotes, weekProjectTasks, weekSystemTasks]
+  )
+  const weekRangeLabel = React.useMemo(() => {
+    const start = weekDates[0]
+    const end = weekDates[weekDates.length - 1]
+    if (!start || !end) return ""
+    const startLabel = start.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+    const endLabel = end.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+    return `${startLabel} - ${endLabel}`
+  }, [weekDates])
+  const todayProjectPrint = React.useMemo(() => {
+    return todayProjectTasks
+      .map((task) => {
+        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+        const projectLabel = project?.title || project?.name || "Project"
+        return `${projectLabel}: ${task.title}`
+      })
+      .sort((a, b) => a.localeCompare(b))
+  }, [projects, todayProjectTasks])
+  const todayNoProjectPrint = React.useMemo(() => {
+    return todayNoProjectTasks
+      .map((task) => `${noProjectTypeLabel(task)}: ${task.title}`)
+      .sort((a, b) => a.localeCompare(b))
+  }, [todayNoProjectTasks])
+  const todayNotesPrint = React.useMemo(() => {
+    return todayOpenNotes.map((note) => note.content || "Note").sort((a, b) => a.localeCompare(b))
+  }, [todayOpenNotes])
+  const todaySystemPrint = React.useMemo(() => {
+    return todaySystemTasks.map((task) => task.title || "System task").sort((a, b) => a.localeCompare(b))
+  }, [todaySystemTasks])
+  const todayMeetingsPrint = React.useMemo(() => {
+    return todayMeetings.map(formatMeetingPrintLabel).sort((a, b) => a.localeCompare(b))
+  }, [todayMeetings])
+  const printDates = React.useMemo(() => {
+    return printRange === "today" ? [todayDate] : weekDates
+  }, [printRange, todayDate, weekDates])
+  const printRowsByRange = React.useMemo(() => {
+    if (printRange === "today") {
+      return [
+        { id: "project", label: "Project tasks", itemsByDay: [todayProjectPrint] },
+        { id: "no-project", label: "Fast tasks", itemsByDay: [todayNoProjectPrint] },
+        { id: "notes", label: "GA/KA notes", itemsByDay: [todayNotesPrint] },
+        { id: "system", label: "System tasks", itemsByDay: [todaySystemPrint] },
+        { id: "meetings", label: "Meetings", itemsByDay: [todayMeetingsPrint] },
+      ]
+    }
+    return printRows
+  }, [
+    printRange,
+    printRows,
+    todayMeetingsPrint,
+    todayNoProjectPrint,
+    todayNotesPrint,
+    todayProjectPrint,
+    todaySystemPrint,
+  ])
+  const printRangeLabel = React.useMemo(() => {
+    if (printRange === "today") {
+      const dateLabel = todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+      return `Today - ${dateLabel}`
+    }
+    return weekRangeLabel
+  }, [printRange, todayDate, weekRangeLabel])
 
   const projectTaskGroups = React.useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -1569,7 +1738,8 @@ export default function DepartmentKanban() {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50/30 to-stone-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950/30">
+    <div className="min-h-screen bg-slate-50">
+      <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50/30 to-stone-50 p-6 shadow-lg print:hidden dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950/30">
       <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
       <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
       <div className="relative space-y-6">
@@ -1874,9 +2044,25 @@ export default function DepartmentKanban() {
                 </Select>
               ) : null}
               {viewMode === "mine" ? (
-                <Button variant="outline" className="rounded-xl border-slate-200">
-                  Print
-                </Button>
+                <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                  <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                    <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                      <SelectValue placeholder="This Week" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="ghost"
+                    className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
+                    onClick={() => window.print()}
+                  >
+                    Print
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>
@@ -3211,6 +3397,89 @@ export default function DepartmentKanban() {
         </DialogContent>
       </Dialog>
       </div>
+      </div>
+      <div className="hidden print:block">
+        <div className="px-6 py-4">
+          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
+          <div className="mt-4 text-2xl font-bold text-slate-900">Weekly Task Report</div>
+          <div className="mt-1 text-sm text-slate-700">
+            Department: {departmentDisplayName}
+          </div>
+          <div className="text-sm text-slate-700">
+            User: {user?.full_name || user?.username || "-"}
+          </div>
+          <div className="text-sm text-slate-700">
+            {printRange === "today" ? "Date" : "Week"}: {printRangeLabel}
+          </div>
+        </div>
+        <div className="px-6 pb-6">
+          <table className="w-full border border-slate-900 text-[11px]">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
+                {printDates.map((date) => (
+                  <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                    {formatPrintDay(date)}
+                  </th>
+                ))}
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printRowsByRange.map((row) => {
+                const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
+                return (
+                  <tr key={row.id}>
+                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                      {row.label}
+                      <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
+                        {total}
+                      </span>
+                    </td>
+                    {row.itemsByDay.map((items, idx) => (
+                      <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
+                        {items.length ? (
+                          <div className="space-y-1">
+                            {items.map((item, itemIndex) => (
+                              <div
+                                key={`${row.id}-${idx}-${itemIndex}`}
+                                className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                              >
+                                <div className="flex items-start gap-1 leading-tight">
+                                  <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                  <span>{item}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="italic text-slate-600">No data available.</div>
+                        )}
+                      </td>
+                    ))}
+                    <td className="border border-slate-900 px-2 py-2 align-top" />
+                    <td className="border border-slate-900 px-2 py-2 align-top" />
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <style jsx global>{`
+        @media print {
+          body {
+            background: white;
+          }
+          aside {
+            display: none !important;
+          }
+          @page {
+            margin: 12mm;
+          }
+        }
+      `}</style>
     </div>
   )
 }

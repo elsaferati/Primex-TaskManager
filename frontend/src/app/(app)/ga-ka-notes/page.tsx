@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
+import { Clock } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +14,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, GaNote, Project, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import { formatDepartmentName } from "@/lib/department-name"
+import type { Department, GaNote, Project, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -36,6 +39,16 @@ const NOTE_TO_TASK_PRIORITY: Record<NotePriority, TaskPriority> = {
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
+const TASK_PRIORITY_STYLES: Record<string, string> = {
+  HIGH: "bg-rose-50 text-rose-700",
+  NORMAL: "bg-blue-50 text-blue-700",
+}
+const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
+  TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
+  IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
+  DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
+  CANCELLED: { label: "Cancelled", dot: "bg-slate-400", pill: "bg-slate-100 text-slate-600" },
+}
 
 function formatDate(value?: string | null) {
   if (!value) return "-"
@@ -48,12 +61,32 @@ function formatDate(value?: string | null) {
   })
 }
 
+function getInitials(label: string) {
+  const trimmed = label.trim()
+  if (!trimmed) return "?"
+  const parts = trimmed.split(/\s+/)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+}
+
+function getDueTone(value?: string | null) {
+  if (!value) return "text-slate-500"
+  const due = new Date(value)
+  const now = new Date()
+  if (Number.isNaN(due.getTime())) return "text-slate-500"
+  if (due.getTime() < now.getTime()) return "text-rose-600"
+  const hoursLeft = (due.getTime() - now.getTime()) / 3_600_000
+  return hoursLeft <= 24 ? "text-amber-600" : "text-slate-600"
+}
+
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
+  const [tasks, setTasks] = React.useState<Task[]>([])
+  const [loadingTasks, setLoadingTasks] = React.useState(false)
   const [departmentId, setDepartmentId] = React.useState("ALL")
   const [projectId, setProjectId] = React.useState("NONE")
   const [content, setContent] = React.useState("")
@@ -105,6 +138,27 @@ export default function GaKaNotesPage() {
     [apiFetch]
   )
 
+  const loadTasks = React.useCallback(
+    async (noteIds: string[]) => {
+      if (!noteIds.length) {
+        setTasks([])
+        return
+      }
+      setLoadingTasks(true)
+      try {
+        const res = await apiFetch("/tasks")
+        if (res?.ok) {
+          const allTasks = (await res.json()) as Task[]
+          const allowedIds = new Set(noteIds)
+          setTasks(allTasks.filter((task) => task.ga_note_origin_id && allowedIds.has(task.ga_note_origin_id)))
+        }
+      } finally {
+        setLoadingTasks(false)
+      }
+    },
+    [apiFetch]
+  )
+
   const fetchNotes = React.useCallback(async () => {
     if (!user) return
     setLoading(true)
@@ -141,6 +195,11 @@ export default function GaKaNotesPage() {
   React.useEffect(() => {
     void fetchNotes()
   }, [fetchNotes])
+
+  React.useEffect(() => {
+    const noteIds = notes.filter((note) => note.is_converted_to_task).map((note) => note.id)
+    void loadTasks(noteIds)
+  }, [loadTasks, notes])
 
   const createNote = async () => {
     if (!content.trim()) {
@@ -229,6 +288,7 @@ export default function GaKaNotesPage() {
         toast.error("Failed to create task")
         return
       }
+      const createdTask = (await taskRes.json()) as Task
       const patchRes = await apiFetch(`/ga-notes/${note.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -242,6 +302,13 @@ export default function GaKaNotesPage() {
           prev.map((n) => (n.id === note.id ? { ...n, is_converted_to_task: true } : n))
         )
       }
+      setTasks((prev) => {
+        if (createdTask.ga_note_origin_id) {
+          const filtered = prev.filter((task) => task.ga_note_origin_id !== createdTask.ga_note_origin_id)
+          return [createdTask, ...filtered]
+        }
+        return [createdTask, ...prev]
+      })
       setTaskDialogNoteId(null)
       toast.success("Task created from note")
     } finally {
@@ -281,6 +348,18 @@ export default function GaKaNotesPage() {
     const taskNotes = sorted.filter((note) => note.is_converted_to_task)
     return [...regularNotes, ...taskNotes]
   }, [notes])
+  const taskByNoteId = React.useMemo(() => {
+    const map = new Map<string, Task>()
+    tasks.forEach((task) => {
+      if (task.ga_note_origin_id) {
+        map.set(task.ga_note_origin_id, task)
+      }
+    })
+    return map
+  }, [tasks])
+  const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
+  const projectMap = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
   return (
     <div className="space-y-6">
@@ -403,31 +482,121 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="grid gap-3">
-              {visibleNotes.map((note) => (
-                <Card
-                  key={note.id}
-                  className="border border-primary/10 bg-gradient-to-br from-white via-primary/5 to-transparent shadow-sm"
-                >
-                  <CardContent className="flex flex-col gap-3 py-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge className={TYPE_BADGE[note.note_type] ?? ""}>{note.note_type}</Badge>
-                          <Badge
-                            className={
-                              note.priority && note.priority !== "NONE"
-                                ? PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]
-                                : "border border-slate-200 text-slate-700 bg-slate-50"
-                            }
-                          >
-                            {note.priority || "No priority"}
-                          </Badge>
-                          <span>Created: {formatDate(note.created_at)}</span>
+              {visibleNotes.map((note) => {
+                if (note.is_converted_to_task) {
+                  return (
+                    <div
+                      key={note.id}
+                      className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                    >
+                      {(() => {
+                        const task = taskByNoteId.get(note.id)
+                        if (!task) {
+                          return (
+                            <div className="text-xs text-slate-500">
+                              {loadingTasks ? "Loading task details..." : "Task details not available."}
+                            </div>
+                          )
+                        }
+                        const department = task.department_id ? departmentMap.get(task.department_id) : null
+                        const project = task.project_id ? projectMap.get(task.project_id) : null
+                        const assigneeNames =
+                          task.assignees?.length
+                            ? task.assignees
+                                .map((assignee) => assignee.full_name || assignee.username || assignee.email || "")
+                                .filter(Boolean)
+                            : []
+                        const fallbackAssignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                        const assigneeLabel =
+                          assigneeNames.length > 0
+                            ? assigneeNames.join(", ")
+                            : fallbackAssignee?.full_name ||
+                              fallbackAssignee?.username ||
+                              fallbackAssignee?.email ||
+                              "-"
+                        const assigneeInitials = getInitials(assigneeLabel)
+                        const departmentLabel = department ? formatDepartmentName(department.name) : "No department"
+                        const projectLabel = project?.title || project?.name || ""
+                        const priorityLabel = task.priority || "NORMAL"
+                        const priorityStyle = TASK_PRIORITY_STYLES[priorityLabel] || "bg-slate-100 text-slate-700"
+                        const statusStyle =
+                          TASK_STATUS_STYLES[task.status || ""] ||
+                          { label: task.status || "Unknown", dot: "bg-slate-400", pill: "bg-slate-100 text-slate-600" }
+                        const dueTone = getDueTone(task.due_date)
+                        return (
+                          <div className="space-y-3 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3 min-w-0">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
+                                  GA
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="truncate text-base font-semibold text-slate-900">
+                                    {task.title}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${priorityStyle}`}>
+                                      {priorityLabel === "HIGH" ? "High" : "Normal"}
+                                    </span>
+                                    <span
+                                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${statusStyle.pill}`}
+                                    >
+                                      <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
+                                      {statusStyle.label}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <Link
+                                href={`/tasks/${task.id}`}
+                                className="text-xs font-medium text-slate-500 hover:text-slate-700"
+                              >
+                                View details
+                              </Link>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-700">
+                                  {assigneeInitials}
+                                </div>
+                                <span className="font-medium text-slate-800">{assigneeLabel}</span>
+                                <span className="text-slate-400">-</span>
+                                <span className="text-slate-500">{departmentLabel}</span>
+                                {projectLabel ? <span className="text-slate-400">-</span> : null}
+                                {projectLabel ? <span className="text-slate-500">{projectLabel}</span> : null}
+                              </div>
+                              <div className={`flex items-center gap-1 ${dueTone}`}>
+                                <Clock className="h-4 w-4" />
+                                <span className="font-medium">{formatDate(task.due_date)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )
+                }
+                return (
+                  <Card
+                    key={note.id}
+                    className="border border-primary/10 bg-gradient-to-br from-white via-primary/5 to-transparent shadow-sm"
+                  >
+                    <CardContent className="flex flex-col gap-3 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <Badge className={TYPE_BADGE[note.note_type] ?? ""}>{note.note_type}</Badge>
+                            {note.priority && note.priority !== "NONE" ? (
+                              <Badge className={PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}>
+                                {note.priority}
+                              </Badge>
+                            ) : null}
+                            <span>Created: {formatDate(note.created_at)}</span>
+                          </div>
+                          <div className="text-base font-medium leading-relaxed">{note.content}</div>
                         </div>
-                        <div className="text-base font-medium leading-relaxed">{note.content}</div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {!note.is_converted_to_task ? (
+                        <div className="flex flex-wrap items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
@@ -437,36 +606,34 @@ export default function GaKaNotesPage() {
                           >
                             Create task
                           </Button>
-                        ) : (
-                          <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Task created</Badge>
-                        )}
-                        {note.status !== "CLOSED" ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-emerald-200 text-emerald-800 hover:bg-emerald-50"
-                            onClick={() => void closeNote(note.id)}
-                          >
-                            Close
-                          </Button>
-                        ) : (
-                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Closed</Badge>
-                        )}
+                          {note.status !== "CLOSED" ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                              onClick={() => void closeNote(note.id)}
+                            >
+                              Close
+                            </Button>
+                          ) : (
+                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Closed</Badge>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    {note.project_id || note.department_id ? (
-                      <div className="text-xs text-muted-foreground flex flex-wrap gap-2">
-                        {note.project_id ? (
-                          <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Project</Badge>
-                        ) : null}
-                        {note.department_id ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-200">Department</Badge>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              ))}
+                      {note.project_id || note.department_id ? (
+                        <div className="text-xs text-muted-foreground flex flex-wrap gap-2">
+                          {note.project_id ? (
+                            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Project</Badge>
+                          ) : null}
+                          {note.department_id ? (
+                            <Badge className="bg-amber-100 text-amber-800 border-amber-200">Department</Badge>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           )}
         </CardContent>

@@ -229,10 +229,8 @@ export default function GaKaTasksPage() {
         <CardHeader className="gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-lg">GA/KA Tasks</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                GA tasks from the task table plus GA system tasks in one view.
-              </p>
+              <CardTitle className="text-lg">Admin Tasks</CardTitle>
+             
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="outline" className="border-slate-200 bg-white">
@@ -440,8 +438,8 @@ export default function GaKaTasksPage() {
       {viewFilter !== "tasks" ? (
         <SystemTasksView
           scopeFilter="GA"
-          headingTitle="GA/KA System Tasks"
-          headingDescription="System tasks scoped for GA/KA."
+          headingTitle="Kosove &amp; Gane Admin System Tasks"
+          headingDescription="System tasks scoped for Kosove and Gane admins."
           showSystemActions={false}
           showFilters={false}
           externalPriorityFilter={priorityFilter}
