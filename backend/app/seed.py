@@ -39,6 +39,20 @@ PCM_PROJECTS = [
         "progress_percentage": 0,
     },
     {
+        "title": "VS/VL PRJK I VOGEL",
+        "description": "VS/VL project phases: Project Acceptance, Amazone, Control, Dreamrobot.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.PLANIFIKIMI,
+        "progress_percentage": 0,
+    },
+    {
+        "title": "TT",
+        "description": "Menaxhimi i programit dhe checklistes se produkteve.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.PLANIFIKIMI,
+        "progress_percentage": 48,
+    },
+    {
         "title": "Set One",
         "description": "Programi i perfunduar javen e kaluar.",
         "status": TaskStatus.DONE,

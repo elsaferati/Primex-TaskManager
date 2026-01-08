@@ -311,7 +311,7 @@ function toDateInput(value?: string | null) {
 function isMstProject(project?: Project | null) {
   if (!project) return false
   const title = (project.title || project.name || "").toUpperCase()
-  return title.includes("MST")
+  return title.includes("MST") || title.trim() === "TT"
 }
 function isVsVlProject(project?: Project | null) {
   if (!project) return false
@@ -1155,7 +1155,7 @@ export default function PcmProjectPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              VS/VL
+              VS/VL 
             </Badge>
           </div>
         </div>
