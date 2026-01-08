@@ -552,6 +552,8 @@ export function SystemTasksView({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = React.useState("")
+  const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
+  const [stickyOffset, setStickyOffset] = React.useState(0)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -645,6 +647,22 @@ export function SystemTasksView({
       setDepartmentId(scopeFilter === "GA" ? GA_DEPARTMENTS_VALUE : ALL_DEPARTMENTS_VALUE)
     }
   }, [departments, departmentId, scopeFilter, user?.department_id])
+
+  React.useEffect(() => {
+    const node = stickyHeaderRef.current
+    if (!node) return undefined
+    const updateOffset = () => {
+      setStickyOffset(node.getBoundingClientRect().height)
+    }
+    updateOffset()
+    const observer = new ResizeObserver(updateOffset)
+    observer.observe(node)
+    window.addEventListener("resize", updateOffset)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", updateOffset)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!editTemplate) return
@@ -1566,7 +1584,10 @@ export function SystemTasksView({
   return (
     <div className="space-y-4 pb-12">
       {/* Header Area */}
-      <div className="rounded-lg border border-border/60 bg-white p-4 shadow-sm">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-50 rounded-lg border border-border/60 bg-white/95 p-4 shadow-sm backdrop-blur"
+      >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-xl font-semibold leading-tight text-slate-900">{effectiveHeadingTitle}</h3>
@@ -2347,10 +2368,13 @@ export function SystemTasksView({
       ) : sections.length ? (
         <div id="system-task-table" className="relative min-w-[800px] overflow-visible rounded-lg border bg-white shadow-sm">
           {/* STICKY HEADER ROW */}
-          <div className={cn(
-            GRID_CLASS,
-            "sticky top-0 z-40 border-b bg-slate-50/95 py-3 px-10 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
-          )}>
+          <div
+            className={cn(
+              GRID_CLASS,
+              "sticky z-40 border-b bg-slate-50/95 py-3 px-10 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
+            )}
+            style={{ top: stickyOffset }}
+          >
             <div>Task Title</div>
             <div>Department</div>
             <div>Owner</div>
