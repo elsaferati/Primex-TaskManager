@@ -50,7 +50,7 @@ const items: NavItem[] = [
   },
   {
     href: "/ga-ka-tasks",
-    label: "GA/KA Tasks",
+    label: "Admin",
     icon: ClipboardCheck,
   },
   {

@@ -1558,11 +1558,11 @@ export function SystemTasksView({
   }
 
   const effectiveHeadingTitle =
-    headingTitle ?? (scopeFilter === "GA" ? "GA/KA System Tasks" : "System Tasks")
+    headingTitle ?? (scopeFilter === "GA" ? "Kosove & Gane Admin System Tasks" : "System Tasks")
   const effectiveHeadingDescription =
     headingDescription ??
     (scopeFilter === "GA"
-      ? "System tasks scoped for GA/KA."
+      ? "System tasks scoped for Kosove and Gane admins."
       : "Department tasks organized by frequency and date.")
 
   const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
