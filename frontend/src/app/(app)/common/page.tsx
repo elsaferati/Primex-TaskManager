@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { User, Task, CommonEntry, GaNote, Department } from "@/lib/types"
+import type { User, Task, CommonEntry, GaNote, Department, Project } from "@/lib/types"
 
 type CommonType = "late" | "absent" | "leave" | "ga" | "blocked" | "oneH" | "external" | "r1" | "feedback" | "priority"
 
@@ -374,6 +374,7 @@ export default function CommonViewPage() {
         ])
         let loadedUsers: User[] = []
         let loadedDepartments: Department[] = []
+        let projectNameById = new Map<string, string>()
         if (uRes?.ok) {
           loadedUsers = (await uRes.json()) as User[]
           if (mounted) setUsers(loadedUsers)
@@ -381,6 +382,17 @@ export default function CommonViewPage() {
         if (depsRes?.ok) {
           loadedDepartments = (await depsRes.json()) as Department[]
           if (mounted) setDepartments(loadedDepartments)
+        }
+        const projectsEndpoint =
+          user?.role && user.role !== "STAFF"
+            ? "/projects?include_all_departments=true"
+            : "/projects"
+        const projectsRes = await apiFetch(projectsEndpoint)
+        if (projectsRes?.ok) {
+          const projects = (await projectsRes.json()) as Project[]
+          projectNameById = new Map(
+            projects.map((p) => [p.id, (p.title || p.name || "").trim()]).filter(([, label]) => label)
+          )
         }
 
         // Load common entries
@@ -544,7 +556,11 @@ export default function CommonViewPage() {
         }
 
         // Load tasks for blocked, 1H, R1, external, and priority
-        const tasksRes = await apiFetch("/tasks?include_done=true")
+        const tasksEndpoint =
+          user?.role && user.role !== "STAFF"
+            ? "/tasks?include_done=true&include_all_departments=true"
+            : "/tasks?include_done=true"
+        const tasksRes = await apiFetch(tasksEndpoint)
         if (tasksRes?.ok) {
           const tasks = (await tasksRes.json()) as Task[]
           const today = toISODate(new Date())
@@ -552,9 +568,11 @@ export default function CommonViewPage() {
           const priorityMap = new Map<string, PriorityItem>()
 
           for (const t of tasks) {
-            const assignee = loadedUsers.find((u) => u.id === t.assigned_to_user_id)
+            const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
+            const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
             const ownerName = assignee?.full_name || assignee?.username || "Unknown"
-            const taskDate = t.planned_for ? toISODate(new Date(t.planned_for)) : today
+            const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
+            const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
 
             if (t.is_bllok) {
               allData.blocked.push({
@@ -591,7 +609,7 @@ export default function CommonViewPage() {
             }
 
             // Priority items
-            if (t.priority && t.priority === "HIGH" && t.project_id && assignee) {
+            if (t.project_id && assigneeId) {
               const key = `${ownerName}-${taskDate}`
               if (!priorityMap.has(key)) {
                 priorityMap.set(key, {
@@ -601,9 +619,9 @@ export default function CommonViewPage() {
                 })
               }
               priorityMap.get(key)!.items.push({
-                project: `Project ${t.project_id?.slice(0, 8)}`,
+                project: projectNameById.get(t.project_id) || `Project ${t.project_id?.slice(0, 8)}`,
                 task: t.title,
-                level: t.priority,
+                level: t.priority || "NORMAL",
               })
             }
           }
@@ -633,7 +651,7 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch])
+  }, [apiFetch, user?.role])
 
   React.useEffect(() => {
     if (formType === "leave" && !formFullDay) {
@@ -1106,7 +1124,7 @@ export default function CommonViewPage() {
       },
       {
         id: "priority",
-        label: "Priority",
+        label: "Tasks",
         count: filtered.priority.reduce((sum, p) => sum + p.items.length, 0),
         headerClass: "swimlane-header priority",
         badgeClass: "swimlane-badge priority",
@@ -2046,7 +2064,7 @@ export default function CommonViewPage() {
             type="button"
             onClick={() => setTypeFilter("priority")}
           >
-            Priority
+            Tasks
           </button>
           </div>
           <label className="switch" title="When OFF: select only one. When ON: select multiple.">

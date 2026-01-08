@@ -126,12 +126,15 @@ async def list_tasks(
     due_from: datetime | None = None,
     due_to: datetime | None = None,
     include_done: bool = True,
+    include_all_departments: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
     stmt = select(Task)
 
-    if user.role == UserRole.ADMIN:
+    if include_all_departments:
+        ensure_manager_or_admin(user)
+    elif user.role == UserRole.ADMIN:
         pass  # Admin can see all tasks
     elif user.role == UserRole.MANAGER:
         # Manager can see their department's tasks OR tasks without a department (GA tasks)

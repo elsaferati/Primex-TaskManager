@@ -42,15 +42,19 @@ def phase_index(phase: ProjectPhaseStatus) -> int:
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(
     department_id: uuid.UUID | None = None,
+    include_all_departments: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[ProjectOut]:
     stmt = select(Project)
     if department_id:
-        ensure_department_access(user, department_id)
+        if not include_all_departments:
+            ensure_department_access(user, department_id)
         stmt = stmt.where(Project.department_id == department_id)
 
-    if user.role != UserRole.ADMIN:
+    if include_all_departments:
+        ensure_manager_or_admin(user)
+    elif user.role != UserRole.ADMIN:
         if user.department_id is None:
             return []
         stmt = stmt.where(Project.department_id == user.department_id)
