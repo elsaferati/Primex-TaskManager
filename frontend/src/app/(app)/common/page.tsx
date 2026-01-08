@@ -28,9 +28,15 @@ type ExternalItem = { title: string; date: string; time: string; platform: strin
 type R1Item = { title: string; date: string; owner: string; note?: string }
 type ProblemItem = { title: string; person: string; date: string; note?: string }
 type FeedbackItem = { title: string; person: string; date: string; note?: string }
-type PriorityItem = { person: string; date: string; items: Array<{ project: string; task: string; level: string }> }
+type PriorityItem = { project: string; date: string; assignees: string[] }
 
-type SwimlaneCell = { title: string; subtitle?: string; accentClass?: string; placeholder?: boolean }
+type SwimlaneCell = {
+  title: string
+  subtitle?: string
+  accentClass?: string
+  assignees?: string[]
+  placeholder?: boolean
+}
 type SwimlaneRow = {
   id: CommonType
   label: string
@@ -255,6 +261,15 @@ const MEETING_TEMPLATES: MeetingTemplate[] = [
   },
 ]
 
+const initials = (name: string) => {
+  const cleaned = name.trim()
+  if (!cleaned) return "?"
+  const parts = cleaned.split(/\s+/)
+  const first = parts[0]?.[0] || ""
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : ""
+  return `${first}${last}`.toUpperCase()
+}
+
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
 
@@ -382,8 +397,12 @@ export default function CommonViewPage() {
         }
 
         // Load users and departments first
+        const usersEndpoint =
+          user?.role && user.role !== "STAFF"
+            ? "/users?include_all_departments=true"
+            : "/users"
         const [uRes, depsRes] = await Promise.all([
-          apiFetch("/users"),
+          apiFetch(usersEndpoint),
           apiFetch("/departments")
         ])
         let loadedUsers: User[] = []
@@ -591,14 +610,19 @@ export default function CommonViewPage() {
           for (const t of tasks) {
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
-            const ownerName = assignee?.full_name || assignee?.username || "Unknown"
+            const ownerName = assignee?.full_name || assignee?.username || null
+            const assigneeNames = t.assignees?.length
+              ? t.assignees.map((a) => a.full_name || a.username || a.email || "Unknown")
+              : ownerName
+              ? [ownerName]
+              : []
             const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
             const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
 
             if (t.is_bllok) {
               allData.blocked.push({
                 title: t.title,
-                person: ownerName,
+                person: ownerName || "Unknown",
                 date: taskDate,
                 note: t.description || undefined,
               })
@@ -606,7 +630,7 @@ export default function CommonViewPage() {
             if (t.is_1h_report) {
               allData.oneH.push({
                 title: t.title,
-                person: ownerName,
+                person: ownerName || "Unknown",
                 date: taskDate,
                 note: t.description || undefined,
               })
@@ -615,7 +639,7 @@ export default function CommonViewPage() {
               allData.r1.push({
                 title: t.title,
                 date: taskDate,
-                owner: ownerName,
+                owner: ownerName || "Unknown",
                 note: t.description || undefined,
               })
             }
@@ -625,25 +649,27 @@ export default function CommonViewPage() {
                 date: taskDate,
                 time: "14:00",
                 platform: "Zoom",
-                owner: ownerName,
+                owner: ownerName || "Unknown",
               })
             }
 
             // Priority items
-            if (t.project_id && assigneeId) {
-              const key = `${ownerName}-${taskDate}`
+            if (t.project_id) {
+              const projectLabel = projectNameById.get(t.project_id) || `Project ${t.project_id?.slice(0, 8)}`
+              const key = `${t.project_id}-${taskDate}`
               if (!priorityMap.has(key)) {
                 priorityMap.set(key, {
-                  person: ownerName,
+                  project: projectLabel,
                   date: taskDate,
-                  items: [],
+                  assignees: [],
                 })
               }
-              priorityMap.get(key)!.items.push({
-                project: projectNameById.get(t.project_id) || `Project ${t.project_id?.slice(0, 8)}`,
-                task: t.title,
-                level: t.priority || "NORMAL",
-              })
+              const entry = priorityMap.get(key)!
+              for (const name of assigneeNames) {
+                if (!entry.assignees.includes(name)) {
+                  entry.assignees.push(name)
+                }
+              }
             }
           }
           
@@ -1069,13 +1095,11 @@ export default function CommonViewPage() {
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent feedback",
     }))
-    const priorityItems: SwimlaneCell[] = filtered.priority.flatMap((p) =>
-      p.items.map((item) => ({
-        title: `${p.person} - ${item.project}`,
-        subtitle: `${item.task} (${item.level}) - ${formatDateHuman(p.date)}`,
-        accentClass: "swimlane-accent priority",
-      }))
-    )
+    const priorityItems: SwimlaneCell[] = filtered.priority.map((p) => ({
+      title: p.project,
+      assignees: p.assignees,
+      accentClass: "swimlane-accent priority",
+    }))
 
       return [
         {
@@ -1120,7 +1144,7 @@ export default function CommonViewPage() {
         },
         {
           id: "oneH",
-          label: "1H Tasks",
+          label: "1H Projects",
           count: filtered.oneH.length,
           headerClass: "swimlane-header oneh",
           badgeClass: "swimlane-badge oneh",
@@ -1136,8 +1160,8 @@ export default function CommonViewPage() {
         },
         {
           id: "priority",
-          label: "Tasks",
-          count: filtered.priority.reduce((sum, p) => sum + p.items.length, 0),
+          label: "Projects",
+          count: filtered.priority.length,
           headerClass: "swimlane-header priority",
           badgeClass: "swimlane-badge priority",
           items: priorityItems,
@@ -1563,13 +1587,13 @@ export default function CommonViewPage() {
         .swimlane-content {
           flex: 1;
           display: grid;
-          grid-template-columns: repeat(3, minmax(260px, 1fr));
+          grid-template-columns: repeat(3, minmax(220px, 1fr));
           grid-auto-flow: column;
-          grid-auto-columns: minmax(260px, 1fr);
-          min-width: 780px;
+          grid-auto-columns: minmax(220px, 1fr);
+          min-width: 660px;
         }
         .swimlane-cell {
-          padding: 14px 16px;
+          padding: 12px 14px;
           border-right: 1px solid var(--swim-border);
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
@@ -1597,6 +1621,25 @@ export default function CommonViewPage() {
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
+        }
+        .swimlane-assignees {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .swimlane-avatar {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+          border: 1px solid var(--swim-border);
+          background: #ffffff;
+          color: #475569;
+          font-size: 10px;
+          font-weight: 700;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
         }
         .swimlane-header.delay { background: var(--delay-bg); color: #c2410c; }
         .swimlane-header.absence { background: var(--absence-bg); color: #b91c1c; }
@@ -2098,7 +2141,7 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("priority")}
             >
-              Tasks
+              Projects
             </button>
             <button
               className={`chip ${typeFilters.has("ga") ? "active" : ""}`}
@@ -2314,6 +2357,15 @@ export default function CommonViewPage() {
                                 .join(" ")}
                             >
                               <div className="swimlane-title">{cell.title}</div>
+                              {!cell.placeholder && cell.assignees?.length ? (
+                                <div className="swimlane-assignees">
+                                  {cell.assignees.map((name) => (
+                                    <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
+                                      {initials(name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
                               {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
                             </div>
                           ) : (

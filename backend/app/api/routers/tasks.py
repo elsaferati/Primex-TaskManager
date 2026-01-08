@@ -247,6 +247,7 @@ async def create_task(
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
+    allow_cross_department = project is not None
     if payload.assignees is not None:
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
@@ -260,7 +261,7 @@ async def create_task(
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
         for assignee in assignee_users:
-            if assignee.department_id != department_id:
+            if not allow_cross_department and assignee.department_id != department_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
 
     status_value = payload.status or TaskStatus.TODO
@@ -441,6 +442,7 @@ async def update_task(
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
+    allow_cross_department = task.project_id is not None
 
     if payload.title is not None:
         task.title = payload.title
@@ -496,7 +498,7 @@ async def update_task(
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
         for assignee in assignee_users:
-            if assignee.department_id != task.department_id:
+            if not allow_cross_department and assignee.department_id != task.department_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
         await _replace_task_assignees(db, task, assignee_ids)
         task.assigned_to = assignee_ids[0] if assignee_ids else None
@@ -521,7 +523,7 @@ async def update_task(
         assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
         if assigned_user is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
-        if assigned_user.department_id != task.department_id:
+        if not allow_cross_department and assigned_user.department_id != task.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
         task.assigned_to = payload.assigned_to
         await _replace_task_assignees(db, task, [payload.assigned_to])

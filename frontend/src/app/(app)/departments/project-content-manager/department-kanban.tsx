@@ -24,7 +24,7 @@ const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "Tasks", tone: "red" },
+  { id: "no-project", label: "Fast Tasks", tone: "red" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
@@ -478,21 +478,36 @@ export default function DepartmentKanban() {
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [projectTasks, todayDate])
+  }, [projectTasks, todayDate, selectedUserId])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [visibleNoProjectTasks, todayDate])
+  }, [visibleNoProjectTasks, todayDate, selectedUserId])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
       const date = toDate(note.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return note.created_by === selectedUserId
+      }
+      return true
     })
-  }, [openNotes, todayDate])
+  }, [openNotes, todayDate, selectedUserId])
   const todayMeetings = React.useMemo(
     () =>
       visibleMeetings.filter((m) => {
@@ -1119,7 +1134,7 @@ export default function DepartmentKanban() {
                       : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
                   ].join(" ")}
                 >
-                  {tab.label}
+                  <span className="uppercase tracking-wide">{tab.label}</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
                 </button>
               )
@@ -1270,25 +1285,25 @@ export default function DepartmentKanban() {
       ) : null}
 
       {activeTab === "all" ? (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-semibold tracking-tight">
+              <div className="text-2xl font-bold tracking-tight text-slate-800">
                 {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
               </div>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-slate-600 mt-1">
                 {viewMode === "department"
                   ? "All of today's tasks for the department team."
                   : "All of today's tasks, organized in one place."}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="rounded-full border border-amber-200/60 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
                 {formatToday()}
               </div>
               {viewMode === "department" && departmentUsers.length ? (
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                  <SelectTrigger className="h-9 w-48">
+                  <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
                     <SelectValue placeholder="All users" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1301,7 +1316,11 @@ export default function DepartmentKanban() {
                   </SelectContent>
                 </Select>
               ) : null}
-              {viewMode === "mine" ? <Button variant="outline">Print</Button> : null}
+              {viewMode === "mine" ? (
+                <Button variant="outline" className="rounded-xl border-slate-200">
+                  Print
+                </Button>
+              ) : null}
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-4">
@@ -1311,69 +1330,74 @@ export default function DepartmentKanban() {
               { label: "NOTES (OPEN)", value: todayOpenNotes.length },
               { label: "SYSTEM", value: todaySystemTasks.length },
             ].map((stat) => (
-              <Card
-                key={stat.label}
-                className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-900/70"
-              >
-                <div className="text-xs font-semibold text-muted-foreground">{stat.label}</div>
-                <div className="mt-2 text-2xl font-semibold">{stat.value}</div>
+              <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
               </Card>
             ))}
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Project Tasks</div>
-                <Badge variant="secondary">{todayProjectTasks.length}</Badge>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">PROJECT TASKS</div>
+                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {todayProjectTasks.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Due today</div>
               </div>
-              <div className="mt-4 space-y-4">
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
                 {todayProjectTaskGroups.length ? (
-                  todayProjectTaskGroups.map((group) => (
-                    <div key={group.id}>
-                      <div className="text-xs font-semibold text-muted-foreground">{group.name}</div>
-                      <div className="mt-2 space-y-2">
-                        {group.tasks.map((task) => {
-                          const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                          const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                          return (
-                            <Link
-                              key={task.id}
-                              href={`/tasks/${task.id}`}
-                              className="block rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 text-sm transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {task.status || "TODO"}
-                                </Badge>
-                                <Badge variant="secondary" className="text-xs">
-                                  {phaseLabel}
-                                </Badge>
-                                <div className="font-medium">{task.title}</div>
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {assignee?.full_name || assignee?.username || "Unassigned"}
-                              </div>
-                            </Link>
-                          )
-                        })}
+                  <div className="space-y-3">
+                    {todayProjectTaskGroups.map((group) => (
+                      <div key={group.id}>
+                        <div className="text-xs font-semibold text-slate-700">{group.name}</div>
+                        <div className="mt-2 space-y-2">
+                          {group.tasks.map((task) => {
+                            const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                            const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                            return (
+                              <Link
+                                key={task.id}
+                                href={`/tasks/${task.id}`}
+                                className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                    {task.status || "TODO"}
+                                  </Badge>
+                                  <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                                    {phaseLabel}
+                                  </Badge>
+                                  <div className="font-medium text-slate-800">{task.title}</div>
+                                </div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  {assignee?.full_name || assignee?.username || "Unassigned"}
+                                </div>
+                              </Link>
+                            )
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 ) : (
-                  <div className="text-sm text-muted-foreground">No project tasks today.</div>
+                  <div className="text-sm text-slate-500">No project tasks today.</div>
                 )}
               </div>
-            </Card>
+            </div>
 
-            <div className="grid gap-4">
-              <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">No Project Tasks</div>
-                  <Badge variant="secondary">{todayNoProjectTasks.length}</Badge>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {todayNoProjectTasks.length ? (
-                    todayNoProjectTasks.map((task) => {
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">NO PROJECT</div>
+                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {todayNoProjectTasks.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
+              </div>
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                {todayNoProjectTasks.length ? (
+                  <div className="space-y-2">
+                    {todayNoProjectTasks.map((task) => {
                       const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                       const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
                       const typeLabel = task.is_bllok
@@ -1387,51 +1411,90 @@ export default function DepartmentKanban() {
                         <Link
                           key={task.id}
                           href={`/tasks/${task.id}`}
-                          className="block rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 text-sm transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
+                          className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
                         >
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
+                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                               {typeLabel}
                             </Badge>
-                            <Badge variant="secondary" className="text-xs">
+                            <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
                               {phaseLabel}
                             </Badge>
-                            <div className="font-medium">{task.title}</div>
+                            <div className="font-medium text-slate-800">{task.title}</div>
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
+                          <div className="mt-1 text-xs text-slate-600">
                             {assignee?.full_name || assignee?.username || "Unassigned"}
                           </div>
                         </Link>
                       )
-                    })
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No tasks today.</div>
-                  )}
-                </div>
-              </Card>
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">No tasks today.</div>
+                )}
+              </div>
+            </div>
 
-              <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">System Tasks</div>
-                  <Badge variant="secondary">{todaySystemTasks.length}</Badge>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {todaySystemTasks.length ? (
-                    todaySystemTasks.map((task) => {
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">NOTES (OPEN)</div>
+                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {todayOpenNotes.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Quick notes</div>
+              </div>
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                {todayOpenNotes.length ? (
+                  <div className="space-y-2">
+                    {todayOpenNotes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {note.note_type || "GA"}
+                          </Badge>
+                          <div className="font-medium">{note.content}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No open notes today.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">SYSTEM</div>
+                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {todaySystemTasks.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+              </div>
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                {todaySystemTasks.length ? (
+                  <div className="space-y-2">
+                    {todaySystemTasks.map((task) => {
                       const description = task.description?.trim() || ""
                       const isExpanded = Boolean(expandedSystemDescriptions[task.id])
                       const { text, truncated } = truncateDescription(description)
                       const displayText = description ? (isExpanded ? description : text) : "-"
                       return (
-                        <div key={task.id} className="rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 text-sm dark:border-stone-800/70 dark:bg-stone-900/60">
-                          <div className="font-medium">{task.title}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
+                        <div
+                          key={task.id}
+                          className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="font-medium text-slate-800">{task.title}</div>
+                          <div className="mt-1 text-xs text-slate-600">
                             {displayText}
                             {description && truncated ? (
                               <button
                                 type="button"
                                 onClick={() => toggleSystemDescription(task.id)}
-                                className="ml-2 text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-200"
+                                className="ml-2 text-[11px] font-semibold text-amber-700 hover:underline"
                               >
                                 {isExpanded ? "Show less" : "Read more"}
                               </button>
@@ -1439,59 +1502,44 @@ export default function DepartmentKanban() {
                           </div>
                         </div>
                       )
-                    })
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No system tasks today.</div>
-                  )}
-                </div>
-              </Card>
-            </div>
-
-            <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">GA/KA Notes (Open)</div>
-                <Badge variant="secondary">{todayOpenNotes.length}</Badge>
-              </div>
-              <div className="mt-4 space-y-2">
-                {todayOpenNotes.length ? (
-                  todayOpenNotes.map((note) => (
-                    <div key={note.id} className="rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 text-sm dark:border-stone-800/70 dark:bg-stone-900/60">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <div className="font-medium">{note.content}</div>
-                      </div>
-                    </div>
-                  ))
+                    })}
+                  </div>
                 ) : (
-                  <div className="text-sm text-muted-foreground">No open notes today.</div>
+                  <div className="text-sm text-slate-500">No system tasks today.</div>
                 )}
               </div>
-            </Card>
+            </div>
 
-            <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Meetings (Today)</div>
-                <Badge variant="secondary">{todayMeetings.length}</Badge>
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">MEETINGS</div>
+                <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                  {todayMeetings.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Today</div>
               </div>
-              <div className="mt-4 space-y-2">
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
                 {todayMeetings.length ? (
-                  todayMeetings.map((meeting) => (
-                    <div key={meeting.id} className="rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 text-sm dark:border-stone-800/70 dark:bg-stone-900/60">
-                      <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                      {meeting.project_id ? (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))
+                  <div className="space-y-2">
+                    {todayMeetings.map((meeting) => (
+                      <div
+                        key={meeting.id}
+                        className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
+                      >
+                        <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                        {meeting.project_id ? (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">No meetings today.</div>
                 )}
               </div>
-            </Card>
+            </div>
           </div>
         </div>
       ) : null}

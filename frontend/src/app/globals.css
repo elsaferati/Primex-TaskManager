@@ -122,4 +122,13 @@
   body {
     @apply bg-background text-foreground;
   }
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #1f2937;
+    cursor: pointer;
+  }
+  .dark input[type="checkbox"] {
+    accent-color: #f8fafc;
+  }
 }

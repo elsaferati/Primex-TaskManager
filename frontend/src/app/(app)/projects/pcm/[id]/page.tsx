@@ -502,7 +502,7 @@ export default function PcmProjectPage() {
         apiFetch(`/checklist-items?project_id=${p.id}`),
         apiFetch(`/ga-notes?project_id=${p.id}`),
         apiFetch(`/project-prompts?project_id=${p.id}`),
-        apiFetch("/users"),
+        apiFetch("/users?include_all_departments=true"),
         apiFetch(`/meetings?project_id=${p.id}`),
       ])
 
@@ -1014,6 +1014,7 @@ export default function PcmProjectPage() {
       }),
     [activePhase, project?.current_phase, tasks]
   )
+  const assignableUsers = React.useMemo(() => allUsers.filter((u) => u.role !== "ADMIN"), [allUsers])
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -1029,7 +1030,6 @@ export default function PcmProjectPage() {
       const u = userMap.get(id)
       return u?.full_name || u?.username || "-"
     }
-    const assignableUsers = departmentUsers.filter((u) => u.role !== "ADMIN")
     const taskAssigneeIds = (task: Task) => {
       const ids = task.assignees?.map((a) => a.id) || []
       if (ids.length) return ids
@@ -1788,9 +1788,7 @@ export default function PcmProjectPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
-                          {departmentUsers
-                            .filter((u) => u.role !== "ADMIN")
-                            .map((u) => (
+                          {assignableUsers.map((u) => (
                               <SelectItem key={u.id} value={u.id}>
                                 {u.full_name || u.username || u.email}
                               </SelectItem>
@@ -2198,9 +2196,7 @@ export default function PcmProjectPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__unassigned__">-</SelectItem>
-                        {departmentUsers
-                          .filter((u) => u.role !== "ADMIN")
-                          .map((u) => (
+                        {assignableUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.full_name || u.username || u.email}
                             </SelectItem>
@@ -2225,7 +2221,7 @@ export default function PcmProjectPage() {
                   <div className="col-span-1 text-sm text-slate-400">
                     {(() => {
                       if (controlAssignee === "__unassigned__") return "-"
-                      const assignedUser = departmentUsers.find((u) => u.id === controlAssignee)
+                      const assignedUser = allUsers.find((u) => u.id === controlAssignee)
                       const assignedName = assignedUser?.full_name?.toLowerCase() || ""
                       if (assignedName.includes("diellza")) return "Lea Murturi"
                       if (assignedName.includes("lea")) return "Diellza Veliu"

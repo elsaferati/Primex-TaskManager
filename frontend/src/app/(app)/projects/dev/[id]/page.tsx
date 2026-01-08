@@ -189,7 +189,7 @@ export default function DevelopmentProjectPage() {
         apiFetch(`/checklist-items?project_id=${p.id}`),
         apiFetch(`/ga-notes?project_id=${p.id}`),
         apiFetch(`/project-prompts?project_id=${p.id}`),
-        apiFetch("/users"),
+        apiFetch("/users?include_all_departments=true"),
         apiFetch(`/meetings?project_id=${p.id}`),
       ])
 

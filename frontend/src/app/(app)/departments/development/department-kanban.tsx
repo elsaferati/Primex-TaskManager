@@ -24,7 +24,7 @@ const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "Tasks", tone: "blue" },
+  { id: "no-project", label: "Fast Tasks", tone: "blue" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
@@ -1477,7 +1477,7 @@ export default function DepartmentKanban() {
                       isActive ? activeTabClass : inactiveTabClass,
                     ].join(" ")}
                   >
-                    {tab.label}
+                    <span className="uppercase tracking-wide">{tab.label}</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${badgeClass}`}>
                       {counts[tab.id]}
                     </span>
@@ -1663,7 +1663,7 @@ export default function DepartmentKanban() {
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
                   {formatToday()}
                 </div>
-                {viewMode === "department" && departmentUsers.length ? (
+                {viewMode === "department" ? (
                   <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                     <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
                       <SelectValue placeholder="All users" />

@@ -25,7 +25,7 @@ const TABS = [
   { id: "all", label: "Overview", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
-  { id: "no-project", label: "Buckets", tone: "red" },
+  { id: "no-project", label: "Fast Tasks", tone: "red" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
@@ -460,21 +460,36 @@ export default function DepartmentKanban() {
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [projectTasks, todayDate])
+  }, [projectTasks, todayDate, selectedUserId])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const date = toDate(task.due_date || task.start_date || task.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return task.assigned_to === selectedUserId
+      }
+      return true
     })
-  }, [visibleNoProjectTasks, todayDate])
+  }, [visibleNoProjectTasks, todayDate, selectedUserId])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
       const date = toDate(note.created_at)
-      return date ? isSameDay(date, todayDate) : false
+      const matchesDate = date ? isSameDay(date, todayDate) : false
+      if (!matchesDate) return false
+      if (selectedUserId !== "__all__") {
+        return note.created_by === selectedUserId
+      }
+      return true
     })
-  }, [openNotes, todayDate])
+  }, [openNotes, todayDate, selectedUserId])
   const todayMeetings = React.useMemo(
     () =>
       visibleMeetings.filter((m) => {
@@ -872,7 +887,7 @@ export default function DepartmentKanban() {
                       : "text-muted-foreground hover:text-foreground hover:bg-background/70",
                   ].join(" ")}
                 >
-                  {tab.label}
+                  <span className="uppercase tracking-wide">{tab.label}</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
                 </button>
               )
@@ -987,38 +1002,248 @@ export default function DepartmentKanban() {
 
             {/* OVERVIEW */}
             {activeTab === "all" && (
-                <div className="space-y-8">
-                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div><h2 className="text-2xl font-light text-slate-900 dark:text-white">{formatToday()}</h2><p className="text-slate-500 dark:text-slate-400">Daily overview across all departments.</p></div>
-                        {viewMode === "department" && (
-                            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                                <SelectTrigger className="w-[200px] rounded-xl border-0 bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700"><SelectValue placeholder="Filter User" /></SelectTrigger>
-                                <SelectContent><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent>
-                            </Select>
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-2xl font-bold tracking-tight text-slate-800">
+                        {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
+                      </div>
+                      <div className="text-sm text-slate-600 mt-1">
+                        {viewMode === "department"
+                          ? "All of today's tasks for the department team."
+                          : "All of today's tasks, organized in one place."}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
+                        {formatToday()}
+                      </div>
+                      {viewMode === "department" && departmentUsers.length ? (
+                        <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                          <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="All users" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">All users</SelectItem>
+                            {departmentUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || "-"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : null}
+                      {viewMode === "mine" ? (
+                        <Button variant="outline" className="rounded-xl border-slate-200">
+                          Print
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-4">
+                    {[
+                      { label: "PROJECT TASKS", value: todayProjectTasks.length },
+                      { label: "NO PROJECT", value: todayNoProjectTasks.length },
+                      { label: "NOTES (OPEN)", value: todayOpenNotes.length },
+                      { label: "SYSTEM", value: todaySystemTasks.length },
+                    ].map((stat) => (
+                      <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                        <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
+                      </Card>
+                    ))}
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                        <div className="text-sm font-semibold">PROJECT TASKS</div>
+                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          {todayProjectTasks.length}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">Due today</div>
+                      </div>
+                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                        {todayProjectTaskGroups.length ? (
+                          <div className="space-y-3">
+                            {todayProjectTaskGroups.map((group) => (
+                              <div key={group.id}>
+                                <div className="text-xs font-semibold text-slate-700">{group.name}</div>
+                                <div className="mt-2 space-y-2">
+                                  {group.tasks.map((task) => {
+                                    const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                                    const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                                    return (
+                                      <Link
+                                        key={task.id}
+                                        href={`/tasks/${task.id}`}
+                                        className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                            {task.status || "TODO"}
+                                          </Badge>
+                                          <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                                            {phaseLabel}
+                                          </Badge>
+                                          <div className="font-medium text-slate-800">{task.title}</div>
+                                        </div>
+                                        <div className="mt-1 text-xs text-slate-600">
+                                          {assignee?.full_name || assignee?.username || "Unassigned"}
+                                        </div>
+                                      </Link>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-500">No project tasks today.</div>
                         )}
+                      </div>
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-4">
-                        {[ { label: "Projects", value: todayProjectTasks.length, color: "text-blue-600" }, { label: "Tasks", value: todayNoProjectTasks.length, color: "text-purple-600" }, { label: "Notes", value: todayOpenNotes.length, color: "text-amber-600" }, { label: "System", value: todaySystemTasks.length, color: "text-emerald-600" } ].map(stat => (
-                            <div key={stat.label} className="flex flex-col items-center justify-center rounded-2xl bg-white/40 p-6 text-center shadow-sm backdrop-blur-sm ring-1 ring-slate-900/5 dark:bg-slate-900/40 dark:ring-white/5"><span className={`text-4xl font-light ${stat.color} dark:text-white`}>{stat.value}</span><span className="mt-2 text-xs font-bold uppercase tracking-widest text-slate-400">{stat.label}</span></div>
-                        ))}
+
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                        <div className="text-sm font-semibold">NO PROJECT</div>
+                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          {todayNoProjectTasks.length}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
+                      </div>
+                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                        {todayNoProjectTasks.length ? (
+                          <div className="space-y-2">
+                            {todayNoProjectTasks.map((task) => {
+                              const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                              const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                              const typeLabel = task.is_bllok
+                                ? "Blocked"
+                                : task.is_1h_report
+                                  ? "1H"
+                                  : task.is_r1
+                                    ? "R1"
+                                    : "Normal"
+                              return (
+                                <Link
+                                  key={task.id}
+                                  href={`/tasks/${task.id}`}
+                                  className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                      {typeLabel}
+                                    </Badge>
+                                    <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
+                                      {phaseLabel}
+                                    </Badge>
+                                    <div className="font-medium text-slate-800">{task.title}</div>
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    {assignee?.full_name || assignee?.username || "Unassigned"}
+                                  </div>
+                                </Link>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-500">No tasks today.</div>
+                        )}
+                      </div>
                     </div>
-                    <div className="grid gap-6 lg:grid-cols-2">
-                        <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-                             <div className="mb-4 flex items-center justify-between"><h3 className="font-medium text-slate-900 dark:text-white">Project Tasks</h3><Badge variant="secondary" className="rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{todayProjectTasks.length}</Badge></div>
-                             <div className="space-y-6">{todayProjectTaskGroups.length > 0 ? todayProjectTaskGroups.map(group => (<div key={group.id}><h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">{group.name}</h4><div className="space-y-2">{group.tasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="group flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-emerald-900"><div className="flex items-center gap-3"><div className={`h-2 w-2 rounded-full ${task.status === "DONE" ? "bg-emerald-400" : "bg-slate-300"}`}></div><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span></div><span className="text-xs text-slate-400 group-hover:text-emerald-600">{assigneeLabel(task.assigned_to ? userMap.get(task.assigned_to) : null)}</span></Link>))}</div></div>)) : <div className="py-8 text-center text-sm text-slate-400">No project tasks for today.</div>}</div>
-                        </div>
-                        <div className="space-y-6">
-                             <div className="rounded-3xl border border-slate-100 bg-white/60 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-                                <div className="mb-4 flex items-center justify-between"><h3 className="font-medium text-slate-900 dark:text-white">Ad-hoc Tasks</h3><Badge variant="secondary" className="rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{todayNoProjectTasks.length}</Badge></div>
-                                <div className="space-y-2">{todayNoProjectTasks.length > 0 ? todayNoProjectTasks.map(task => (<Link key={task.id} href={`/tasks/${task.id}`} className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 transition hover:ring-purple-200 dark:bg-slate-900 dark:ring-slate-800"><span className="text-sm font-medium text-slate-700 dark:text-slate-200">{task.title}</span><Badge variant="outline" className="h-5 text-[10px]">{task.is_bllok ? "Blocked" : "Normal"}</Badge></Link>)) : <div className="py-4 text-center text-sm text-slate-400">Nothing pending.</div>}</div>
-                             </div>
-                             <div className="grid gap-6 sm:grid-cols-2"><div className="rounded-3xl border border-slate-100 bg-white/60 p-5 dark:border-slate-800 dark:bg-slate-900/40"><div className="text-sm text-slate-500">System Tasks</div><div className="mt-1 text-2xl font-light text-emerald-600">{todaySystemTasks.length}</div></div><div className="rounded-3xl border border-slate-100 bg-white/60 p-5 dark:border-slate-800 dark:bg-slate-900/40"><div className="text-sm text-slate-500">Meetings</div><div className="mt-1 text-2xl font-light text-slate-900 dark:text-white">{todayMeetings.length}</div></div></div>
-                        </div>
+
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                        <div className="text-sm font-semibold">NOTES (OPEN)</div>
+                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          {todayOpenNotes.length}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">Quick notes</div>
+                      </div>
+                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                        {todayOpenNotes.length ? (
+                          <div className="space-y-2">
+                            {todayOpenNotes.map((note) => (
+                              <div
+                                key={note.id}
+                                className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {note.note_type || "GA"}
+                                  </Badge>
+                                  <div className="font-medium">{note.content}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">No open notes today.</div>
+                        )}
+                      </div>
                     </div>
+
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                        <div className="text-sm font-semibold">SYSTEM</div>
+                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          {todaySystemTasks.length}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+                      </div>
+                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                        {todaySystemTasks.length ? (
+                          <div className="space-y-2">
+                            {todaySystemTasks.map((task) => (
+                              <div
+                                key={task.id}
+                                className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="font-medium text-slate-800">{task.title}</div>
+                                <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-500">No system tasks today.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                        <div className="text-sm font-semibold">MEETINGS</div>
+                        <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                          {todayMeetings.length}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">Today</div>
+                      </div>
+                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                        {todayMeetings.length ? (
+                          <div className="space-y-2">
+                            {todayMeetings.map((meeting) => (
+                              <div
+                                key={meeting.id}
+                                className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                                {meeting.project_id ? (
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">No meetings today.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
             )}
 
-            {/* SYSTEM */}
             {activeTab === "system" && (
                 <div className="space-y-6">
                      <div className="flex items-center justify-between">
