@@ -170,7 +170,7 @@ export default function GaKaNotesPage() {
         return
       }
       const created = (await res.json()) as GaNote
-      setNotes((prev) => [...prev, created])
+      setNotes((prev) => [created, ...prev])
       setContent("")
     } finally {
       setPosting(false)
@@ -271,6 +271,16 @@ export default function GaKaNotesPage() {
   const taskAssigneeOptions = users.filter(
     (person) => effectiveTaskDepartmentId && person.department_id === effectiveTaskDepartmentId
   )
+  const visibleNotes = React.useMemo(() => {
+    const sorted = [...notes].sort((a, b) => {
+      const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+      return bCreated - aCreated
+    })
+    const regularNotes = sorted.filter((note) => !note.is_converted_to_task)
+    const taskNotes = sorted.filter((note) => note.is_converted_to_task)
+    return [...regularNotes, ...taskNotes]
+  }, [notes])
 
   return (
     <div className="space-y-6">
@@ -393,7 +403,7 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="grid gap-3">
-              {notes.map((note) => (
+              {visibleNotes.map((note) => (
                 <Card
                   key={note.id}
                   className="border border-primary/10 bg-gradient-to-br from-white via-primary/5 to-transparent shadow-sm"
@@ -416,23 +426,32 @@ export default function GaKaNotesPage() {
                         </div>
                         <div className="text-base font-medium leading-relaxed">{note.content}</div>
                       </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {!note.is_converted_to_task ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-indigo-300 text-indigo-800 hover:bg-indigo-50"
-                        disabled={user?.role === "STAFF"}
-                        onClick={() => openTaskDialog(note)}
-                      >
-                        Create task
-                      </Button>
-                    ) : (
-                      <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Task created</Badge>
-                    )}
-                        {note.status === "CLOSED" ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!note.is_converted_to_task ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-indigo-300 text-indigo-800 hover:bg-indigo-50"
+                            disabled={user?.role === "STAFF"}
+                            onClick={() => openTaskDialog(note)}
+                          >
+                            Create task
+                          </Button>
+                        ) : (
+                          <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Task created</Badge>
+                        )}
+                        {note.status !== "CLOSED" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                            onClick={() => void closeNote(note.id)}
+                          >
+                            Close
+                          </Button>
+                        ) : (
                           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Closed</Badge>
-                        ) : null}
+                        )}
                       </div>
                     </div>
                     {note.project_id || note.department_id ? (

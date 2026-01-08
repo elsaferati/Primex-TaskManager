@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -26,7 +26,8 @@ async def list_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    stmt = select(GaNote).order_by(GaNote.created_at)
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
     if project_id is None and department_id is None:
         if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")

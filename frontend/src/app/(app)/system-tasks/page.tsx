@@ -2373,18 +2373,13 @@ export function SystemTasksView({
         <div id="system-task-table" className="relative w-full rounded-lg border bg-white shadow-sm">
           {/* SCROLL WRAPPER for responsive table */}
           <div className="overflow-x-auto">
-            {/* STICKY HEADER ROW */}
-            {/* Note: sticky works here relative to the overflow container unless height is fixed. 
-                For general use, we keep the structure but allow scroll if needed. */}
+            {/* STICKY HEADER ROW - CHANGED TO STATIC to prevent floating issues */}
             <div className="min-w-[1000px] xl:min-w-0">
-              <div
-                className="sticky z-40 bg-slate-50/95 backdrop-blur"
-                style={{ top: "var(--system-tasks-sticky-offset, 0px)" }}
-              >
+              <div className="border-b bg-slate-50 py-3">
                 <div
                   className={cn(
                     GRID_CLASS,
-                    "border-b py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500"
+                    "text-[11px] font-bold uppercase tracking-wider text-slate-500"
                   )}
                 >
                   <div>Task Title</div>

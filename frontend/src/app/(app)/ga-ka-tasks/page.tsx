@@ -178,7 +178,10 @@ export default function GaKaTasksPage() {
     () =>
       tasks.filter((task) => {
         const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-        return Boolean(task.ga_note_origin_id) && !isSystem
+        if (!task.ga_note_origin_id || isSystem) return false
+        const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+        return createdAt >= cutoff
       }),
     [tasks]
   )
