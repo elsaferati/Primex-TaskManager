@@ -1144,7 +1144,7 @@ export default function CommonViewPage() {
         },
         {
           id: "oneH",
-          label: "1H Projects",
+          label: "1H",
           count: filtered.oneH.length,
           headerClass: "swimlane-header oneh",
           badgeClass: "swimlane-badge oneh",
