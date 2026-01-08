@@ -143,6 +143,8 @@ async def update_ga_note(
             note.completed_at = note.completed_at or datetime.utcnow()
     if payload.priority is not None:
         note.priority = payload.priority
+    if payload.is_converted_to_task is not None:
+        note.is_converted_to_task = payload.is_converted_to_task
 
     await db.commit()
     await db.refresh(note)
