@@ -106,7 +106,7 @@ export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
 
   return (
-    <aside className="w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen sticky top-0">
+    <aside className="w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen sticky top-0 print:hidden">
       {/* Header / Logo Area */}
       <div className="flex h-16 items-center border-b px-6">
         <div className="flex items-center gap-2 font-bold text-lg tracking-tight">

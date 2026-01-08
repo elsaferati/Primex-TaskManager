@@ -138,9 +138,9 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 }))
 
 // Define the grid layout once so header and body always match.
-// Columns: Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
+// Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
 // MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
-const GRID_CLASS = "grid grid-cols-[minmax(200px,1fr)_120px_120px_100px_90px_80px_70px] xl:grid-cols-[1fr_150px_150px_120px_100px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+const GRID_CLASS = "grid grid-cols-[52px_minmax(200px,1fr)_120px_120px_100px_90px_80px_70px] xl:grid-cols-[64px_1fr_150px_150px_120px_100px_100px_80px] gap-2 xl:gap-4 items-center px-4"
 
 type Section = {
   id: string
@@ -553,6 +553,7 @@ export function SystemTasksView({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = React.useState("")
+  const [printing, setPrinting] = React.useState(false)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -1339,6 +1340,14 @@ export function SystemTasksView({
     link.click()
   }
 
+  const handlePrint = React.useCallback(() => {
+    setPrinting(true)
+    window.requestAnimationFrame(() => {
+      window.print()
+      setTimeout(() => setPrinting(false), 300)
+    })
+  }, [])
+
   const importTemplatesFromFile = async (file: File) => {
     if (!canCreate) return
     const text = await file.text()
@@ -1601,6 +1610,14 @@ export function SystemTasksView({
           </div>
           {showSystemActions ? (
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={handlePrint}
+                size="sm"
+                className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Print
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -2370,7 +2387,13 @@ export function SystemTasksView({
       {loading ? (
         <div className="py-8 text-center text-sm text-muted-foreground">Loading tasks...</div>
       ) : sections.length ? (
-        <div id="system-task-table" className="relative w-full rounded-lg border bg-white shadow-sm">
+        <div
+          id="system-task-table"
+          className={cn(
+            "relative w-full rounded-lg border bg-white shadow-sm",
+            printing && "print:border-0 print:shadow-none"
+          )}
+        >
           {/* SCROLL WRAPPER for responsive table */}
           <div className="overflow-x-auto">
             {/* STICKY HEADER ROW - CHANGED TO STATIC to prevent floating issues */}
@@ -2382,6 +2405,7 @@ export function SystemTasksView({
                     "text-[11px] font-bold uppercase tracking-wider text-slate-500"
                   )}
                 >
+                  <div>No.</div>
                   <div>Task Title</div>
                   <div>Department</div>
                   <div>Owner</div>
@@ -2461,6 +2485,9 @@ export function SystemTasksView({
                                 isInactive && "opacity-60 grayscale"
                               )}
                             >
+                              <div className="text-sm font-semibold text-slate-600">
+                                {index + 1}
+                              </div>
                               {/* Title Only (Description removed from list view) */}
                               <div className="min-w-0 pr-4">
                                 <div className="flex flex-wrap items-center gap-2">
