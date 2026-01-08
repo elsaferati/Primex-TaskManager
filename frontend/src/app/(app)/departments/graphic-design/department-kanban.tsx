@@ -282,7 +282,7 @@ function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
 // --- MAIN COMPONENT ---
 
 export default function DepartmentKanban() {
-  const departmentName = "Development"
+  const departmentName = "Graphic Design"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -295,6 +295,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
+  const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -625,6 +626,27 @@ export default function DepartmentKanban() {
       toast.success("System task created")
     } finally {
       setCreatingSystem(false)
+    }
+  }
+
+  const updateSystemTaskStatus = async (taskId: string, nextStatus: "TODO" | "DONE") => {
+    setSystemStatusUpdatingId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update system task status")
+        return
+      }
+      setSystemTasks((prev) =>
+        prev.map((item) => (item.id === taskId ? { ...item, status: nextStatus } : item))
+      )
+      toast.success(nextStatus === "DONE" ? "System task closed" : "System task reopened")
+    } finally {
+      setSystemStatusUpdatingId(null)
     }
   }
 
@@ -1016,7 +1038,67 @@ export default function DepartmentKanban() {
                          <div className="ml-auto flex items-center gap-2"><Label className="text-xs text-slate-500">Show All</Label><Checkbox checked={showAllSystem} onCheckedChange={(v)=>setShowAllSystem(!!v)} /></div>
                      </div>
                      <div className="space-y-8">
-                         {systemGroups.map(group => (<div key={group.label} className="space-y-4"><div className="flex items-center gap-3"><span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span><div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{group.items.map(item => (<div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800"><div className="space-y-2"><div className="flex items-start justify-between"><h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4><div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div></div><p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p></div><div className="mt-4 flex items-center gap-2 border-t border-slate-50 pt-3 dark:border-slate-800"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">{initials(item.default_assignee_id ? users.find(u => u.id === item.default_assignee_id)?.full_name || "?" : "?")}</div><span className="text-xs text-slate-400">{item.default_assignee_id ? users.find(u => u.id === item.default_assignee_id)?.full_name : "Unassigned"}</span></div></div>))}</div></div>))}
+                         {systemGroups.map(group => (
+                            <div key={group.label} className="space-y-4">
+                                <div className="flex items-center gap-3">
+                                    <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span>
+                                    <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
+                                </div>
+                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    {group.items.map(item => {
+                                        const statusValue = item.status || "TODO"
+                                        const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                                        const owner = users.find(u => u.id === item.default_assignee_id)
+                                        const isAssigned =
+                                          Boolean(user?.id) &&
+                                          (item.default_assignee_id === user?.id ||
+                                            item.assignees?.some((assignee) => assignee.id === user?.id))
+                                        return (
+                                            <div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800">
+                                                <div className="space-y-2">
+                                                    <div className="flex items-start justify-between">
+                                                        <div className="space-y-1">
+                                                            <h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4>
+                                                            <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
+                                                        </div>
+                                                        <div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div>
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p>
+                                                </div>
+                                                <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 dark:border-slate-800">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">
+                                                            {initials(owner?.full_name || "?")}
+                                                        </div>
+                                                        <span className="text-xs text-slate-400">{owner?.full_name || "Unassigned"}</span>
+                                                    </div>
+                                                    {viewMode === "mine" ? (
+                                                        isClosed ? (
+                                                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                                                <span className="text-[12px]">✓</span>
+                                                                Done
+                                                            </span>
+                                                        ) : isAssigned ? (
+                                                            <button
+                                                                type="button"
+                                                                disabled={systemStatusUpdatingId === item.id}
+                                                                className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                                                                onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                                            >
+                                                                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
+                                                                    ✓
+                                                                </span>
+                                                                Mark Done
+                                                            </button>
+                                                        ) : null
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                         ))}
                      </div>
                 </div>
             )}

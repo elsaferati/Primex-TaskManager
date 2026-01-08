@@ -9,10 +9,12 @@ from app.models.enums import TaskPriority, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.services.system_task_schedule import should_reopen_system_task
 
 
 async def generate_system_tasks() -> int:
     created = 0
+    now = datetime.now(timezone.utc)
     async with SessionLocal() as db:
         templates = (await db.execute(select(SystemTaskTemplate))).scalars().all()
         for tmpl in templates:
@@ -37,7 +39,7 @@ async def generate_system_tasks() -> int:
                     priority=tmpl.priority or TaskPriority.NORMAL,
                     finish_period=tmpl.finish_period,
                     system_template_origin_id=tmpl.id,
-                    start_date=datetime.now(timezone.utc),
+                    start_date=now,
                     is_active=active_value,
                 )
                 db.add(task)
@@ -56,6 +58,9 @@ async def generate_system_tasks() -> int:
                 task.assigned_to = tmpl.default_assignee_id
                 task.finish_period = tmpl.finish_period
                 task.is_active = active_value
+                if active_value and should_reopen_system_task(task, tmpl, now):
+                    task.status = TaskStatus.TODO
+                    task.completed_at = None
 
         await db.commit()
 

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
+from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.schemas.task import TaskAssigneeOut
 
 
@@ -26,5 +26,6 @@ class SystemTaskOut(BaseModel):
     month_of_year: int | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
+    status: TaskStatus
     is_active: bool
     created_at: datetime

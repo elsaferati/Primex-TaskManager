@@ -71,12 +71,12 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
-  NORMAL: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  NORMAL: "border-amber-200 bg-amber-50 text-amber-700",
   HIGH: "border-red-200 bg-red-50 text-red-700",
 }
 
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
-  NORMAL: "border-l-emerald-500",
+  NORMAL: "border-l-amber-500",
   HIGH: "border-l-red-600",
 }
 
@@ -320,6 +320,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
+  const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -571,6 +572,7 @@ export default function DepartmentKanban() {
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
+  const showSystemActions = viewMode === "mine"
   const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
@@ -682,6 +684,27 @@ export default function DepartmentKanban() {
       toast.success("System task created")
     } finally {
       setCreatingSystem(false)
+    }
+  }
+
+  const updateSystemTaskStatus = async (taskId: string, nextStatus: "TODO" | "DONE") => {
+    setSystemStatusUpdatingId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update system task status")
+        return
+      }
+      setSystemTasks((prev) =>
+        prev.map((item) => (item.id === taskId ? { ...item, status: nextStatus } : item))
+      )
+      toast.success(nextStatus === "DONE" ? "System task closed" : "System task reopened")
+    } finally {
+      setSystemStatusUpdatingId(null)
     }
   }
 
@@ -1641,22 +1664,38 @@ export default function DepartmentKanban() {
                     </Badge>
                     <Badge variant="secondary">{group.items.length}</Badge>
                   </div>
-                  <div className="grid grid-cols-7 gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  <div
+                    className={[
+                      "grid gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground",
+                      showSystemActions ? "grid-cols-8" : "grid-cols-7",
+                    ].join(" ")}
+                  >
                     <div className="col-span-2">TASK</div>
                     <div>DEPARTMENT</div>
                     <div>WHEN</div>
                     <div>STATUS</div>
                     <div>OWNER</div>
                     <div>SET BY</div>
+                    {showSystemActions ? <div>ACTIONS</div> : null}
                   </div>
                   <div className="divide-y">
                     {group.items.map((item) => {
                       const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
                       const priorityValue = normalizePriority(item.priority)
+                      const statusValue = item.status || "TODO"
+                      const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                      const isAssigned =
+                        Boolean(user?.id) &&
+                        (item.default_assignee_id === user?.id ||
+                          item.assignees?.some((assignee) => assignee.id === user?.id))
                       return (
                         <div
                           key={item.id}
-                          className={`grid grid-cols-7 gap-3 border-l-4 px-4 py-4 text-sm ${PRIORITY_BORDER_STYLES[priorityValue]}`}
+                          className={[
+                            "grid gap-3 border-l-4 px-4 py-4 text-sm",
+                            PRIORITY_BORDER_STYLES[priorityValue],
+                            showSystemActions ? "grid-cols-8" : "grid-cols-7",
+                          ].join(" ")}
                         >
                           <div className="col-span-2">
                             <div className="font-medium">{item.title}</div>
@@ -1690,6 +1729,9 @@ export default function DepartmentKanban() {
                               <Badge variant="secondary">
                                 {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
                               </Badge>
+                              <Badge variant="secondary" className="uppercase text-[10px]">
+                                {statusValue}
+                              </Badge>
                               <Badge
                                 variant="outline"
                                 className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
@@ -1700,6 +1742,28 @@ export default function DepartmentKanban() {
                           </div>
                           <div>{owner?.full_name || owner?.username || "-"}</div>
                           <div>{user?.full_name || user?.username || "-"}</div>
+                          {showSystemActions ? (
+                            <div>
+                              {isClosed ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                  <span className="text-[12px]">✓</span>
+                                  Done
+                                </span>
+                              ) : isAssigned ? (
+                                <button
+                                  type="button"
+                                  disabled={systemStatusUpdatingId === item.id}
+                                  className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                                  onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                >
+                                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
+                                    ✓
+                                  </span>
+                                  Mark Done
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       )
                     })}
