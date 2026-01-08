@@ -1,10 +1,10 @@
-﻿"use client"
+﻿
+"use client"
 
 import * as React from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -139,7 +139,8 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 
 // Define the grid layout once so header and body always match.
 // Columns: Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
-const GRID_CLASS = "grid grid-cols-[1fr_150px_150px_120px_100px_100px_80px] gap-4 items-center px-4"
+// MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
+const GRID_CLASS = "grid grid-cols-[minmax(200px,1fr)_120px_120px_100px_90px_80px_70px] xl:grid-cols-[1fr_150px_150px_120px_100px_100px_80px] gap-2 xl:gap-4 items-center px-4"
 
 type Section = {
   id: string
@@ -552,8 +553,6 @@ export function SystemTasksView({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = React.useState("")
-  const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
-  const [stickyOffset, setStickyOffset] = React.useState(0)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -648,21 +647,6 @@ export function SystemTasksView({
     }
   }, [departments, departmentId, scopeFilter, user?.department_id])
 
-  React.useEffect(() => {
-    const node = stickyHeaderRef.current
-    if (!node) return undefined
-    const updateOffset = () => {
-      setStickyOffset(node.getBoundingClientRect().height)
-    }
-    updateOffset()
-    const observer = new ResizeObserver(updateOffset)
-    observer.observe(node)
-    window.addEventListener("resize", updateOffset)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", updateOffset)
-    }
-  }, [])
 
   React.useEffect(() => {
     if (!editTemplate) return
@@ -1581,8 +1565,28 @@ export function SystemTasksView({
       ? "System tasks scoped for GA/KA."
       : "Department tasks organized by frequency and date.")
 
+  const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
+  const [stickyOffset, setStickyOffset] = React.useState(0)
+
+  React.useLayoutEffect(() => {
+    const element = stickyHeaderRef.current
+    if (!element || typeof ResizeObserver === "undefined") return
+
+    const updateOffset = () => {
+      setStickyOffset(element.offsetHeight)
+    }
+
+    updateOffset()
+    const observer = new ResizeObserver(updateOffset)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <div className="space-y-4 pb-12">
+    <div
+      className="space-y-4 pb-12"
+      style={{ "--system-tasks-sticky-offset": `${stickyOffset}px` } as React.CSSProperties}
+    >
       {/* Header Area */}
       <div
         ref={stickyHeaderRef}
@@ -2366,157 +2370,168 @@ export function SystemTasksView({
       {loading ? (
         <div className="py-8 text-center text-sm text-muted-foreground">Loading tasks...</div>
       ) : sections.length ? (
-        <div id="system-task-table" className="relative min-w-[800px] overflow-visible rounded-lg border bg-white shadow-sm">
-          {/* STICKY HEADER ROW */}
-          <div
-            className={cn(
-              GRID_CLASS,
-              "sticky z-40 border-b bg-slate-50/95 py-3 px-10 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
-            )}
-            style={{ top: stickyOffset }}
-          >
-            <div>Task Title</div>
-            <div>Department</div>
-            <div>Owner</div>
-            <div>Frequency</div>
-            <div>Finish by</div>
-            <div>Priority</div>
-            <div className="text-right">Actions</div>
-          </div>
+        <div id="system-task-table" className="relative w-full rounded-lg border bg-white shadow-sm">
+          {/* SCROLL WRAPPER for responsive table */}
+          <div className="overflow-x-auto">
+            {/* STICKY HEADER ROW */}
+            {/* Note: sticky works here relative to the overflow container unless height is fixed. 
+                For general use, we keep the structure but allow scroll if needed. */}
+            <div className="min-w-[1000px] xl:min-w-0">
+              <div
+                className="sticky z-40 bg-slate-50/95 backdrop-blur"
+                style={{ top: "var(--system-tasks-sticky-offset, 0px)" }}
+              >
+                <div
+                  className={cn(
+                    GRID_CLASS,
+                    "border-b py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500"
+                  )}
+                >
+                  <div>Task Title</div>
+                  <div>Department</div>
+                  <div>Owner</div>
+                  <div>Frequency</div>
+                  <div>Finish by</div>
+                  <div>Priority</div>
+                  <div className="text-right">Actions</div>
+                </div>
+              </div>
 
-          {/* TABLE BODY */}
-          <div className="p-4 space-y-2 bg-slate-50">
-            {sections.map((section) => (
-              <React.Fragment key={section.id}>
-                {section.templates.length ? (
-                  section.templates.map((template, index) => {
-                    const priorityValue = normalizePriority(template.priority)
-                    const department = template.department_id ? departmentMap.get(template.department_id) : null
-                    const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-                    const departmentLabel =
-                      scope === "GA"
-                        ? "GA"
-                        : scope === "ALL"
-                          ? "ALL"
-                          : department
-                            ? formatDepartmentName(department.name)
-                            : "-"
-                    const ownerLabel = assigneeSummary(template.assignees)
-                    const isUnassignedAll = !template.department_id && !template.default_assignee_id
-                    const frequencyLabel =
-                      FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
-                      template.frequency
-                    
-                    const isInactive = template.is_active === false
-                    const showInactiveDivider =
-                      isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
-                    
-                    // Grouping Logic
-                    const prev = index > 0 ? section.templates[index - 1] : null
-                    const prevPriority = prev ? normalizePriority(prev.priority) : null
-                      const showFrequencyDivider =
-                        !isInactive &&
-                        (index === 0 || (prev && prev.frequency !== template.frequency))
+              {/* TABLE BODY */}
+              <div className="p-4 space-y-2 bg-slate-50">
+                {sections.map((section) => (
+                  <React.Fragment key={section.id}>
+                    {section.templates.length ? (
+                      section.templates.map((template, index) => {
+                        const priorityValue = normalizePriority(template.priority)
+                        const department = template.department_id ? departmentMap.get(template.department_id) : null
+                        const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+                        const departmentLabel =
+                          scope === "GA"
+                            ? "GA"
+                            : scope === "ALL"
+                              ? "ALL"
+                              : department
+                                ? formatDepartmentName(department.name)
+                                : "-"
+                        const ownerLabel = assigneeSummary(template.assignees)
+                        const isUnassignedAll = !template.department_id && !template.default_assignee_id
+                        const frequencyLabel =
+                          FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
+                          template.frequency
+                        
+                        const isInactive = template.is_active === false
+                        const showInactiveDivider =
+                          isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
+                        
+                        // Grouping Logic
+                        const prev = index > 0 ? section.templates[index - 1] : null
+                        const prevPriority = prev ? normalizePriority(prev.priority) : null
+                          const showFrequencyDivider =
+                            !isInactive &&
+                            (index === 0 || (prev && prev.frequency !== template.frequency))
 
-                      const showPriorityDivider =
-                        !isInactive &&
-                        !showFrequencyDivider &&
-                        prevPriority !== null &&
-                        prevPriority !== priorityValue &&
-                        priorityValue === "HIGH"
+                          const showPriorityDivider =
+                            !isInactive &&
+                            !showFrequencyDivider &&
+                            prevPriority !== null &&
+                            prevPriority !== priorityValue &&
+                            priorityValue === "HIGH"
 
-                    return (
-                      <React.Fragment key={template.id}>
-                        {/* Dividers */}
-                        {showInactiveDivider && (
-                           <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400">
-                             Inactive Tasks
-                           </div>
-                        )}
-                        {showPriorityDivider && (
-                           <div className="col-span-full rounded border-l-4 border-l-transparent bg-red-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400">
-                             High Priority
-                           </div>
-                        )}
-                        {showFrequencyDivider && (
-                           <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                             {frequencyLabel}
-                           </div>
-                         )}
-
-                        {/* Task Row (Card Style) */}
-                        <div
-                          className={cn(
-                            GRID_CLASS,
-                            "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
-                            PRIORITY_BORDER_STYLES[priorityValue],
-                            isInactive && "opacity-60 grayscale"
-                          )}
-                        >
-                          {/* Title Only (Description removed from list view) */}
-                          <div className="min-w-0 pr-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
-                                {template.title}
+                        return (
+                          <React.Fragment key={template.id}>
+                            {/* Dividers */}
+                            {showInactiveDivider && (
+                              <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400">
+                                Inactive Tasks
                               </div>
-                              <Badge variant="secondary" className="h-5 text-[10px] uppercase">
-                                {template.status || "TODO"}
-                              </Badge>
-                            </div>
-                          </div>
-                          
-                          <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
-                            {departmentLabel}
-                          </div>
-                          
-                          <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
-                            {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
-                          </div>
-
-                          <div>
-                             <span className="text-sm text-slate-700 font-normal">
+                            )}
+                            {showPriorityDivider && (
+                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-red-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400">
+                                High Priority
+                              </div>
+                            )}
+                            {showFrequencyDivider && (
+                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                                 {frequencyLabel}
-                             </span>
-                          </div>
+                              </div>
+                            )}
 
-                          <div className="text-sm text-slate-700 font-normal">
-                            {template.finish_period || "-"}
-                          </div>
-
-                          <div>
-                            <Badge
-                              variant="outline"
-                              className={cn("px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              {canEdit && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-full border border-transparent text-xs text-slate-500 hover:border-slate-200 hover:bg-white hover:text-blue-600"
-                                  onClick={() => startEdit(template)}
-                                >
-                                  Edit
-                                </Button>
+                            {/* Task Row (Card Style) */}
+                            <div
+                              className={cn(
+                                GRID_CLASS,
+                                "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
+                                PRIORITY_BORDER_STYLES[priorityValue],
+                                isInactive && "opacity-60 grayscale"
                               )}
+                            >
+                              {/* Title Only (Description removed from list view) */}
+                              <div className="min-w-0 pr-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                                    {template.title}
+                                  </div>
+                                  <Badge variant="secondary" className="h-5 text-[10px] uppercase">
+                                    {template.status || "TODO"}
+                                  </Badge>
+                                </div>
+                              </div>
+                              
+                              <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                                {departmentLabel}
+                              </div>
+                              
+                              <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                                {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
+                              </div>
+
+                              <div>
+                                <span className="text-sm text-slate-700 font-normal">
+                                    {frequencyLabel}
+                                </span>
+                              </div>
+
+                              <div className="text-sm text-slate-700 font-normal">
+                                {template.finish_period || "-"}
+                              </div>
+
+                              <div>
+                                <Badge
+                                  variant="outline"
+                                  className={cn("px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
+                                >
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </Badge>
+                              </div>
+
+                              <div className="text-right">
+                                <div className="flex flex-col items-end gap-2">
+                                  {canEdit && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-full border border-transparent text-xs text-slate-500 hover:border-slate-200 hover:bg-white hover:text-blue-600"
+                                      onClick={() => startEdit(template)}
+                                    >
+                                      Edit
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    )
-                  })
-                ) : (
-                  <div className="py-12 text-center text-sm text-muted-foreground">
-                    No scheduled tasks found.
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
+                          </React.Fragment>
+                        )
+                      })
+                    ) : (
+                      <div className="py-12 text-center text-sm text-muted-foreground">
+                        No scheduled tasks found.
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       ) : (
