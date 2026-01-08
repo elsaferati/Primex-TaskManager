@@ -310,8 +310,9 @@ function toDateInput(value?: string | null) {
 
 function isMstProject(project?: Project | null) {
   if (!project) return false
-  const title = (project.title || project.name || "").toUpperCase()
-  return title.includes("MST") || title.trim() === "TT"
+  const title = (project.title || project.name || "").toUpperCase().trim()
+  const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
+  return title.includes("MST") || isTt
 }
 function isVsVlProject(project?: Project | null) {
   if (!project) return false
@@ -442,6 +443,7 @@ export default function PcmProjectPage() {
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
   const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANIFIKIMI")
   const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PROJECT_ACCEPTANCE")
+  const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "ga">("description")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
@@ -463,7 +465,9 @@ export default function PcmProjectPage() {
   const vsVlDragStartXRef = React.useRef(0)
   const vsVlDragScrollLeftRef = React.useRef(0)
   const [programName, setProgramName] = React.useState("")
-  const [productTab, setProductTab] = React.useState<"tasks" | "checklists" | "members" | "ga">("tasks")
+  const [mstTab, setMstTab] = React.useState<"description" | "tasks" | "checklists" | "members" | "ga" | "final">(
+    "description"
+  )
   const [newMemberId, setNewMemberId] = React.useState<string>("")
   const [controlTitle, setControlTitle] = React.useState("")
   const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
@@ -533,6 +537,30 @@ export default function PcmProjectPage() {
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
+  const mstPhaseRef = React.useRef(mstPhase)
+  const vsVlPhaseRef = React.useRef(vsVlPhase)
+
+  React.useEffect(() => {
+    if (!isMst) return
+    if (mstPhaseRef.current === mstPhase) return
+    mstPhaseRef.current = mstPhase
+    if (mstPhase === "PLANIFIKIMI") {
+      setMstTab("description")
+      return
+    }
+    if (mstPhase === "FINALIZIMI") {
+      setMstTab("final")
+      return
+    }
+    setMstTab("tasks")
+  }, [isMst, mstPhase])
+
+  React.useEffect(() => {
+    if (!isVsVl) return
+    if (vsVlPhaseRef.current === vsVlPhase) return
+    vsVlPhaseRef.current = vsVlPhase
+    setVsVlTab(vsVlPhase === "PROJECT_ACCEPTANCE" ? "description" : "tasks")
+  }, [isVsVl, vsVlPhase])
 
   React.useEffect(() => {
     if (!isVsVl || !project?.id) return
@@ -1024,6 +1052,91 @@ export default function PcmProjectPage() {
   const canClosePhase = phase !== "MBYLLJA" && phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
 
+  const renderGaNotes = () => (
+    <div className="space-y-4">
+      <Card className="bg-white/90 backdrop-blur-sm border-slate-100 shadow-sm rounded-2xl overflow-hidden">
+        <div className="p-6 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={newGaNoteType} onValueChange={(value) => setNewGaNoteType(value as "GA" | "KA")}>
+              <SelectTrigger className="w-28 border-slate-200 focus:border-slate-400 rounded-xl">
+                <SelectValue placeholder="GA/KA" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="GA">GA</SelectItem>
+                <SelectItem value="KA">KA</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={newGaNotePriority}
+              onValueChange={(value) => setNewGaNotePriority(value as "__none__" | "NORMAL" | "HIGH")}
+            >
+              <SelectTrigger className="w-40 border-slate-200 focus:border-slate-400 rounded-xl">
+                <SelectValue placeholder="Priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No priority</SelectItem>
+                <SelectItem value="NORMAL">Normal</SelectItem>
+                <SelectItem value="HIGH">High</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-start gap-2">
+            <Textarea
+              placeholder="Add GA/KA note..."
+              value={newGaNote}
+              onChange={(e) => setNewGaNote(e.target.value)}
+              rows={3}
+              className="border-slate-200 focus:border-slate-400 rounded-xl"
+            />
+            <Button
+              variant="outline"
+              disabled={!newGaNote.trim() || addingGaNote}
+              onClick={() => void submitGaNote()}
+              className="bg-slate-900 hover:bg-slate-800 text-white border-0 rounded-xl"
+            >
+              {addingGaNote ? "Adding..." : "Add"}
+            </Button>
+          </div>
+        </div>
+      </Card>
+      {gaNotes.length ? (
+        gaNotes.map((note) => (
+          <Card key={note.id} className="bg-white/90 backdrop-blur-sm border-slate-100 shadow-sm rounded-2xl overflow-hidden p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <Badge className={note.note_type === "KA" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-sky-100 text-sky-700 border-sky-200"}>
+                  {note.note_type || "GA"}
+                </Badge>
+                <span>
+                  From {userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "-"}
+                </span>
+                <span>- {formatDateTime(note.created_at)}</span>
+                {note.priority ? (
+                  <Badge className="bg-slate-100 text-slate-700 border-slate-200">{statusLabel(note.priority)}</Badge>
+                ) : null}
+              </div>
+              {note.status !== "CLOSED" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void closeGaNote(note.id)}
+                  className="rounded-xl border-slate-200 hover:bg-slate-50"
+                >
+                  Close
+                </Button>
+              ) : (
+                <Badge className="bg-slate-100 text-slate-600 border-slate-200">Closed</Badge>
+              )}
+            </div>
+            <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{note.content}</div>
+          </Card>
+        ))
+      ) : (
+        <div className="text-sm text-slate-500 text-center py-6">No GA/KA notes yet.</div>
+      )}
+    </div>
+  )
+
   if (isVsVl) {
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
@@ -1070,6 +1183,16 @@ export default function PcmProjectPage() {
     })
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
+    const vsVlTabs =
+      vsVlPhase === "PROJECT_ACCEPTANCE"
+        ? [
+            { id: "description", label: "Description" },
+            { id: "ga", label: "GA/KA Notes" },
+          ]
+        : [
+            { id: "tasks", label: "Tasks" },
+            { id: "ga", label: "GA/KA Notes" },
+          ]
     const shouldIgnoreDragTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false
       if (target.isContentEditable) return true
@@ -1160,238 +1283,246 @@ export default function PcmProjectPage() {
           </div>
         </div>
 
-        {vsVlPhase === "PROJECT_ACCEPTANCE" ? (
-          <>
-            <div className="border-b flex gap-6">
-              <button className="relative pb-3 text-sm font-medium text-blue-600">
-                Description
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+        <div className="border-b flex gap-6">
+          {vsVlTabs.map((tab) => {
+            const isActive = vsVlTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setVsVlTab(tab.id as typeof vsVlTab)}
+                className={[
+                  "relative pb-3 text-sm font-medium",
+                  tab.id === "ga" ? "ml-auto" : "",
+                  isActive ? "text-blue-600" : "text-muted-foreground",
+                ].join(" ")}
+              >
+                {tab.label}
+                {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
               </button>
-            </div>
-            <Card>
-              <div className="p-4 space-y-4">
-                <div className="text-lg font-semibold">Planning</div>
-                <div className="grid gap-3">
-                  {VS_VL_ACCEPTANCE_QUESTIONS.map((q) => (
-                    <div key={q} className="flex items-center gap-3">
-                      <Checkbox
-                        checked={Boolean(vsVlAcceptanceChecks[q])}
-                        onCheckedChange={() => setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
-                        className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                      />
-                      <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
-                    </div>
-                  ))}
-                </div>
+            )
+          })}
+        </div>
+
+        {vsVlTab === "ga" ? (
+          renderGaNotes()
+        ) : vsVlPhase === "PROJECT_ACCEPTANCE" ? (
+          <Card>
+            <div className="p-4 space-y-4">
+              <div className="text-lg font-semibold">Planning</div>
+              <div className="grid gap-3">
+                {VS_VL_ACCEPTANCE_QUESTIONS.map((q) => (
+                  <div key={q} className="flex items-center gap-3">
+                    <Checkbox
+                      checked={Boolean(vsVlAcceptanceChecks[q])}
+                      onCheckedChange={() => setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                      className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                    />
+                    <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
+                  </div>
+                ))}
               </div>
-            </Card>
-          </>
-        ) : (
-          <>
-            <div className="border-b flex gap-6">
-              <button className="relative pb-3 text-sm font-medium text-blue-600">
-                Tasks
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              </button>
             </div>
-            <Card className="border-0 shadow-sm">
-              <div className="p-6 space-y-4">
-                <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-                <div
-                  ref={vsVlScrollRef}
-                  className="overflow-x-auto border rounded-lg cursor-grab active:cursor-grabbing"
-                  style={{ touchAction: "pan-x" }}
-                  onPointerDown={handleVsVlPointerDown}
-                  onPointerMove={handleVsVlPointerMove}
-                  onPointerUp={handleVsVlPointerUp}
-                  onPointerLeave={handleVsVlPointerUp}
-                  onPointerCancel={handleVsVlPointerUp}
-                >
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-slate-600 uppercase tracking-wide">
-                      <tr>
-                        <th className="border px-2 py-2 text-left">PLATFORMA</th>
-                        <th className="border px-2 py-2 text-left">PERSHKRIMI</th>
-                        <th className="border px-2 py-2 text-left">PERSHKRIMI/DETAL</th>
-                        <th className="border px-2 py-2 text-left">DATA E SHFAQJES</th>
-                        <th className="border px-2 py-2 text-left">PRIORITETI</th>
-                        <th className="border px-2 py-2 text-left">USERID</th>
-                        <th className="border px-2 py-2 text-left">VARESIA</th>
-                        <th className="border px-2 py-2 text-left">STATUS</th>
-                        <th className="border px-2 py-2 text-left">COMMENT</th>
-                        <th className="border px-2 py-2 text-left">CHECKLISTA</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="align-top bg-slate-50">
-                        <td className="border px-2 py-2 text-[11px] font-semibold text-slate-600">
-                          {VS_VL_PHASE_LABELS[vsVlPhase]}
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Input
-                            value={vsVlTaskTitle}
-                            onChange={(e) => setVsVlTaskTitle(e.target.value)}
-                            placeholder="Pershkrimi..."
-                            className="h-8 text-xs"
-                          />
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Textarea
-                            value={vsVlTaskDetail}
-                            onChange={(e) => setVsVlTaskDetail(e.target.value)}
-                            placeholder="Pershkrimi/Detaj"
-                            rows={3}
-                            className="text-xs"
-                          />
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Input
-                            value={vsVlTaskDate}
-                            onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
-                            type="date"
-                            className="h-8 text-xs"
-                          />
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="NORMAL">NORMAL</SelectItem>
-                              <SelectItem value="HIGH">I LARTE</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="border px-2 py-2">
-                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                            {assignableUsers.length ? (
-                              assignableUsers.map((u) => {
-                                const checked = vsVlTaskAssignees.includes(u.id)
-                                return (
-                                  <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                    <input
-                                      type="checkbox"
-                                      className="h-3 w-3 rounded border-slate-300"
-                                      checked={checked}
-                                      onChange={() =>
-                                        setVsVlTaskAssignees((prev) =>
-                                          checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
-                                        )
-                                      }
-                                    />
-                                    <span className="truncate">{u.full_name || u.username || u.email}</span>
-                                  </label>
-                                )
-                              })
-                            ) : (
-                              <div className="text-[11px] text-slate-400">-</div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="-" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">-</SelectItem>
-                              {dependencyOptions.map((task) => (
-                                <SelectItem key={task.id} value={task.id}>
-                                  {task.title}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {TASK_STATUSES.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {statusLabel(status)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="border px-2 py-2">
-                          <Textarea
-                            value={vsVlTaskComment}
-                            onChange={(e) => setVsVlTaskComment(e.target.value)}
-                            placeholder="Koment..."
-                            rows={2}
-                            className="text-xs"
-                          />
-                        </td>
-                        <td className="border px-2 py-2 space-y-2">
-                          <Textarea
-                            value={vsVlTaskChecklist}
-                            onChange={(e) => setVsVlTaskChecklist(e.target.value)}
-                            placeholder="Checklist..."
-                            rows={2}
-                            className="text-xs"
-                          />
-                          <Button
-                            size="sm"
-                            className="w-full"
-                            disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
-                            onClick={async () => {
-                              if (!project || !vsVlTaskTitle.trim()) return
-                              setCreatingVsVlTask(true)
-                              try {
-                                const meta: VsVlTaskMeta = {
-                                  vs_vl_phase: vsVlPhase,
-                                  checklist: vsVlTaskChecklist.trim() || undefined,
-                                  comment: vsVlTaskComment.trim() || undefined,
-                                }
-                                const res = await apiFetch("/tasks", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    title: vsVlTaskTitle.trim(),
-                                    description: vsVlTaskDetail.trim() || null,
-                                    project_id: project.id,
-                                    department_id: project.department_id,
-                                    assignees: vsVlTaskAssignees,
-                                    dependency_task_id:
-                                      vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
-                                    status: vsVlTaskStatus || "TODO",
-                                    priority: vsVlTaskPriority,
-                                    due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
-                                    internal_notes: serializeVsVlMeta(meta),
-                                  }),
-                                })
-                                if (!res?.ok) {
-                                  toast.error("Failed to add task")
-                                  return
-                                }
-                                const created = (await res.json()) as Task
-                                setTasks((prev) => [...prev, created])
-                                setVsVlTaskTitle("")
-                                setVsVlTaskDetail("")
-                                setVsVlTaskDate("")
-                                setVsVlTaskPriority("NORMAL")
-                                setVsVlTaskStatus("TODO")
-                                setVsVlTaskAssignees([])
-                                setVsVlTaskDependencyId("__none__")
-                                setVsVlTaskChecklist("")
-                                setVsVlTaskComment("")
-                                toast.success("Task added")
-                              } finally {
-                                setCreatingVsVlTask(false)
+          </Card>
+        ) : (
+          <Card className="border-0 shadow-sm">
+            <div className="p-6 space-y-4">
+              <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
+              <div
+                ref={vsVlScrollRef}
+                className="overflow-x-auto border rounded-lg cursor-grab active:cursor-grabbing"
+                style={{ touchAction: "pan-x" }}
+                onPointerDown={handleVsVlPointerDown}
+                onPointerMove={handleVsVlPointerMove}
+                onPointerUp={handleVsVlPointerUp}
+                onPointerLeave={handleVsVlPointerUp}
+                onPointerCancel={handleVsVlPointerUp}
+              >
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-600 uppercase tracking-wide">
+                    <tr>
+                      <th className="border px-2 py-2 text-left">PLATFORMA</th>
+                      <th className="border px-2 py-2 text-left">PERSHKRIMI</th>
+                      <th className="border px-2 py-2 text-left">PERSHKRIMI/DETAL</th>
+                      <th className="border px-2 py-2 text-left">DATA E SHFAQJES</th>
+                      <th className="border px-2 py-2 text-left">PRIORITETI</th>
+                      <th className="border px-2 py-2 text-left">USERID</th>
+                      <th className="border px-2 py-2 text-left">VARESIA</th>
+                      <th className="border px-2 py-2 text-left">STATUS</th>
+                      <th className="border px-2 py-2 text-left">COMMENT</th>
+                      <th className="border px-2 py-2 text-left">CHECKLISTA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="align-top bg-slate-50">
+                      <td className="border px-2 py-2 text-[11px] font-semibold text-slate-600">
+                        {VS_VL_PHASE_LABELS[vsVlPhase]}
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Input
+                          value={vsVlTaskTitle}
+                          onChange={(e) => setVsVlTaskTitle(e.target.value)}
+                          placeholder="Pershkrimi..."
+                          className="h-8 text-xs"
+                        />
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Textarea
+                          value={vsVlTaskDetail}
+                          onChange={(e) => setVsVlTaskDetail(e.target.value)}
+                          placeholder="Pershkrimi/Detaj"
+                          rows={3}
+                          className="text-xs"
+                        />
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Input
+                          value={vsVlTaskDate}
+                          onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
+                          type="date"
+                          className="h-8 text-xs"
+                        />
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="NORMAL">NORMAL</SelectItem>
+                            <SelectItem value="HIGH">I LARTE</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="border px-2 py-2">
+                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                          {assignableUsers.length ? (
+                            assignableUsers.map((u) => {
+                              const checked = vsVlTaskAssignees.includes(u.id)
+                              return (
+                                <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3 rounded border-slate-300"
+                                    checked={checked}
+                                    onChange={() =>
+                                      setVsVlTaskAssignees((prev) =>
+                                        checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                                      )
+                                    }
+                                  />
+                                  <span className="truncate">{u.full_name || u.username || u.email}</span>
+                                </label>
+                              )
+                            })
+                          ) : (
+                            <div className="text-[11px] text-slate-400">-</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="-" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">-</SelectItem>
+                            {dependencyOptions.map((task) => (
+                              <SelectItem key={task.id} value={task.id}>
+                                {task.title}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TASK_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {statusLabel(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="border px-2 py-2">
+                        <Textarea
+                          value={vsVlTaskComment}
+                          onChange={(e) => setVsVlTaskComment(e.target.value)}
+                          placeholder="Koment..."
+                          rows={2}
+                          className="text-xs"
+                        />
+                      </td>
+                      <td className="border px-2 py-2 space-y-2">
+                        <Textarea
+                          value={vsVlTaskChecklist}
+                          onChange={(e) => setVsVlTaskChecklist(e.target.value)}
+                          placeholder="Checklist..."
+                          rows={2}
+                          className="text-xs"
+                        />
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
+                          onClick={async () => {
+                            if (!project || !vsVlTaskTitle.trim()) return
+                            setCreatingVsVlTask(true)
+                            try {
+                              const meta: VsVlTaskMeta = {
+                                vs_vl_phase: vsVlPhase,
+                                checklist: vsVlTaskChecklist.trim() || undefined,
+                                comment: vsVlTaskComment.trim() || undefined,
                               }
-                            }}
-                          >
-                            {creatingVsVlTask ? "Saving..." : "Save"}
-                          </Button>
-                        </td>
-                      </tr>
-                      {orderedVsVlTasks.length ? (
-                        orderedVsVlTasks.map((task) => {
+                              const res = await apiFetch("/tasks", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  title: vsVlTaskTitle.trim(),
+                                  description: vsVlTaskDetail.trim() || null,
+                                  project_id: project.id,
+                                  department_id: project.department_id,
+                                  assignees: vsVlTaskAssignees,
+                                  dependency_task_id:
+                                    vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
+                                  status: vsVlTaskStatus || "TODO",
+                                  priority: vsVlTaskPriority,
+                                  due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
+                                  internal_notes: serializeVsVlMeta(meta),
+                                }),
+                              })
+                              if (!res?.ok) {
+                                toast.error("Failed to add task")
+                                return
+                              }
+                              const created = (await res.json()) as Task
+                              setTasks((prev) => [...prev, created])
+                              setVsVlTaskTitle("")
+                              setVsVlTaskDetail("")
+                              setVsVlTaskDate("")
+                              setVsVlTaskPriority("NORMAL")
+                              setVsVlTaskStatus("TODO")
+                              setVsVlTaskAssignees([])
+                              setVsVlTaskDependencyId("__none__")
+                              setVsVlTaskChecklist("")
+                              setVsVlTaskComment("")
+                              toast.success("Task added")
+                            } finally {
+                              setCreatingVsVlTask(false)
+                            }
+                          }}
+                        >
+                          {creatingVsVlTask ? "Saving..." : "Save"}
+                        </Button>
+                      </td>
+                    </tr>
+                    {orderedVsVlTasks.length ? (
+                      orderedVsVlTasks.map((task) => {
                           const meta = parseVsVlMeta(task.internal_notes)
                           const titleKey = normalizeTaskTitle(task.title)
                           const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
@@ -1602,8 +1733,7 @@ export default function PcmProjectPage() {
                 </div>
               </div>
             </Card>
-          </>
-        )}
+            )}
       </div>
     )
   }
@@ -1675,12 +1805,32 @@ export default function PcmProjectPage() {
         {mstPhase === "PLANIFIKIMI" ? (
           <>
             <div className="border-b flex gap-6">
-              <button className="relative pb-3 text-sm font-medium text-blue-600">
-                Description
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              </button>
+              {[
+                { id: "description", label: "Description" },
+                { id: "ga", label: "Shenime GA/KA" },
+              ].map((tab) => {
+                const isActive = mstTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMstTab(tab.id as typeof mstTab)}
+                    className={[
+                      "relative pb-3 text-sm font-medium",
+                      tab.id === "ga" ? "ml-auto" : "",
+                      isActive ? "text-blue-600" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {tab.label}
+                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                  </button>
+                )
+              })}
             </div>
-            <Card>
+            {mstTab === "ga" ? (
+              renderGaNotes()
+            ) : (
+              <Card>
               <div className="p-4 space-y-4">
                 <div className="text-lg font-semibold">Planifikimi</div>
                 <div className="grid gap-3">
@@ -1732,6 +1882,7 @@ export default function PcmProjectPage() {
                 </div>
               </div>
             </Card>
+            )}
           </>
         ) : mstPhase === "PRODUKTE" ? (
           <>
@@ -1742,13 +1893,16 @@ export default function PcmProjectPage() {
                 { id: "members", label: "Members" },
                 { id: "ga", label: "Shenime GA/KA" },
               ].map((tab) => {
-                const isActive = productTab === tab.id
+                const isActive = mstTab === tab.id
                 return (
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setProductTab(tab.id as typeof productTab)}
-                    className={["relative pb-3 text-sm font-medium", isActive ? "text-blue-600" : "text-muted-foreground"].join(" ")}
+                    onClick={() => setMstTab(tab.id as typeof mstTab)}
+                    className={[
+                      "relative pb-3 text-sm font-medium",
+                      isActive ? "text-blue-600" : "text-muted-foreground",
+                    ].join(" ")}
                   >
                     {tab.label}
                     {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
@@ -1757,7 +1911,7 @@ export default function PcmProjectPage() {
               })}
             </div>
 
-            {productTab === "tasks" ? (
+            {mstTab === "tasks" ? (
               <Card className="border-0 shadow-sm">
                 <div className="p-6 space-y-4">
                   <div className="text-lg font-semibold tracking-tight">Tasks</div>
@@ -1947,7 +2101,7 @@ export default function PcmProjectPage() {
               </Card>
             ) : null}
 
-            {productTab === "checklists" ? (
+            {mstTab === "checklists" ? (
               <Card>
                 <div className="p-4 space-y-4">
                   <div className="text-lg font-semibold">Checklists</div>
@@ -1994,7 +2148,7 @@ export default function PcmProjectPage() {
               </Card>
             ) : null}
 
-            {productTab === "members" ? (
+            {mstTab === "members" ? (
               <Card>
                 <div className="p-4 space-y-4">
                   <div className="flex items-center justify-between">
@@ -2067,105 +2221,37 @@ export default function PcmProjectPage() {
               </Card>
             ) : null}
 
-            {productTab === "ga" ? (
-              <Card>
-                <div className="p-4 space-y-4">
-                  <div className="text-lg font-semibold">Shenime GA/KA</div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <Select value={newGaNoteType} onValueChange={(v) => setNewGaNoteType(v as "GA" | "KA")}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="GA">GA</SelectItem>
-                        <SelectItem value="KA">KA</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={newGaNotePriority} onValueChange={(v) => setNewGaNotePriority(v as any)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="No priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No priority</SelectItem>
-                        <SelectItem value="NORMAL">Normal</SelectItem>
-                        <SelectItem value="HIGH">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <div className="md:col-span-2 flex gap-2">
-                      <Textarea
-                        placeholder="Add GA/KA note..."
-                        value={newGaNote}
-                        onChange={(e) => setNewGaNote(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button
-                        onClick={async () => {
-                          if (!project || !newGaNote.trim()) return
-                          setAddingGaNote(true)
-                          try {
-                            const res = await apiFetch("/ga-notes", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                content: newGaNote.trim(),
-                                project_id: project.id,
-                                note_type: newGaNoteType,
-                                priority: newGaNotePriority === "__none__" ? null : newGaNotePriority,
-                              }),
-                            })
-                            if (!res?.ok) {
-                              toast.error("Failed to add note")
-                              return
-                            }
-                            const created = (await res.json()) as GaNote
-                            setGaNotes((prev) => [...prev, created])
-                            setNewGaNote("")
-                            setNewGaNotePriority("__none__")
-                          } finally {
-                            setAddingGaNote(false)
-                          }
-                        }}
-                        disabled={addingGaNote || !newGaNote.trim()}
-                      >
-                        {addingGaNote ? "Adding..." : "Add"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {gaNotes.map((note) => {
-                      const creator = userMap.get(note.created_by || "")?.full_name || userMap.get(note.created_by || "")?.username || "Unknown"
-                      return (
-                        <Card key={note.id} className="border border-amber-100 bg-amber-50/50">
-                          <div className="p-3 flex flex-col gap-2">
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Badge variant="secondary">{note.note_type}</Badge>
-                              <span>From {creator}</span>
-                              <span>•</span>
-                              <span>{note.created_at ? new Date(note.created_at).toLocaleString("sq-AL") : "-"}</span>
-                              <Badge variant="outline" className="ml-auto">{note.priority || "Normal"}</Badge>
-                              <Badge variant={note.status === "CLOSED" ? "secondary" : "outline"}>{note.status}</Badge>
-                            </div>
-                            <div className="text-sm whitespace-pre-wrap">{note.content}</div>
-                          </div>
-                        </Card>
-                      )
-                    })}
-                    {gaNotes.length === 0 ? <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div> : null}
-                  </div>
-                </div>
-              </Card>
-            ) : null}
+            {mstTab === "ga" ? renderGaNotes() : null}
           </>
         ) : mstPhase === "KONTROLLI" ? (
           <>
             <div className="border-b flex gap-6">
-              <button className="relative pb-3 text-sm font-medium text-blue-600">
-                Tasks (Detyrat)
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              </button>
+              {[
+                { id: "tasks", label: "Tasks (Detyrat)" },
+                { id: "ga", label: "Shenime GA/KA" },
+              ].map((tab) => {
+                const isActive = mstTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMstTab(tab.id as typeof mstTab)}
+                    className={[
+                      "relative pb-3 text-sm font-medium",
+                      tab.id === "ga" ? "ml-auto" : "",
+                      isActive ? "text-blue-600" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {tab.label}
+                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                  </button>
+                )
+              })}
             </div>
-            <Card className="border-0 shadow-sm">
+            {mstTab === "ga" ? (
+              renderGaNotes()
+            ) : (
+              <Card className="border-0 shadow-sm">
               <div className="p-6 space-y-4">
                 <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
                 {/* Table header */}
@@ -2360,16 +2446,37 @@ export default function PcmProjectPage() {
                 </div>
               </div>
             </Card>
+            )}
           </>
         ) : mstPhase === "FINALIZIMI" ? (
           <>
             <div className="border-b flex gap-6">
-              <button className="relative pb-3 text-sm font-medium text-blue-600">
-                Finalizimi
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              </button>
+              {[
+                { id: "final", label: "Finalizimi" },
+                { id: "ga", label: "Shenime GA/KA" },
+              ].map((tab) => {
+                const isActive = mstTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMstTab(tab.id as typeof mstTab)}
+                    className={[
+                      "relative pb-3 text-sm font-medium",
+                      tab.id === "ga" ? "ml-auto" : "",
+                      isActive ? "text-blue-600" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {tab.label}
+                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                  </button>
+                )
+              })}
             </div>
-            <Card className="border-0 shadow-sm">
+            {mstTab === "ga" ? (
+              renderGaNotes()
+            ) : (
+              <Card className="border-0 shadow-sm">
               <div className="p-6 space-y-6">
                 <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
                 <div className="space-y-4">
@@ -2407,6 +2514,7 @@ export default function PcmProjectPage() {
                 )}
               </div>
             </Card>
+            )}
           </>
         ) : (
           <Card>
@@ -2476,7 +2584,16 @@ export default function PcmProjectPage() {
           {visibleTabs.map((tab) => {
             const isActive = tab.id === activeTab
             return (
-              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={["relative pb-3 text-sm font-medium", isActive ? "text-blue-600" : "text-muted-foreground"].join(" ")}>
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  "relative pb-3 text-sm font-medium",
+                  tab.id === "ga" ? "ml-auto" : "",
+                  isActive ? "text-blue-600" : "text-muted-foreground",
+                ].join(" ")}
+              >
                 {tab.label}
                 {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
               </button>

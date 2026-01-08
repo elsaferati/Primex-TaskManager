@@ -2889,31 +2889,33 @@ export default function DepartmentKanban() {
 
         {/* Title Warning Confirmation Dialog */}
         <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
-          <DialogContent className="sm:max-w-md bg-white border-amber-100 rounded-2xl">
+          <DialogContent className="sm:max-w-md border-red-200 bg-white shadow-xl rounded-2xl">
             <DialogHeader>
-              <DialogTitle className="text-slate-900 flex items-center gap-2">
-                <span className="text-2xl">!</span>
+              <DialogTitle className="text-slate-900 flex items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white text-lg shadow-sm">
+                  !
+                </span>
                 <span>Confirm Project Title</span>
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="text-sm text-slate-700">
-                Please confirm the title "<span className="font-semibold text-slate-900">{pendingProjectTitle}</span>" is the correct shortcut to use.
+                Please confirm the title "<span className="font-semibold text-red-900">{pendingProjectTitle}</span>" is the correct shortcut to use.
               </div>
               {looksLikeFullName(pendingProjectTitle) ? (
-                <div className="text-sm text-slate-600">
+                <div className="text-sm text-red-700 font-semibold">
                   This looks longer than a typical shortcut. Consider shortening it.
                 </div>
               ) : null}
-              <div className="bg-white border border-slate-200 rounded-xl p-4">
-                <div className="text-sm font-semibold text-slate-900 mb-2">Remember:</div>
-                <div className="text-xs text-slate-600 space-y-1">
-                  <div>- Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
-                  <div>- Keep it short and simple (typically 2-6 characters)</div>
-                  <div>- Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
+              <div className="rounded-xl border border-red-200 bg-red-50/60 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-red-700 mb-2">Remember</div>
+                <div className="text-xs text-red-800 space-y-1">
+                  <div>• Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
+                  <div>• Keep it short and simple (typically 2-6 characters)</div>
+                  <div>• Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
                 </div>
               </div>
-              <div className="text-sm text-slate-600">
+              <div className="text-sm text-slate-700">
                 Are you sure you want to use this as the project title?
               </div>
             </div>
@@ -2934,7 +2936,7 @@ export default function DepartmentKanban() {
                   setPendingProjectTitle("")
                   void submitProject()
                 }} 
-                className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl"
+                className="bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm rounded-xl"
               >
                 Yes, Use This Title
               </Button>
