@@ -5,7 +5,18 @@ import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import type { User, Task, CommonEntry, GaNote, Department, Project } from "@/lib/types"
 
-type CommonType = "late" | "absent" | "leave" | "ga" | "blocked" | "oneH" | "external" | "r1" | "feedback" | "priority"
+type CommonType =
+  | "late"
+  | "absent"
+  | "leave"
+  | "ga"
+  | "blocked"
+  | "oneH"
+  | "external"
+  | "r1"
+  | "problem"
+  | "feedback"
+  | "priority"
 
 type LateItem = { person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { person: string; date: string; from: string; to: string; note?: string }
@@ -15,6 +26,7 @@ type BlockedItem = { title: string; person: string; date: string; note?: string 
 type OneHItem = { title: string; person: string; date: string; note?: string }
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string }
 type R1Item = { title: string; date: string; owner: string; note?: string }
+type ProblemItem = { title: string; person: string; date: string; note?: string }
 type FeedbackItem = { title: string; person: string; date: string; note?: string }
 type PriorityItem = { person: string; date: string; items: Array<{ project: string; task: string; level: string }> }
 
@@ -287,6 +299,7 @@ export default function CommonViewPage() {
     oneH: [] as OneHItem[],
     external: [] as ExternalItem[],
     r1: [] as R1Item[],
+    problems: [] as ProblemItem[],
     feedback: [] as FeedbackItem[],
     priority: [] as PriorityItem[],
   })
@@ -301,7 +314,7 @@ export default function CommonViewPage() {
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
   const [gaModalOpen, setGaModalOpen] = React.useState(false)
-  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "feedback" | "gaNote">("late")
+  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "problem" | "feedback" | "gaNote">("late")
   const [formPerson, setFormPerson] = React.useState("")
   const [formDate, setFormDate] = React.useState(toISODate(new Date()))
   const [formDelayStart, setFormDelayStart] = React.useState("08:00")
@@ -363,6 +376,7 @@ export default function CommonViewPage() {
           oneH: [] as OneHItem[],
           external: [] as ExternalItem[],
           r1: [] as R1Item[],
+          problems: [] as ProblemItem[],
           feedback: [] as FeedbackItem[],
           priority: [] as PriorityItem[],
         }
@@ -522,6 +536,13 @@ export default function CommonViewPage() {
                 time: "14:00",
                 platform: "Zoom",
                 owner: personName,
+              })
+            } else if (e.category === "Problems") {
+              allData.problems.push({
+                title: e.title,
+                person: personName,
+                date,
+                note: e.description || undefined,
               })
             } else if (e.category === "Complaints" || e.category === "Requests" || e.category === "Proposals") {
               allData.feedback.push({
@@ -689,12 +710,13 @@ export default function CommonViewPage() {
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date))
     const external = commonData.external.filter((x) => inSelectedDates(x.date))
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date))
+    const problems = commonData.problems.filter((x) => inSelectedDates(x.date))
     const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date))
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
 
-    return { late, absent, leave, ga, blocked, oneH, external, r1, feedback, priority }
+    return { late, absent, leave, ga, blocked, oneH, external, r1, problems, feedback, priority }
   }, [commonData, selectedDates])
 
   // Common people for priority (from users)
@@ -894,6 +916,7 @@ export default function CommonViewPage() {
         if (formType === "late") category = "Delays"
         else if (formType === "absent") category = "Absences"
         else if (formType === "leave") category = "Annual Leave"
+        else if (formType === "problem") category = "Problems"
         else category = "Requests"
 
         // Find the user by name if person is selected
@@ -942,10 +965,10 @@ export default function CommonViewPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             category,
-            title: formType === "feedback" ? formTitle : formPerson || "Untitled",
-            description: description || null,
-          }),
-        })
+              title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
+              description: description || null,
+            }),
+          })
 
         if (res.ok) {
           const createdEntry = (await res.json()) as CommonEntry
@@ -1036,6 +1059,11 @@ export default function CommonViewPage() {
       subtitle: `Owner: ${x.owner} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent r1",
     }))
+    const problemItems: SwimlaneCell[] = filtered.problems.map((x) => ({
+      title: x.title,
+      subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent problem",
+    }))
     const feedbackItems: SwimlaneCell[] = filtered.feedback.map((x) => ({
       title: x.title,
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
@@ -1049,88 +1077,96 @@ export default function CommonViewPage() {
       }))
     )
 
-    return [
-      {
-        id: "late",
-        label: "Delays",
-        count: filtered.late.length,
-        headerClass: "swimlane-header delay",
-        badgeClass: "swimlane-badge delay",
-        items: lateItems,
-      },
-      {
-        id: "absent",
-        label: "Absences",
-        count: filtered.absent.length,
-        headerClass: "swimlane-header absence",
-        badgeClass: "swimlane-badge absence",
-        items: absentItems,
-      },
-      {
-        id: "leave",
-        label: "Annual Leave",
-        count: filtered.leave.length,
-        headerClass: "swimlane-header leave",
-        badgeClass: "swimlane-badge leave",
-        items: leaveItems,
-      },
-      {
-        id: "ga",
-        label: "GA Notes",
-        count: filtered.ga.length,
-        headerClass: "swimlane-header ga",
-        badgeClass: "swimlane-badge ga",
-        items: gaItems,
-      },
-      {
-        id: "blocked",
-        label: "Blocked",
-        count: filtered.blocked.length,
-        headerClass: "swimlane-header blocked",
-        badgeClass: "swimlane-badge blocked",
-        items: blockedItems,
-      },
-      {
-        id: "oneH",
-        label: "1H Tasks",
-        count: filtered.oneH.length,
-        headerClass: "swimlane-header oneh",
-        badgeClass: "swimlane-badge oneh",
-        items: oneHItems,
-      },
-      {
-        id: "external",
-        label: "External Meetings",
-        count: filtered.external.length,
-        headerClass: "swimlane-header external",
-        badgeClass: "swimlane-badge external",
-        items: externalItems,
-      },
-      {
-        id: "r1",
-        label: "R1",
-        count: filtered.r1.length,
-        headerClass: "swimlane-header r1",
-        badgeClass: "swimlane-badge r1",
-        items: r1Items,
-      },
-      {
-        id: "feedback",
-        label: "Complaints/Requests/Proposals",
-        count: filtered.feedback.length,
-        headerClass: "swimlane-header feedback",
-        badgeClass: "swimlane-badge feedback",
-        items: feedbackItems,
-      },
-      {
-        id: "priority",
-        label: "Tasks",
-        count: filtered.priority.reduce((sum, p) => sum + p.items.length, 0),
-        headerClass: "swimlane-header priority",
-        badgeClass: "swimlane-badge priority",
-        items: priorityItems,
-      },
-    ]
+      return [
+        {
+          id: "late",
+          label: "Delays",
+          count: filtered.late.length,
+          headerClass: "swimlane-header delay",
+          badgeClass: "swimlane-badge delay",
+          items: lateItems,
+        },
+        {
+          id: "absent",
+          label: "Absences",
+          count: filtered.absent.length,
+          headerClass: "swimlane-header absence",
+          badgeClass: "swimlane-badge absence",
+          items: absentItems,
+        },
+        {
+          id: "leave",
+          label: "Annual Leave",
+          count: filtered.leave.length,
+          headerClass: "swimlane-header leave",
+          badgeClass: "swimlane-badge leave",
+          items: leaveItems,
+        },
+        {
+          id: "external",
+          label: "External Meetings",
+          count: filtered.external.length,
+          headerClass: "swimlane-header external",
+          badgeClass: "swimlane-badge external",
+          items: externalItems,
+        },
+        {
+          id: "blocked",
+          label: "Blocked",
+          count: filtered.blocked.length,
+          headerClass: "swimlane-header blocked",
+          badgeClass: "swimlane-badge blocked",
+          items: blockedItems,
+        },
+        {
+          id: "oneH",
+          label: "1H Tasks",
+          count: filtered.oneH.length,
+          headerClass: "swimlane-header oneh",
+          badgeClass: "swimlane-badge oneh",
+          items: oneHItems,
+        },
+        {
+          id: "r1",
+          label: "R1",
+          count: filtered.r1.length,
+          headerClass: "swimlane-header r1",
+          badgeClass: "swimlane-badge r1",
+          items: r1Items,
+        },
+        {
+          id: "priority",
+          label: "Tasks",
+          count: filtered.priority.reduce((sum, p) => sum + p.items.length, 0),
+          headerClass: "swimlane-header priority",
+          badgeClass: "swimlane-badge priority",
+          items: priorityItems,
+        },
+        {
+          id: "ga",
+          label: "GA Notes",
+          count: filtered.ga.length,
+          headerClass: "swimlane-header ga",
+          badgeClass: "swimlane-badge ga",
+          items: gaItems,
+        },
+        {
+          id: "problem",
+          label: "Problems",
+          count: filtered.problems.length,
+          headerClass: "swimlane-header problem",
+          badgeClass: "swimlane-badge problem",
+          items: problemItems,
+        },
+        {
+          id: "feedback",
+          label: "Complaints/Requests/Proposals",
+          count: filtered.feedback.length,
+          headerClass: "swimlane-header feedback",
+          badgeClass: "swimlane-badge feedback",
+          items: feedbackItems,
+        },
+      ]
   }, [filtered])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
@@ -1142,7 +1178,7 @@ export default function CommonViewPage() {
   }, [])
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", overflow: "auto", background: "#ffffff" }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#ffffff" }}>
       <style>{`
         * { box-sizing: border-box; }
         :root {
@@ -1165,6 +1201,8 @@ export default function CommonViewPage() {
           --external-accent: #0284c7;
           --r1-bg: #dcfce7;
           --r1-accent: #16a34a;
+          --problem-bg: #ecfeff;
+          --problem-accent: #0891b2;
           --feedback-bg: #e2e8f0;
           --feedback-accent: #64748b;
           --priority-bg: #fef3c7;
@@ -1174,6 +1212,12 @@ export default function CommonViewPage() {
         }
         
         /* Modern Header */
+        .common-sticky {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #ffffff;
+        }
         .top-header { 
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           padding: 12px 24px; 
@@ -1562,6 +1606,7 @@ export default function CommonViewPage() {
         .swimlane-header.ga { background: var(--ga-bg); color: #6b7280; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
+        .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
         .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
         .swimlane-header.priority { background: var(--priority-bg); color: #b45309; }
         .swimlane-badge.delay { border-color: var(--delay-accent); color: #c2410c; }
@@ -1572,6 +1617,7 @@ export default function CommonViewPage() {
         .swimlane-badge.ga { border-color: var(--ga-accent); color: #6b7280; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
+        .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
         .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
         .swimlane-badge.priority { border-color: var(--priority-accent); color: #b45309; }
         .swimlane-accent.delay { border-left: 4px solid var(--delay-accent); }
@@ -1582,6 +1628,7 @@ export default function CommonViewPage() {
         .swimlane-accent.ga { border-left: 4px solid var(--ga-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
+        .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
         
@@ -1942,149 +1989,158 @@ export default function CommonViewPage() {
         }
       `}</style>
 
-      <header className="top-header">
-        <div className="page-title">
-          <h1>Common View</h1>
-          <p>Daily/weekly view for key statuses and team priorities.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-primary no-print" type="button" onClick={handlePrint}>
-            Export / Print
-          </button>
-          <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
-            Meeting
-          </button>
-          <button className="btn-outline no-print" type="button" onClick={() => openModal("gaNote")}>
-            GA
-          </button>
-          <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
-            + Add
-          </button>
-        </div>
-      </header>
+      <div className="common-sticky">
+        <header className="top-header">
+          <div className="page-title">
+            <h1>Common View</h1>
+            <p>Daily/weekly view for key statuses and team priorities.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn-primary no-print" type="button" onClick={handlePrint}>
+              Export / Print
+            </button>
+            <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
+              Meeting
+            </button>
+            <button className="btn-outline no-print" type="button" onClick={() => openModal("gaNote")}>
+              GA
+            </button>
+            <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
+              + Add
+            </button>
+          </div>
+        </header>
 
-      <div className="common-toolbar no-print">
-        <div className="toolbar-group">
-          <div className="chip-row">
-          {weekISOs.map((iso) => {
-            const d = fromISODate(iso)
-            const label = `${alWeekdayShort(d)} ${formatDateHuman(iso)}`
-            const isActive = selectedDates.has(iso)
-            return (
-              <button
-                key={iso}
-                className={`chip ${isActive ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleDay(iso)}
-              >
-                {label}
-              </button>
-            )
-          })}
+        <div className="common-toolbar no-print">
+          <div className="toolbar-group">
+            <div className="chip-row">
+            {weekISOs.map((iso) => {
+              const d = fromISODate(iso)
+              const label = `${alWeekdayShort(d)} ${formatDateHuman(iso)}`
+              const isActive = selectedDates.has(iso)
+              return (
+                <button
+                  key={iso}
+                  className={`chip ${isActive ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleDay(iso)}
+                >
+                  {label}
+                </button>
+              )
+            })}
+            </div>
+            <label className="switch" title="When OFF: select only one. When ON: select multiple.">
+              <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
+              Multi-select (Days)
+            </label>
           </div>
-          <label className="switch" title="When OFF: select only one. When ON: select multiple.">
-            <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
-            Multi-select (Days)
-          </label>
-        </div>
-        <div className="toolbar-group">
-          <div className="chip-row">
-          <button
-            className={`chip ${typeFilters.size === 0 ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("all")}
-          >
-            All
-          </button>
-          <button
-            className={`chip ${typeFilters.has("late") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("late")}
-          >
-            Delays
-          </button>
-          <button
-            className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("absent")}
-          >
-            Absences
-          </button>
-          <button
-            className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("leave")}
-          >
-            Annual Leave
-          </button>
-          <button
-            className={`chip ${typeFilters.has("ga") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("ga")}
-          >
-            GA Notes
-          </button>
-          <button
-            className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("blocked")}
-          >
-            BLOCKED
-          </button>
-          <button
-            className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("oneH")}
-          >
-            1H
-          </button>
-          <button
-            className={`chip ${typeFilters.has("external") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("external")}
-          >
-            External Meetings
-          </button>
-          <button
-            className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("r1")}
-          >
-            R1
-          </button>
-          <button
-            className={`chip ${typeFilters.has("feedback") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("feedback")}
-          >
-            Complaints/Requests/Proposals
-          </button>
-          <button
-            className={`chip ${typeFilters.has("priority") ? "active" : ""}`}
-            type="button"
-            onClick={() => setTypeFilter("priority")}
-          >
-            Tasks
-          </button>
+          <div className="toolbar-group">
+            <div className="chip-row">
+            <button
+              className={`chip ${typeFilters.size === 0 ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("all")}
+            >
+              All
+            </button>
+            <button
+              className={`chip ${typeFilters.has("late") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("late")}
+            >
+              Delays
+            </button>
+            <button
+              className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("absent")}
+            >
+              Absences
+            </button>
+            <button
+              className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("leave")}
+            >
+              Annual Leave
+            </button>
+            <button
+              className={`chip ${typeFilters.has("external") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("external")}
+            >
+              External Meetings
+            </button>
+            <button
+              className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("blocked")}
+            >
+              BLOCKED
+            </button>
+            <button
+              className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("oneH")}
+            >
+              1H
+            </button>
+            <button
+              className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("r1")}
+            >
+              R1
+            </button>
+            <button
+              className={`chip ${typeFilters.has("priority") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("priority")}
+            >
+              Tasks
+            </button>
+            <button
+              className={`chip ${typeFilters.has("ga") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("ga")}
+            >
+              GA Notes
+            </button>
+            <button
+              className={`chip ${typeFilters.has("problem") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("problem")}
+            >
+              Problems
+            </button>
+            <button
+              className={`chip ${typeFilters.has("feedback") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("feedback")}
+            >
+              Complaints/Requests/Proposals
+            </button>
+            </div>
+            <label className="switch" title="When OFF: select only one. When ON: select multiple.">
+              <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
+              Multi-select (Types)
+            </label>
           </div>
-          <label className="switch" title="When OFF: select only one. When ON: select multiple.">
-            <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
-            Multi-select (Types)
-          </label>
+          <input
+            className="input"
+            type="date"
+            value={toISODate(weekStart)}
+            onChange={(e) => setWeek(e.target.value)}
+            style={{ width: "auto" }}
+          />
+          <button className="btn-outline" type="button" onClick={selectAll}>
+            All days
+          </button>
+          <button className="btn-outline" type="button" onClick={selectToday}>
+            Today
+          </button>
         </div>
-        <input
-          className="input"
-          type="date"
-          value={toISODate(weekStart)}
-          onChange={(e) => setWeek(e.target.value)}
-          style={{ width: "auto" }}
-        />
-        <button className="btn-outline" type="button" onClick={selectAll}>
-          All days
-        </button>
-        <button className="btn-outline" type="button" onClick={selectToday}>
-          Today
-        </button>
       </div>
 
       {meetingPanelOpen ? (
@@ -2301,6 +2357,7 @@ export default function CommonViewPage() {
                       <option value="late">Delay</option>
                       <option value="absent">Absence</option>
                       <option value="leave">Annual Leave</option>
+                      <option value="problem">Problem</option>
                       <option value="feedback">Complaint/Request/Proposal</option>
                       <option value="gaNote">GA Note</option>
                   </select>
@@ -2407,14 +2464,14 @@ export default function CommonViewPage() {
                     </>
                   )}
 
-                  {formType === "feedback" && (
+                  {(formType === "feedback" || formType === "problem") && (
                     <div className="form-row span-2">
                       <label htmlFor="cv-title">Title</label>
                       <input
                         id="cv-title"
                         className="input"
                         type="text"
-                        placeholder="e.g. Request: server access"
+                        placeholder="e.g. Issue: server access"
                         value={formTitle}
                         onChange={(e) => setFormTitle(e.target.value)}
                         required

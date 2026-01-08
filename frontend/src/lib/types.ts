@@ -47,6 +47,7 @@ export type CommonCategory =
   | "Annual Leave"
   | "Blocks"
   | "External Tasks"
+  | "Problems"
   | "Complaints"
   | "Requests"
   | "Proposals"

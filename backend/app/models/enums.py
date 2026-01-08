@@ -107,6 +107,7 @@ class CommonCategory(str, enum.Enum):
     annual_leave = "Annual Leave"
     blocks = "Blocks"
     external_tasks = "External Tasks"
+    problems = "Problems"
     complaints = "Complaints"
     requests = "Requests"
     proposals = "Proposals"
