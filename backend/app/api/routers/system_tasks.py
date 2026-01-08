@@ -19,6 +19,7 @@ from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
 from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateUpdate
+from app.services.system_task_schedule import should_reopen_system_task
 
 
 router = APIRouter()
@@ -73,6 +74,7 @@ async def _sync_task_for_template(
     template: SystemTaskTemplate,
     creator_id: uuid.UUID | None,
 ) -> tuple[Task, bool]:
+    now = datetime.now(timezone.utc)
     task = (
         await db.execute(
             select(Task).where(Task.system_template_origin_id == template.id)
@@ -92,7 +94,7 @@ async def _sync_task_for_template(
             priority=template.priority or TaskPriority.NORMAL,
             finish_period=template.finish_period,
             system_template_origin_id=template.id,
-            start_date=datetime.now(timezone.utc),
+            start_date=now,
             is_active=active_value,
         )
         db.add(task)
@@ -108,6 +110,9 @@ async def _sync_task_for_template(
     task.is_active = active_value
     if task.priority is None:
         task.priority = template.priority or TaskPriority.NORMAL
+    if active_value and should_reopen_system_task(task, template, now):
+        task.status = TaskStatus.TODO
+        task.completed_at = None
     return task, False
 
 
@@ -134,6 +139,7 @@ def _task_row_to_out(
         month_of_year=template.month_of_year,
         priority=priority_value,
         finish_period=task.finish_period,
+        status=task.status,
         is_active=task.is_active,
         created_at=task.created_at,
     )

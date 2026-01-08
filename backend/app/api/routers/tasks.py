@@ -378,10 +378,35 @@ async def update_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    ensure_department_access(user, task.department_id)
+    if user.role == UserRole.STAFF:
+        if task.assigned_to == user.id:
+            pass
+        else:
+            staff_assignment = (
+                await db.execute(
+                    select(TaskAssignee)
+                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user.id)
+                )
+            ).scalar_one_or_none()
+            if staff_assignment is None:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        if task.department_id is not None:
+            ensure_department_access(user, task.department_id)
+    else:
+        ensure_department_access(user, task.department_id)
 
-    if user.role == UserRole.STAFF and task.assigned_to != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if payload.status is not None and task.system_template_origin_id is not None:
+        if task.assigned_to == user.id:
+            pass
+        else:
+            status_assignment = (
+                await db.execute(
+                    select(TaskAssignee)
+                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user.id)
+                )
+            ).scalar_one_or_none()
+            if status_assignment is None:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     if user.role == UserRole.STAFF:
         forbidden_fields = {

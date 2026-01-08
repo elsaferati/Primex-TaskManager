@@ -30,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { toast } from "sonner"
 import type {
   Department,
   SystemTaskFrequency,
@@ -602,16 +603,22 @@ export function SystemTasksView({
         apiFetch("/system-tasks"),
         apiFetch("/departments"),
       ])
-      if (templatesRes.ok) {
-        setTemplates((await templatesRes.json()) as SystemTaskTemplate[])
-      }
-      if (departmentsRes.ok) {
-        setDepartments((await departmentsRes.json()) as Department[])
-      }
-      const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
-      if (usersRes.ok) {
-        setUsers((await usersRes.json()) as AssigneeUser[])
-      }
+        if (templatesRes.ok) {
+          setTemplates((await templatesRes.json()) as SystemTaskTemplate[])
+        } else {
+          console.error("Failed to load system tasks", templatesRes.status)
+        }
+        if (departmentsRes.ok) {
+          setDepartments((await departmentsRes.json()) as Department[])
+        } else {
+          console.error("Failed to load departments", departmentsRes.status)
+        }
+        const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
+        if (usersRes.ok) {
+          setUsers((await usersRes.json()) as AssigneeUser[])
+        } else {
+          console.error("Failed to load users", usersRes.status)
+        }
     } finally {
       setLoading(false)
     }
@@ -931,12 +938,12 @@ export function SystemTasksView({
       const aInactive = !a.is_active
       const bInactive = !b.is_active
       if (aInactive !== bInactive) return aInactive ? 1 : -1
-      const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
-      const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
-      if (aPriority !== bPriority) return aPriority - bPriority
       const aFrequency = frequencyOrder[a.frequency]
       const bFrequency = frequencyOrder[b.frequency]
       if (aFrequency !== bFrequency) return aFrequency - bFrequency
+      const aPriority = PRIORITY_SORT_ORDER[normalizePriority(a.priority)]
+      const bPriority = PRIORITY_SORT_ORDER[normalizePriority(b.priority)]
+      if (aPriority !== bPriority) return aPriority - bPriority
       const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
       const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
       if (aCreated !== bCreated) return bCreated - aCreated
@@ -1031,7 +1038,17 @@ export function SystemTasksView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        let detail = "Failed to create system task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
       setCreateOpen(false)
       setTitle("")
       setDescription("")
@@ -1047,6 +1064,7 @@ export function SystemTasksView({
       setInternalNotes({})
       setIsActive(true)
       await load()
+      toast.success("System task created")
     } finally {
       setSaving(false)
     }
@@ -1110,7 +1128,17 @@ export function SystemTasksView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        let detail = "Failed to update system task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
       const updated = (await res.json()) as SystemTaskTemplate
       setTemplates((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditOpen(false)
@@ -2321,7 +2349,7 @@ export function SystemTasksView({
           {/* STICKY HEADER ROW */}
           <div className={cn(
             GRID_CLASS,
-            "sticky top-0 z-40 border-b bg-slate-50/95 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
+            "sticky top-0 z-40 border-b bg-slate-50/95 py-3 px-10 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm backdrop-blur"
           )}>
             <div>Task Title</div>
             <div>Department</div>
@@ -2362,17 +2390,16 @@ export function SystemTasksView({
                     // Grouping Logic
                     const prev = index > 0 ? section.templates[index - 1] : null
                     const prevPriority = prev ? normalizePriority(prev.priority) : null
-                    const showPriorityDivider =
-                      !isInactive &&
-                      prevPriority !== null &&
-                      prevPriority !== priorityValue &&
-                      priorityValue === "HIGH"
-
-                    const showFrequencyDivider =
+                      const showFrequencyDivider =
                         !isInactive &&
-                        (index === 0 ||
-                        (prev && prev.frequency !== template.frequency) ||
-                        (prevPriority !== null && prevPriority !== priorityValue))
+                        (index === 0 || (prev && prev.frequency !== template.frequency))
+
+                      const showPriorityDivider =
+                        !isInactive &&
+                        !showFrequencyDivider &&
+                        prevPriority !== null &&
+                        prevPriority !== priorityValue &&
+                        priorityValue === "HIGH"
 
                     return (
                       <React.Fragment key={template.id}>
@@ -2387,11 +2414,11 @@ export function SystemTasksView({
                              High Priority
                            </div>
                         )}
-                        {showFrequencyDivider && !showPriorityDivider && (
+                        {showFrequencyDivider && (
                            <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                              {frequencyLabel}
                            </div>
-                        )}
+                         )}
 
                         {/* Task Row (Card Style) */}
                         <div
@@ -2404,8 +2431,13 @@ export function SystemTasksView({
                         >
                           {/* Title Only (Description removed from list view) */}
                           <div className="min-w-0 pr-4">
-                            <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
-                              {template.title}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                                {template.title}
+                              </div>
+                              <Badge variant="secondary" className="h-5 text-[10px] uppercase">
+                                {template.status || "TODO"}
+                              </Badge>
                             </div>
                           </div>
                           
@@ -2437,7 +2469,8 @@ export function SystemTasksView({
                           </div>
 
                           <div className="text-right">
-                             {canEdit && (
+                            <div className="flex flex-col items-end gap-2">
+                              {canEdit && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -2446,7 +2479,8 @@ export function SystemTasksView({
                                 >
                                   Edit
                                 </Button>
-                             )}
+                              )}
+                            </div>
                           </div>
                         </div>
                       </React.Fragment>

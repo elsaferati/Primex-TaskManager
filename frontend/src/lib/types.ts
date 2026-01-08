@@ -36,6 +36,7 @@ export interface SystemTaskTemplate {
   month_of_year?: number | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
+  status?: string | null
   is_active: boolean
   created_at: string
 }
