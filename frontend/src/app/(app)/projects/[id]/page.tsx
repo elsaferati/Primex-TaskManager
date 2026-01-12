@@ -30,6 +30,7 @@ const PHASE_LABELS: Record<string, string> = {
 
 const TABS = [
   { id: "description", label: "Description" },
+  { id: "testing", label: "Testing" },
   { id: "tasks", label: "Tasks" },
   { id: "checklists", label: "Checklists" },
   { id: "members", label: "Members" },
@@ -84,6 +85,24 @@ function statusLabel(status?: string) {
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase())
+}
+
+function formatErrorDetail(detail: unknown) {
+  if (typeof detail === "string") return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? (item as { msg?: string }).msg
+          : String(item)
+      )
+      .filter(Boolean)
+      .join(", ")
+  }
+  if (detail && typeof detail === "object" && "msg" in detail) {
+    return String((detail as { msg?: string }).msg || "An error occurred")
+  }
+  return "An error occurred"
 }
 
 function formatDateTime(value?: string | null) {
@@ -218,6 +237,23 @@ export default function ProjectPage() {
   }, [prompts])
 
   React.useEffect(() => {
+    if (!checklistItems.length) return
+    setMeetingChecklist((prev) =>
+      prev.map((item) => {
+        const stored = checklistItems.find(
+          (entry) => entry.path === "MEETINGS" && entry.title === item.content
+        )
+        if (!stored) return item
+        return {
+          ...item,
+          answer: stored.comment || "",
+          isChecked: Boolean(stored.is_checked),
+        }
+      })
+    )
+  }, [checklistItems])
+
+  React.useEffect(() => {
     if (!membersOpen) return
     setSelectedMemberIds(members.map((m) => m.id))
   }, [membersOpen, members])
@@ -315,7 +351,10 @@ export default function ProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: project.id,
-          content: newChecklistContent.trim(),
+          item_type: "CHECKBOX",
+          path: activePhase,
+          title: newChecklistContent.trim(),
+          is_checked: false,
         }),
       })
       if (!res.ok) {
@@ -326,7 +365,7 @@ export default function ProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(formatErrorDetail(detail))
         return
       }
       const created = (await res.json()) as ChecklistItem
@@ -380,16 +419,58 @@ export default function ProjectPage() {
     }
   }
 
+  const syncMeetingChecklistItem = async (itemId: string, next: Partial<(typeof meetingChecklist)[number]>) => {
+    if (!project) return
+    const item = meetingChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    const nextItem = { ...item, ...next }
+    const existing = checklistItems.find(
+      (entry) => entry.path === "MEETINGS" && entry.title === nextItem.content
+    )
+    const payload = {
+      project_id: project.id,
+      item_type: "CHECKBOX",
+      path: "MEETINGS",
+      title: nextItem.content,
+      comment: nextItem.answer || null,
+      is_checked: nextItem.isChecked,
+    }
+    try {
+      const res = await apiFetch(
+        existing ? `/checklist-items/${existing.id}` : "/checklist-items",
+        {
+          method: existing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      )
+      if (!res.ok) {
+        throw new Error("Failed to save meeting checklist")
+      }
+      const saved = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => {
+        if (existing) {
+          return prev.map((entry) => (entry.id === saved.id ? saved : entry))
+        }
+        return [...prev, saved]
+      })
+    } catch {
+      toast.error("Failed to save meeting checklist")
+    }
+  }
+
   const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
+    void syncMeetingChecklistItem(itemId, { isChecked: next })
   }
 
   const updateMeetingChecklistItem = (itemId: string, answer: string) => {
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, answer } : item))
     )
+    void syncMeetingChecklistItem(itemId, { answer })
   }
 
   const toggleDocumentationChecklistItem = (itemId: string, next: boolean) => {
@@ -558,21 +639,25 @@ export default function ProjectPage() {
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "PLANIFIKIMI") {
-      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
+    if (phaseValue === "PLANIFIKIMI" || phaseValue === "PLANNING") {
+      return TABS.filter(
+        (tab) =>
+          tab.id !== "checklists" &&
+          tab.id !== "members" &&
+          tab.id !== "prompts" &&
+          tab.id !== "testing"
+      )
     }
-    if (phaseValue === "ZHVILLIMI") {
+    if (phaseValue === "ZHVILLIMI" || phaseValue === "DEVELOPMENT") {
       return [
         ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "TESTIMI") {
-      return TABS.filter(
-        (tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts"
-      )
+    if (phaseValue === "TESTIMI" || phaseValue === "TESTING") {
+      return TABS.filter((tab) => tab.id === "testing" || tab.id === "tasks" || tab.id === "ga")
     }
-    if (phaseValue === "DOKUMENTIMI") {
+    if (phaseValue === "DOKUMENTIMI" || phaseValue === "DOCUMENTATION") {
       return TABS.filter(
         (tab) =>
           tab.id !== "description" &&
@@ -581,7 +666,7 @@ export default function ProjectPage() {
           tab.id !== "prompts"
       )
     }
-    return TABS
+    return TABS.filter((tab) => tab.id !== "testing")
   }, [phaseValue])
 
   React.useEffect(() => {
@@ -599,6 +684,10 @@ export default function ProjectPage() {
         return taskPhase === activePhase
       }),
     [activePhase, project?.current_phase, tasks]
+  )
+  const visibleChecklistItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === activePhase),
+    [activePhase, checklistItems]
   )
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
@@ -799,17 +888,6 @@ export default function ProjectPage() {
                 </Button>
               </div>
             </>
-          ) : activePhase === "TESTIMI" ? (
-            <>
-              <div className="text-lg font-semibold">Testing Questions</div>
-              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-                <div>What should we test and why?</div>
-                <div>Who owns each test area?</div>
-                <div>What environments or data are required?</div>
-                <div>How will issues be tracked and fixed?</div>
-                <div>What is the acceptance checklist to approve?</div>
-              </div>
-            </>
           ) : (
             <>
               <div className="text-lg font-semibold">Project Description</div>
@@ -826,6 +904,19 @@ export default function ProjectPage() {
               </div>
             </>
           )}
+        </Card>
+      ) : null}
+
+      {activeTab === "testing" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">Testing Questions</div>
+          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+            <div>What should we test and why?</div>
+            <div>Who owns each test area?</div>
+            <div>What environments or data are required?</div>
+            <div>How will issues be tracked and fixed?</div>
+            <div>What is the acceptance checklist to approve?</div>
+          </div>
         </Card>
       ) : null}
 
@@ -1038,8 +1129,8 @@ export default function ProjectPage() {
                   {addingChecklist ? "Adding..." : "Add"}
                 </Button>
               </div>
-              {checklistItems.length ? (
-                checklistItems.map((item) => (
+              {visibleChecklistItems.length ? (
+                visibleChecklistItems.map((item) => (
                   <Card
                     key={item.id}
                     className="cursor-pointer px-6 py-5"

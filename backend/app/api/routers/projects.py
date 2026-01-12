@@ -23,7 +23,11 @@ from app.models.user import User
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
 from app.schemas.vs_workflow_item import VsWorkflowItemOut, VsWorkflowItemUpdate
-from app.services.workflow_service import initialize_vs_workflow, get_active_workflow_items
+from app.services.workflow_service import (
+    initialize_vs_workflow,
+    get_active_workflow_items,
+    dependency_item_ids_from_info,
+)
 
 
 router = APIRouter()
@@ -255,11 +259,6 @@ async def update_project(
                 detail="Cannot skip phases forward. Use advance-phase endpoint to move to the next phase.",
             )
         project.current_phase = payload.current_phase
-        await db.execute(
-            update(Task)
-            .where(Task.project_id == project.id)
-            .values(phase=payload.current_phase)
-        )
     if payload.status is not None:
         project.status = payload.status
     if payload.progress_percentage is not None:
@@ -354,11 +353,6 @@ async def advance_project_phase(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     project.current_phase = sequence[current_idx + 1]
-    await db.execute(
-        update(Task)
-        .where(Task.project_id == project.id)
-        .values(phase=project.current_phase)
-    )
     await db.commit()
     await db.refresh(project)
     return ProjectOut(
@@ -410,6 +404,7 @@ async def delete_project(
 @router.get("/{project_id}/workflow-items", response_model=list[VsWorkflowItemOut])
 async def list_workflow_items(
     project_id: uuid.UUID,
+    phase: str | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[VsWorkflowItemOut]:
@@ -423,7 +418,7 @@ async def list_workflow_items(
     # but here we'll assume the service function is adapted or we use the async pattern.
     # For now, let's keep it consistent with the existing codebase's DB patterns.
     # Note: get_active_workflow_items in the service was written as sync, let's make it async in the service and call it here.
-    items = await get_active_workflow_items(db, project_id)
+    items = await get_active_workflow_items(db, project_id, phase)
     return items
 
 
@@ -443,6 +438,29 @@ async def update_workflow_item(
         ensure_department_access(user, project.department_id)
     
     if payload.status is not None:
+        if payload.status == "DONE" and item.dependency_info:
+            project_items = (
+                await db.execute(
+                    select(VsWorkflowItem).where(VsWorkflowItem.project_id == item.project_id)
+                )
+            ).scalars().all()
+            dependency_ids = dependency_item_ids_from_info(item.dependency_info, project_items)
+            if dependency_ids:
+                pending = (
+                    await db.execute(
+                        select(VsWorkflowItem)
+                        .where(
+                            VsWorkflowItem.project_id == item.project_id,
+                            VsWorkflowItem.id.in_(dependency_ids),
+                            VsWorkflowItem.status != "DONE",
+                        )
+                    )
+                ).scalars().first()
+                if pending is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot mark as done before dependencies are completed.",
+                    )
         item.status = payload.status
     if payload.assigned_to is not None:
         item.assigned_to = payload.assigned_to

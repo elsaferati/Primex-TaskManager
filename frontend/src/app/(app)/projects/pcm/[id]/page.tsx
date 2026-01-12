@@ -96,6 +96,11 @@ async function initializeMstChecklistItems(
     return !existingMap.has(key)
   })
 
+  const finalizationItemsToCreate = FINALIZATION_CHECKLIST.filter((entry) => {
+    const key = `${FINALIZATION_PATH}|${entry.question}`
+    return !existingMap.has(key)
+  })
+
   // Create missing planning questions
   const planningItemsToCreate = MST_PLANNING_QUESTIONS.filter((question) => {
     const key = `PLANNING|${question}`
@@ -111,6 +116,14 @@ async function initializeMstChecklistItems(
       keyword: row.keywords,
       description: row.pershkrimi,
       category: row.kategoria,
+    })),
+    ...finalizationItemsToCreate.map((entry) => ({
+      type: "finalization" as const,
+      path: FINALIZATION_PATH,
+      title: entry.question,
+      keyword: FINALIZATION_PATH,
+      description: entry.question,
+      category: FINALIZATION_PATH,
     })),
     ...planningItemsToCreate.map((question) => ({
       type: "planning" as const,
@@ -527,6 +540,7 @@ export default function PcmProjectPage() {
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const mstCommentTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -759,7 +773,7 @@ export default function PcmProjectPage() {
     const tabs =
       vsVlPhase === "PLANNING" ? [{ id: "description", label: "Description" }] : [{ id: "tasks", label: "Tasks" }]
 
-    if (isVsAmazonProject(project)) {
+    if (isVsAmazonProject(project) && vsVlPhase !== "PLANNING") {
       tabs.push({ id: "workflow", label: "Workflow" })
     }
 
@@ -1527,7 +1541,7 @@ export default function PcmProjectPage() {
         {vsVlTab === "ga" ? (
           renderGaNotes()
         ) : vsVlTab === "workflow" ? (
-          <VsWorkflow projectId={projectId} apiFetch={apiFetch} />
+          <VsWorkflow projectId={projectId} apiFetch={apiFetch} phase={vsVlPhase} />
         ) : vsVlPhase === "PLANNING" ? (
 
           <Card>
@@ -2239,6 +2253,17 @@ export default function PcmProjectPage() {
         )
       }
     }
+
+    const queueMstCommentSave = (path: string, title: string, comment: string) => {
+      const key = `${path}|${title}`
+      const timers = mstCommentTimersRef.current
+      if (timers[key]) {
+        clearTimeout(timers[key])
+      }
+      timers[key] = setTimeout(() => {
+        void updateMstChecklistComment(path, title, comment)
+      }, 600)
+    }
     const updateFinalizationChecklist = async (entry: { id: string; question: string }, nextChecked: boolean) => {
       if (!project) return
       const existing = checklistItems.find(
@@ -2932,6 +2957,7 @@ export default function PcmProjectPage() {
                               onChange={(e) => {
                                 const newComment = e.target.value
                                 setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
+                                queueMstCommentSave(row.path, row.detyrat, newComment)
                               }}
                               onBlur={(e) => updateMstChecklistComment(row.path, row.detyrat, e.target.value)}
                             />

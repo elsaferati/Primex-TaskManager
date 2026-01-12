@@ -93,13 +93,14 @@ class ChecklistItemCreateWithProject(BaseModel):
     """Wrapper to support project_id in create payload."""
     project_id: uuid.UUID | None = None
     checklist_id: uuid.UUID | None = None
-    item_type: ChecklistItemType
+    item_type: ChecklistItemType | None = None
     position: int | None = None
     path: str | None = None
     keyword: str | None = None
     description: str | None = None
     category: str | None = None
     title: str | None = None
+    content: str | None = None
     comment: str | None = None
     is_checked: bool | None = None
     assignee_user_ids: list[uuid.UUID] = []
@@ -115,15 +116,22 @@ async def create_checklist_item(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or checklist_id required")
 
     # Validate using the schema validator
+    resolved_item_type = payload.item_type
+    resolved_title = payload.title or payload.content
+    if resolved_item_type is None and (resolved_title or payload.comment):
+        resolved_item_type = ChecklistItemType.CHECKBOX
+    if resolved_item_type is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="item_type is required")
+
     create_payload = ChecklistItemCreate(
         checklist_id=payload.checklist_id,
-        item_type=payload.item_type,
+        item_type=resolved_item_type,
         position=payload.position,
         path=payload.path,
         keyword=payload.keyword,
         description=payload.description,
         category=payload.category,
-        title=payload.title,
+        title=resolved_title,
         comment=payload.comment,
         is_checked=payload.is_checked,
         assignee_user_ids=payload.assignee_user_ids,
@@ -199,7 +207,14 @@ async def create_checklist_item(
                 db.add(assignee)
 
     await db.commit()
-    await db.refresh(item, ["assignees", "assignees.user"])
+    await db.refresh(item)
+    item = (
+        await db.execute(
+            select(ChecklistItem)
+            .options(selectinload(ChecklistItem.assignees).selectinload(ChecklistItemAssignee.user))
+            .where(ChecklistItem.id == item.id)
+        )
+    ).scalar_one()
 
     return _item_to_out(item)
 
@@ -271,7 +286,14 @@ async def update_checklist_item(
                     db.add(assignee)
 
     await db.commit()
-    await db.refresh(item, ["assignees", "assignees.user"])
+    await db.refresh(item)
+    item = (
+        await db.execute(
+            select(ChecklistItem)
+            .options(selectinload(ChecklistItem.assignees).selectinload(ChecklistItemAssignee.user))
+            .where(ChecklistItem.id == item.id)
+        )
+    ).scalar_one()
 
     return _item_to_out(item)
 

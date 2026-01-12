@@ -312,7 +312,9 @@ export default function DesignProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: project.id,
-          content: newChecklistContent.trim(),
+          item_type: "CHECKBOX",
+          title: newChecklistContent.trim(),
+          is_checked: false,
         }),
       })
       if (!res.ok) {
@@ -615,7 +617,16 @@ export default function DesignProjectPage() {
           {visibleTabs.map((tab) => {
             const isActive = tab.id === activeTab
             return (
-              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={["relative pb-3 text-sm font-medium", isActive ? "text-blue-600" : "text-muted-foreground"].join(" ")}>
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  "relative pb-3 text-sm font-medium",
+                  tab.id === "ga" ? "ml-auto" : "",
+                  isActive ? "text-blue-600" : "text-muted-foreground",
+                ].join(" ")}
+              >
                 {tab.label}
                 {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
               </button>
