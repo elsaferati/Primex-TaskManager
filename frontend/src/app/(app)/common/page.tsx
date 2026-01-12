@@ -117,20 +117,18 @@ const MEETING_TEMPLATES: MeetingTemplate[] = [
       { key: "time", label: "WHEN", width: "90px" },
     ],
     rows: [
-      { nr: 1, day: "E HENE", topic: "A ESHTE BERE KONTROLLI I TRANSFERIT TE THIRRJEVE NGA DE NE PRIMEX SIPAS TEMPLATE-IT" },
-      { nr: 2, day: "E HENE", topic: "ME MUR?" },
-      { nr: 3, day: "E HENE", topic: "A ESHTE BILANCI I GJENDJES X2 NE RREGULL?" },
-      { nr: 4, day: "E HENE", topic: "MUNGESA/VONESA SOT: PX-NESE PO?" },
-      { nr: 5, day: "CDO DITE", topic: "PUSHIM SOT: PX/HC/FD/HF" },
-      { nr: 6, day: "CDO DITE", topic: "FESTA: PASNESER/NESER/SOT: PX/HC/FD/HF/USA - NESE PO? / NESE KA DUHET TE" },
-      { nr: 7, day: "CDO DITE", topic: "LAJMROHEN KLIENTAT 1 JAVE ME HERET" },
-      { nr: 8, day: "CDO DITE", topic: "FESTA JAVA E ARDHSHME PX/PL/DE/USA" },
-      { nr: 9, day: "CDO DITE", topic: "TAKIME NGA KALENDARI SOT / NESER (A KA TAKIME TE JASHTME?)" },
-      { nr: 10, day: "E HENE", topic: "PRINTERI COLOR B&W" },
-      { nr: 11, day: "CDO DITE", topic: "ANKESA" },
-      { nr: 12, day: "CDO DITE", topic: "KERKESA" },
-      { nr: 13, day: "CDO DITE", topic: "PROPOZIME" },
-      { nr: 14, day: "CDO DITE", topic: "PIKA TE PERBASHKETA" },
+      { nr: 1, day: "E HENE", topic: "A ESHTE BERE KONTROLLI I TRANSFERIT TE THIRRJEVE NGA DE NE PRIMEX SIPAS TEMPLATE-IT NE MURE?" },
+      { nr: 2, day: "E HENE", topic: "A ESHTE BILANCI I GJENDJES X2 NE RREGULL?" },
+      { nr: 3, day: "CDO DITE", topic: "MUNGESA/VONESA SOT: PX-NESE PO?" },
+      { nr: 4, day: "CDO DITE", topic: "PUSHIM SOT: PX/HC/FD/HF" },
+      { nr: 5, day: "CDO DITE", topic: "FESTA: PASNESER/NESER/SOT: PX/HC/FD/HF/USA - NESE PO? / NESE KA DUHET TE. LAJMROHEN KLIENTAT 1 JAVE ME HERET" },
+      { nr: 6, day: "CDO DITE", topic: "FESTA JAVA E ARDHSHME PX/PL/DE/USA" },
+      { nr: 7, day: "CDO DITE", topic: "TAKIME NGA KALENDARI SOT / NESER (A KA TAKIME TE JASHTME?)" },
+      { nr: 8, day: "E HENE", topic: "PRINTERI COLOR B&W" },
+      { nr: 9, day: "CDO DITE", topic: "ANKESA" },
+      { nr: 10, day: "CDO DITE", topic: "KERKESA" },
+      { nr: 11, day: "CDO DITE", topic: "PROPOZIME" },
+      { nr: 12, day: "CDO DITE", topic: "PIKA TE PERBASHKETA" },
     ],
   },
   {
@@ -149,10 +147,9 @@ const MEETING_TEMPLATES: MeetingTemplate[] = [
       { nr: 1, topic: "BZ PROJEKTET/SECILI INDIVIDUALISHT (BLIC DETYRAT)" },
       { nr: 2, topic: "TT/VS/MST PRJK/MST FOTO/SMM" },
       { nr: 3, topic: "KUSH NUK ESHTE BRENDA PLANIT & A KA PASUR PROBLEME?" },
-      { nr: 4, topic: "BZ PERMBLEDHJA ME GA (FIZIKISHT)- A KA DICKA TE RE QE KA SHTU GA NE PERMBLEDHJE?" },
-      { nr: 5, topic: "SOT/R1/1H, BLOK?" },
-      { nr: 6, topic: "SQARO DETYRA TE REJA TE SHPEJTA QE KRYHEN BRENDA DITES?" },
-      { nr: 7, topic: "A PRITET DICKA NE PAUZE PER KONTROLLE GA NGA ZHVILLIMI/PROJEKTET?" },
+      { nr: 4, topic: "BZ PERMBLEDHJA ME GA (FIZIKISHT)- A KA DICKA TE RE QE KA SHTU GA NE PERMBLEDHJE? SOT/R1/1H, BLOK?" },
+      { nr: 5, topic: "SQARO DETYRA TE REJA TE SHPEJTA QE KRYHEN BRENDA DITES?" },
+      { nr: 6, topic: "A PRITET DICKA NE PAUZE PER KONTROLLE GA NGA ZHVILLIMI/PROJEKTET?" },
     ],
   },
   {
@@ -196,10 +193,9 @@ const MEETING_TEMPLATES: MeetingTemplate[] = [
       { nr: 2, topic: "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU" },
       { nr: 3, topic: "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?" },
       { nr: 4, topic: "(GA)SHENIME GA- PIKAT PAS PAUZE" },
-      { nr: 5, topic: "REPLY GA (DET. NGA STAFI) KOMENTE" },
-      { nr: 6, topic: "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?" },
-      { nr: 7, topic: "(GA) PIKAT E BORDIT" },
-      { nr: 8, topic: "(GA) PIKAT E BORDIT" },
+      { nr: 5, topic: "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?" },
+      { nr: 6, topic: "(GA) PIKAT E BORDIT" },
+      { nr: 7, topic: "(GA) E HENE- ORDER/TIKETA HT/H" },
     ],
   },
   {
@@ -222,7 +218,7 @@ const MEETING_TEMPLATES: MeetingTemplate[] = [
         owner: "DV ME STAF",
         time: "3:30 PM",
       },
-      { nr: 2, topic: "PARREGULLSITE DHE DETYRAT SOT PER SOT (DISKUTOHEN EDHE WHEN ESHTE GA E NXENE)" },
+      { nr: 2, topic: "PARREGULLSITE DHE DETYRAT SOT PER SOT (DISKUTOHEN EDHE KUR ESHTE GA E NXENE)" },
       { nr: 3, topic: "URGJENCAT" },
       { nr: 4, topic: "MUST SOT" },
       { nr: 5, topic: "BZ SHENIME \\ DETYRAT PERSONALISHT" },
@@ -1296,12 +1292,14 @@ export default function CommonViewPage() {
           font-weight: 700;
           color: #1f2937;
           border-bottom: 1px solid #cbd5e1;
+          white-space: nowrap;
         }
         .meeting-table td {
           border-top: 1px solid #e2e8f0;
           padding: 8px 10px;
           vertical-align: top;
           color: #0f172a;
+          white-space: nowrap;
         }
         .meeting-check-cell {
           text-align: center;
