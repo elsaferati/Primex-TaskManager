@@ -24,12 +24,27 @@ def upgrade():
     op.execute("ALTER TABLE projects ALTER COLUMN status TYPE VARCHAR(50) USING status::VARCHAR(50)")
     
     # Tasks table
+    op.execute("ALTER TABLE tasks ALTER COLUMN priority DROP DEFAULT")
     op.execute("ALTER TABLE tasks ALTER COLUMN phase TYPE VARCHAR(50) USING phase::VARCHAR(50)")
     op.execute("ALTER TABLE tasks ALTER COLUMN status TYPE VARCHAR(50) USING status::VARCHAR(50)")
     op.execute("ALTER TABLE tasks ALTER COLUMN priority TYPE VARCHAR(50) USING priority::VARCHAR(50)")
     op.execute("ALTER TABLE tasks ALTER COLUMN finish_period TYPE VARCHAR(50) USING finish_period::VARCHAR(50)")
 
     # System task templates table
+    op.execute("ALTER TABLE system_task_templates ALTER COLUMN priority DROP DEFAULT")
+    op.execute(
+        "DO $$ "
+        "DECLARE r record; "
+        "BEGIN "
+        "FOR r IN "
+        "SELECT conname FROM pg_constraint "
+        "WHERE conrelid = 'system_task_templates'::regclass AND contype = 'c' "
+        "AND pg_get_constraintdef(oid) ILIKE '%priority%' "
+        "LOOP "
+        "EXECUTE format('ALTER TABLE system_task_templates DROP CONSTRAINT %I', r.conname); "
+        "END LOOP; "
+        "END $$;"
+    )
     op.execute("ALTER TABLE system_task_templates ALTER COLUMN priority TYPE VARCHAR(50) USING priority::VARCHAR(50)")
     op.execute("ALTER TABLE system_task_templates ALTER COLUMN finish_period TYPE VARCHAR(50) USING finish_period::VARCHAR(50)")
     op.execute("ALTER TABLE system_task_templates ALTER COLUMN scope TYPE VARCHAR(50) USING scope::VARCHAR(50)")
