@@ -157,12 +157,30 @@ export interface Task {
   updated_at: string
 }
 
+export type ChecklistItemType = "TITLE" | "COMMENT" | "CHECKBOX"
+
+export interface ChecklistItemAssignee {
+  user_id: string
+  user_full_name?: string | null
+  user_username?: string | null
+}
+
 export interface ChecklistItem {
   id: string
   checklist_id?: string | null
-  content: string
-  is_checked: boolean
+  item_type: ChecklistItemType
   position: number
+  // Common fields
+  path?: string | null
+  keyword?: string | null
+  description?: string | null
+  category?: string | null
+  // Type-specific fields
+  title?: string | null
+  comment?: string | null
+  is_checked?: boolean | null
+  // Assignees
+  assignees?: ChecklistItemAssignee[]
 }
 
 export interface GaNote {

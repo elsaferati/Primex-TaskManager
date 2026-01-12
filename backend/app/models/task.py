@@ -37,19 +37,19 @@ class Task(Base):
         UUID(as_uuid=True), ForeignKey("system_task_templates.id")
     )
 
-    status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus, name="task_status"), nullable=False, server_default="TODO"
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="TODO"
     )
-    priority: Mapped[TaskPriority] = mapped_column(
-        Enum(TaskPriority, name="task_priority"), nullable=False, server_default="NORMAL"
+    priority: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="NORMAL"
     )
-    finish_period: Mapped[TaskFinishPeriod | None] = mapped_column(
-        Enum(TaskFinishPeriod, name="finish_period"), nullable=True
+    finish_period: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
     )
-    phase: Mapped[ProjectPhaseStatus] = mapped_column(
-        Enum(ProjectPhaseStatus, name="project_phase_status"),
+    phase: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
-        server_default="TAKIMET",
+        server_default="MEETINGS",
     )
     progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 

@@ -17,31 +17,35 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
+import { VsWorkflow } from "@/components/projects/vs-workflow"
 
-// PCM phases (Albanian labels)
-const PHASES = ["INICIMI", "PLANIFIKIMI", "EKZEKUTIMI", "MONITORIMI", "MBYLLJA"] as const
+
+// PCM phases (English labels)
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"] as const
 const PHASE_LABELS: Record<string, string> = {
-  INICIMI: "Initiation",
-  PLANIFIKIMI: "Planning",
-  EKZEKUTIMI: "Execution",
-  MONITORIMI: "Monitoring",
-  MBYLLJA: "Closed",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
+  CLOSED: "Closed",
 }
 
-// MST-specific phases (Albanian labels for the requested UI)
-const MST_PHASES = ["PLANIFIKIMI", "PRODUKTE", "KONTROLLI", "FINALIZIMI"] as const
+// MST-specific phases
+const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
 const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
-  PLANIFIKIMI: "Planifikimi",
-  PRODUKTE: "Produkte",
-  KONTROLLI: "Kontrolli",
-  FINALIZIMI: "Finalizimi",
+  PLANNING: "Planning",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
 }
-const VS_VL_PHASES = ["PROJECT_ACCEPTANCE", "AMAZONE", "CONTROL", "DREAMROBOT"] as const
+
+const VS_VL_PHASES = ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT"] as const
 const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
-  PROJECT_ACCEPTANCE: "PLANNING",
-  AMAZONE: "AMAZON",
-  CONTROL: "CHECK",
-  DREAMROBOT: "DREAMROBOT",
+  PLANNING: "Planning",
+  AMAZON: "Amazon",
+  CHECK: "Check",
+  DREAMROBOT: "Dreamrobot",
 }
 const VS_VL_ACCEPTANCE_QUESTIONS = [
   "A ESHTE HAPUR GRUPI NE TEAMS?",
@@ -58,6 +62,53 @@ const MST_PLANNING_QUESTIONS = [
   "A jane identifikuar karakteristikat e programit?",
   "A eshte bere plani kur parashihet me u perfundu projekti?",
 ]
+
+// Helper function to initialize MST checklist items in database
+async function initializeMstChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  // Create a map of existing items by path + title for quick lookup
+  const existingMap = new Map<string, ChecklistItem>()
+  existingItems.forEach((item) => {
+    if (item.path && item.title) {
+      const key = `${item.path}|${item.title}`
+      existingMap.set(key, item)
+    }
+  })
+
+  // Find user IDs for "DV, LM" initials (we'll need to parse this)
+  // For now, we'll create items without assignees and they can be added later
+
+  // Create missing items
+  const itemsToCreate = MST_FINAL_CHECKLIST.filter((row) => {
+    const key = `${row.path}|${row.detyrat}`
+    return !existingMap.has(key)
+  })
+
+  // Create items in batches
+  for (const row of itemsToCreate) {
+    try {
+      await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          item_type: "CHECKBOX",
+          path: row.path,
+          title: row.detyrat,
+          keyword: row.keywords,
+          description: row.pershkrimi,
+          category: row.kategoria,
+          is_checked: false,
+        }),
+      })
+    } catch (error) {
+      console.error("Failed to create checklist item:", error)
+    }
+  }
+}
 
 type MstChecklistRow = {
   path: string
@@ -317,8 +368,14 @@ function isMstProject(project?: Project | null) {
 function isVsVlProject(project?: Project | null) {
   if (!project) return false
   const title = (project.title || project.name || "").toUpperCase()
-  return title.includes("VS/VL")
+  return title.includes("VS/VL") || isVsAmazonProject(project)
 }
+function isVsAmazonProject(project?: Project | null) {
+  if (!project) return false
+  const title = (project.title || project.name || "").toUpperCase()
+  return title.includes("VS AMAZON") || title.includes("VS/VL AMAZON")
+}
+
 
 function parseVsVlMeta(notes?: string | null): VsVlTaskMeta | null {
   if (!notes || !notes.startsWith(VS_VL_META_PREFIX)) return null
@@ -371,7 +428,7 @@ const VS_VL_TASK_TITLES = {
   template: normalizeTaskTitle("PLOTESIMI I TEMPLATE-IT TE AMAZONIT"),
   prices: normalizeTaskTitle("KALKULIMI I CMIMEVE"),
   photos: normalizeTaskTitle("GJENERIMI I FOTOVE"),
-  kontrol: normalizeTaskTitle("KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON"),
+  control: normalizeTaskTitle("KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON"),
   ko1: normalizeTaskTitle("KO1 E PROJEKTIT VS"),
   ko2: normalizeTaskTitle("KO2 E PROJEKTIT VS"),
   dreamVs: normalizeTaskTitle("DREAM ROBOT VS"),
@@ -441,10 +498,11 @@ export default function PcmProjectPage() {
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
-  const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANIFIKIMI")
-  const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PROJECT_ACCEPTANCE")
-  const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "ga">("description")
+  const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANNING")
+  const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PLANNING")
+  const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "workflow" | "ga">("description")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
+  const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
   const [vsVlAcceptanceChecks, setVsVlAcceptanceChecks] = React.useState<Record<string, boolean>>({})
@@ -512,7 +570,20 @@ export default function PcmProjectPage() {
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
       if (mRes.ok) setMembers((await mRes.json()) as User[])
-      if (cRes.ok) setChecklistItems((await cRes.json()) as ChecklistItem[])
+      if (cRes.ok) {
+        const items = (await cRes.json()) as ChecklistItem[]
+        setChecklistItems(items)
+        
+        // Initialize MST checklist items if this is an MST project
+        if (isMstProject(p)) {
+          await initializeMstChecklistItems(p.id, items, apiFetch)
+          // Reload checklist items after initialization
+          const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+          if (reloadRes.ok) {
+            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+          }
+        }
+      }
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
       if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -536,7 +607,43 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
+  
+  // Initialize MST checklist checked state and comments from database
+  React.useEffect(() => {
+    if (!isMst || !project) return
+    
+    const mstChecklistItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return MST_FINAL_CHECKLIST.some(
+        (row) => item.path === row.path && item.title === row.detyrat
+      )
+    })
+
+    const checked: Record<string, boolean> = {}
+    const comments: Record<string, string> = {}
+    mstChecklistItems.forEach((item) => {
+      if (item.path && item.title) {
+        const key = `${item.path}|${item.title}`
+        checked[key] = item.is_checked || false
+        if (item.comment) comments[key] = item.comment
+      }
+    })
+    setMstChecklistChecked(checked)
+    setMstChecklistComments(comments)
+  }, [checklistItems, isMst, project])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
+
+  const vsVlTabs = React.useMemo(() => {
+    const tabs =
+      vsVlPhase === "PLANNING" ? [{ id: "description", label: "Description" }] : [{ id: "tasks", label: "Tasks" }]
+
+    if (isVsAmazonProject(project)) {
+      tabs.push({ id: "workflow", label: "Workflow" })
+    }
+
+    tabs.push({ id: "ga", label: "GA/KA Notes" })
+    return tabs
+  }, [vsVlPhase, project])
   const mstPhaseRef = React.useRef(mstPhase)
   const vsVlPhaseRef = React.useRef(vsVlPhase)
 
@@ -544,11 +651,11 @@ export default function PcmProjectPage() {
     if (!isMst) return
     if (mstPhaseRef.current === mstPhase) return
     mstPhaseRef.current = mstPhase
-    if (mstPhase === "PLANIFIKIMI") {
+    if (mstPhase === "PLANNING") {
       setMstTab("description")
       return
     }
-    if (mstPhase === "FINALIZIMI") {
+    if (mstPhase === "FINAL") {
       setMstTab("final")
       return
     }
@@ -559,7 +666,7 @@ export default function PcmProjectPage() {
     if (!isVsVl) return
     if (vsVlPhaseRef.current === vsVlPhase) return
     vsVlPhaseRef.current = vsVlPhase
-    setVsVlTab(vsVlPhase === "PROJECT_ACCEPTANCE" ? "description" : "tasks")
+    setVsVlTab(vsVlPhase === "PLANNING" ? "description" : "tasks")
   }, [isVsVl, vsVlPhase])
 
   React.useEffect(() => {
@@ -583,7 +690,7 @@ export default function PcmProjectPage() {
     const templateTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.template)
     const pricesTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.prices)
     const photosTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.photos)
-    const kontrolTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.kontrol)
+    const kontrolTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.control)
     const ko1Task = findVsVlTask(tasks, VS_VL_TASK_TITLES.ko1)
     const ko2Task = findVsVlTask(tasks, VS_VL_TASK_TITLES.ko2)
     const dreamVsTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.dreamVs)
@@ -717,7 +824,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as Task
@@ -753,7 +860,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const updated = (await res.json()) as Project
@@ -785,7 +892,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as ChecklistItem
@@ -865,7 +972,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const added = (await res.json()) as User[]
@@ -912,7 +1019,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const updated = (await res.json()) as Project
@@ -947,7 +1054,7 @@ export default function PcmProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as GaNote
@@ -1152,24 +1259,24 @@ export default function PcmProjectPage() {
     const vsVlTasks = tasks.filter((task) => {
       const meta = parseVsVlMeta(task.internal_notes)
       if (!meta?.vs_vl_phase) {
-        return vsVlPhase === "AMAZONE"
+        return vsVlPhase === "AMAZON"
       }
       return meta.vs_vl_phase === vsVlPhase
     })
     const phaseOrder =
-      vsVlPhase === "AMAZONE"
+      vsVlPhase === "AMAZON"
         ? [
-            VS_VL_TASK_TITLES.base,
-            VS_VL_TASK_TITLES.template,
-            VS_VL_TASK_TITLES.prices,
-            VS_VL_TASK_TITLES.photos,
-            VS_VL_TASK_TITLES.kontrol,
-          ]
-        : vsVlPhase === "CONTROL"
+          VS_VL_TASK_TITLES.base,
+          VS_VL_TASK_TITLES.template,
+          VS_VL_TASK_TITLES.prices,
+          VS_VL_TASK_TITLES.photos,
+          VS_VL_TASK_TITLES.control,
+        ]
+        : vsVlPhase === "CHECK"
           ? [VS_VL_TASK_TITLES.ko1, VS_VL_TASK_TITLES.ko2]
           : vsVlPhase === "DREAMROBOT"
             ? [VS_VL_TASK_TITLES.dreamVs, VS_VL_TASK_TITLES.dreamVl, VS_VL_TASK_TITLES.dreamWeights]
-          : []
+            : []
     const orderMap = new Map(phaseOrder.map((key, idx) => [key, idx]))
     const orderedVsVlTasks = [...vsVlTasks].sort((a, b) => {
       const aKey = normalizeTaskTitle(a.title)
@@ -1183,16 +1290,7 @@ export default function PcmProjectPage() {
     })
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
-    const vsVlTabs =
-      vsVlPhase === "PROJECT_ACCEPTANCE"
-        ? [
-            { id: "description", label: "Description" },
-            { id: "ga", label: "GA/KA Notes" },
-          ]
-        : [
-            { id: "tasks", label: "Tasks" },
-            { id: "ga", label: "GA/KA Notes" },
-          ]
+
     const shouldIgnoreDragTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false
       if (target.isContentEditable) return true
@@ -1278,7 +1376,7 @@ export default function PcmProjectPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              VS/VL 
+              VS/VL
             </Badge>
           </div>
         </div>
@@ -1306,7 +1404,10 @@ export default function PcmProjectPage() {
 
         {vsVlTab === "ga" ? (
           renderGaNotes()
-        ) : vsVlPhase === "PROJECT_ACCEPTANCE" ? (
+        ) : vsVlTab === "workflow" ? (
+          <VsWorkflow projectId={projectId} apiFetch={apiFetch} />
+        ) : vsVlPhase === "PLANNING" ? (
+
           <Card>
             <div className="p-4 space-y-4">
               <div className="text-lg font-semibold">Planning</div>
@@ -1523,217 +1624,217 @@ export default function PcmProjectPage() {
                     </tr>
                     {orderedVsVlTasks.length ? (
                       orderedVsVlTasks.map((task) => {
-                          const meta = parseVsVlMeta(task.internal_notes)
-                          const titleKey = normalizeTaskTitle(task.title)
-                          const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
-                          const dependencyId = isBaseTask
-                            ? null
-                            : task.dependency_task_id || meta?.dependency_task_id || null
-                          const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
-                          const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
-                          const isLocked = isDependencyLocked
-                          const selectedAssignees = taskAssigneeIds(task)
-                          const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
-                          return (
-                            <tr key={task.id} className="align-top">
-                              <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
-                              <td className="border px-2 py-2 font-medium">{task.title}</td>
-                              <td className="border px-2 py-2 whitespace-pre-wrap">{task.description || "-"}</td>
-                              <td className="border px-2 py-2">
-                                <Input
-                                  value={toDateInput(task.due_date)}
-                                  onChange={async (e) => {
-                                    if (isLocked) return
-                                    const nextValue = normalizeDueDateInput(e.target.value)
-                                    const dueDate = nextValue ? new Date(nextValue).toISOString() : null
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ due_date: dueDate }),
-                                    })
-                                    if (!res.ok) {
-                                      toast.error("Failed to update date")
-                                      return
-                                    }
-                                    const updated = (await res.json()) as Task
-                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                  }}
-                                  type="date"
-                                  className="h-8 text-xs"
-                                  disabled={isLocked}
-                                />
-                              </td>
-                              <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
-                              <td className="border px-2 py-2">
-                                <div className="space-y-2">
-                                  <div className="text-[11px] text-slate-500">
-                                    {selectedAssignees.length
-                                      ? selectedAssignees.map((id) => memberLabel(id)).join(", ")
-                                      : "-"}
-                                  </div>
-                                  <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                                    {assignableUsers.length ? (
-                                      assignableUsers.map((u) => {
-                                        const checked = selectedAssignees.includes(u.id)
-                                        return (
-                                          <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                            <input
-                                              type="checkbox"
-                                              className="h-3 w-3 rounded border-slate-300"
-                                              checked={checked}
-                                              disabled={isLocked}
-                                              onChange={async () => {
-                                                if (isLocked) return
-                                                const nextIds = checked
-                                                  ? selectedAssignees.filter((id) => id !== u.id)
-                                                  : [...selectedAssignees, u.id]
-                                                const res = await apiFetch(`/tasks/${task.id}`, {
-                                                  method: "PATCH",
-                                                  headers: { "Content-Type": "application/json" },
-                                                  body: JSON.stringify({ assignees: nextIds }),
-                                                })
-                                                if (!res.ok) {
-                                                  toast.error("Failed to update assignees")
-                                                  return
-                                                }
-                                                const updated = (await res.json()) as Task
-                                                setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                              }}
-                                            />
-                                            <span className="truncate">{u.full_name || u.username || u.email}</span>
-                                          </label>
-                                        )
-                                      })
-                                    ) : (
-                                      <div className="text-[11px] text-slate-400">-</div>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="border px-2 py-2">
-                                <Select
-                                  value={
-                                    isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
+                        const meta = parseVsVlMeta(task.internal_notes)
+                        const titleKey = normalizeTaskTitle(task.title)
+                        const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
+                        const dependencyId = isBaseTask
+                          ? null
+                          : task.dependency_task_id || meta?.dependency_task_id || null
+                        const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
+                        const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
+                        const isLocked = isDependencyLocked
+                        const selectedAssignees = taskAssigneeIds(task)
+                        const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
+                        return (
+                          <tr key={task.id} className="align-top">
+                            <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
+                            <td className="border px-2 py-2 font-medium">{task.title}</td>
+                            <td className="border px-2 py-2 whitespace-pre-wrap">{task.description || "-"}</td>
+                            <td className="border px-2 py-2">
+                              <Input
+                                value={toDateInput(task.due_date)}
+                                onChange={async (e) => {
+                                  if (isLocked) return
+                                  const nextValue = normalizeDueDateInput(e.target.value)
+                                  const dueDate = nextValue ? new Date(nextValue).toISOString() : null
+                                  const res = await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ due_date: dueDate }),
+                                  })
+                                  if (!res.ok) {
+                                    toast.error("Failed to update date")
+                                    return
                                   }
-                                  onValueChange={async (value) => {
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        dependency_task_id: value === "__none__" ? null : value,
-                                      }),
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                }}
+                                type="date"
+                                className="h-8 text-xs"
+                                disabled={isLocked}
+                              />
+                            </td>
+                            <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
+                            <td className="border px-2 py-2">
+                              <div className="space-y-2">
+                                <div className="text-[11px] text-slate-500">
+                                  {selectedAssignees.length
+                                    ? selectedAssignees.map((id) => memberLabel(id)).join(", ")
+                                    : "-"}
+                                </div>
+                                <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                                  {assignableUsers.length ? (
+                                    assignableUsers.map((u) => {
+                                      const checked = selectedAssignees.includes(u.id)
+                                      return (
+                                        <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                          <input
+                                            type="checkbox"
+                                            className="h-3 w-3 rounded border-slate-300"
+                                            checked={checked}
+                                            disabled={isLocked}
+                                            onChange={async () => {
+                                              if (isLocked) return
+                                              const nextIds = checked
+                                                ? selectedAssignees.filter((id) => id !== u.id)
+                                                : [...selectedAssignees, u.id]
+                                              const res = await apiFetch(`/tasks/${task.id}`, {
+                                                method: "PATCH",
+                                                headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ assignees: nextIds }),
+                                              })
+                                              if (!res.ok) {
+                                                toast.error("Failed to update assignees")
+                                                return
+                                              }
+                                              const updated = (await res.json()) as Task
+                                              setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                            }}
+                                          />
+                                          <span className="truncate">{u.full_name || u.username || u.email}</span>
+                                        </label>
+                                      )
                                     })
-                                    if (!res.ok) {
-                                      toast.error("Failed to update dependency")
-                                      return
-                                    }
-                                    const updated = (await res.json()) as Task
-                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                  }}
-                                  disabled={isBaseTask}
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue placeholder="-" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">-</SelectItem>
-                                    {dependencyOptions
-                                      .filter((opt) => opt.id !== task.id)
-                                      .map((opt) => (
-                                        <SelectItem key={opt.id} value={opt.id}>
-                                          {opt.title}
-                                        </SelectItem>
-                                      ))}
-                                  </SelectContent>
-                                </Select>
-                              </td>
-                              <td className="border px-2 py-2">
-                                <Select
-                                  value={task.status || "TODO"}
-                                  onValueChange={async (value) => {
-                                    if (isLocked) return
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ status: value }),
-                                    })
-                                    if (!res.ok) {
-                                      toast.error("Failed to update status")
-                                      return
-                                    }
-                                    const updated = (await res.json()) as Task
-                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                  }}
-                                  disabled={isLocked}
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {TASK_STATUSES.map((status) => (
-                                      <SelectItem key={status} value={status}>
-                                        {statusLabel(status)}
+                                  ) : (
+                                    <div className="text-[11px] text-slate-400">-</div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="border px-2 py-2">
+                              <Select
+                                value={
+                                  isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
+                                }
+                                onValueChange={async (value) => {
+                                  const res = await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      dependency_task_id: value === "__none__" ? null : value,
+                                    }),
+                                  })
+                                  if (!res.ok) {
+                                    toast.error("Failed to update dependency")
+                                    return
+                                  }
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                }}
+                                disabled={isBaseTask}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue placeholder="-" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">-</SelectItem>
+                                  {dependencyOptions
+                                    .filter((opt) => opt.id !== task.id)
+                                    .map((opt) => (
+                                      <SelectItem key={opt.id} value={opt.id}>
+                                        {opt.title}
                                       </SelectItem>
                                     ))}
-                                  </SelectContent>
-                                </Select>
-                              </td>
-                              <td className="border px-2 py-2">
-                                <Textarea
-                                  value={commentValue}
-                                  onChange={(e) =>
-                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="border px-2 py-2">
+                              <Select
+                                value={task.status || "TODO"}
+                                onValueChange={async (value) => {
+                                  if (isLocked) return
+                                  const res = await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ status: value }),
+                                  })
+                                  if (!res.ok) {
+                                    toast.error("Failed to update status")
+                                    return
                                   }
-                                  onBlur={async (e) => {
-                                    if (isLocked) return
-                                    const nextValue = e.target.value.trim()
-                                    const currentValue = meta?.comment || ""
-                                    if (nextValue === currentValue) return
-                                    const nextMeta: VsVlTaskMeta = {
-                                      ...(meta || {}),
-                                      vs_vl_phase: meta?.vs_vl_phase || vsVlPhase,
-                                    }
-                                    if (nextValue) {
-                                      nextMeta.comment = nextValue
-                                    } else {
-                                      delete nextMeta.comment
-                                    }
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
-                                    })
-                                    if (!res.ok) {
-                                      toast.error("Failed to update comment")
-                                      return
-                                    }
-                                    const updated = (await res.json()) as Task
-                                    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                  }}
-                                  placeholder="Koment..."
-                                  rows={2}
-                                  className="text-xs"
-                                  disabled={isLocked}
-                                />
-                              </td>
-                              <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.checklist || "-"}</td>
-                            </tr>
-                          )
-                        })
-                      ) : (
-                        <tr>
-                          <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={10}>
-                            No tasks yet.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                }}
+                                disabled={isLocked}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {TASK_STATUSES.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                      {statusLabel(status)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="border px-2 py-2">
+                              <Textarea
+                                value={commentValue}
+                                onChange={(e) =>
+                                  setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                }
+                                onBlur={async (e) => {
+                                  if (isLocked) return
+                                  const nextValue = e.target.value.trim()
+                                  const currentValue = meta?.comment || ""
+                                  if (nextValue === currentValue) return
+                                  const nextMeta: VsVlTaskMeta = {
+                                    ...(meta || {}),
+                                    vs_vl_phase: meta?.vs_vl_phase || vsVlPhase,
+                                  }
+                                  if (nextValue) {
+                                    nextMeta.comment = nextValue
+                                  } else {
+                                    delete nextMeta.comment
+                                  }
+                                  const res = await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
+                                  })
+                                  if (!res.ok) {
+                                    toast.error("Failed to update comment")
+                                    return
+                                  }
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                }}
+                                placeholder="Koment..."
+                                rows={2}
+                                className="text-xs"
+                                disabled={isLocked}
+                              />
+                            </td>
+                            <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.checklist || "-"}</td>
+                          </tr>
+                        )
+                      })
+                    ) : (
+                      <tr>
+                        <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={10}>
+                          No tasks yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-            </Card>
-            )}
+            </div>
+          </Card>
+        )}
       </div>
     )
   }
@@ -1742,8 +1843,69 @@ export default function PcmProjectPage() {
     const planningChecks = mstPlanningChecks
     const togglePlanning = (q: string) =>
       setMstPlanningChecks((prev) => ({ ...prev, [q]: !prev[q] }))
-    const toggleFinalChecklist = (path: string) =>
-      setMstChecklistChecked((prev) => ({ ...prev, [path]: !prev[path] }))
+    // Get MST checklist items from database (filtered by path matching template)
+    const mstChecklistItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return MST_FINAL_CHECKLIST.some(
+        (row) => item.path === row.path && item.title === row.detyrat
+      )
+    })
+
+    // Create a map for quick lookup
+    const mstItemMap = new Map<string, ChecklistItem>()
+    mstChecklistItems.forEach((item) => {
+      if (item.path && item.title) {
+        const key = `${item.path}|${item.title}`
+        mstItemMap.set(key, item)
+      }
+    })
+
+    // Initialize checked state from database (moved outside to avoid hook issues)
+
+    const toggleFinalChecklist = async (path: string, title: string) => {
+      const key = `${path}|${title}`
+      const item = mstItemMap.get(key)
+      if (!item) return
+
+      const newChecked = !mstChecklistChecked[key]
+      setMstChecklistChecked((prev) => ({ ...prev, [key]: newChecked }))
+
+      try {
+        const res = await apiFetch(`/checklist-items/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: newChecked }),
+        })
+        if (!res.ok) {
+          setMstChecklistChecked((prev) => ({ ...prev, [key]: !newChecked }))
+          toast.error("Failed to update checklist")
+        }
+      } catch (error) {
+        setMstChecklistChecked((prev) => ({ ...prev, [key]: !newChecked }))
+        toast.error("Failed to update checklist")
+      }
+    }
+
+    const updateMstChecklistComment = async (path: string, title: string, comment: string) => {
+      const key = `${path}|${title}`
+      const item = mstItemMap.get(key)
+      if (!item) return
+
+      setMstChecklistComments((prev) => ({ ...prev, [key]: comment }))
+
+      try {
+        const res = await apiFetch(`/checklist-items/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: comment || null }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to save comment")
+        }
+      } catch (error) {
+        toast.error("Failed to save comment")
+      }
+    }
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
@@ -1802,7 +1964,7 @@ export default function PcmProjectPage() {
           </div>
         </div>
 
-        {mstPhase === "PLANIFIKIMI" ? (
+        {mstPhase === "PLANNING" ? (
           <>
             <div className="border-b flex gap-6">
               {[
@@ -1831,60 +1993,60 @@ export default function PcmProjectPage() {
               renderGaNotes()
             ) : (
               <Card>
-              <div className="p-4 space-y-4">
-                <div className="text-lg font-semibold">Planifikimi</div>
-                <div className="grid gap-3">
-                  {[
-                    "A eshte hapur grupi ne Teams?",
-                    "A eshte hapur projekti ne chat GPT?",
-                  ].map((q, idx) => (
-                    <div key={q} className="grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-9 flex items-center gap-3">
-                        <Checkbox
-                          checked={Boolean(descriptionChecks[q])}
-                          onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
-                        />
-                        <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
-                      </div>
-                      <div className="col-span-3">
-                        {idx === 1 ? (
-                          <Textarea
-                            placeholder="Shkruaj emrin e programit..."
-                            value={programName}
-                            onChange={(e) => setProgramName(e.target.value)}
+                <div className="p-4 space-y-4">
+                  <div className="text-lg font-semibold">Planifikimi</div>
+                  <div className="grid gap-3">
+                    {[
+                      "A eshte hapur grupi ne Teams?",
+                      "A eshte hapur projekti ne chat GPT?",
+                    ].map((q, idx) => (
+                      <div key={q} className="grid grid-cols-12 gap-3 items-center">
+                        <div className="col-span-9 flex items-center gap-3">
+                          <Checkbox
+                            checked={Boolean(descriptionChecks[q])}
+                            onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
                           />
-                        ) : null}
+                          <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
+                        </div>
+                        <div className="col-span-3">
+                          {idx === 1 ? (
+                            <Textarea
+                              placeholder="Shkruaj emrin e programit..."
+                              value={programName}
+                              onChange={(e) => setProgramName(e.target.value)}
+                            />
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
 
-                <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
-                  <div className="col-span-10">Description/General Points (me checkbox)</div>
-                  <div className="col-span-2 text-right">Status/Koment</div>
-                </div>
+                  <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
+                    <div className="col-span-10">Description/General Points (me checkbox)</div>
+                    <div className="col-span-2 text-right">Status/Koment</div>
+                  </div>
 
-                <div className="divide-y border rounded-lg">
-                  {MST_PLANNING_QUESTIONS.slice(2).map((q) => (
-                    <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
-                      <div className="col-span-10 flex items-start gap-3">
-                        <Checkbox
-                          checked={Boolean(descriptionChecks[q])}
-                          onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
-                        />
-                        <span className="text-sm">{q}</span>
+                  <div className="divide-y border rounded-lg">
+                    {MST_PLANNING_QUESTIONS.slice(2).map((q) => (
+                      <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
+                        <div className="col-span-10 flex items-start gap-3">
+                          <Checkbox
+                            checked={Boolean(descriptionChecks[q])}
+                            onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                          />
+                          <span className="text-sm">{q}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <Input placeholder="Koment" />
+                        </div>
                       </div>
-                      <div className="col-span-2">
-                        <Input placeholder="Koment" />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
             )}
           </>
-        ) : mstPhase === "PRODUKTE" ? (
+        ) : mstPhase === "PRODUCT" ? (
           <>
             <div className="border-b flex gap-6">
               {[
@@ -1943,10 +2105,10 @@ export default function PcmProjectPage() {
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
                           {assignableUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || u.email}
-                              </SelectItem>
-                            ))}
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || u.email}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2063,7 +2225,7 @@ export default function PcmProjectPage() {
                             />
                           </div>
                           <div className="col-span-2">
-                            <Badge 
+                            <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}
                               className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
                             >
@@ -2085,7 +2247,7 @@ export default function PcmProjectPage() {
                                 toast.success("Task deleted")
                               }}
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
                             </Button>
                           </div>
                         </div>
@@ -2117,32 +2279,60 @@ export default function PcmProjectPage() {
                     <div className="col-span-2">PATH</div>
                     <div className="col-span-2">DETYRAT</div>
                     <div className="col-span-2">KEYWORDS</div>
-                    <div className="col-span-3">PERSHKRIMI</div>
+                    <div className="col-span-2">PERSHKRIMI</div>
                     <div className="col-span-1">KATEGORIA</div>
                     <div className="col-span-1">CHECK</div>
                     <div className="col-span-1">INCL</div>
-                    <div className="col-span-1">COMENT</div>
+                    <div className="col-span-1">KOMENT</div>
                   </div>
                   <div className="divide-y">
-                    {MST_FINAL_CHECKLIST.map((row) => (
-                      <div key={row.path + row.detyrat} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
-                        <div className="col-span-2">{row.path}</div>
-                        <div className="col-span-2 font-semibold">{row.detyrat}</div>
-                        <div className="col-span-2">{row.keywords}</div>
-                        <div className="col-span-3">{row.pershkrimi}</div>
-                        <div className="col-span-1">{row.kategoria}</div>
-                        <div className="col-span-1 flex justify-center">
-                          <Checkbox
-                            checked={Boolean(mstChecklistChecked[row.path + row.detyrat])}
-                            onCheckedChange={() => toggleFinalChecklist(row.path + row.detyrat)}
-                          />
+                    {MST_FINAL_CHECKLIST.map((row) => {
+                      const key = `${row.path}|${row.detyrat}`
+                      const dbItem = mstItemMap.get(key)
+                      const isChecked = mstChecklistChecked[key] || false
+                      const comment = mstChecklistComments[key] || ""
+                      const assignees = dbItem?.assignees || []
+                      const assigneeInitials = assignees
+                        .map((a) => {
+                          const user = allUsers.find((u) => u.id === a.user_id)
+                          if (user?.full_name) {
+                            const names = user.full_name.split(" ")
+                            return names.map((n) => n[0]).join("").toUpperCase()
+                          }
+                          return user?.username?.substring(0, 2).toUpperCase() || ""
+                        })
+                        .filter(Boolean)
+                        .join(", ") || row.incl
+
+                      return (
+                        <div key={key} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
+                          <div className="col-span-2 truncate" title={row.path}>{row.path}</div>
+                          <div className="col-span-2 font-semibold truncate" title={row.detyrat}>{row.detyrat}</div>
+                          <div className="col-span-2 truncate" title={row.keywords}>{row.keywords}</div>
+                          <div className="col-span-2 truncate" title={row.pershkrimi}>{row.pershkrimi}</div>
+                          <div className="col-span-1 truncate" title={row.kategoria}>{row.kategoria}</div>
+                          <div className="col-span-1 flex justify-center">
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={() => toggleFinalChecklist(row.path, row.detyrat)}
+                            />
+                          </div>
+                          <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
+                          <div className="col-span-1">
+                            <Input
+                              placeholder="Koment"
+                              className="h-8 text-xs w-full"
+                              value={comment}
+                              onChange={(e) => {
+                                const newComment = e.target.value
+                                setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
+                              }}
+                              onBlur={(e) => updateMstChecklistComment(row.path, row.detyrat, e.target.value)}
+                            />
+                          </div>
                         </div>
-                        <div className="col-span-1">{row.incl}</div>
-                        <div className="col-span-1">
-                          <Input placeholder="Koment" className="h-8" />
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               </Card>
@@ -2223,7 +2413,7 @@ export default function PcmProjectPage() {
 
             {mstTab === "ga" ? renderGaNotes() : null}
           </>
-        ) : mstPhase === "KONTROLLI" ? (
+        ) : mstPhase === "CONTROL" ? (
           <>
             <div className="border-b flex gap-6">
               {[
@@ -2252,203 +2442,203 @@ export default function PcmProjectPage() {
               renderGaNotes()
             ) : (
               <Card className="border-0 shadow-sm">
-              <div className="p-6 space-y-4">
-                <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
-                {/* Table header */}
-                <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
-                  <div className="col-span-3">Task</div>
-                  <div className="col-span-1">Assigned</div>
-                  <div className="col-span-2">Total</div>
-                  <div className="col-span-2">Completed</div>
-                  <div className="col-span-1">KO</div>
-                  <div className="col-span-2">Status</div>
-                  <div className="col-span-1"></div>
-                </div>
-                {/* Inline form row */}
-                <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                  <div className="col-span-3">
-                    <input
-                      type="text"
-                      placeholder="Enter task name..."
-                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                      value={controlTitle}
-                      onChange={(e) => setControlTitle(e.target.value)}
-                    />
+                <div className="p-6 space-y-4">
+                  <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
+                  {/* Table header */}
+                  <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
+                    <div className="col-span-3">Task</div>
+                    <div className="col-span-1">Assigned</div>
+                    <div className="col-span-2">Total</div>
+                    <div className="col-span-2">Completed</div>
+                    <div className="col-span-1">KO</div>
+                    <div className="col-span-2">Status</div>
+                    <div className="col-span-1"></div>
                   </div>
-                  <div className="col-span-1">
-                    <Select value={controlAssignee} onValueChange={setControlAssignee}>
-                      <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                        <SelectValue placeholder="-" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__unassigned__">-</SelectItem>
-                        {assignableUsers.map((u) => (
+                  {/* Inline form row */}
+                  <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                    <div className="col-span-3">
+                      <input
+                        type="text"
+                        placeholder="Enter task name..."
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        value={controlTitle}
+                        onChange={(e) => setControlTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <Select value={controlAssignee} onValueChange={setControlAssignee}>
+                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                          <SelectValue placeholder="-" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__unassigned__">-</SelectItem>
+                          {assignableUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.full_name || u.username || u.email}
                             </SelectItem>
                           ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                    />
-                  </div>
-                  <div className="col-span-1 text-sm text-slate-400">
-                    {(() => {
-                      if (controlAssignee === "__unassigned__") return "-"
-                      const assignedUser = allUsers.find((u) => u.id === controlAssignee)
-                      const assignedName = assignedUser?.full_name?.toLowerCase() || ""
-                      if (assignedName.includes("diellza")) return "Lea Murturi"
-                      if (assignedName.includes("lea")) return "Diellza Veliu"
-                      return "Elsa Ferati"
-                    })()}
-                  </div>
-                  <div className="col-span-2">
-                    <Button
-                      size="sm"
-                      className="rounded-full px-5 shadow-sm"
-                      onClick={async () => {
-                        if (!project || !controlTitle.trim()) return
-                        setCreatingControlTask(true)
-                        try {
-                          const res = await apiFetch("/tasks", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              title: controlTitle.trim(),
-                              project_id: project.id,
-                              department_id: project.department_id,
-                              assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                              status: "IN_PROGRESS",
-                              priority: "NORMAL",
-                            }),
-                          })
-                          if (!res?.ok) {
-                            toast.error("Failed to add task")
-                            return
-                          }
-                          const created = (await res.json()) as Task
-                          setTasks((prev) => [...prev, created])
-                          setControlTitle("")
-                          setControlAssignee("__unassigned__")
-                          toast.success("Task added")
-                        } finally {
-                          setCreatingControlTask(false)
-                        }
-                      }}
-                      disabled={creatingControlTask || !controlTitle.trim()}
-                    >
-                      {creatingControlTask ? "Saving..." : "Save"}
-                    </Button>
-                  </div>
-                  <div className="col-span-1"></div>
-                </div>
-                {/* Task rows */}
-                <div className="divide-y divide-slate-100">
-                  {tasks.map((task) => {
-                    const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
-                    const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
-                    const assignedName = assignedUser?.full_name?.toLowerCase() || ""
-                    const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
-                    return (
-                      <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                        <div className="col-span-3 font-medium text-slate-700">{task.title}</div>
-                        <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
-                        <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
-                        <div className="col-span-2">
-                          <input
-                            type="number"
-                            min="0"
-                            max={totalVal > 0 ? totalVal : undefined}
-                            className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
-                            value={controlEdits[task.id]?.completed || ""}
-                            onChange={async (e) => {
-                              let completedNum = parseInt(e.target.value, 10) || 0
-                              // Cap at total value
-                              if (totalVal > 0 && completedNum > totalVal) {
-                                completedNum = totalVal
-                              }
-                              const newCompleted = completedNum.toString()
-                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                              const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
-
-                              // Update local state immediately
-                              setControlEdits((prev) => ({
-                                ...prev,
-                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                              }))
-
-                              // Update task on server
-                              const res = await apiFetch(`/tasks/${task.id}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                  status: newStatus,
-                                }),
-                              })
-                              if (res?.ok) {
-                                const updated = (await res.json()) as Task
-                                setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                if (shouldMarkDone && task.status !== "DONE") {
-                                  toast.success("Task marked as Done!")
-                                }
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="col-span-1 text-slate-500">{koName}</div>
-                        <div className="col-span-2">
-                          <Badge 
-                            variant={task.status === "DONE" ? "default" : "outline"}
-                            className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
-                          >
-                            {statusLabel(controlEdits[task.id]?.status || task.status)}
-                          </Badge>
-                        </div>
-                        <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                            onClick={async () => {
-                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                              if (!res?.ok) {
-                                toast.error("Failed to delete task")
-                                return
-                              }
-                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                              toast.success("Task deleted")
-                            }}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {tasks.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-slate-400">
-                      No tasks yet. Add one above to get started.
+                        </SelectContent>
+                      </Select>
                     </div>
-                  ) : null}
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                      />
+                    </div>
+                    <div className="col-span-1 text-sm text-slate-400">
+                      {(() => {
+                        if (controlAssignee === "__unassigned__") return "-"
+                        const assignedUser = allUsers.find((u) => u.id === controlAssignee)
+                        const assignedName = assignedUser?.full_name?.toLowerCase() || ""
+                        if (assignedName.includes("diellza")) return "Lea Murturi"
+                        if (assignedName.includes("lea")) return "Diellza Veliu"
+                        return "Elsa Ferati"
+                      })()}
+                    </div>
+                    <div className="col-span-2">
+                      <Button
+                        size="sm"
+                        className="rounded-full px-5 shadow-sm"
+                        onClick={async () => {
+                          if (!project || !controlTitle.trim()) return
+                          setCreatingControlTask(true)
+                          try {
+                            const res = await apiFetch("/tasks", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                title: controlTitle.trim(),
+                                project_id: project.id,
+                                department_id: project.department_id,
+                                assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
+                                status: "IN_PROGRESS",
+                                priority: "NORMAL",
+                              }),
+                            })
+                            if (!res?.ok) {
+                              toast.error("Failed to add task")
+                              return
+                            }
+                            const created = (await res.json()) as Task
+                            setTasks((prev) => [...prev, created])
+                            setControlTitle("")
+                            setControlAssignee("__unassigned__")
+                            toast.success("Task added")
+                          } finally {
+                            setCreatingControlTask(false)
+                          }
+                        }}
+                        disabled={creatingControlTask || !controlTitle.trim()}
+                      >
+                        {creatingControlTask ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                    <div className="col-span-1"></div>
+                  </div>
+                  {/* Task rows */}
+                  <div className="divide-y divide-slate-100">
+                    {tasks.map((task) => {
+                      const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
+                      const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
+                      const assignedName = assignedUser?.full_name?.toLowerCase() || ""
+                      const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
+                      return (
+                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div className="col-span-3 font-medium text-slate-700">{task.title}</div>
+                          <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
+                          <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
+                          <div className="col-span-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max={totalVal > 0 ? totalVal : undefined}
+                              className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
+                              value={controlEdits[task.id]?.completed || ""}
+                              onChange={async (e) => {
+                                let completedNum = parseInt(e.target.value, 10) || 0
+                                // Cap at total value
+                                if (totalVal > 0 && completedNum > totalVal) {
+                                  completedNum = totalVal
+                                }
+                                const newCompleted = completedNum.toString()
+                                const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
+
+                                // Update local state immediately
+                                setControlEdits((prev) => ({
+                                  ...prev,
+                                  [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                }))
+
+                                // Update task on server
+                                const res = await apiFetch(`/tasks/${task.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                    status: newStatus,
+                                  }),
+                                })
+                                if (res?.ok) {
+                                  const updated = (await res.json()) as Task
+                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  if (shouldMarkDone && task.status !== "DONE") {
+                                    toast.success("Task marked as Done!")
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="col-span-1 text-slate-500">{koName}</div>
+                          <div className="col-span-2">
+                            <Badge
+                              variant={task.status === "DONE" ? "default" : "outline"}
+                              className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                            >
+                              {statusLabel(controlEdits[task.id]?.status || task.status)}
+                            </Badge>
+                          </div>
+                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                              onClick={async () => {
+                                const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                if (!res?.ok) {
+                                  toast.error("Failed to delete task")
+                                  return
+                                }
+                                setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                toast.success("Task deleted")
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {tasks.length === 0 ? (
+                      <div className="py-8 text-center text-sm text-slate-400">
+                        No tasks yet. Add one above to get started.
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
             )}
           </>
-        ) : mstPhase === "FINALIZIMI" ? (
+        ) : mstPhase === "FINAL" ? (
           <>
             <div className="border-b flex gap-6">
               {[
@@ -2477,43 +2667,43 @@ export default function PcmProjectPage() {
               renderGaNotes()
             ) : (
               <Card className="border-0 shadow-sm">
-              <div className="p-6 space-y-6">
-                <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
-                <div className="space-y-4">
-                  {[
-                    { id: "kontrollat", question: "A jane kryer kontrollat?" },
-                    { id: "files", question: "A eshte ruajtur projekti tek files?" },
-                  ].map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
-                    >
-                      <Checkbox
-                        id={item.id}
-                        checked={Boolean(finalizationChecks[item.id])}
-                        onCheckedChange={(checked) =>
-                          setFinalizationChecks((prev) => ({ ...prev, [item.id]: Boolean(checked) }))
-                        }
-                      />
-                      <label
-                        htmlFor={item.id}
-                        className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
+                <div className="p-6 space-y-6">
+                  <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
+                  <div className="space-y-4">
+                    {[
+                      { id: "kontrollat", question: "A jane kryer kontrollat?" },
+                      { id: "files", question: "A eshte ruajtur projekti tek files?" },
+                    ].map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
                       >
-                        {item.question}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-                {Object.values(finalizationChecks).filter(Boolean).length === 2 && (
-                  <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
-                    <div className="flex items-center gap-2 text-emerald-700 font-medium">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                      Projekti eshte gati per mbyllje!
-                    </div>
+                        <Checkbox
+                          id={item.id}
+                          checked={Boolean(finalizationChecks[item.id])}
+                          onCheckedChange={(checked) =>
+                            setFinalizationChecks((prev) => ({ ...prev, [item.id]: Boolean(checked) }))
+                          }
+                        />
+                        <label
+                          htmlFor={item.id}
+                          className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
+                        >
+                          {item.question}
+                        </label>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            </Card>
+                  {Object.values(finalizationChecks).filter(Boolean).length === 2 && (
+                    <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                      <div className="flex items-center gap-2 text-emerald-700 font-medium">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                        Projekti eshte gati per mbyllje!
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
             )}
           </>
         ) : (

@@ -22,9 +22,7 @@ class TaskFinishPeriod(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     TODO = "TODO"
     IN_PROGRESS = "IN_PROGRESS"
-    REVIEW = "REVIEW"
     DONE = "DONE"
-    CANCELLED = "CANCELLED"
 
 
 class TaskType(str, enum.Enum):
@@ -93,12 +91,18 @@ class HolidayType(str, enum.Enum):
 
 
 class ProjectPhaseStatus(str, enum.Enum):
-    TAKIMET = "TAKIMET"
-    PLANIFIKIMI = "PLANIFIKIMI"
-    ZHVILLIMI = "ZHVILLIMI"
-    TESTIMI = "TESTIMI"
-    DOKUMENTIMI = "DOKUMENTIMI"
-    MBYLLUR = "MBYLLUR"
+    MEETINGS = "MEETINGS"
+    PLANNING = "PLANNING"
+    DEVELOPMENT = "DEVELOPMENT"
+    TESTING = "TESTING"
+    DOCUMENTATION = "DOCUMENTATION"
+    PRODUCT = "PRODUCT"
+    CONTROL = "CONTROL"
+    FINAL = "FINAL"
+    AMAZON = "AMAZON"
+    CHECK = "CHECK"
+    DREAMROBOT = "DREAMROBOT"
+    CLOSED = "CLOSED"
 
 
 class CommonCategory(str, enum.Enum):
@@ -126,3 +130,8 @@ class NotificationType(str, enum.Enum):
     mention = "mention"
     reminder = "reminder"
 
+
+class ChecklistItemType(str, enum.Enum):
+    TITLE = "TITLE"
+    COMMENT = "COMMENT"
+    CHECKBOX = "CHECKBOX"
