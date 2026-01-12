@@ -995,7 +995,7 @@ export default function CommonViewPage() {
   const saveMeetingRow = React.useCallback(
     async (meetingId: string, rowId: string) => {
       const payload = {
-        title: editDraft.topic.trim(),
+        title: editDraft.topic.trim().toUpperCase(),
         day: editDraft.day.trim() || null,
         owner: editDraft.owner.trim() || null,
         time: editDraft.time.trim() || null,
@@ -1177,7 +1177,7 @@ export default function CommonViewPage() {
 
   const addMeetingRow = React.useCallback(
     async (meetingId: string) => {
-      const topic = addDraft.topic.trim()
+      const topic = addDraft.topic.trim().toUpperCase()
       if (!topic) return
       const meeting = meetingTemplates.find((template) => template.id === meetingId)
       if (!meeting) return
@@ -1205,24 +1205,29 @@ export default function CommonViewPage() {
         const created = await res.json()
         const createdRow: MeetingRow = {
           id: created.id,
-          nr: created.position ?? nextPosition,
+          nr: requestedNr || created.position || nextPosition,
           day: created.day || undefined,
           topic: created.title || topic,
           owner: created.owner || undefined,
           time: created.time || undefined,
           isChecked: created.is_checked ?? false,
         }
+        const baseRows = meeting?.rows || []
+        const nextRows = requestedNr
+          ? baseRows.map((row) =>
+              row.nr >= requestedNr ? { ...row, nr: row.nr + 1 } : row
+            ).concat(createdRow)
+          : baseRows.concat(createdRow)
         setMeetingTemplates((prev) =>
           prev.map((template) => {
             if (template.id !== meetingId) return template
             return {
               ...template,
-              rows: [...template.rows, createdRow],
+              rows: nextRows,
             }
           })
         )
         setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
-        const nextRows = (meeting?.rows || []).concat(createdRow)
         await resequenceMeetingRows(meetingId, nextRows)
       } catch (err) {
         console.error("Failed to add meeting item", err)
@@ -2301,7 +2306,10 @@ export default function CommonViewPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeMeeting.rows.map((row, rowIndex) => (
+                    {activeMeeting.rows
+                      .slice()
+                      .sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+                      .map((row, rowIndex) => (
                       <tr key={row.id}>
                         {activeMeeting.columns.map((col) => {
                           let value = ""
@@ -2351,7 +2359,8 @@ export default function CommonViewPage() {
                                     className="input"
                                     type="text"
                                     value={editDraft.topic}
-                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value }))}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                                    style={{ textTransform: "uppercase" }}
                                   />
                                 ) : (
                                   value
@@ -2493,10 +2502,11 @@ export default function CommonViewPage() {
                       type="text"
                       placeholder="Topic"
                       value={addDraft.topic}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value }))}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                      style={{ textTransform: "uppercase" }}
                     />
                     <button className="btn-primary" type="button" onClick={() => addMeetingRow(activeMeeting.id)}>
-                      Add item
+                      Add meeting point
                     </button>
                   </div>
                 </div>
