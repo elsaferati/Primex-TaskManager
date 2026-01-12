@@ -1588,7 +1588,7 @@ export default function DepartmentKanban() {
                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                         {group.items.map(item => {
                           const statusValue = item.status || "TODO"
-                          const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                          const isClosed = statusValue === "DONE"
                           const owner = users.find(u => u.id === item.default_assignee_id)
                           const isAssigned =
                             Boolean(user?.id) &&

@@ -2268,7 +2268,7 @@ export default function DepartmentKanban() {
                             ? "border-red-200 bg-red-50 text-red-700"
                             : "border-amber-200 bg-amber-50 text-amber-700"
                         const statusValue = item.status || "TODO"
-                        const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                        const isClosed = statusValue === "DONE"
                         const isAssigned =
                           Boolean(user?.id) &&
                           (item.default_assignee_id === user?.id ||

@@ -1906,9 +1906,7 @@ export default function DepartmentKanban() {
                             <SelectContent>
                               <SelectItem value="TODO">To do</SelectItem>
                               <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                              <SelectItem value="REVIEW">Review</SelectItem>
                               <SelectItem value="DONE">Done</SelectItem>
-                              <SelectItem value="CANCELLED">Cancelled</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -2491,7 +2489,7 @@ export default function DepartmentKanban() {
                           const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
                           const priorityValue = normalizePriority(item.priority)
                           const statusValue = item.status || "TODO"
-                          const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                          const isClosed = statusValue === "DONE"
                           const isAssigned =
                             Boolean(user?.id) &&
                             (item.default_assignee_id === user?.id ||

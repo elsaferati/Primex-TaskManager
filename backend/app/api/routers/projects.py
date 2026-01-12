@@ -14,6 +14,7 @@ from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, TaskStatus, UserRole
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
+from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.meeting import Meeting
 from app.models.project import Project
@@ -69,14 +70,17 @@ PHASE_SEQUENCE = [
 ]
 
 
-def get_project_sequence(project: Project) -> list[ProjectPhaseStatus]:
+def get_project_sequence(project: Project, department_name: str | None = None) -> list[ProjectPhaseStatus]:
     # This is a bit simplistic, but we can refine it
     title = project.title.upper()
+    department_label = (department_name or "").upper()
     # Check department if available (would need department name)
     # For now, base it on title patterns similar to trigger logic
     if "VS" in title or "VL" in title:
         return VS_PHASES
     if "MST" in title:
+        return MST_PHASES
+    if department_label in {"PROJECT CONTENT MANAGER", "GRAPHIC DESIGN", "PCM", "GD"}:
         return MST_PHASES
     # Default to DEV if it looks like a dev project or fallback
     return DEV_PHASES
@@ -294,7 +298,14 @@ async def advance_project_phase(
     if project.department_id is not None:
         ensure_department_access(user, project.department_id)
 
-    sequence = get_project_sequence(project)
+    department_name = None
+    if project.department_id is not None:
+        department = (
+            await db.execute(select(Department).where(Department.id == project.department_id))
+        ).scalar_one_or_none()
+        department_name = department.name if department else None
+
+    sequence = get_project_sequence(project, department_name)
     try:
         current_idx = sequence.index(project.current_phase)
     except ValueError:

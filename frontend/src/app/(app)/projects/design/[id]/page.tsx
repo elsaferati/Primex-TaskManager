@@ -45,7 +45,7 @@ const MEETING_TABS = [
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 // Design task statuses
-const TASK_STATUSES = ["TODO", "DRAFTING", "INTERNAL_REVIEW", "CLIENT_REVIEW", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
@@ -426,7 +426,7 @@ export default function DesignProjectPage() {
     const openTasks = tasks.filter(
       (task) =>
         task.status !== "DONE" &&
-        task.status !== "CANCELLED" &&
+        task.status !== "DONE" &&
         (task.phase || currentPhase) === currentPhase
     )
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)

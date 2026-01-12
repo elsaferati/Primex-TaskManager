@@ -96,6 +96,12 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
     )
 
 
+def _enum_value(value) -> str | None:
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else value
+
+
 async def _project_for_id(db: AsyncSession, project_id: uuid.UUID) -> Project:
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
@@ -310,7 +316,7 @@ async def create_task(
         before=None,
         after={
             "title": task.title,
-            "status": task.status.value,
+            "status": _enum_value(task.status),
             "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         },
     )
@@ -403,10 +409,10 @@ async def update_task(
         "description": task.description,
         "internal_notes": task.internal_notes,
         "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
-        "status": task.status.value,
-        "priority": task.priority.value,
-        "finish_period": task.finish_period.value if task.finish_period else None,
-        "phase": task.phase.value if task.phase else None,
+        "status": _enum_value(task.status),
+        "priority": _enum_value(task.priority),
+        "finish_period": _enum_value(task.finish_period),
+        "phase": _enum_value(task.phase),
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -548,7 +554,7 @@ async def update_task(
                 type=NotificationType.status_change,
                 title="Task status changed",
                 body=task.title,
-                data={"task_id": str(task.id), "status": task.status.value},
+                data={"task_id": str(task.id), "status": _enum_value(task.status)},
             )
         )
 
@@ -574,10 +580,10 @@ async def update_task(
         "description": task.description,
         "internal_notes": task.internal_notes,
         "dependency_task_id": str(task.dependency_task_id) if task.dependency_task_id else None,
-        "status": task.status.value,
-        "priority": task.priority.value,
-        "finish_period": task.finish_period.value if task.finish_period else None,
-        "phase": task.phase.value if task.phase else None,
+        "status": _enum_value(task.status),
+        "priority": _enum_value(task.priority),
+        "finish_period": _enum_value(task.finish_period),
+        "phase": _enum_value(task.phase),
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,

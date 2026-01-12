@@ -18,9 +18,7 @@ import type { Task, User, UserLookup } from "@/lib/types"
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
-  { value: "REVIEW", label: "Review" },
   { value: "DONE", label: "Done" },
-  { value: "CANCELLED", label: "Cancelled" },
 ] as const
 
 const TASK_PRIORITY_LABELS: Record<string, string> = {

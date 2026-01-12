@@ -172,17 +172,17 @@ const CHECKLIST_WARNING = [
 ].join("\n")
 
 const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  TODO: {
+    label: "To do",
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+  },
+  IN_PROGRESS: {
+    label: "In progress",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
   DONE: {
     label: "Done",
     className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "border-red-200 bg-red-50 text-red-700",
-  },
-  REVIEW: {
-    label: "Review",
-    className: "border-amber-200 bg-amber-50 text-amber-700",
   },
 }
 

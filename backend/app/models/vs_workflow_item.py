@@ -14,7 +14,7 @@ class VsWorkflowItem(Base):
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     
     # Using plain strings to avoid Enum conflicts
-    status = Column(String, nullable=False, server_default="TODO") # TODO, IN_PROGRESS, REVIEW, DONE, CANCELLED
+    status = Column(String, nullable=False, server_default="TODO") # TODO, IN_PROGRESS, DONE
     priority = Column(String, nullable=False, server_default="NORMAL") # NORMAL, HIGH
     
     show_after_minutes = Column(Integer, nullable=False, default=0)

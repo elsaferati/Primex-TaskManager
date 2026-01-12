@@ -25,6 +25,12 @@ from app.services.system_task_schedule import should_reopen_system_task
 router = APIRouter()
 
 
+def _enum_value(value) -> str | None:
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else value
+
+
 def _task_is_active(template: SystemTaskTemplate) -> bool:
     if not template.is_active:
         return False
@@ -90,9 +96,9 @@ async def _sync_task_for_template(
             department_id=template.department_id,
             assigned_to=template.default_assignee_id,
             created_by=creator_id,
-            status=TaskStatus.TODO,
-            priority=template.priority or TaskPriority.NORMAL,
-            finish_period=template.finish_period,
+            status=_enum_value(TaskStatus.TODO),
+            priority=_enum_value(template.priority or TaskPriority.NORMAL),
+            finish_period=_enum_value(template.finish_period),
             system_template_origin_id=template.id,
             start_date=now,
             is_active=active_value,
@@ -106,12 +112,12 @@ async def _sync_task_for_template(
     task.internal_notes = template.internal_notes
     task.department_id = template.department_id
     task.assigned_to = template.default_assignee_id
-    task.finish_period = template.finish_period
+    task.finish_period = _enum_value(template.finish_period)
     task.is_active = active_value
     if task.priority is None:
-        task.priority = template.priority or TaskPriority.NORMAL
+        task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
     if active_value and should_reopen_system_task(task, template, now):
-        task.status = TaskStatus.TODO
+        task.status = _enum_value(TaskStatus.TODO)
         task.completed_at = None
     return task, False
 
@@ -293,14 +299,14 @@ async def create_system_task_template(
         internal_notes=payload.internal_notes,
         department_id=department_id,
         default_assignee_id=assignee_ids[0] if assignee_ids else None,
-        scope=scope_value,
-        frequency=payload.frequency,
+        scope=_enum_value(scope_value),
+        frequency=_enum_value(payload.frequency),
         day_of_week=days_of_week[0] if days_of_week else payload.day_of_week,
         days_of_week=days_of_week,
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
-        priority=priority_value,
-        finish_period=payload.finish_period,
+        priority=_enum_value(priority_value),
+        finish_period=_enum_value(payload.finish_period),
         is_active=payload.is_active if payload.is_active is not None else True,
     )
 
@@ -432,7 +438,7 @@ async def update_system_task_template(
     if "internal_notes" in fields_set:
         template.internal_notes = payload.internal_notes
     if scope_set:
-        template.scope = scope_value
+        template.scope = _enum_value(scope_value)
     if scope_value == SystemTaskScope.DEPARTMENT:
         if department_set:
             template.department_id = payload.department_id
@@ -441,7 +447,7 @@ async def update_system_task_template(
     if assignee_set and assignee_ids is not None:
         template.default_assignee_id = assignee_ids[0] if assignee_ids else None
     if payload.frequency is not None:
-        template.frequency = payload.frequency
+        template.frequency = _enum_value(payload.frequency)
     if days_set:
         template.days_of_week = days_of_week or None
         template.day_of_week = days_of_week[0] if days_of_week else payload.day_of_week
@@ -450,9 +456,9 @@ async def update_system_task_template(
     if payload.month_of_year is not None:
         template.month_of_year = payload.month_of_year
     if payload.priority is not None:
-        template.priority = payload.priority
+        template.priority = _enum_value(payload.priority)
     if "finish_period" in fields_set:
-        template.finish_period = payload.finish_period
+        template.finish_period = _enum_value(payload.finish_period)
     if payload.is_active is not None:
         template.is_active = payload.is_active
 

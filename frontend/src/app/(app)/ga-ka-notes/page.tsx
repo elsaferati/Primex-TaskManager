@@ -47,7 +47,6 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
-  CANCELLED: { label: "Cancelled", dot: "bg-slate-400", pill: "bg-slate-100 text-slate-600" },
 }
 
 function formatDate(value?: string | null) {
