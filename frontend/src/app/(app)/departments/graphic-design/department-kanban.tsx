@@ -331,7 +331,7 @@ export default function DepartmentKanban() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
-  
+
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
@@ -353,7 +353,7 @@ export default function DepartmentKanban() {
   const [systemDateInput, setSystemDateInput] = React.useState(() => formatDateInput(new Date()))
   const [systemFrequency, setSystemFrequency] = React.useState<SystemTaskTemplate["frequency"]>("DAILY")
   const [systemStatus, setSystemStatus] = React.useState<(typeof STATUS_OPTIONS)[number]>("OPEN")
-  
+
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [projectTitle, setProjectTitle] = React.useState("")
@@ -361,7 +361,7 @@ export default function DepartmentKanban() {
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
-  
+
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
@@ -373,7 +373,7 @@ export default function DepartmentKanban() {
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
   const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
-  
+
   const [noProjectOpen, setNoProjectOpen] = React.useState(false)
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
@@ -384,7 +384,7 @@ export default function DepartmentKanban() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
-  
+
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
   const [newGaNoteProjectId, setNewGaNoteProjectId] = React.useState("__none__")
@@ -888,7 +888,7 @@ export default function DepartmentKanban() {
         due_date: dueDate,
       }
       const assigneeIds = noProjectAssignee === "__all__" ? departmentUsers.map((u) => u.id) : noProjectAssignee === "__unassigned__" ? [null] : [noProjectAssignee]
-      
+
       const createdTasks: Task[] = []
       for (const assigneeId of assigneeIds) {
         const res = await apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, assigned_to: assigneeId }) })
@@ -968,7 +968,7 @@ export default function DepartmentKanban() {
       }
       if (newGaNoteProjectId === "__none__") payload.department_id = department.id
       else payload.project_id = newGaNoteProjectId
-      
+
       const res = await apiFetch("/ga-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) { toast.error("Failed to add note"); return }
       const created = (await res.json()) as GaNote
@@ -984,8 +984,8 @@ export default function DepartmentKanban() {
   const closeGaNote = async (noteId: string) => {
     const res = await apiFetch(`/ga-notes/${noteId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED" }) })
     if (res.ok) {
-        const updated = (await res.json()) as GaNote
-        setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+      const updated = (await res.json()) as GaNote
+      setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
     }
   }
 
@@ -1000,747 +1000,743 @@ export default function DepartmentKanban() {
         <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
 
         <div className="relative space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
-            <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
-            <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
+              <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
+              <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+            </div>
+            <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+              <button
+                type="button"
+                onClick={() => setViewMode("department")}
+                className={[
+                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  viewMode === "department"
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                Department
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("mine")}
+                className={[
+                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  viewMode === "mine"
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                My View
+              </button>
+            </div>
           </div>
-          <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-            <button
-              type="button"
-              onClick={() => setViewMode("department")}
-              className={[
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                viewMode === "department"
-                  ? "bg-foreground text-background shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              ].join(" ")}
-            >
-              Department
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("mine")}
-              className={[
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                viewMode === "mine"
-                  ? "bg-foreground text-background shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              ].join(" ")}
-            >
-              My View
-            </button>
-          </div>
-        </div>
 
-        <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-          <div className="flex flex-wrap gap-2">
-            {TABS.map((tab) => {
-              const isActive = tab.id === activeTab
-              const badgeTone =
-                tab.tone === "blue"
-                  ? "bg-blue-50 text-blue-600"
-                  : tab.tone === "red"
-                    ? "bg-red-50 text-red-600"
-                    : "bg-muted text-foreground"
-              const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={[
-                    "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-foreground text-background shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/70",
-                  ].join(" ")}
-                >
-                  <span className="uppercase tracking-wide">{tab.label}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
-                </button>
-              )
-            })}
+          <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
+            <div className="flex flex-wrap gap-2">
+              {TABS.map((tab) => {
+                const isActive = tab.id === activeTab
+                const badgeTone =
+                  tab.tone === "blue"
+                    ? "bg-blue-50 text-blue-600"
+                    : tab.tone === "red"
+                      ? "bg-red-50 text-red-600"
+                      : "bg-muted text-foreground"
+                const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={[
+                      "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-foreground text-background shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                    ].join(" ")}
+                  >
+                    <span className="uppercase tracking-wide">{tab.label}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        </div>
 
-        <div className="min-h-[600px] animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="min-h-[600px] animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* PROJECTS */}
             {activeTab === "projects" && (
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
-                        {canManage && (
-                            <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
-                                <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
-                                <DialogContent className="sm:max-w-xl rounded-2xl">
-                                    <DialogHeader><DialogTitle>Create Project</DialogTitle></DialogHeader>
-                                    <div className="grid gap-4 py-4">
-                                        <div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
-                                        <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-2"><Label>Manager</Label><Select value={projectManagerId} onValueChange={setProjectManagerId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div>
-                                            <div className="space-y-2"><Label>Phase</Label><Select value={projectPhase} onValueChange={setProjectPhase}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{PHASES.map((p) => <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>)}</SelectContent></Select></div>
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitProject()}>Create</Button></div>
-                                </DialogContent>
-                            </Dialog>
-                        )}
-                    </div>
-                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-2">
-                        {filteredProjects.map((project) => {
-                            // Derived Data Calculation
-                            const tasks = departmentTasks.filter(t => t.project_id === project.id);
-                            const phase = project.current_phase || "TAKIMET";
-                            const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
-                            
-                            // Calculate members from tasks assignees + manager
-                            const memberIds = new Set(tasks.map(t => t.assigned_to).filter(Boolean));
-                            if(project.manager_id) memberIds.add(project.manager_id);
-                            const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
-
-                            return (
-                                <Card key={project.id} className="group flex flex-col justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
-                                    <div className="space-y-4">
-                                        <div className="flex items-start justify-between">
-                                            <div className="space-y-1">
-                                                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{project.title || project.name}</h3>
-                                                {/* Single Phase Badge */}
-                                                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-                                                    {PHASE_LABELS[phase]}
-                                                </Badge>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Tasks</div>
-                                                <div className="text-xl font-light text-slate-900 dark:text-white">{tasks.length}</div>
-                                            </div>
-                                        </div>
-                                        
-                                        {/* Description */}
-                                        <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 dark:text-slate-400">{project.description || "No description provided."}</p>
-                                        
-                                        {/* Taskbar: Horizontal list of tasks */}
-                                        <div className="space-y-2">
-                                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Task Summary</div>
-                                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                                                {tasks.length > 0 ? tasks.slice(0, 5).map(t => (
-                                                    <div key={t.id} className="flex-shrink-0 max-w-[150px] truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                                                        {t.title}
-                                                    </div>
-                                                )) : <div className="text-xs text-slate-400 italic">No active tasks</div>}
-                                                {tasks.length > 5 && <div className="flex-shrink-0 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">+{tasks.length - 5} more</div>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
-                                        <div className="flex items-center gap-4">
-                                            {/* Members Stack */}
-                                            <div className="flex -space-x-2">
-                                                {members.length > 0 ? members.slice(0,4).map(m => (
-                                                    <div
-                                                      key={m?.id}
-                                                      className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-300"
-                                                      title={m?.full_name || m?.username || "Unknown"}
-                                                    >
-                                                        {initials(m?.full_name || "?")}
-                                                    </div>
-                                                )) : <div className="text-xs text-slate-400">No members</div>}
-                                                {members.length > 4 && <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] text-slate-500 dark:border-slate-900 dark:bg-slate-800">+{members.length - 4}</div>}
-                                            </div>
-                                            
-                                            {/* GA Notes Count */}
-                                            {noteCount > 0 && (
-                                                <div className="flex items-center gap-1 text-xs text-slate-500">
-                                                    <span className="font-bold text-slate-700 dark:text-slate-300">{noteCount}</span> GA Notes
-                                                </div>
-                                            )}
-                                        </div>
-                                        
-                                        <Link href={`/projects/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
-                                            View <span aria-hidden="true">&rarr;</span>
-                                        </Link>
-                                    </div>
-                                </Card>
-                            )
-                        })}
-                    </div>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                  {canManage && (
+                    <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+                      <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
+                      <DialogContent className="sm:max-w-xl rounded-2xl">
+                        <DialogHeader><DialogTitle>Create Project</DialogTitle></DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
+                          <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2"><Label>Manager</Label><Select value={projectManagerId} onValueChange={setProjectManagerId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div>
+                            <div className="space-y-2"><Label>Phase</Label><Select value={projectPhase} onValueChange={setProjectPhase}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{PHASES.map((p) => <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>)}</SelectContent></Select></div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitProject()}>Create</Button></div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                 </div>
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-2">
+                  {filteredProjects.map((project) => {
+                    // Derived Data Calculation
+                    const tasks = departmentTasks.filter(t => t.project_id === project.id);
+                    const phase = project.current_phase || "TAKIMET";
+                    const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
+
+                    // Calculate members from tasks assignees + manager
+                    const memberIds = new Set(tasks.map(t => t.assigned_to).filter(Boolean));
+                    if (project.manager_id) memberIds.add(project.manager_id);
+                    const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
+
+                    return (
+                      <Card key={project.id} className="group flex flex-col justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-1">
+                              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{project.title || project.name}</h3>
+                              {/* Single Phase Badge */}
+                              <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                                {PHASE_LABELS[phase]}
+                              </Badge>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Tasks</div>
+                              <div className="text-xl font-light text-slate-900 dark:text-white">{tasks.length}</div>
+                            </div>
+                          </div>
+
+                          {/* Description */}
+                          <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 dark:text-slate-400">{project.description || "No description provided."}</p>
+
+                          {/* Taskbar: Horizontal list of tasks */}
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Task Summary</div>
+                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                              {tasks.length > 0 ? tasks.slice(0, 5).map(t => (
+                                <div key={t.id} className="flex-shrink-0 max-w-[150px] truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                  {t.title}
+                                </div>
+                              )) : <div className="text-xs text-slate-400 italic">No active tasks</div>}
+                              {tasks.length > 5 && <div className="flex-shrink-0 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">+{tasks.length - 5} more</div>}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+                          <div className="flex items-center gap-4">
+                            {/* Members Stack */}
+                            <div className="flex -space-x-2">
+                              {members.length > 0 ? members.slice(0, 4).map(m => (
+                                <div
+                                  key={m?.id}
+                                  className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600 dark:border-slate-900 dark:bg-slate-700 dark:text-slate-300"
+                                  title={m?.full_name || m?.username || "Unknown"}
+                                >
+                                  {initials(m?.full_name || "?")}
+                                </div>
+                              )) : <div className="text-xs text-slate-400">No members</div>}
+                              {members.length > 4 && <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] text-slate-500 dark:border-slate-900 dark:bg-slate-800">+{members.length - 4}</div>}
+                            </div>
+
+                            {/* GA Notes Count */}
+                            {noteCount > 0 && (
+                              <div className="flex items-center gap-1 text-xs text-slate-500">
+                                <span className="font-bold text-slate-700 dark:text-slate-300">{noteCount}</span> GA Notes
+                              </div>
+                            )}
+                          </div>
+
+                          <Link href={`/projects/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
+                            View <span aria-hidden="true">&rarr;</span>
+                          </Link>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </div>
             )}
 
             {/* OVERVIEW */}
             {activeTab === "all" && (
-                <div className="space-y-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold tracking-tight text-slate-800">
-                        {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
-                      </div>
-                      <div className="text-sm text-slate-600 mt-1">
-                        {viewMode === "department"
-                          ? "All of today's tasks for the department team."
-                          : "All of today's tasks, organized in one place."}
-                      </div>
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-2xl font-bold tracking-tight text-slate-800">
+                      {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-                        {formatToday()}
-                      </div>
-                      {viewMode === "department" && departmentUsers.length ? (
-                        <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                          <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="All users" />
+                    <div className="text-sm text-slate-600 mt-1">
+                      {viewMode === "department"
+                        ? "All of today's tasks for the department team."
+                        : "All of today's tasks, organized in one place."}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
+                      {formatToday()}
+                    </div>
+                    {viewMode === "department" && departmentUsers.length ? (
+                      <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                        <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectValue placeholder="All users" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">All users</SelectItem>
+                          {departmentUsers.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || "-"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    {viewMode === "mine" ? (
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                        <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                        <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                          <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                            <SelectValue placeholder="This Week" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__all__">All users</SelectItem>
-                            {departmentUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || "-"}
-                              </SelectItem>
-                            ))}
+                            <SelectItem value="today">Today</SelectItem>
+                            <SelectItem value="week">This Week</SelectItem>
                           </SelectContent>
                         </Select>
-                      ) : null}
-                      {viewMode === "mine" ? (
-                        <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                          <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                          <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                            <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                              <SelectValue placeholder="This Week" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="today">Today</SelectItem>
-                              <SelectItem value="week">This Week</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            variant="ghost"
-                            className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
-                            onClick={() => window.print()}
-                          >
-                            Print
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-4">
-                    {[
-                      { label: "PROJECT TASKS", value: todayProjectTasks.length },
-                      { label: "NO PROJECT", value: todayNoProjectTasks.length },
-                      { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-                      { label: "SYSTEM", value: todaySystemTasks.length },
-                    ].map((stat) => (
-                      <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
-                        <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
-                      </Card>
-                    ))}
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                        <div className="text-sm font-semibold">PROJECT TASKS</div>
-                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          {todayProjectTasks.length}
-                        </span>
-                        <div className="mt-2 text-xs text-slate-500">Due today</div>
+                        <Button
+                          variant="ghost"
+                          className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
+                          onClick={() => window.print()}
+                        >
+                          Print
+                        </Button>
                       </div>
-                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                        {todayProjectTaskGroups.length ? (
-                          <div className="space-y-3">
-                            {todayProjectTaskGroups.map((group) => (
-                              <div key={group.id}>
-                                <div className="text-xs font-semibold text-slate-700">{group.name}</div>
-                                <div className="mt-2 space-y-2">
-                                  {group.tasks.map((task) => {
-                                    const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                                    const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                                    return (
-                                      <Link
-                                        key={task.id}
-                                        href={`/tasks/${task.id}`}
-                                        className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                            {task.status || "TODO"}
-                                          </Badge>
-                                          <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
-                                            {phaseLabel}
-                                          </Badge>
-                                          <div className="font-medium text-slate-800">{task.title}</div>
-                                        </div>
-                                        <div className="mt-1 text-xs text-slate-600">
-                                          {assignee?.full_name || assignee?.username || "Unassigned"}
-                                        </div>
-                                      </Link>
-                                    )
-                                  })}
-                                </div>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-4">
+                  {[
+                    { label: "PROJECT TASKS", value: todayProjectTasks.length },
+                    { label: "NO PROJECT", value: todayNoProjectTasks.length },
+                    { label: "NOTES (OPEN)", value: todayOpenNotes.length },
+                    { label: "SYSTEM", value: todaySystemTasks.length },
+                  ].map((stat) => (
+                    <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                      <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
+                    </Card>
+                  ))}
+                </div>
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">PROJECT TASKS</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todayProjectTasks.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Due today</div>
+                    </div>
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todayProjectTaskGroups.length ? (
+                        <div className="space-y-3">
+                          {todayProjectTaskGroups.map((group) => (
+                            <div key={group.id}>
+                              <div className="text-xs font-semibold text-slate-700">{group.name}</div>
+                              <div className="mt-2 space-y-2">
+                                {group.tasks.map((task) => {
+                                  const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                                  const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                                  return (
+                                    <Link
+                                      key={task.id}
+                                      href={`/tasks/${task.id}`}
+                                      className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                          {task.status || "TODO"}
+                                        </Badge>
+                                        <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                                          {phaseLabel}
+                                        </Badge>
+                                        <div className="font-medium text-slate-800">{task.title}</div>
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-600">
+                                        {assignee?.full_name || assignee?.username || "Unassigned"}
+                                      </div>
+                                    </Link>
+                                  )
+                                })}
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-500">No project tasks today.</div>
-                        )}
-                      </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No project tasks today.</div>
+                      )}
                     </div>
+                  </div>
 
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                        <div className="text-sm font-semibold">NO PROJECT</div>
-                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          {todayNoProjectTasks.length}
-                        </span>
-                        <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
-                      </div>
-                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                        {todayNoProjectTasks.length ? (
-                          <div className="space-y-2">
-                            {todayNoProjectTasks.map((task) => {
-                              const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                              const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                              const typeLabel = task.is_bllok
-                                ? "Blocked"
-                                : task.is_1h_report
-                                  ? "1H"
-                                  : task.is_r1
-                                    ? "R1"
-                                    : "Normal"
-                              return (
-                                <Link
-                                  key={task.id}
-                                  href={`/tasks/${task.id}`}
-                                  className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                      {typeLabel}
-                                    </Badge>
-                                    <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
-                                      {phaseLabel}
-                                    </Badge>
-                                    <div className="font-medium text-slate-800">{task.title}</div>
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    {assignee?.full_name || assignee?.username || "Unassigned"}
-                                  </div>
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-500">No tasks today.</div>
-                        )}
-                      </div>
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">NO PROJECT</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todayNoProjectTasks.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                     </div>
-
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                        <div className="text-sm font-semibold">NOTES (OPEN)</div>
-                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          {todayOpenNotes.length}
-                        </span>
-                        <div className="mt-2 text-xs text-slate-500">Quick notes</div>
-                      </div>
-                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                        {todayOpenNotes.length ? (
-                          <div className="space-y-2">
-                            {todayOpenNotes.map((note) => (
-                              <div
-                                key={note.id}
-                                className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todayNoProjectTasks.length ? (
+                        <div className="space-y-2">
+                          {todayNoProjectTasks.map((task) => {
+                            const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                            const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                            const typeLabel = task.is_bllok
+                              ? "Blocked"
+                              : task.is_1h_report
+                                ? "1H"
+                                : task.is_r1
+                                  ? "R1"
+                                  : "Normal"
+                            return (
+                              <Link
+                                key={task.id}
+                                href={`/tasks/${task.id}`}
+                                className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
                               >
                                 <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-xs">
-                                    {note.note_type || "GA"}
+                                  <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                    {typeLabel}
                                   </Badge>
-                                  <div className="font-medium">{note.content}</div>
+                                  <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
+                                    {phaseLabel}
+                                  </Badge>
+                                  <div className="font-medium text-slate-800">{task.title}</div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-muted-foreground">No open notes today.</div>
-                        )}
-                      </div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  {assignee?.full_name || assignee?.username || "Unassigned"}
+                                </div>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No tasks today.</div>
+                      )}
                     </div>
+                  </div>
 
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                        <div className="text-sm font-semibold">SYSTEM</div>
-                        <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          {todaySystemTasks.length}
-                        </span>
-                        <div className="mt-2 text-xs text-slate-500">Scheduled</div>
-                      </div>
-                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                        {todaySystemTasks.length ? (
-                          <div className="space-y-2">
-                            {todaySystemTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
-                              >
-                                <div className="font-medium text-slate-800">{task.title}</div>
-                                <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-500">No system tasks today.</div>
-                        )}
-                      </div>
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">NOTES (OPEN)</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todayOpenNotes.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Quick notes</div>
                     </div>
-
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                      <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                        <div className="text-sm font-semibold">MEETINGS</div>
-                        <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                          {todayMeetings.length}
-                        </span>
-                        <div className="mt-2 text-xs text-slate-500">Today</div>
-                      </div>
-                      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                        {todayMeetings.length ? (
-                          <div className="space-y-2">
-                            {todayMeetings.map((meeting) => (
-                              <div
-                                key={meeting.id}
-                                className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
-                              >
-                                <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                                {meeting.project_id ? (
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
-                                  </div>
-                                ) : null}
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todayOpenNotes.length ? (
+                        <div className="space-y-2">
+                          {todayOpenNotes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {note.note_type || "GA"}
+                                </Badge>
+                                <div className="font-medium">{note.content}</div>
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-muted-foreground">No meetings today.</div>
-                        )}
-                      </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No open notes today.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">SYSTEM</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todaySystemTasks.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+                    </div>
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todaySystemTasks.length ? (
+                        <div className="space-y-2">
+                          {todaySystemTasks.map((task) => (
+                            <div
+                              key={task.id}
+                              className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                            >
+                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No system tasks today.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">MEETINGS</div>
+                      <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        {todayMeetings.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Today</div>
+                    </div>
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todayMeetings.length ? (
+                        <div className="space-y-2">
+                          {todayMeetings.map((meeting) => (
+                            <div
+                              key={meeting.id}
+                              className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
+                            >
+                              <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                              {meeting.project_id ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No meetings today.</div>
+                      )}
                     </div>
                   </div>
                 </div>
+              </div>
             )}
 
             {activeTab === "system" && (
-                <div className="space-y-6">
-                     <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">System Routine</h2>
-                        {canManage && (<Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Routine Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Routine</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={systemTitle} onChange={(e)=>setSystemTitle(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Owner</Label><Select value={systemOwnerId} onValueChange={setSystemOwnerId}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Frequency</Label><Select value={systemFrequency} onValueChange={(v:any)=>setSystemFrequency(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(FREQUENCY_LABELS).map(([k,v])=><SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={systemDescription} onChange={(e)=>setSystemDescription(e.target.value)} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setCreateSystemOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitSystemTask()}>Save</Button></div></DialogContent></Dialog>)}
-                     </div>
-                     <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
-                         <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                             {[{l:"Today",o:0}, {l:"Yesterday",o:-1}, {l:"Tomorrow",o:1}].map(d => {
-                                 const target = new Date(); target.setDate(target.getDate() + d.o);
-                                 const active = target.toDateString() === systemDate.toDateString();
-                                 return <button key={d.l} onClick={()=>setSystemDate(target)} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${active ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{d.l}</button>
-                             })}
-                         </div>
-                         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
-                         <Input type="date" className="h-9 w-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0" value={formatDateInput(systemDate)} onChange={(e)=>setSystemDate(new Date(e.target.value))} />
-                         <div className="ml-auto flex items-center gap-2"><Label className="text-xs text-slate-500">Show All</Label><Checkbox checked={showAllSystem} onCheckedChange={(v)=>setShowAllSystem(!!v)} /></div>
-                     </div>
-                     <div className="space-y-8">
-                         {systemGroups.map(group => (
-                            <div key={group.label} className="space-y-4">
-                                <div className="flex items-center gap-3">
-                                    <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span>
-                                    <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
-                                </div>
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                    {group.items.map(item => {
-                                        const statusValue = item.status || "TODO"
-                                        const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
-                                        const owner = users.find(u => u.id === item.default_assignee_id)
-                                        const isAssigned =
-                                          Boolean(user?.id) &&
-                                          (item.default_assignee_id === user?.id ||
-                                            item.assignees?.some((assignee) => assignee.id === user?.id))
-                                        return (
-                                            <div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800">
-                                                <div className="space-y-2">
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="space-y-1">
-                                                            <h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4>
-                                                            <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
-                                                        </div>
-                                                        <div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div>
-                                                    </div>
-                                                    <p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p>
-                                                </div>
-                                                <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 dark:border-slate-800">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">
-                                                            {initials(owner?.full_name || "?")}
-                                                        </div>
-                                                        <span className="text-xs text-slate-400">{owner?.full_name || "Unassigned"}</span>
-                                                    </div>
-                                                    {viewMode === "mine" ? (
-                                                        isClosed ? (
-                                                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                                                <span className="text-[12px]">✓</span>
-                                                                Done
-                                                            </span>
-                                                        ) : isAssigned ? (
-                                                            <button
-                                                                type="button"
-                                                                disabled={systemStatusUpdatingId === item.id}
-                                                                className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                                                onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
-                                                            >
-                                                                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
-                                                                    ✓
-                                                                </span>
-                                                                Mark Done
-                                                            </button>
-                                                        ) : null
-                                                    ) : null}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                         ))}
-                     </div>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">System Routine</h2>
+                  {canManage && (<Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Routine Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Routine</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Owner</Label><Select value={systemOwnerId} onValueChange={setSystemOwnerId}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Frequency</Label><Select value={systemFrequency} onValueChange={(v: any) => setSystemFrequency(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(FREQUENCY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={systemDescription} onChange={(e) => setSystemDescription(e.target.value)} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateSystemOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitSystemTask()}>Save</Button></div></DialogContent></Dialog>)}
                 </div>
+                <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+                  <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                    {[{ l: "Today", o: 0 }, { l: "Yesterday", o: -1 }, { l: "Tomorrow", o: 1 }].map(d => {
+                      const target = new Date(); target.setDate(target.getDate() + d.o);
+                      const active = target.toDateString() === systemDate.toDateString();
+                      return <button key={d.l} onClick={() => setSystemDate(target)} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${active ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{d.l}</button>
+                    })}
+                  </div>
+                  <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
+                  <Input type="date" className="h-9 w-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0" value={formatDateInput(systemDate)} onChange={(e) => setSystemDate(new Date(e.target.value))} />
+                  <div className="ml-auto flex items-center gap-2"><Label className="text-xs text-slate-500">Show All</Label><Checkbox checked={showAllSystem} onCheckedChange={(v) => setShowAllSystem(!!v)} /></div>
+                </div>
+                <div className="space-y-8">
+                  {systemGroups.map(group => (
+                    <div key={group.label} className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span>
+                        <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {group.items.map(item => {
+                          const statusValue = item.status || "TODO"
+                          const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                          const owner = users.find(u => u.id === item.default_assignee_id)
+                          const isAssigned =
+                            Boolean(user?.id) &&
+                            (item.default_assignee_id === user?.id ||
+                              item.assignees?.some((assignee) => assignee.id === user?.id))
+                          return (
+                            <div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800">
+                              <div className="space-y-2">
+                                <div className="flex items-start justify-between">
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4>
+                                    <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
+                                  </div>
+                                  <div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div>
+                                </div>
+                                <p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p>
+                              </div>
+                              <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 dark:border-slate-800">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">
+                                    {initials(owner?.full_name || "?")}
+                                  </div>
+                                  <span className="text-xs text-slate-400">{owner?.full_name || "Unassigned"}</span>
+                                </div>
+                                {viewMode === "mine" ? (
+                                  isClosed ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                      <span className="text-[12px]">✓</span>
+                                      Done
+                                    </span>
+                                  ) : isAssigned ? (
+                                    <button
+                                      type="button"
+                                      disabled={systemStatusUpdatingId === item.id}
+                                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                                      onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                    >
+                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
+                                        ✓
+                                      </span>
+                                      Mark Done
+                                    </button>
+                                  ) : null
+                                ) : null}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* BUCKETS */}
             {activeTab === "no-project" && (
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                         <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
-                        {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v:any)=>setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t=><SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e)=>setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={noProjectDescription} onChange={(e)=>setNoProjectDescription(e.target.value)} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u=><SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value)=>setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e)=>setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
-                    </div>
-                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
-                        <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">Blocked</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
-                        <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Origin</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
-                        <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
-                    </div>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
+                  {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={noProjectDescription} onChange={(e) => setNoProjectDescription(e.target.value)} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value) => setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
                 </div>
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
+                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">Blocked</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
+                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Origin</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
+                  <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
+                </div>
+              </div>
             )}
 
             {/* NOTES */}
             {activeTab === "ga-ka" && (
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                         <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">GA / KA Notes</h2><p className="text-sm text-slate-500">General Admin & Key Accounts.</p></div>
-                         {!isReadOnly && (<Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Note</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Note</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Related Project</Label><Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="None (General)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{projects.map(p=><SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Type</Label><Select value={newGaNoteType} onValueChange={(v:any)=>setNewGaNoteType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GA">GA</SelectItem><SelectItem value="KA">KA</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Priority</Label><Select value={newGaNotePriority} onValueChange={(v:any)=>setNewGaNotePriority(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem><SelectItem value="NORMAL">Normal</SelectItem><SelectItem value="HIGH">High</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Content</Label><Textarea className="rounded-xl" value={newGaNote} onChange={(e)=>setNewGaNote(e.target.value)} rows={4} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={()=>setGaNoteOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={()=>void submitGaNote()}>Save</Button></div></DialogContent></Dialog>)}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {visibleGaNotes.length ? visibleGaNotes.map(note => {
-                            const author = users.find(u => u.id === note.created_by)
-                            const project = note.project_id ? projects.find(p => p.id === note.project_id) : null
-                            return (
-                                <Card key={note.id} className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border-0 bg-white/60 p-5 shadow-sm ring-1 ring-slate-900/5 transition hover:shadow-md dark:bg-slate-900/60 dark:ring-white/10">
-                                    <div className="absolute top-0 right-0 h-16 w-16 -translate-y-6 translate-x-6 rounded-full bg-slate-50 dark:bg-slate-800"></div>
-                                    <div className="relative z-10">
-                                        <div className="flex items-center justify-between mb-3"><span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>{note.note_type}</span><span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span></div>
-                                        <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
-                                    </div>
-                                    <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
-                                        <div className="flex items-center gap-2"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">{initials(author?.full_name||"?")}</div><span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span></div>
-                                        {note.status !== "CLOSED" && !isReadOnly ? <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={()=>void closeGaNote(note.id)}>Archive</Button> : note.status === "CLOSED" ? <Badge variant="secondary" className="h-5 text-[10px]">Archived</Badge> : null}
-                                    </div>
-                                </Card>
-                            )
-                        }) : <div className="col-span-full py-12 text-center text-sm text-slate-400">No active notes.</div>}
-                    </div>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">GA / KA Notes</h2><p className="text-sm text-slate-500">General Admin & Key Accounts.</p></div>
+                  {!isReadOnly && (<Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Note</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Note</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Related Project</Label><Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="None (General)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Type</Label><Select value={newGaNoteType} onValueChange={(v: any) => setNewGaNoteType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GA">GA</SelectItem><SelectItem value="KA">KA</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Priority</Label><Select value={newGaNotePriority} onValueChange={(v: any) => setNewGaNotePriority(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem><SelectItem value="NORMAL">Normal</SelectItem><SelectItem value="HIGH">High</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Content</Label><Textarea className="rounded-xl" value={newGaNote} onChange={(e) => setNewGaNote(e.target.value)} rows={4} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setGaNoteOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitGaNote()}>Save</Button></div></DialogContent></Dialog>)}
                 </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleGaNotes.length ? visibleGaNotes.map(note => {
+                    const author = users.find(u => u.id === note.created_by)
+                    const project = note.project_id ? projects.find(p => p.id === note.project_id) : null
+                    return (
+                      <Card key={note.id} className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border-0 bg-white/60 p-5 shadow-sm ring-1 ring-slate-900/5 transition hover:shadow-md dark:bg-slate-900/60 dark:ring-white/10">
+                        <div className="absolute top-0 right-0 h-16 w-16 -translate-y-6 translate-x-6 rounded-full bg-slate-50 dark:bg-slate-800"></div>
+                        <div className="relative z-10">
+                          <div className="flex items-center justify-between mb-3"><span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>{note.note_type}</span><span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span></div>
+                          <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
+                        </div>
+                        <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+                          <div className="flex items-center gap-2"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">{initials(author?.full_name || "?")}</div><span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span></div>
+                          {note.status !== "CLOSED" && !isReadOnly ? <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => void closeGaNote(note.id)}>Archive</Button> : note.status === "CLOSED" ? <Badge variant="secondary" className="h-5 text-[10px]">Archived</Badge> : null}
+                        </div>
+                      </Card>
+                    )
+                  }) : <div className="col-span-full py-12 text-center text-sm text-slate-400">No active notes.</div>}
+                </div>
+              </div>
             )}
 
             {/* MEETINGS */}
             {activeTab === "meetings" && (
-                <div className="space-y-8">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Meetings</h2>
-                    </div>
-
-                    <div className="grid gap-8 lg:grid-cols-2">
-                        {/* Internal Sync */}
-                        <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
-                             <div className="relative z-10">
-                                 <h3 className="text-lg font-medium text-slate-900 dark:text-white">Internal Sync</h3>
-                                 <p className="text-sm text-slate-500">Daily routine checks.</p>
-                                 
-                                 <div className="mt-6 mb-8 flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                                     {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map(slot => (
-                                         <button key={slot} onClick={()=>setInternalSlot(slot)} className={`flex-1 rounded-lg py-2 text-xs font-medium transition-all ${internalSlot === slot ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{slot}</button>
-                                     ))}
-                                 </div>
-
-                                 <div className="space-y-4">
-                                     <h4 className="font-medium text-emerald-600 dark:text-emerald-400">{INTERNAL_MEETING.slots[internalSlot].label}</h4>
-                                     <ul className="space-y-3">
-                                         {INTERNAL_MEETING.slots[internalSlot].items.map((item, i) => (
-                                             <li key={i} className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
-                                                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400">{i+1}</span>
-                                                 <span className="leading-relaxed">{item}</span>
-                                             </li>
-                                         ))}
-                                     </ul>
-                                 </div>
-                             </div>
-                        </div>
-
-                        {/* Scheduled */}
-                        <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
-                             <div className="flex items-center justify-between mb-4">
-                                <div><h3 className="text-lg font-medium text-slate-900 dark:text-white">Scheduled</h3><p className="text-sm text-slate-500">Project meetings & Calendar events.</p></div>
-                                <Badge variant="secondary" className="bg-slate-100 text-slate-600">{visibleMeetings.length} today</Badge>
-                             </div>
-
-                             {!isReadOnly && (
-                                 <div className="mb-6 rounded-2xl bg-slate-50/50 p-4 ring-1 ring-slate-100 dark:bg-slate-800/50 dark:ring-slate-700">
-                                     <div className="space-y-3">
-                                         <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="New Meeting Title" value={meetingTitle} onChange={(e)=>setMeetingTitle(e.target.value)} />
-                                         <div className="grid grid-cols-2 gap-3">
-                                             <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="Platform" value={meetingPlatform} onChange={(e)=>setMeetingPlatform(e.target.value)} />
-                                             <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" type="datetime-local" value={meetingStartsAt} onChange={(e)=>setMeetingStartsAt(e.target.value)} />
-                                         </div>
-                                         <div className="flex gap-3">
-                                             <Select value={meetingProjectId} onValueChange={setMeetingProjectId}><SelectTrigger className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><SelectValue placeholder="Project (Opt)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{filteredProjects.map(p=><SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select>
-                                             <Button className="shrink-0 rounded-xl bg-slate-900 text-white" onClick={()=>void submitMeeting()} disabled={!meetingTitle.trim() || creatingMeeting}>Add</Button>
-                                         </div>
-                                     </div>
-                                 </div>
-                             )}
-
-                             <div className="space-y-3">
-                                 {visibleMeetings.map((meeting) => {
-                                     const project = meeting.project_id ? projects.find(p => p.id === meeting.project_id) : null
-                                     const isEditing = editingMeetingId === meeting.id
-                                     
-                                     if (isEditing) {
-                                         return (
-                                             <div key={meeting.id} className="rounded-xl border bg-white p-4 space-y-2 shadow-lg ring-2 ring-emerald-100">
-                                                 <Input value={editMeetingTitle} onChange={(e)=>setEditMeetingTitle(e.target.value)} className="font-medium" />
-                                                 <div className="grid grid-cols-2 gap-2"><Input value={editMeetingPlatform} onChange={(e)=>setEditMeetingPlatform(e.target.value)} /><Input type="datetime-local" value={editMeetingStartsAt} onChange={(e)=>setEditMeetingStartsAt(e.target.value)} /></div>
-                                                 <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={()=>setEditingMeetingId(null)}>Cancel</Button><Button size="sm" onClick={()=>void saveMeeting(meeting.id)}>Save</Button></div>
-                                             </div>
-                                         )
-                                     }
-                                     return (
-                                         <div key={meeting.id} className="group flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-100 transition hover:ring-slate-300 dark:bg-slate-900 dark:ring-slate-800">
-                                             <div className="flex items-start gap-4">
-                                                 <div className="flex flex-col items-center min-w-[3rem]">
-                                                     <span className="text-xs font-bold text-slate-900 dark:text-white">{meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "--:--"}</span>
-                                                     <Badge variant="outline" className="mt-1 h-4 px-1 text-[8px] border-slate-200 text-slate-500">DB</Badge>
-                                                 </div>
-                                                 <div>
-                                                     <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">{meeting.title}</div>
-                                                     <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">•</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{project.title}</span></>}</div>
-                                                 </div>
-                                             </div>
-                                             {!isReadOnly && (
-                                                <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
-                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-900" onClick={()=>{setEditingMeetingId(meeting.id);setEditMeetingTitle(meeting.title);setEditMeetingPlatform(meeting.platform||"");setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at));setEditMeetingProjectId(meeting.project_id||"__none__");}}>✎</Button>
-                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-400 hover:text-rose-600" onClick={()=>void deleteMeeting(meeting.id)}>✕</Button>
-                                                </div>
-                                             )}
-                                         </div>
-                                     )
-                                 })}
-                                 {!visibleMeetings.length && <div className="py-4 text-center text-sm text-slate-400">No scheduled meetings.</div>}
-                             </div>
-                        </div>
-                    </div>
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Meetings</h2>
                 </div>
-            )}
-        </div>
-      </div>
-      <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">Weekly Task Report</div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentName}
-          </div>
-          <div className="text-sm text-slate-700">
-            User: {user?.full_name || user?.username || "-"}
-          </div>
-          <div className="text-sm text-slate-700">
-            {printRange === "today" ? "Date" : "Week"}: {printRangeLabel}
-          </div>
-        </div>
-        <div className="px-6 pb-6">
-          <table className="w-full border border-slate-900 text-[11px]">
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
-                {printDates.map((date) => (
-                  <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                    {formatPrintDay(date)}
-                  </th>
-                ))}
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {printRowsByRange.map((row) => {
-                const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
-                return (
-                  <tr key={row.id}>
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                      {row.label}
-                      <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
-                        {total}
-                      </span>
-                    </td>
-                    {row.itemsByDay.map((items, idx) => (
-                      <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
-                        {items.length ? (
-                          <div className="space-y-1">
-                            {items.map((item, itemIndex) => (
-                              <div
-                                key={`${row.id}-${idx}-${itemIndex}`}
-                                className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                              >
-                                <div className="flex items-start gap-1 leading-tight">
-                                  <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                  <span>{item}</span>
-                                </div>
-                              </div>
-                            ))}
+
+                <div className="grid gap-8 lg:grid-cols-2">
+                  {/* Internal Sync */}
+                  <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
+                    <div className="relative z-10">
+                      <h3 className="text-lg font-medium text-slate-900 dark:text-white">Internal Sync</h3>
+                      <p className="text-sm text-slate-500">Daily routine checks.</p>
+
+                      <div className="mt-6 mb-8 flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                        {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map(slot => (
+                          <button key={slot} onClick={() => setInternalSlot(slot)} className={`flex-1 rounded-lg py-2 text-xs font-medium transition-all ${internalSlot === slot ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{slot}</button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-4">
+                        <h4 className="font-medium text-emerald-600 dark:text-emerald-400">{INTERNAL_MEETING.slots[internalSlot].label}</h4>
+                        <ul className="space-y-3">
+                          {INTERNAL_MEETING.slots[internalSlot].items.map((item, i) => (
+                            <li key={i} className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400">{i + 1}</span>
+                              <span className="leading-relaxed">{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scheduled */}
+                  <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
+                    <div className="flex items-center justify-between mb-4">
+                      <div><h3 className="text-lg font-medium text-slate-900 dark:text-white">Scheduled</h3><p className="text-sm text-slate-500">Project meetings & Calendar events.</p></div>
+                      <Badge variant="secondary" className="bg-slate-100 text-slate-600">{visibleMeetings.length} today</Badge>
+                    </div>
+
+                    {!isReadOnly && (
+                      <div className="mb-6 rounded-2xl bg-slate-50/50 p-4 ring-1 ring-slate-100 dark:bg-slate-800/50 dark:ring-slate-700">
+                        <div className="space-y-3">
+                          <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="New Meeting Title" value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} />
+                          <div className="grid grid-cols-2 gap-3">
+                            <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" placeholder="Platform" value={meetingPlatform} onChange={(e) => setMeetingPlatform(e.target.value)} />
+                            <Input className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" type="datetime-local" value={meetingStartsAt} onChange={(e) => setMeetingStartsAt(e.target.value)} />
                           </div>
-                        ) : (
-                          <div className="italic text-slate-600">No data available.</div>
-                        )}
+                          <div className="flex gap-3">
+                            <Select value={meetingProjectId} onValueChange={setMeetingProjectId}><SelectTrigger className="rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><SelectValue placeholder="Project (Opt)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{filteredProjects.map(p => <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select>
+                            <Button className="shrink-0 rounded-xl bg-slate-900 text-white" onClick={() => void submitMeeting()} disabled={!meetingTitle.trim() || creatingMeeting}>Add</Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {visibleMeetings.map((meeting) => {
+                        const project = meeting.project_id ? projects.find(p => p.id === meeting.project_id) : null
+                        const isEditing = editingMeetingId === meeting.id
+
+                        if (isEditing) {
+                          return (
+                            <div key={meeting.id} className="rounded-xl border bg-white p-4 space-y-2 shadow-lg ring-2 ring-emerald-100">
+                              <Input value={editMeetingTitle} onChange={(e) => setEditMeetingTitle(e.target.value)} className="font-medium" />
+                              <div className="grid grid-cols-2 gap-2"><Input value={editMeetingPlatform} onChange={(e) => setEditMeetingPlatform(e.target.value)} /><Input type="datetime-local" value={editMeetingStartsAt} onChange={(e) => setEditMeetingStartsAt(e.target.value)} /></div>
+                              <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setEditingMeetingId(null)}>Cancel</Button><Button size="sm" onClick={() => void saveMeeting(meeting.id)}>Save</Button></div>
+                            </div>
+                          )
+                        }
+                        return (
+                          <div key={meeting.id} className="group flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-100 transition hover:ring-slate-300 dark:bg-slate-900 dark:ring-slate-800">
+                            <div className="flex items-start gap-4">
+                              <div className="flex flex-col items-center min-w-[3rem]">
+                                <span className="text-xs font-bold text-slate-900 dark:text-white">{meeting.starts_at ? new Date(meeting.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--:--"}</span>
+                                <Badge variant="outline" className="mt-1 h-4 px-1 text-[8px] border-slate-200 text-slate-500">DB</Badge>
+                              </div>
+                              <div>
+                                <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">{meeting.title}</div>
+                                <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">•</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{project.title}</span></>}</div>
+                              </div>
+                            </div>
+                            {!isReadOnly && (
+                              <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-900" onClick={() => { setEditingMeetingId(meeting.id); setEditMeetingTitle(meeting.title); setEditMeetingPlatform(meeting.platform || ""); setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at)); setEditMeetingProjectId(meeting.project_id || "__none__"); }}>✎</Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-400 hover:text-rose-600" onClick={() => void deleteMeeting(meeting.id)}>✕</Button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {!visibleMeetings.length && <div className="py-4 text-center text-sm text-slate-400">No scheduled meetings.</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="hidden print:block">
+          <div className="px-6 py-4">
+            <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
+            <div className="mt-4 text-2xl font-bold text-slate-900">Weekly Task Report</div>
+            <div className="mt-1 text-sm text-slate-700">
+              Department: {departmentName}
+            </div>
+            <div className="text-sm text-slate-700">
+              User: {user?.full_name || user?.username || "-"}
+            </div>
+            <div className="text-sm text-slate-700">
+              {printRange === "today" ? "Date" : "Week"}: {printRangeLabel}
+            </div>
+          </div>
+          <div className="px-6 pb-6">
+            <table className="w-full border border-slate-900 text-[11px]">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
+                  {printDates.map((date) => (
+                    <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                      {formatPrintDay(date)}
+                    </th>
+                  ))}
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printRowsByRange.map((row) => {
+                  const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
+                  return (
+                    <tr key={row.id}>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                        {row.label}
+                        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
+                          {total}
+                        </span>
                       </td>
-                    ))}
-                    <td className="border border-slate-900 px-2 py-2 align-top" />
-                    <td className="border border-slate-900 px-2 py-2 align-top" />
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      {row.itemsByDay.map((items, idx) => (
+                        <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
+                          {items.length ? (
+                            <div className="space-y-1">
+                              {items.map((item, itemIndex) => (
+                                <div
+                                  key={`${row.id}-${idx}-${itemIndex}`}
+                                  className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                >
+                                  <div className="flex items-start gap-1 leading-tight">
+                                    <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                    <span>{item}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="italic text-slate-600">No data available.</div>
+                          )}
+                        </td>
+                      ))}
+                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <style jsx global>{`
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @media print {
-          body {
-            background: white;
-          }
-          aside {
-            display: none !important;
-          }
-          @page {
-            margin: 12mm;
-          }
+          body { background: white; }
+          aside { display: none !important; }
+          @page { margin: 12mm; }
         }
-      `}</style>
+      `}} />
     </div>
   )
 }
