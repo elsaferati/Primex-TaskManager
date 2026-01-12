@@ -2,14 +2,12 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
-import { formatDepartmentName } from "@/lib/department-name"
-import type { User, Task, CommonEntry, GaNote, Department, Project } from "@/lib/types"
+import type { User, Task, CommonEntry, Project } from "@/lib/types"
 
 type CommonType =
   | "late"
   | "absent"
   | "leave"
-  | "ga"
   | "blocked"
   | "oneH"
   | "external"
@@ -21,7 +19,6 @@ type CommonType =
 type LateItem = { person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { person: string; date: string; from: string; to: string; note?: string }
 type LeaveItem = { person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
-type GaNoteItem = { id: string; date: string; department: string; person?: string; note: string }
 type BlockedItem = { title: string; person: string; date: string; note?: string }
 type OneHItem = { title: string; person: string; date: string; note?: string }
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string }
@@ -304,12 +301,10 @@ export default function CommonViewPage() {
 
   // State
   const [users, setUsers] = React.useState<User[]>([])
-  const [departments, setDepartments] = React.useState<Department[]>([])
   const [commonData, setCommonData] = React.useState({
     late: [] as LateItem[],
     absent: [] as AbsentItem[],
     leave: [] as LeaveItem[],
-    gaNotes: [] as GaNoteItem[],
     blocked: [] as BlockedItem[],
     oneH: [] as OneHItem[],
     external: [] as ExternalItem[],
@@ -328,8 +323,7 @@ export default function CommonViewPage() {
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
-  const [gaModalOpen, setGaModalOpen] = React.useState(false)
-  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "problem" | "feedback" | "gaNote">("late")
+  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "problem" | "feedback">("late")
   const [formPerson, setFormPerson] = React.useState("")
   const [formDate, setFormDate] = React.useState(toISODate(new Date()))
   const [formDelayStart, setFormDelayStart] = React.useState("08:00")
@@ -340,20 +334,11 @@ export default function CommonViewPage() {
   const [formFullDay, setFormFullDay] = React.useState(true)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
-  const [formDept, setFormDept] = React.useState("All")
-  const [gaAudience, setGaAudience] = React.useState<"all" | "department" | "person">("department")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [activeMeetingId, setActiveMeetingId] = React.useState(() => MEETING_TEMPLATES[0]?.id || "")
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
-  const resolveUserByLabel = React.useCallback(
-    (label: string) =>
-      users.find(
-        (u) => u.full_name === label || u.username === label || u.email === label || `${u.full_name || ""}`.trim() === label
-      ),
-    [users]
-  )
   const activeMeeting = React.useMemo(
     () => MEETING_TEMPLATES.find((template) => template.id === activeMeetingId) || null,
     [activeMeetingId]
@@ -386,7 +371,6 @@ export default function CommonViewPage() {
           late: [] as LateItem[],
           absent: [] as AbsentItem[],
           leave: [] as LeaveItem[],
-          gaNotes: [] as GaNoteItem[],
           blocked: [] as BlockedItem[],
           oneH: [] as OneHItem[],
           external: [] as ExternalItem[],
@@ -401,20 +385,12 @@ export default function CommonViewPage() {
           user?.role && user.role !== "STAFF"
             ? "/users?include_all_departments=true"
             : "/users"
-        const [uRes, depsRes] = await Promise.all([
-          apiFetch(usersEndpoint),
-          apiFetch("/departments")
-        ])
+        const uRes = await apiFetch(usersEndpoint)
         let loadedUsers: User[] = []
-        let loadedDepartments: Department[] = []
         let projectNameById = new Map<string, string>()
         if (uRes?.ok) {
           loadedUsers = (await uRes.json()) as User[]
           if (mounted) setUsers(loadedUsers)
-        }
-        if (depsRes?.ok) {
-          loadedDepartments = (await depsRes.json()) as Department[]
-          if (mounted) setDepartments(loadedDepartments)
         }
         const projectsEndpoint =
           user?.role && user.role !== "STAFF"
@@ -574,27 +550,6 @@ export default function CommonViewPage() {
           }
         }
 
-        // Load GA notes
-        const gaRes = await apiFetch("/ga-notes")
-        if (gaRes?.ok) {
-          const gaData = (await gaRes.json()) as GaNote[]
-          allData.gaNotes = gaData.map((n) => {
-            const user = n.created_by ? loadedUsers.find((u) => u.id === n.created_by) : null
-            const dateStr = n.start_date ? toISODate(new Date(n.start_date)) : toISODate(new Date(n.created_at))
-            const departmentName = n.department_id
-              ? loadedDepartments.find((d) => d.id === n.department_id)?.name || n.department_id
-              : "All"
-            
-            return {
-              id: n.id,
-              date: dateStr,
-              department: departmentName,
-              person: user?.full_name || user?.username || undefined,
-              note: n.content || "",
-            }
-          })
-        }
-
         // Load tasks for blocked, 1H, R1, external, and priority
         const tasksEndpoint =
           user?.role && user.role !== "STAFF"
@@ -706,18 +661,6 @@ export default function CommonViewPage() {
     }
   }, [formType, formFullDay])
 
-  React.useEffect(() => {
-    if (formType !== "gaNote" || gaAudience !== "person") return
-    if (!formPerson) return
-    const selectedUser = resolveUserByLabel(formPerson)
-    if (!selectedUser?.department_id) {
-      setFormDept("All")
-      return
-    }
-    const dept = departments.find((d) => d.id === selectedUser.department_id)
-    setFormDept(dept?.name || "All")
-  }, [formType, gaAudience, formPerson, departments, resolveUserByLabel])
-
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
   const leaveCovers = (leave: LeaveItem, dateStr: string) => {
@@ -731,7 +674,6 @@ export default function CommonViewPage() {
     const leave = commonData.leave.filter((x) =>
       selectedDates.size ? Array.from(selectedDates).some((d) => leaveCovers(x, d)) : true
     )
-    const ga = commonData.gaNotes.filter((x) => inSelectedDates(x.date))
     const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date))
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date))
     const external = commonData.external.filter((x) => inSelectedDates(x.date))
@@ -742,7 +684,7 @@ export default function CommonViewPage() {
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
 
-    return { late, absent, leave, ga, blocked, oneH, external, r1, problems, feedback, priority }
+    return { late, absent, leave, blocked, oneH, external, r1, problems, feedback, priority }
   }, [commonData, selectedDates])
 
   // Common people for priority (from users)
@@ -816,31 +758,12 @@ export default function CommonViewPage() {
     })
   }
 
-  const openModal = (type?: "gaNote") => {
-    if (type === "gaNote") {
-      setFormType("gaNote")
-      setGaAudience("department")
-      setFormPerson("")
-      // Set default department to user's department or first available
-      if (user?.department_id) {
-        const userDept = departments.find(d => d.id === user.department_id)
-        setFormDept(userDept?.name || (departments.length > 0 ? departments[0].name : "All"))
-      } else if (departments.length > 0) {
-        setFormDept(departments[0].name)
-      } else {
-        setFormDept("All")
-      }
-      setFormNote("")
-      setFormDate(toISODate(new Date()))
-      setGaModalOpen(true)
-    } else {
-      setModalOpen(true)
-    }
+  const openModal = () => {
+    setModalOpen(true)
   }
 
   const closeModal = () => {
     setModalOpen(false)
-    setGaModalOpen(false)
     // Reset form
     setFormType("late")
     setFormPerson("")
@@ -853,166 +776,86 @@ export default function CommonViewPage() {
     setFormFullDay(true)
     setFormTitle("")
     setFormNote("")
-    setFormDept("All")
-    setGaAudience("department")
   }
 
   const submitForm = async (e: React.FormEvent) => {
     e.preventDefault()
 
     try {
-      if (formType === "gaNote") {
-        if (!formNote.trim()) {
-          alert("Note content is required")
-          return
-        }
-        
-        // Resolve audience/department for GA notes
-        let departmentId: string | null = null
-        let createdByUserId: string | undefined = undefined
+      let category: string
+      if (formType === "late") category = "Delays"
+      else if (formType === "absent") category = "Absences"
+      else if (formType === "leave") category = "Annual Leave"
+      else if (formType === "problem") category = "Problems"
+      else category = "Requests"
 
-        if (gaAudience === "all") {
-          departmentId = null
-        } else if (gaAudience === "person") {
-          if (!formPerson) {
-            alert("Please select a user.")
-            return
-          }
-          const selectedUser = resolveUserByLabel(formPerson)
-          if (!selectedUser) {
-            alert("Selected user not found. Please select a valid user.")
-            return
-          }
-          if (!selectedUser.department_id) {
-            alert("Selected user has no department assigned.")
-            return
-          }
-          departmentId = selectedUser.department_id
-          createdByUserId = selectedUser.id
-        } else {
-          const dept = departments.find((d) => d.name === formDept)
-          if (!dept) {
-            alert("Please select a valid department.")
-            return
-          }
-          departmentId = dept.id
+      // Find the user by name if person is selected
+      let assignedUserId: string | null = null
+      if (formPerson && formType !== "feedback") {
+        const selectedUser = users.find(
+          (u) =>
+            u.full_name === formPerson ||
+            u.username === formPerson ||
+            u.email === formPerson ||
+            `${u.full_name || ""}`.trim() === formPerson
+        )
+        if (selectedUser) {
+          assignedUserId = selectedUser.id
         }
-        
-        // Format date as ISO datetime string (backend expects datetime with time)
-        // Use start of day in UTC
-        const dateObj = new Date(formDate)
-        dateObj.setHours(0, 0, 0, 0)
-        const startDate = dateObj.toISOString()
-        
-        const payload: any = {
-          content: formNote.trim(),
-          start_date: startDate,
-        }
+      }
 
-        if (departmentId) {
-          payload.department_id = departmentId
-        }
-        
-        // Only include created_by if a user was selected
-        if (createdByUserId) {
-          payload.created_by = createdByUserId
-        }
-        
-        const res = await apiFetch("/ga-notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-        
-        if (res.ok) {
-          closeModal()
-          // Reload all data to show the new GA note
-          window.location.reload()
-        } else {
-          // Show error message
-          try {
-            const errorData = await res.json()
-            alert(errorData.detail || "Failed to create GA note. Please check your department selection.")
-          } catch {
-            alert("Failed to create GA note. Please try again.")
-          }
-        }
-      } else {
-        let category: string
-        if (formType === "late") category = "Delays"
-        else if (formType === "absent") category = "Absences"
-        else if (formType === "leave") category = "Annual Leave"
-        else if (formType === "problem") category = "Problems"
-        else category = "Requests"
+      // Build description with all relevant information
+      let description = formNote || ""
+      
+      // Add time/date information based on type
+      if (formType === "late") {
+        const startTime = formDelayStart || "08:00"
+        const startLine = `Start: ${startTime}`
+        const endLine = formUntil ? `Until: ${formUntil}` : ""
+        const delayLines = endLine ? `${startLine}\n${endLine}` : startLine
+        description = description ? `${description}\n\n${delayLines}` : delayLines
+      } else if (formType === "absent" && formFrom && formTo) {
+        description = description ? `${description}\n\nFrom: ${formFrom} - To: ${formTo}` : `From: ${formFrom} - To: ${formTo}`
+      } else if (formType === "leave") {
+        const leaveInfo =
+          formEndDate && formEndDate !== formDate
+            ? `Date range: ${formDate} to ${formEndDate}`
+            : `Date: ${formDate}`
+        description = description ? `${description}\n\n${leaveInfo}` : leaveInfo
+      }
+      
+      // Add date information
+      if (formDate && formType !== "leave") {
+        description = description ? `${description}\nDate: ${formDate}` : `Date: ${formDate}`
+      }
 
-        // Find the user by name if person is selected
-        let assignedUserId: string | null = null
-        if (formPerson && formType !== "feedback") {
-          const selectedUser = users.find(
-            (u) =>
-              u.full_name === formPerson ||
-              u.username === formPerson ||
-              u.email === formPerson ||
-              `${u.full_name || ""}`.trim() === formPerson
-          )
-          if (selectedUser) {
-            assignedUserId = selectedUser.id
-          }
-        }
+      // Create the entry
+      const res = await apiFetch("/common-entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
+          description: description || null,
+        }),
+      })
 
-        // Build description with all relevant information
-        let description = formNote || ""
-        
-        // Add time/date information based on type
-        if (formType === "late") {
-          const startTime = formDelayStart || "08:00"
-          const startLine = `Start: ${startTime}`
-          const endLine = formUntil ? `Until: ${formUntil}` : ""
-          const delayLines = endLine ? `${startLine}\n${endLine}` : startLine
-          description = description ? `${description}\n\n${delayLines}` : delayLines
-        } else if (formType === "absent" && formFrom && formTo) {
-          description = description ? `${description}\n\nFrom: ${formFrom} - To: ${formTo}` : `From: ${formFrom} - To: ${formTo}`
-        } else if (formType === "leave") {
-          const leaveInfo =
-            formEndDate && formEndDate !== formDate
-              ? `Date range: ${formDate} to ${formEndDate}`
-              : `Date: ${formDate}`
-          description = description ? `${description}\n\n${leaveInfo}` : leaveInfo
-        }
-        
-        // Add date information
-        if (formDate && formType !== "leave") {
-          description = description ? `${description}\nDate: ${formDate}` : `Date: ${formDate}`
-        }
+      if (res.ok) {
+        const createdEntry = (await res.json()) as CommonEntry
 
-        // Create the entry
-        const res = await apiFetch("/common-entries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            category,
-              title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
-              description: description || null,
+        // If we have a user to assign, assign them
+        if (assignedUserId && createdEntry.id) {
+          await apiFetch(`/common-entries/${createdEntry.id}/assign`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assigned_to_user_id: assignedUserId,
             }),
           })
-
-        if (res.ok) {
-          const createdEntry = (await res.json()) as CommonEntry
-
-          // If we have a user to assign, assign them
-          if (assignedUserId && createdEntry.id) {
-            await apiFetch(`/common-entries/${createdEntry.id}/assign`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                assigned_to_user_id: assignedUserId,
-              }),
-            })
-          }
-
-          // Trigger a reload
-          window.location.reload()
         }
+
+        // Trigger a reload
+        window.location.reload()
       }
       closeModal()
     } catch (err) {
@@ -1070,11 +913,6 @@ export default function CommonViewPage() {
       subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent oneh",
     }))
-    const gaItems: SwimlaneCell[] = filtered.ga.map((x) => ({
-      title: x.person || (x.department === "All" ? "All employees" : x.department),
-      subtitle: `${formatDateHuman(x.date)} - ${x.note}`,
-      accentClass: "swimlane-accent ga",
-    }))
     const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
       title: x.title,
       subtitle: `${x.time} - ${formatDateHuman(x.date)} - ${x.platform} - ${x.owner}`,
@@ -1101,96 +939,88 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent priority",
     }))
 
-      return [
-        {
-          id: "late",
-          label: "Delays",
-          count: filtered.late.length,
-          headerClass: "swimlane-header delay",
-          badgeClass: "swimlane-badge delay",
-          items: lateItems,
-        },
-        {
-          id: "absent",
-          label: "Absences",
-          count: filtered.absent.length,
-          headerClass: "swimlane-header absence",
-          badgeClass: "swimlane-badge absence",
-          items: absentItems,
-        },
-        {
-          id: "leave",
-          label: "Annual Leave",
-          count: filtered.leave.length,
-          headerClass: "swimlane-header leave",
-          badgeClass: "swimlane-badge leave",
-          items: leaveItems,
-        },
-        {
-          id: "external",
-          label: "External Meetings",
-          count: filtered.external.length,
-          headerClass: "swimlane-header external",
-          badgeClass: "swimlane-badge external",
-          items: externalItems,
-        },
-        {
-          id: "blocked",
-          label: "Blocked",
-          count: filtered.blocked.length,
-          headerClass: "swimlane-header blocked",
-          badgeClass: "swimlane-badge blocked",
-          items: blockedItems,
-        },
-        {
-          id: "oneH",
-          label: "1H",
-          count: filtered.oneH.length,
-          headerClass: "swimlane-header oneh",
-          badgeClass: "swimlane-badge oneh",
-          items: oneHItems,
-        },
-        {
-          id: "r1",
-          label: "R1",
-          count: filtered.r1.length,
-          headerClass: "swimlane-header r1",
-          badgeClass: "swimlane-badge r1",
-          items: r1Items,
-        },
-        {
-          id: "priority",
-          label: "Projects",
-          count: filtered.priority.length,
-          headerClass: "swimlane-header priority",
-          badgeClass: "swimlane-badge priority",
-          items: priorityItems,
-        },
-        {
-          id: "ga",
-          label: "GA Notes",
-          count: filtered.ga.length,
-          headerClass: "swimlane-header ga",
-          badgeClass: "swimlane-badge ga",
-          items: gaItems,
-        },
-        {
-          id: "problem",
-          label: "Problems",
-          count: filtered.problems.length,
-          headerClass: "swimlane-header problem",
-          badgeClass: "swimlane-badge problem",
-          items: problemItems,
-        },
-        {
-          id: "feedback",
-          label: "Complaints/Requests/Proposals",
-          count: filtered.feedback.length,
-          headerClass: "swimlane-header feedback",
-          badgeClass: "swimlane-badge feedback",
-          items: feedbackItems,
-        },
-      ]
+    return [
+      {
+        id: "late",
+        label: "Delays",
+        count: filtered.late.length,
+        headerClass: "swimlane-header delay",
+        badgeClass: "swimlane-badge delay",
+        items: lateItems,
+      },
+      {
+        id: "absent",
+        label: "Absences",
+        count: filtered.absent.length,
+        headerClass: "swimlane-header absence",
+        badgeClass: "swimlane-badge absence",
+        items: absentItems,
+      },
+      {
+        id: "leave",
+        label: "Annual Leave",
+        count: filtered.leave.length,
+        headerClass: "swimlane-header leave",
+        badgeClass: "swimlane-badge leave",
+        items: leaveItems,
+      },
+      {
+        id: "external",
+        label: "External Meetings",
+        count: filtered.external.length,
+        headerClass: "swimlane-header external",
+        badgeClass: "swimlane-badge external",
+        items: externalItems,
+      },
+      {
+        id: "blocked",
+        label: "Blocked",
+        count: filtered.blocked.length,
+        headerClass: "swimlane-header blocked",
+        badgeClass: "swimlane-badge blocked",
+        items: blockedItems,
+      },
+      {
+        id: "oneH",
+        label: "1H",
+        count: filtered.oneH.length,
+        headerClass: "swimlane-header oneh",
+        badgeClass: "swimlane-badge oneh",
+        items: oneHItems,
+      },
+      {
+        id: "r1",
+        label: "R1",
+        count: filtered.r1.length,
+        headerClass: "swimlane-header r1",
+        badgeClass: "swimlane-badge r1",
+        items: r1Items,
+      },
+      {
+        id: "priority",
+        label: "Projects",
+        count: filtered.priority.length,
+        headerClass: "swimlane-header priority",
+        badgeClass: "swimlane-badge priority",
+        items: priorityItems,
+      },
+      {
+        id: "problem",
+        label: "Problems",
+        count: filtered.problems.length,
+        headerClass: "swimlane-header problem",
+        badgeClass: "swimlane-badge problem",
+        items: problemItems,
+      },
+      {
+        id: "feedback",
+        label: "Complaints/Requests/Proposals",
+        count: filtered.feedback.length,
+        headerClass: "swimlane-header feedback",
+        badgeClass: "swimlane-badge feedback",
+        items: feedbackItems,
+      },
+    ]
   }, [filtered])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
@@ -1219,8 +1049,6 @@ export default function CommonViewPage() {
           --blocked-accent: #be123c;
           --oneh-bg: #efe7ff;
           --oneh-accent: #7c3aed;
-          --ga-bg: #f3f4f6;
-          --ga-accent: #9ca3af;
           --external-bg: #e0f2fe;
           --external-accent: #0284c7;
           --r1-bg: #dcfce7;
@@ -1646,7 +1474,6 @@ export default function CommonViewPage() {
         .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
         .swimlane-header.oneh { background: var(--oneh-bg); color: #6d28d9; }
-        .swimlane-header.ga { background: var(--ga-bg); color: #6b7280; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
@@ -1657,7 +1484,6 @@ export default function CommonViewPage() {
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #6d28d9; }
-        .swimlane-badge.ga { border-color: var(--ga-accent); color: #6b7280; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
@@ -1668,7 +1494,6 @@ export default function CommonViewPage() {
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
         .swimlane-accent.blocked { border-left: 4px solid var(--blocked-accent); }
         .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
-        .swimlane-accent.ga { border-left: 4px solid var(--ga-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
@@ -2045,9 +1870,6 @@ export default function CommonViewPage() {
             <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
               Meeting
             </button>
-            <button className="btn-outline no-print" type="button" onClick={() => openModal("gaNote")}>
-              GA
-            </button>
             <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
               + Add
             </button>
@@ -2142,13 +1964,6 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("priority")}
             >
               Projects
-            </button>
-            <button
-              className={`chip ${typeFilters.has("ga") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("ga")}
-            >
-              GA Notes
             </button>
             <button
               className={`chip ${typeFilters.has("problem") ? "active" : ""}`}
@@ -2382,7 +2197,7 @@ export default function CommonViewPage() {
       </div>
 
       {/* Modal */}
-      {(modalOpen || gaModalOpen) && (
+      {modalOpen && (
         <div className="modal">
           <div className="modal-backdrop" onClick={closeModal} />
           <div className="modal-card">
@@ -2405,116 +2220,31 @@ export default function CommonViewPage() {
                         setFormType(e.target.value as any)
                       }}
                       required
-                    >
-                      <option value="late">Delay</option>
-                      <option value="absent">Absence</option>
-                      <option value="leave">Annual Leave</option>
-                      <option value="problem">Problem</option>
-                      <option value="feedback">Complaint/Request/Proposal</option>
-                      <option value="gaNote">GA Note</option>
-                  </select>
-                </div>
-                  {formType !== "gaNote" && (
-                    <div className="form-row">
-                      <label htmlFor="cv-person">Person</label>
-                      <select
-                        id="cv-person"
-                        className="input"
-                        value={formPerson}
-                        onChange={(e) => setFormPerson(e.target.value)}
-                        required
                       >
-                        <option value="">--</option>
-                        {users.map((u) => (
-                          <option key={u.id} value={u.full_name || u.username || u.email}>
-                            {u.full_name || u.username || u.email}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {formType === "gaNote" && (
-                    <>
-                      <div className="form-row">
-                        <label htmlFor="cv-ga-audience">Audience</label>
-                        <select
-                          id="cv-ga-audience"
-                          className="input"
-                          value={gaAudience}
-                          onChange={(e) => {
-                            const next = e.target.value as "all" | "department" | "person"
-                            setGaAudience(next)
-                            if (next !== "person") setFormPerson("")
-                            if (next !== "department") setFormDept("All")
-                          }}
-                          required
-                        >
-                          {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
-                            <option value="all">All employees</option>
-                          )}
-                          <option value="department">Department</option>
-                          <option value="person">Specific person</option>
-                        </select>
-                      </div>
-
-                      {gaAudience === "person" && (
-                        <div className="form-row">
-                          <label htmlFor="cv-person">User</label>
-                          <select
-                            id="cv-person"
-                            className="input"
-                            value={formPerson}
-                            onChange={(e) => setFormPerson(e.target.value)}
-                            required
-                          >
-                            <option value="">--</option>
-                            {users.map((u) => (
-                              <option key={u.id} value={u.full_name || u.username || u.email}>
-                                {u.full_name || u.username || u.email}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      {gaAudience === "department" && (
-                        <div className="form-row">
-                          <label htmlFor="cv-dept">Department</label>
-                          <select
-                            id="cv-dept"
-                            className="input"
-                            value={formDept}
-                            onChange={(e) => setFormDept(e.target.value)}
-                            required
-                          >
-                            {departments.length === 0 ? (
-                              <option value="">Loading departments...</option>
-                            ) : (
-                              departments.map((dept) => (
-                                <option key={dept.id} value={dept.name}>
-                                  {formatDepartmentName(dept.name)}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </div>
-                      )}
-
-                      {gaAudience === "person" && (
-                        <div className="form-row">
-                          <label htmlFor="cv-dept-auto">Department (auto)</label>
-                          <input
-                            id="cv-dept-auto"
-                            className="input"
-                            type="text"
-                            value={formDept === "All" ? "Unassigned" : formDept}
-                            readOnly
-                          />
-                        </div>
-                      )}
-                    </>
-                  )}
+                        <option value="late">Delay</option>
+                        <option value="absent">Absence</option>
+                        <option value="leave">Annual Leave</option>
+                        <option value="problem">Problem</option>
+                        <option value="feedback">Complaint/Request/Proposal</option>
+                    </select>
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="cv-person">Person</label>
+                    <select
+                      id="cv-person"
+                      className="input"
+                      value={formPerson}
+                      onChange={(e) => setFormPerson(e.target.value)}
+                      required
+                    >
+                      <option value="">--</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.full_name || u.username || u.email}>
+                          {u.full_name || u.username || u.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   {(formType === "feedback" || formType === "problem") && (
                     <div className="form-row span-2">
