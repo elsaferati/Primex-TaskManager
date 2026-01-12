@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.checklist_items import router as checklist_items_router
+from app.api.routers.checklists import router as checklists_router
 from app.api.routers.departments import router as departments_router
 from app.api.routers.ga_notes import router as ga_notes_router
 from app.api.routers.microsoft import router as microsoft_router
@@ -21,6 +22,7 @@ from app.api.routers.task_statuses import router as task_statuses_router
 api_router = APIRouter()
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(checklist_items_router, prefix="/checklist-items", tags=["checklist-items"])
+api_router.include_router(checklists_router, prefix="/checklists", tags=["checklists"])
 api_router.include_router(departments_router, prefix="/departments", tags=["departments"])
 api_router.include_router(ga_notes_router, prefix="/ga-notes", tags=["ga-notes"])
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])

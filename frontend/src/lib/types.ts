@@ -176,6 +176,9 @@ export interface ChecklistItem {
   keyword?: string | null
   description?: string | null
   category?: string | null
+  day?: string | null
+  owner?: string | null
+  time?: string | null
   // Type-specific fields
   title?: string | null
   comment?: string | null
