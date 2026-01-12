@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Task, User } from "@/lib/types"
+import type { Task, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
@@ -59,9 +59,7 @@ export default function TaskDetailsPage() {
   const { apiFetch, user } = useAuth()
 
   const [task, setTask] = React.useState<Task | null>(null)
-  const [users, setUsers] = React.useState<User[]>([])
-
-  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const [users, setUsers] = React.useState<UserLookup[]>([])
 
   const load = React.useCallback(async () => {
     const taskRes = await apiFetch(`/tasks/${taskId}`)
@@ -69,11 +67,9 @@ export default function TaskDetailsPage() {
     const t = (await taskRes.json()) as Task
     setTask(t)
 
-    if (canManage) {
-      const uRes = await apiFetch("/users")
-      if (uRes.ok) setUsers((await uRes.json()) as User[])
-    }
-  }, [apiFetch, taskId, canManage])
+    const uRes = await apiFetch("/users/lookup")
+    if (uRes.ok) setUsers((await uRes.json()) as UserLookup[])
+  }, [apiFetch, taskId])
 
   React.useEffect(() => {
     void load()
@@ -95,6 +91,11 @@ export default function TaskDetailsPage() {
     setReminder(Boolean(task.reminder_enabled))
   }, [task])
 
+  const canAssign =
+    user?.role === "ADMIN" ||
+    user?.role === "MANAGER" ||
+    (task && user?.department_id && task.department_id === user.department_id)
+
   const save = async () => {
     if (!task) return
     setSaving(true)
@@ -104,7 +105,7 @@ export default function TaskDetailsPage() {
         reminder_enabled: reminder,
       }
       if (statusValue) payload.status = statusValue
-      if (canManage) {
+      if (canAssign) {
         payload.due_date = dueDate || null
         payload.assigned_to = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
       }
@@ -201,7 +202,7 @@ export default function TaskDetailsPage() {
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} />
               </div>
 
-              {canManage ? (
+              {canAssign ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Due date</Label>

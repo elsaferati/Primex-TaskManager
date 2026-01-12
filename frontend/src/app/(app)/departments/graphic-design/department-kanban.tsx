@@ -309,6 +309,10 @@ function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
   return "NORMAL"
 }
 
+function gaNoteTaskDefaultTitle(note: string) {
+  return note.length > 50 ? note.slice(0, 50) + "..." : note
+}
+
 // --- MAIN COMPONENT ---
 
 export default function DepartmentKanban() {
@@ -391,6 +395,18 @@ export default function DepartmentKanban() {
   const [newGaNoteType, setNewGaNoteType] = React.useState<"GA" | "KA">("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [newGaNote, setNewGaNote] = React.useState("")
+
+  const [gaNoteCreateTask, setGaNoteCreateTask] = React.useState(false)
+  const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
+  const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
+  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
+  const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
+  const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
+  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
+  const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
 
   // --- DATA LOADING ---
   React.useEffect(() => {
@@ -481,8 +497,12 @@ export default function DepartmentKanban() {
     [meetings, isMineView, user?.id]
   )
   const visibleSystemTemplates = React.useMemo(
-    () => (isMineView && user?.id ? systemTasks.filter((t) => t.default_assignee_id === user.id) : systemTasks),
-    [systemTasks, isMineView, user?.id]
+    () => {
+      // Show ONLY tasks specific to this department (exclude global/ALL scope)
+      const depTasks = department ? systemTasks.filter((t) => t.department_id === department.id) : []
+      return isMineView && user?.id ? depTasks.filter((t) => t.default_assignee_id === user.id) : depTasks
+    },
+    [systemTasks, isMineView, user?.id, department]
   )
 
   const projectTasks = React.useMemo(
@@ -722,7 +742,7 @@ export default function DepartmentKanban() {
     [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
 
-  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canCreate = true // Everyone in this department can create/manage
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
 
@@ -752,6 +772,16 @@ export default function DepartmentKanban() {
     }
     return { normal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
+
+  const gaNoteTaskMap = React.useMemo(() => {
+    const map = new Map<string, Task>()
+    for (const task of departmentTasks) {
+      if (task.ga_note_origin_id) {
+        map.set(task.ga_note_origin_id, task)
+      }
+    }
+    return map
+  }, [departmentTasks])
 
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
@@ -969,15 +999,115 @@ export default function DepartmentKanban() {
       if (newGaNoteProjectId === "__none__") payload.department_id = department.id
       else payload.project_id = newGaNoteProjectId
 
-      const res = await apiFetch("/ga-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-      if (!res.ok) { toast.error("Failed to add note"); return }
+      const res = await apiFetch("/ga-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add note")
+        return
+      }
       const created = (await res.json()) as GaNote
       setGaNotes((prev) => [created, ...prev])
+
+      if (gaNoteCreateTask) {
+        const taskPayload = {
+          title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(created.content || ""),
+          description: gaNoteTaskDescription.trim() || null,
+          project_id: newGaNoteProjectId === "__none__" ? null : newGaNoteProjectId,
+          department_id: department.id,
+          assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+          status: "TODO",
+          priority: gaNoteTaskPriority,
+          ga_note_origin_id: created.id,
+          due_date: gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null,
+          finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
+        }
+        const taskRes = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskPayload),
+        })
+        if (taskRes.ok) {
+          const createdTask = (await taskRes.json()) as Task
+          setDepartmentTasks((prev) => [createdTask, ...prev])
+          if (!createdTask.project_id) {
+            setNoProjectTasks((prev) => [createdTask, ...prev])
+          }
+          toast.success("Note and Task created")
+        } else {
+          toast.success("Note added, but failed to create task")
+        }
+      } else {
+        toast.success("Note added")
+      }
+
       setNewGaNote("")
+      setGaNoteCreateTask(false)
+      setGaNoteTaskTitle("")
+      setGaNoteTaskDescription("")
+      setGaNoteTaskPriority("NORMAL")
+      setGaNoteTaskDueDate("")
+      setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+      setGaNoteTaskAssigneeId("__unassigned__")
       setGaNoteOpen(false)
-      toast.success("Note added")
     } finally {
       setAddingGaNote(false)
+    }
+  }
+
+  const submitGaNoteTask = async () => {
+    if (!gaNoteTaskOpenId || !department) return
+    const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
+    if (!note) return
+
+    setCreatingGaNoteTask(true)
+    try {
+      const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
+      const taskPayload = {
+        title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(note.content || ""),
+        description: gaNoteTaskDescription.trim() || null,
+        project_id: note.project_id ?? null,
+        department_id: department.id,
+        assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+        status: "TODO",
+        priority: gaNoteTaskPriority,
+        ga_note_origin_id: note.id,
+        due_date: dueDateValue,
+        finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
+      }
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(taskPayload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const createdTask = (await res.json()) as Task
+      setDepartmentTasks((prev) => [createdTask, ...prev])
+      if (!createdTask.project_id) {
+        setNoProjectTasks((prev) => [createdTask, ...prev])
+      }
+      setGaNoteTaskOpenId(null)
+      setGaNoteTaskAssigneeId("__unassigned__")
+      setGaNoteTaskTitle("")
+      setGaNoteTaskDescription("")
+      setGaNoteTaskPriority("NORMAL")
+      setGaNoteTaskDueDate("")
+      setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+      toast.success("Task created")
+    } finally {
+      setCreatingGaNoteTask(false)
     }
   }
 
@@ -994,7 +1124,7 @@ export default function DepartmentKanban() {
 
   // --- RENDER ---
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen ">
       <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 shadow-sm print:hidden dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
         <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
         <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
@@ -1102,7 +1232,7 @@ export default function DepartmentKanban() {
                     const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
 
                     return (
-                      <Card key={project.id} className="group flex flex-col justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
+                      <div key={project.id} className="group flex flex-col gap-6 justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="space-y-1">
@@ -1163,7 +1293,7 @@ export default function DepartmentKanban() {
                             View <span aria-hidden="true">&rarr;</span>
                           </Link>
                         </div>
-                      </Card>
+                      </div>
                     )
                   })}
                 </div>
@@ -1524,7 +1654,7 @@ export default function DepartmentKanban() {
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
                   <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">Blocked</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
-                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Origin</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
+                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
                   <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
                 </div>
               </div>
@@ -1535,7 +1665,252 @@ export default function DepartmentKanban() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">GA / KA Notes</h2><p className="text-sm text-slate-500">General Admin & Key Accounts.</p></div>
-                  {!isReadOnly && (<Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Add Note</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Note</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Related Project</Label><Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="None (General)" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Type</Label><Select value={newGaNoteType} onValueChange={(v: any) => setNewGaNoteType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GA">GA</SelectItem><SelectItem value="KA">KA</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Priority</Label><Select value={newGaNotePriority} onValueChange={(v: any) => setNewGaNotePriority(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem><SelectItem value="NORMAL">Normal</SelectItem><SelectItem value="HIGH">High</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Content</Label><Textarea className="rounded-xl" value={newGaNote} onChange={(e) => setNewGaNote(e.target.value)} rows={4} /></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setGaNoteOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitGaNote()}>Save</Button></div></DialogContent></Dialog>)}
+                  {!isReadOnly && (
+                    <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="rounded-xl bg-slate-900 text-white">Add Note</Button>
+                      </DialogTrigger>
+                      <DialogContent className="rounded-2xl sm:max-w-xl">
+                        <DialogHeader>
+                          <DialogTitle>New Note</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Related Project</Label>
+                            <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue placeholder="None (General)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">None</SelectItem>
+                                {projects.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    {p.title}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Type</Label>
+                              <Select value={newGaNoteType} onValueChange={(v: any) => setNewGaNoteType(v)}>
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="GA">GA</SelectItem>
+                                  <SelectItem value="KA">KA</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Priority</Label>
+                              <Select value={newGaNotePriority} onValueChange={(v: any) => setNewGaNotePriority(v)}>
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">None</SelectItem>
+                                  <SelectItem value="NORMAL">Normal</SelectItem>
+                                  <SelectItem value="HIGH">High</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Content</Label>
+                            <Textarea
+                              className="rounded-xl"
+                              value={newGaNote}
+                              onChange={(e) => setNewGaNote(e.target.value)}
+                              rows={4}
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                            <Checkbox
+                              id="create-task"
+                              checked={gaNoteCreateTask}
+                              onCheckedChange={(v) => setGaNoteCreateTask(!!v)}
+                            />
+                            <Label
+                              htmlFor="create-task"
+                              className="text-sm font-medium text-slate-700 cursor-pointer select-none"
+                            >
+                              Create task from this note
+                            </Label>
+                          </div>
+
+                          {gaNoteCreateTask && (
+                            <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2">
+                              <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                  <Label>Assignee</Label>
+                                  <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
+                                    <SelectTrigger className="rounded-xl">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                      {departmentUsers.map((u) => (
+                                        <SelectItem key={u.id} value={u.id}>
+                                          {u.full_name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Finish By</Label>
+                                  <Select
+                                    value={gaNoteTaskFinishPeriod}
+                                    onValueChange={(v) =>
+                                      setGaNoteTaskFinishPeriod(v as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                                    }
+                                  >
+                                    <SelectTrigger className="rounded-xl">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                      {FINISH_PERIOD_OPTIONS.map((o) => (
+                                        <SelectItem key={o} value={o}>
+                                          {o}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Due Date</Label>
+                                <Input
+                                  type="date"
+                                  className="rounded-xl"
+                                  value={gaNoteTaskDueDate}
+                                  onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" onClick={() => setGaNoteOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button className="rounded-xl" onClick={() => void submitGaNote()} disabled={addingGaNote}>
+                            {addingGaNote ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                  <Dialog open={Boolean(gaNoteTaskOpenId)} onOpenChange={(v) => !v && setGaNoteTaskOpenId(null)}>
+                    <DialogContent className="rounded-2xl sm:max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>Create Task from Note</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Task Title</Label>
+                          <Input
+                            className="rounded-xl"
+                            value={gaNoteTaskTitle}
+                            onChange={(e) => setGaNoteTaskTitle(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Description</Label>
+                          <Textarea
+                            className="rounded-xl"
+                            value={gaNoteTaskDescription}
+                            onChange={(e) => setGaNoteTaskDescription(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Assignee</Label>
+                            <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                {departmentUsers.map((u) => (
+                                  <SelectItem key={u.id} value={u.id}>
+                                    {u.full_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Priority</Label>
+                            <Select
+                              value={gaNoteTaskPriority}
+                              onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}
+                            >
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PRIORITY_OPTIONS.map((p) => (
+                                  <SelectItem key={p} value={p}>
+                                    {PRIORITY_LABELS[p]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Finish By</Label>
+                            <Select
+                              value={gaNoteTaskFinishPeriod}
+                              onValueChange={(v) =>
+                                setGaNoteTaskFinishPeriod(v as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                              }
+                            >
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                {FINISH_PERIOD_OPTIONS.map((o) => (
+                                  <SelectItem key={o} value={o}>
+                                    {o}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Due Date</Label>
+                            <Input
+                              type="date"
+                              className="rounded-xl"
+                              value={gaNoteTaskDueDate}
+                              onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={() => setGaNoteTaskOpenId(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          className="rounded-xl"
+                          onClick={() => void submitGaNoteTask()}
+                          disabled={creatingGaNoteTask}
+                        >
+                          {creatingGaNoteTask ? "Creating..." : "Create Task"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {visibleGaNotes.length ? visibleGaNotes.map(note => {
@@ -1549,8 +1924,50 @@ export default function DepartmentKanban() {
                           <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
                         </div>
                         <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
-                          <div className="flex items-center gap-2"><div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">{initials(author?.full_name || "?")}</div><span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span></div>
-                          {note.status !== "CLOSED" && !isReadOnly ? <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => void closeGaNote(note.id)}>Archive</Button> : note.status === "CLOSED" ? <Badge variant="secondary" className="h-5 text-[10px]">Archived</Badge> : null}
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">
+                              {initials(author?.full_name || "?")}
+                            </div>
+                            <span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {gaNoteTaskMap.has(note.id) ? (
+                              <Link href={`/tasks/${gaNoteTaskMap.get(note.id)!.id}`}>
+                                <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                                  View Task
+                                </Button>
+                              </Link>
+                            ) : !isReadOnly && note.status !== "CLOSED" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 gap-1 px-2 text-[10px]"
+                                onClick={() => {
+                                  setGaNoteTaskOpenId(note.id)
+                                  setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
+                                  setGaNoteTaskAssigneeId("__unassigned__")
+                                  setGaNoteTaskPriority(note.priority || "NORMAL")
+                                }}
+                              >
+                                Create Task
+                              </Button>
+                            ) : null}
+                            {note.status !== "CLOSED" && !isReadOnly ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => void closeGaNote(note.id)}
+                              >
+                                Archive
+                              </Button>
+                            ) : note.status === "CLOSED" ? (
+                              <Badge variant="secondary" className="h-5 text-[10px]">
+                                Archived
+                              </Badge>
+                            ) : null}
+                          </div>
                         </div>
                       </Card>
                     )

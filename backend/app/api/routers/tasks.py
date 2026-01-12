@@ -211,7 +211,7 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    ensure_manager_or_admin(user)
+    # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
     department_id = payload.department_id
     project = None
     if payload.project_id is not None:
@@ -379,21 +379,7 @@ async def update_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    if user.role == UserRole.STAFF:
-        if task.assigned_to == user.id:
-            pass
-        else:
-            staff_assignment = (
-                await db.execute(
-                    select(TaskAssignee)
-                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user.id)
-                )
-            ).scalar_one_or_none()
-            if staff_assignment is None:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if task.department_id is not None:
-            ensure_department_access(user, task.department_id)
-    else:
+    if task.department_id is not None:
         ensure_department_access(user, task.department_id)
 
     if payload.status is not None and task.system_template_origin_id is not None:
@@ -409,22 +395,7 @@ async def update_task(
             if status_assignment is None:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    if user.role == UserRole.STAFF:
-        forbidden_fields = {
-            "title": payload.title,
-            "project_id": payload.project_id,
-            "department_id": payload.department_id,
-            "dependency_task_id": payload.dependency_task_id,
-            "assigned_to": payload.assigned_to,
-            "assignees": payload.assignees,
-            "priority": payload.priority,
-            "phase": payload.phase,
-            "is_bllok": payload.is_bllok,
-            "is_1h_report": payload.is_1h_report,
-            "is_r1": payload.is_r1,
-        }
-        if any(v is not None for v in forbidden_fields.values()):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Forbidden fields check removed to allow staff full update access
 
     before = {
         "title": task.title,
