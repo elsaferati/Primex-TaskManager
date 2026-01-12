@@ -62,6 +62,11 @@ const MST_PLANNING_QUESTIONS = [
   "Have the program characteristics been identified?",
   "Is there a plan for when the project is expected to be completed?",
 ]
+const FINALIZATION_PATH = "FINALIZATION"
+const FINALIZATION_CHECKLIST = [
+  { id: "kontrollat", question: "A jane kryer kontrollat?" },
+  { id: "files", question: "A eshte ruajtur projekti tek files?" },
+]
 
 // Helper function to initialize MST checklist items in database
 async function initializeMstChecklistItems(
@@ -734,6 +739,19 @@ export default function PcmProjectPage() {
     setMstPlanningChecks(planningChecked)
     setDescriptionChecks(descriptionChecked)
     setPlanningComments(planningCommentsData)
+
+    const finalizationItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return item.path === FINALIZATION_PATH && FINALIZATION_CHECKLIST.some((entry) => entry.question === item.title)
+    })
+    if (finalizationItems.length) {
+      const finalizationData: Record<string, boolean> = {}
+      finalizationItems.forEach((item) => {
+        const entry = FINALIZATION_CHECKLIST.find((q) => q.question === item.title)
+        if (entry) finalizationData[entry.id] = item.is_checked || false
+      })
+      setFinalizationChecks(finalizationData)
+    }
   }, [checklistItems, isMst, project])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
 
@@ -1697,6 +1715,7 @@ export default function PcmProjectPage() {
                                     vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
                                   status: vsVlTaskStatus || "TODO",
                                   priority: vsVlTaskPriority,
+                                  phase: vsVlPhase,
                                   due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
                                   internal_notes: serializeVsVlMeta(meta),
                                 }),
@@ -2185,7 +2204,12 @@ export default function PcmProjectPage() {
 
       if (!item) return
 
+      const previousComment = item.comment || ""
       setMstChecklistComments((prev) => ({ ...prev, [key]: comment }))
+      setChecklistItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, comment } : i))
+      )
+      mstItemMap.set(key, { ...item, comment })
 
       try {
         const res = await apiFetch(`/checklist-items/${item.id}`, {
@@ -2202,9 +2226,84 @@ export default function PcmProjectPage() {
               ? detail.map((e: any) => e.msg || String(e)).join(", ")
               : "Failed to save comment"
           toast.error(errorMsg)
+          setMstChecklistComments((prev) => ({ ...prev, [key]: previousComment }))
+          setChecklistItems((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, comment: previousComment || null } : i))
+          )
         }
       } catch (error) {
         toast.error("Failed to save comment")
+        setMstChecklistComments((prev) => ({ ...prev, [key]: previousComment }))
+        setChecklistItems((prev) =>
+          prev.map((i) => (i.id === item.id ? { ...i, comment: previousComment || null } : i))
+        )
+      }
+    }
+    const updateFinalizationChecklist = async (entry: { id: string; question: string }, nextChecked: boolean) => {
+      if (!project) return
+      const existing = checklistItems.find(
+        (item) =>
+          item.item_type === "CHECKBOX" &&
+          item.path === FINALIZATION_PATH &&
+          item.title === entry.question
+      )
+
+      if (!existing) {
+        try {
+          const createRes = await apiFetch("/checklist-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: project.id,
+              item_type: "CHECKBOX",
+              path: FINALIZATION_PATH,
+              title: entry.question,
+              keyword: FINALIZATION_PATH,
+              description: entry.question,
+              category: FINALIZATION_PATH,
+              is_checked: nextChecked,
+            }),
+          })
+          if (!createRes.ok) {
+            toast.error("Failed to save checklist")
+            return
+          }
+          const created = (await createRes.json()) as ChecklistItem
+          setChecklistItems((prev) => [...prev, created])
+          setFinalizationChecks((prev) => ({ ...prev, [entry.id]: created.is_checked || false }))
+        } catch {
+          toast.error("Failed to save checklist")
+        }
+        return
+      }
+
+      const previousValue = existing.is_checked || false
+      setFinalizationChecks((prev) => ({ ...prev, [entry.id]: nextChecked }))
+      setChecklistItems((prev) =>
+        prev.map((i) => (i.id === existing.id ? { ...i, is_checked: nextChecked } : i))
+      )
+      try {
+        const res = await apiFetch(`/checklist-items/${existing.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: nextChecked }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to save checklist")
+          setFinalizationChecks((prev) => ({ ...prev, [entry.id]: previousValue }))
+          setChecklistItems((prev) =>
+            prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
+          )
+        } else {
+          const updated = (await res.json()) as ChecklistItem
+          setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        }
+      } catch {
+        toast.error("Failed to save checklist")
+        setFinalizationChecks((prev) => ({ ...prev, [entry.id]: previousValue }))
+        setChecklistItems((prev) =>
+          prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
+        )
       }
     }
     const memberLabel = (id?: string | null) => {
@@ -3177,10 +3276,7 @@ export default function PcmProjectPage() {
                 <div className="p-6 space-y-6">
                   <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
                   <div className="space-y-4">
-                    {[
-                      { id: "kontrollat", question: "A jane kryer kontrollat?" },
-                      { id: "files", question: "A eshte ruajtur projekti tek files?" },
-                    ].map((item) => (
+                  {FINALIZATION_CHECKLIST.map((item) => (
                       <div
                         key={item.id}
                         className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
@@ -3189,7 +3285,7 @@ export default function PcmProjectPage() {
                           id={item.id}
                           checked={Boolean(finalizationChecks[item.id])}
                           onCheckedChange={(checked) =>
-                            setFinalizationChecks((prev) => ({ ...prev, [item.id]: Boolean(checked) }))
+                            updateFinalizationChecklist(item, Boolean(checked))
                           }
                         />
                         <label
