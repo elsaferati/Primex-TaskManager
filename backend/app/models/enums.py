@@ -105,6 +105,11 @@ class ProjectPhaseStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
+class ProjectType(str, enum.Enum):
+    GENERAL = "GENERAL"
+    MST = "MST"
+
+
 class CommonCategory(str, enum.Enum):
     delays = "Delays"
     absences = "Absences"

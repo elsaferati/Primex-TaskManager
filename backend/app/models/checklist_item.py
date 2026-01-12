@@ -27,6 +27,9 @@ class ChecklistItem(Base):
     keyword: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    day: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Type-specific fields
     title: Mapped[str | None] = mapped_column(Text, nullable=True)  # For TITLE and CHECKBOX
@@ -34,6 +37,7 @@ class ChecklistItem(Base):
     is_checked: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Only for CHECKBOX
 
     # Relationships
+    checklist: Mapped["Checklist"] = relationship("Checklist", back_populates="items")
     assignees: Mapped[list["ChecklistItemAssignee"]] = relationship(
         "ChecklistItemAssignee", back_populates="checklist_item", cascade="all, delete-orphan"
     )

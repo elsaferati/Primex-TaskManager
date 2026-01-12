@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import ProjectPhaseStatus, TaskStatus, UserRole
+from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus, UserRole
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
 from app.models.department import Department
@@ -75,18 +75,20 @@ PHASE_SEQUENCE = [
 
 
 def get_project_sequence(project: Project, department_name: str | None = None) -> list[ProjectPhaseStatus]:
-    # This is a bit simplistic, but we can refine it
+    if project.project_type == ProjectType.MST.value:
+        return MST_PHASES
+    if project.project_type == ProjectType.GENERAL.value:
+        return DEV_PHASES
+
+    # Legacy fallback based on title/department
     title = project.title.upper()
     department_label = (department_name or "").upper()
-    # Check department if available (would need department name)
-    # For now, base it on title patterns similar to trigger logic
     if "VS" in title or "VL" in title:
         return VS_PHASES
     if "MST" in title:
         return MST_PHASES
     if department_label in {"PROJECT CONTENT MANAGER", "GRAPHIC DESIGN", "PCM", "GD"}:
         return MST_PHASES
-    # Default to DEV if it looks like a dev project or fallback
     return DEV_PHASES
 
 
@@ -125,6 +127,7 @@ async def list_projects(
             description=p.description,
             department_id=p.department_id,
             manager_id=p.manager_id,
+            project_type=p.project_type,
             current_phase=p.current_phase,
             status=p.status,
             progress_percentage=p.progress_percentage,
@@ -161,6 +164,7 @@ async def create_project(
         description=payload.description,
         department_id=payload.department_id,
         manager_id=payload.manager_id,
+        project_type=payload.project_type.value if payload.project_type else None,
         current_phase=current_phase,
         status=status_value,
         progress_percentage=payload.progress_percentage or 0,
@@ -184,6 +188,7 @@ async def create_project(
         description=project.description,
         department_id=project.department_id,
         manager_id=project.manager_id,
+        project_type=project.project_type,
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
@@ -212,6 +217,7 @@ async def get_project(
         description=project.description,
         department_id=project.department_id,
         manager_id=project.manager_id,
+        project_type=project.project_type,
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
@@ -248,6 +254,8 @@ async def update_project(
         if project.department_id is not None and manager.department_id != project.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Manager must be in department")
         project.manager_id = payload.manager_id
+    if payload.project_type is not None:
+        project.project_type = payload.project_type.value
     if payload.current_phase is not None:
         current_idx = phase_index(project.current_phase)
         next_idx = phase_index(payload.current_phase)
@@ -278,6 +286,7 @@ async def update_project(
         description=project.description,
         department_id=project.department_id,
         manager_id=project.manager_id,
+        project_type=project.project_type,
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
@@ -361,6 +370,7 @@ async def advance_project_phase(
         description=project.description,
         department_id=project.department_id,
         manager_id=project.manager_id,
+        project_type=project.project_type,
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,

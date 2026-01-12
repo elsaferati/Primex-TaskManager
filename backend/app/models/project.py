@@ -22,6 +22,7 @@ class Project(Base):
     current_phase: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="MEETINGS"
     )
+    project_type: Mapped[str | None] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="TODO"
     )

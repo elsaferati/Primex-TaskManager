@@ -45,218 +45,46 @@ type SwimlaneRow = {
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
 type MeetingColumn = { key: MeetingColumnKey; label: string; width?: string }
-type MeetingRow = { nr: number; day?: string; topic: string; owner?: string; time?: string }
+type MeetingRow = {
+  id: string
+  nr: number
+  day?: string
+  topic: string
+  owner?: string
+  time?: string
+  isChecked?: boolean
+}
 type MeetingTemplate = {
   id: string
   title: string
   note?: string
+  groupKey?: string
   columns: MeetingColumn[]
   rows: MeetingRow[]
   defaultOwner?: string
   defaultTime?: string
 }
 
-const MEETING_TEMPLATES: MeetingTemplate[] = [
-  {
-    id: "tak-bord-ga",
-    title: "TAK BORD/GA",
-    defaultOwner: "DV",
-    defaultTime: "8:00",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "M1 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "MUNGESA/VONESA? A KEMI NDONJE MUNGESE QE E PRISH PLANIN?" },
-      { nr: 2, topic: "A KA NDRYSHIME TE PLANIT/PRIORITETEVE?" },
-      { nr: 3, topic: "KUSH ME CKA VAZHDON?" },
-      { nr: 4, topic: "EMAIL PX? primex.eu@gmail.com (KONTROLLO EDHE SPAM)" },
-      { nr: 5, topic: "EMAIL INFO PX? (KONTROLLO EDHE SPAM)" },
-      { nr: 6, topic: "EMAIL HF? (KONTROLLO EDHE SPAM)" },
-      { nr: 7, topic: "KOMENTET SHENIME GA" },
-      { nr: 8, topic: "KOMENTET BORD" },
-    ],
-  },
-  {
-    id: "orders-0805",
-    title: "ORDERS 08:05",
-    note: "!!! MOS HARRO, SEND/RECEIVE MENJEHERE PAS HAPJES SE OUTLOOK! poczta.zenbox.pl",
-    defaultOwner: "DM",
-    defaultTime: "8:05",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "M1 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "PIKAT NGA TEAMS DJE DHE SOT (!08:05-08:45 ORDERS HC)" },
-      { nr: 2, topic: "A KA DET TE REJA DHE TAKIM TE RI NGA TAKIMI DHE A JANE SHPERNDARE DETYRAT? NESE PO, KERKO DATE???" },
-      { nr: 3, topic: "CKA KEMI ME PERGADIT NGA PREZANTIMET SOT DHE NESER?" },
-      { nr: 4, topic: "A ESHTE PRANUAR TAKIMI NGA TE GJITHE PARTICIPANTET?" },
-      { nr: 5, topic: "A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
-      { nr: 6, topic: "A KEMI POROSI TE RE PER INTERLINE, CILI PRODUKT ESHTE, A ESHTE KRIJUAR ZO DHE TE PERCILLET PRODHIMI?" },
-      { nr: 7, topic: "DISKUTOHEN EMAILAT E REJA" },
-    ],
-  },
-  {
-    id: "permbl-m1",
-    title: "PERMBLEDHJA M1",
-    defaultOwner: "LM/DM",
-    defaultTime: "8:15",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "day", label: "DITA", width: "90px" },
-      { key: "topic", label: "M1 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, day: "E HENE", topic: "A ESHTE BERE KONTROLLI I TRANSFERIT TE THIRRJEVE NGA DE NE PRIMEX SIPAS TEMPLATE-IT" },
-      { nr: 2, day: "E HENE", topic: "ME MUR?" },
-      { nr: 3, day: "E HENE", topic: "A ESHTE BILANCI I GJENDJES X2 NE RREGULL?" },
-      { nr: 4, day: "E HENE", topic: "MUNGESA/VONESA SOT: PX-NESE PO?" },
-      { nr: 5, day: "CDO DITE", topic: "PUSHIM SOT: PX/HC/FD/HF" },
-      { nr: 6, day: "CDO DITE", topic: "FESTA: PASNESER/NESER/SOT: PX/HC/FD/HF/USA - NESE PO? / NESE KA DUHET TE" },
-      { nr: 7, day: "CDO DITE", topic: "LAJMROHEN KLIENTAT 1 JAVE ME HERET" },
-      { nr: 8, day: "CDO DITE", topic: "FESTA JAVA E ARDHSHME PX/PL/DE/USA" },
-      { nr: 9, day: "CDO DITE", topic: "TAKIME NGA KALENDARI SOT / NESER (A KA TAKIME TE JASHTME?)" },
-      { nr: 10, day: "E HENE", topic: "PRINTERI COLOR B&W" },
-      { nr: 11, day: "CDO DITE", topic: "ANKESA" },
-      { nr: 12, day: "CDO DITE", topic: "KERKESA" },
-      { nr: 13, day: "CDO DITE", topic: "PROPOZIME" },
-      { nr: 14, day: "CDO DITE", topic: "PIKA TE PERBASHKETA" },
-    ],
-  },
-  {
-    id: "takim-staf",
-    title: "TAKIMI ME STAF PER SQARIMIN E DET & NE FUND ME GA",
-    defaultOwner: "DV",
-    defaultTime: "8:30",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "M1 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "BZ PROJEKTET/SECILI INDIVIDUALISHT (BLIC DETYRAT)" },
-      { nr: 2, topic: "TT/VS/MST PRJK/MST FOTO/SMM" },
-      { nr: 3, topic: "KUSH NUK ESHTE BRENDA PLANIT & A KA PASUR PROBLEME?" },
-      { nr: 4, topic: "BZ PERMBLEDHJA ME GA (FIZIKISHT)- A KA DICKA TE RE QE KA SHTU GA NE PERMBLEDHJE?" },
-      { nr: 5, topic: "SOT/R1/1H, BLOK?" },
-      { nr: 6, topic: "SQARO DETYRA TE REJA TE SHPEJTA QE KRYHEN BRENDA DITES?" },
-      { nr: 7, topic: "A PRITET DICKA NE PAUZE PER KONTROLLE GA NGA ZHVILLIMI/PROJEKTET?" },
-    ],
-  },
-  {
-    id: "permbl-m2",
-    title: "PERMBLEDHJA M2",
-    defaultOwner: "DV",
-    defaultTime: "11:50",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "M2 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "PERSONALISHT SHENIMET GA?" },
-      { nr: 2, topic: "DETYRAT PERSONALISHT 1H/R1/SOT TE KRYERA DHE TE BZ" },
-      { nr: 3, topic: "URGJENCA/PROBLEME/1H!!!" },
-      { nr: 4, topic: "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?" },
-      { nr: 5, topic: "A KA DETYRA TE SHPEJTA QE KRYHEN BRENDA DITES, PER BARAZIM AM?" },
-      { nr: 6, topic: "A KA DETYRA TE REJA NGA TAKIMET EKSTERNE DHE A JANE SHPERNDARE DETYRA DHE A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
-      { nr: 7, topic: "A KA TAKIME TE REJA, KERKO DATEN E TAKIMIT TE RI?" },
-      { nr: 8, topic: "EMAIL/TAKIME A KA KERKESA TE REJA DICKA JASHTE STANDARDEVE" },
-      { nr: 9, topic: "PIKAT E BORDIT" },
-    ],
-  },
-  {
-    id: "permbl-pauze",
-    title: "PERMBLEDHJA PAS PAUZES",
-    defaultOwner: "DV",
-    defaultTime: "13:15",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "(GA) DET NGA EMAIL/ PX INFO" },
-      { nr: 2, topic: "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU" },
-      { nr: 3, topic: "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?" },
-      { nr: 4, topic: "(GA)SHENIME GA- PIKAT PAS PAUZE" },
-      { nr: 5, topic: "REPLY GA (DET. NGA STAFI) KOMENTE" },
-      { nr: 6, topic: "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?" },
-      { nr: 7, topic: "(GA) PIKAT E BORDIT" },
-      { nr: 8, topic: "(GA) PIKAT E BORDIT" },
-    ],
-  },
-  {
-    id: "permbl-1530",
-    title: "PERMBLEDHJA 15:30",
-    defaultOwner: "DV ME GA",
-    defaultTime: "15:45",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "M3 PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      {
-        nr: 1,
-        topic:
-          "BZ INDIVIDUALISHT ME SECILIN: 1. A JEMI BRENDA PLANIT? 2. SA PRODUKTE KOLONA JANE KRYER? 3. A KA PASUR NDRYSHIM TE PLANIT? 4. ME CKA VAZHDOHET NESER? 5. A JANE BERE DONE DETYRAT SE BASHKU ME PERGJEGJES?",
-        owner: "DV ME STAF",
-        time: "3:30 PM",
-      },
-      { nr: 2, topic: "PARREGULLSITE DHE DETYRAT SOT PER SOT (DISKUTOHEN EDHE WHEN ESHTE GA E NXENE)" },
-      { nr: 3, topic: "URGJENCAT" },
-      { nr: 4, topic: "MUST SOT" },
-      { nr: 5, topic: "BZ SHENIME \\ DETYRAT PERSONALISHT" },
-      { nr: 6, topic: "BZ PROGRESI TEK PROJEKTET? SA PRODUKTE/KOLONA JANE PERFUNDUAR?" },
-      { nr: 7, topic: "A KA DETYRA TE SHPEJTA QE KRYHEN BRENDA DITES, PER BARAZIM PM?" },
-      { nr: 8, topic: "A KA DETYRA TE REJA NGA TAKIMET EKSTERNE DHE A JANE SHPERNDARE DETYRA DHE A JANE VENDOSUR NE VEND PREZANTIMET NE CANVA/FILES?" },
-      { nr: 9, topic: "NESE NUK MBAHET TAKIMI 16:20, DISKUTOHEN EDHE DET CKA JANE ME RENDESI PER NESER?" },
-      { nr: 10, topic: "EMAIL/TAKIME A KA KERKESA TE REJA DICKA JASHTE STANDARDEVE" },
-    ],
-  },
-  {
-    id: "mbyllja-dites",
-    title: "MBYLLJA E DITES",
-    defaultOwner: "DV",
-    defaultTime: "16:20",
-    columns: [
-      { key: "nr", label: "NR", width: "52px" },
-      { key: "topic", label: "PIKAT" },
-      { key: "check", label: "", width: "48px" },
-      { key: "owner", label: "WHO", width: "90px" },
-      { key: "time", label: "WHEN", width: "90px" },
-    ],
-    rows: [
-      { nr: 1, topic: "MBINGARKESE NESER (NESE PO PROPOZIM PER RIORGANIZIM)" },
-      { nr: 2, topic: "NENGARKESE NESER" },
-      { nr: 3, topic: "MUST NESER + DET. PERSONALSHT(TRELLO)" },
-      { nr: 4, topic: "DET PER NESER ME PRIORITET: PSH JAVORET, TAKIMET EXT" },
-      { nr: 5, topic: "DET NE PROCES SISTEMIT (RD/93)" },
-      { nr: 6, topic: "DET. PA PROGRES (TRELLO NOT DONE?)" },
-      { nr: 7, topic: "TAKIMET PA KRY (KONTROLLO TRELLO)" },
-      { nr: 8, topic: "NESER ME GA (KOF/takime/ankesa/kerkesa/propozime):" },
-    ],
-  },
-]
+type MeetingChecklist = {
+  id: string
+  title: string
+  note?: string | null
+  default_owner?: string | null
+  default_time?: string | null
+  group_key?: string | null
+  columns?: MeetingColumn[] | null
+  position?: number | null
+  items?: {
+    id: string
+    position: number
+    title?: string | null
+    day?: string | null
+    owner?: string | null
+    time?: string | null
+    is_checked?: boolean | null
+  }[]
+}
+
 
 const initials = (name: string) => {
   const cleaned = name.trim()
@@ -269,6 +97,7 @@ const initials = (name: string) => {
 
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
+  const isAdmin = user?.role === "ADMIN"
 
   // Utils
   const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -335,24 +164,36 @@ export default function CommonViewPage() {
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
-  const [activeMeetingId, setActiveMeetingId] = React.useState(() => MEETING_TEMPLATES[0]?.id || "")
+  const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
+  const [activeMeetingId, setActiveMeetingId] = React.useState("")
+  const [editingRowId, setEditingRowId] = React.useState<string | null>(null)
+  const [editDraft, setEditDraft] = React.useState({
+    day: "",
+    topic: "",
+    owner: "",
+    time: "",
+  })
+  const [addDraft, setAddDraft] = React.useState({
+    nr: "",
+    day: "",
+    topic: "",
+    owner: "",
+    time: "",
+  })
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
   const activeMeeting = React.useMemo(
-    () => MEETING_TEMPLATES.find((template) => template.id === activeMeetingId) || null,
-    [activeMeetingId]
+    () => meetingTemplates.find((template) => template.id === activeMeetingId) || null,
+    [activeMeetingId, meetingTemplates]
   )
-  const boardMeetingIds = React.useMemo(() => {
-    if (!MEETING_TEMPLATES.length) return []
-    const firstId = MEETING_TEMPLATES[0]?.id
-    const lastId = MEETING_TEMPLATES[MEETING_TEMPLATES.length - 1]?.id
-    const boardIds = new Set([firstId, lastId, "permbl-pauze"])
-    return MEETING_TEMPLATES.map((m) => m.id).filter((id) => boardIds.has(id))
-  }, [])
+  const boardMeetingIds = React.useMemo(
+    () => meetingTemplates.filter((m) => m.groupKey === "board").map((m) => m.id),
+    [meetingTemplates]
+  )
   const staffMeetingIds = React.useMemo(
-    () => MEETING_TEMPLATES.map((m) => m.id).filter((id) => !boardMeetingIds.includes(id)),
-    [boardMeetingIds]
+    () => meetingTemplates.filter((m) => m.groupKey !== "board").map((m) => m.id),
+    [meetingTemplates]
   )
   const mergeOwnerColumn = React.useMemo(() => {
     if (!activeMeeting) return false
@@ -360,6 +201,74 @@ export default function CommonViewPage() {
     if (!hasOwner) return false
     return activeMeeting.rows.every((row, idx) => !row.owner || idx === 0)
   }, [activeMeeting])
+
+  React.useEffect(() => {
+    let mounted = true
+    async function loadMeetings() {
+      try {
+        const res = await apiFetch("/checklists?meeting_only=true&include_items=true")
+        if (!res?.ok) return
+        const data = (await res.json()) as MeetingChecklist[]
+        const templates = data
+          .slice()
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+          .map((checklist) => {
+            const rows = (checklist.items || [])
+              .slice()
+              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+              .map((item) => ({
+                id: item.id,
+                nr: item.position ?? 0,
+                day: item.day || undefined,
+                topic: item.title || "",
+                owner: item.owner || undefined,
+                time: item.time || undefined,
+                isChecked: item.is_checked ?? false,
+              }))
+            return {
+              id: checklist.id,
+              title: checklist.title,
+              note: checklist.note || undefined,
+              groupKey: checklist.group_key || undefined,
+              columns: checklist.columns?.length
+                ? checklist.columns
+                : [
+                    { key: "nr", label: "NR", width: "52px" },
+                    { key: "topic", label: "M1 PIKAT" },
+                    { key: "check", label: "", width: "48px" },
+                    { key: "owner", label: "WHO", width: "90px" },
+                    { key: "time", label: "WHEN", width: "90px" },
+                  ],
+              rows,
+              defaultOwner: checklist.default_owner || undefined,
+              defaultTime: checklist.default_time || undefined,
+            }
+          })
+        if (mounted) {
+          setMeetingTemplates(templates)
+        }
+      } catch (err) {
+        console.error("Failed to load meeting checklists", err)
+      }
+    }
+    void loadMeetings()
+    return () => {
+      mounted = false
+    }
+  }, [apiFetch])
+
+  React.useEffect(() => {
+    if (!meetingTemplates.length) return
+    if (!activeMeetingId || !meetingTemplates.some((meeting) => meeting.id === activeMeetingId)) {
+      setActiveMeetingId(meetingTemplates[0].id)
+    }
+  }, [activeMeetingId, meetingTemplates])
+
+  React.useEffect(() => {
+    setEditingRowId(null)
+    setEditDraft({ day: "", topic: "", owner: "", time: "" })
+    setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
+  }, [activeMeetingId])
 
   // Load data on mount
   React.useEffect(() => {
@@ -1031,6 +940,302 @@ export default function CommonViewPage() {
     node.scrollBy({ left: delta, behavior: "smooth" })
   }, [])
 
+  const updateMeetingChecked = React.useCallback((meetingId: string, itemId: string, nextChecked: boolean) => {
+    setMeetingTemplates((prev) =>
+      prev.map((meeting) => {
+        if (meeting.id !== meetingId) return meeting
+        return {
+          ...meeting,
+          rows: meeting.rows.map((row) =>
+            row.id === itemId ? { ...row, isChecked: nextChecked } : row
+          ),
+        }
+      })
+    )
+  }, [])
+
+  const toggleMeetingItem = React.useCallback(
+    async (meetingId: string, itemId: string, nextChecked: boolean) => {
+      const currentChecked =
+        meetingTemplates
+          .find((meeting) => meeting.id === meetingId)
+          ?.rows.find((row) => row.id === itemId)?.isChecked ?? false
+      updateMeetingChecked(meetingId, itemId, nextChecked)
+      try {
+        const res = await apiFetch(`/checklist-items/${itemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: nextChecked }),
+        })
+        if (!res.ok) {
+          updateMeetingChecked(meetingId, itemId, currentChecked)
+        }
+      } catch (err) {
+        updateMeetingChecked(meetingId, itemId, currentChecked)
+      }
+    },
+    [apiFetch, meetingTemplates, updateMeetingChecked]
+  )
+
+  const startEditMeetingRow = React.useCallback((row: MeetingRow) => {
+    setEditingRowId(row.id)
+    setEditDraft({
+      day: row.day || "",
+      topic: row.topic || "",
+      owner: row.owner || "",
+      time: row.time || "",
+    })
+  }, [])
+
+  const cancelEditMeetingRow = React.useCallback(() => {
+    setEditingRowId(null)
+    setEditDraft({ day: "", topic: "", owner: "", time: "" })
+  }, [])
+
+  const saveMeetingRow = React.useCallback(
+    async (meetingId: string, rowId: string) => {
+      const payload = {
+        title: editDraft.topic.trim().toUpperCase(),
+        day: editDraft.day.trim() || null,
+        owner: editDraft.owner.trim() || null,
+        time: editDraft.time.trim() || null,
+      }
+      if (!payload.title) return
+      const previous = meetingTemplates
+        .find((meeting) => meeting.id === meetingId)
+        ?.rows.find((row) => row.id === rowId)
+      setMeetingTemplates((prev) =>
+        prev.map((meeting) => {
+          if (meeting.id !== meetingId) return meeting
+          return {
+            ...meeting,
+            rows: meeting.rows.map((row) =>
+              row.id === rowId
+                ? {
+                    ...row,
+                    day: payload.day ?? undefined,
+                    topic: payload.title,
+                    owner: payload.owner ?? undefined,
+                    time: payload.time ?? undefined,
+                  }
+                : row
+            ),
+          }
+        })
+      )
+      setEditingRowId(null)
+      try {
+        const res = await apiFetch(`/checklist-items/${rowId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          if (previous) {
+            setMeetingTemplates((prev) =>
+              prev.map((meeting) => {
+                if (meeting.id !== meetingId) return meeting
+                return {
+                  ...meeting,
+                  rows: meeting.rows.map((row) =>
+                    row.id === rowId
+                      ? {
+                          ...row,
+                          day: previous.day,
+                          topic: previous.topic,
+                          owner: previous.owner,
+                          time: previous.time,
+                        }
+                      : row
+                  ),
+                }
+              })
+            )
+          }
+        }
+      } catch (err) {
+        if (previous) {
+          setMeetingTemplates((prev) =>
+            prev.map((meeting) => {
+              if (meeting.id !== meetingId) return meeting
+              return {
+                ...meeting,
+                rows: meeting.rows.map((row) =>
+                  row.id === rowId
+                    ? {
+                        ...row,
+                        day: previous.day,
+                        topic: previous.topic,
+                        owner: previous.owner,
+                        time: previous.time,
+                      }
+                    : row
+                ),
+              }
+            })
+          )
+        }
+      }
+    },
+    [apiFetch, editDraft, meetingTemplates]
+  )
+
+  const resequenceMeetingRows = React.useCallback(
+    async (meetingId: string, rowsOverride?: MeetingRow[]) => {
+      const meeting = meetingTemplates.find((template) => template.id === meetingId)
+      const rows = rowsOverride || meeting?.rows || []
+      if (!rows.length) return
+      const sortedRows = rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const resequencedRows = sortedRows.map((row, index) => ({
+        ...row,
+        nr: index + 1,
+      }))
+      const updates = resequencedRows
+        .map((row) => ({ row, nextNr: row.nr }))
+        .filter(({ row, nextNr }) => (rows.find((r) => r.id === row.id)?.nr ?? 0) !== nextNr)
+      if (!updates.length) return
+
+      setMeetingTemplates((prev) =>
+        prev.map((template) => {
+          if (template.id !== meetingId) return template
+          if (rowsOverride) {
+            return { ...template, rows: resequencedRows }
+          }
+          const updatedRows = template.rows.map((row) => {
+            const next = updates.find((entry) => entry.row.id === row.id)
+            return next ? { ...row, nr: next.nextNr } : row
+          })
+          return { ...template, rows: updatedRows }
+        })
+      )
+
+      try {
+        await Promise.all(
+          updates.map(({ row, nextNr }) =>
+            apiFetch(`/checklist-items/${row.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ position: nextNr }),
+            })
+          )
+        )
+      } catch (err) {
+        console.error("Failed to resequence meeting items", err)
+      }
+    },
+    [apiFetch, meetingTemplates]
+  )
+
+  const deleteMeetingRow = React.useCallback(
+    async (meetingId: string, rowId: string) => {
+      const confirmed = window.confirm(
+        "Delete this checklist item? This action cannot be undone."
+      )
+      if (!confirmed) return
+      const previousRows = meetingTemplates.find((meeting) => meeting.id === meetingId)?.rows || []
+      setMeetingTemplates((prev) =>
+        prev.map((meeting) => {
+          if (meeting.id !== meetingId) return meeting
+          return {
+            ...meeting,
+            rows: meeting.rows.filter((row) => row.id !== rowId),
+          }
+        })
+      )
+      try {
+        const res = await apiFetch(`/checklist-items/${rowId}`, {
+          method: "DELETE",
+        })
+        if (!res.ok) {
+          setMeetingTemplates((prev) =>
+            prev.map((meeting) => {
+              if (meeting.id !== meetingId) return meeting
+              return {
+                ...meeting,
+                rows: previousRows,
+              }
+            })
+          )
+          return
+        }
+        const remainingRows = previousRows.filter((row) => row.id !== rowId)
+        await resequenceMeetingRows(meetingId, remainingRows)
+      } catch (err) {
+        setMeetingTemplates((prev) =>
+          prev.map((meeting) => {
+            if (meeting.id !== meetingId) return meeting
+            return {
+              ...meeting,
+              rows: previousRows,
+            }
+          })
+        )
+      }
+    },
+    [apiFetch, meetingTemplates, resequenceMeetingRows]
+  )
+
+  const addMeetingRow = React.useCallback(
+    async (meetingId: string) => {
+      const topic = addDraft.topic.trim().toUpperCase()
+      if (!topic) return
+      const meeting = meetingTemplates.find((template) => template.id === meetingId)
+      if (!meeting) return
+      const parsedNr = Number(addDraft.nr)
+      const requestedNr = Number.isFinite(parsedNr) && parsedNr > 0 ? Math.floor(parsedNr) : null
+      const nextPosition =
+        requestedNr || Math.max(0, ...meeting.rows.map((row) => row.nr || 0)) + 1
+      const payload = {
+        checklist_id: meetingId,
+        item_type: "CHECKBOX",
+        position: nextPosition,
+        title: topic,
+        day: addDraft.day.trim() || null,
+        owner: null,
+        time: null,
+        is_checked: false,
+      }
+      try {
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) return
+        const created = await res.json()
+        const createdRow: MeetingRow = {
+          id: created.id,
+          nr: requestedNr || created.position || nextPosition,
+          day: created.day || undefined,
+          topic: created.title || topic,
+          owner: created.owner || undefined,
+          time: created.time || undefined,
+          isChecked: created.is_checked ?? false,
+        }
+        const baseRows = meeting?.rows || []
+        const nextRows = requestedNr
+          ? baseRows.map((row) =>
+              row.nr >= requestedNr ? { ...row, nr: row.nr + 1 } : row
+            ).concat(createdRow)
+          : baseRows.concat(createdRow)
+        setMeetingTemplates((prev) =>
+          prev.map((template) => {
+            if (template.id !== meetingId) return template
+            return {
+              ...template,
+              rows: nextRows,
+            }
+          })
+        )
+        setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
+        await resequenceMeetingRows(meetingId, nextRows)
+      } catch (err) {
+        console.error("Failed to add meeting item", err)
+      }
+    },
+    [addDraft, apiFetch, meetingTemplates, resequenceMeetingRows]
+  )
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#ffffff" }}>
       <style>{`
@@ -1296,12 +1501,14 @@ export default function CommonViewPage() {
           font-weight: 700;
           color: #1f2937;
           border-bottom: 1px solid #cbd5e1;
+          white-space: nowrap;
         }
         .meeting-table td {
           border-top: 1px solid #e2e8f0;
           padding: 8px 10px;
           vertical-align: top;
           color: #0f172a;
+          white-space: nowrap;
         }
         .meeting-check-cell {
           text-align: center;
@@ -1311,6 +1518,31 @@ export default function CommonViewPage() {
           accent-color: #64748b;
           width: 16px;
           height: 16px;
+        }
+        .btn-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+          background: #ffffff;
+          color: #475569;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+        }
+        .btn-icon:hover {
+          background: #f1f5f9;
+          color: #334155;
+        }
+        .btn-icon.danger {
+          color: #b91c1c;
+          border-color: #fecaca;
+          background: #fff1f2;
+        }
+        .btn-icon.danger:hover {
+          background: #ffe4e6;
+          color: #991b1b;
         }
         .meeting-owner-cell {
           text-align: center;
@@ -2023,7 +2255,7 @@ export default function CommonViewPage() {
                 <option value="" disabled>
                   Select meeting
                 </option>
-                {MEETING_TEMPLATES.filter((t) => boardMeetingIds.includes(t.id)).map((template) => (
+                {meetingTemplates.filter((t) => boardMeetingIds.includes(t.id)).map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.title}
                   </option>
@@ -2040,7 +2272,7 @@ export default function CommonViewPage() {
                 <option value="" disabled>
                   Select meeting
                 </option>
-                {MEETING_TEMPLATES.filter((t) => staffMeetingIds.includes(t.id)).map((template) => (
+                {meetingTemplates.filter((t) => staffMeetingIds.includes(t.id)).map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.title}
                   </option>
@@ -2070,11 +2302,15 @@ export default function CommonViewPage() {
                           {col.label}
                         </th>
                       ))}
+                      {isAdmin ? <th style={{ width: "120px" }}>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
-                    {activeMeeting.rows.map((row, rowIndex) => (
-                      <tr key={`${activeMeeting.id}-${row.nr}`}>
+                    {activeMeeting.rows
+                      .slice()
+                      .sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+                      .map((row, rowIndex) => (
+                      <tr key={row.id}>
                         {activeMeeting.columns.map((col) => {
                           let value = ""
                           if (col.key === "nr") value = String(row.nr)
@@ -2086,6 +2322,7 @@ export default function CommonViewPage() {
                           if (col.key === "time") {
                             value = row.time || (rowIndex === 0 ? activeMeeting.defaultTime || "" : "")
                           }
+                          const isEditing = isAdmin && editingRowId === row.id
 
                           if (col.key === "owner" && mergeOwnerColumn) {
                             if (rowIndex !== 0) return null
@@ -2104,7 +2341,12 @@ export default function CommonViewPage() {
                           if (col.key === "check") {
                             return (
                               <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} className="meeting-check-cell">
-                                <input type="checkbox" aria-label={`Mark ${row.topic}`} />
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Mark ${row.topic}`}
+                                  checked={Boolean(row.isChecked)}
+                                  onChange={(e) => toggleMeetingItem(activeMeeting.id, row.id, e.target.checked)}
+                                />
                               </td>
                             )
                           }
@@ -2112,7 +2354,68 @@ export default function CommonViewPage() {
                           if (col.key === "topic") {
                             return (
                               <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
-                                {value}
+                                {isEditing ? (
+                                  <input
+                                    className="input"
+                                    type="text"
+                                    value={editDraft.topic}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                                    style={{ textTransform: "uppercase" }}
+                                  />
+                                ) : (
+                                  value
+                                )}
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "day") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                                {isEditing ? (
+                                  <input
+                                    className="input"
+                                    type="text"
+                                    value={editDraft.day}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, day: e.target.value }))}
+                                  />
+                                ) : (
+                                  value
+                                )}
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "owner") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                                {isEditing ? (
+                                  <input
+                                    className="input"
+                                    type="text"
+                                    value={editDraft.owner}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, owner: e.target.value }))}
+                                  />
+                                ) : (
+                                  value
+                                )}
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "time") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                                {isEditing ? (
+                                  <input
+                                    className="input"
+                                    type="text"
+                                    value={editDraft.time}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, time: e.target.value }))}
+                                  />
+                                ) : (
+                                  value
+                                )}
                               </td>
                             )
                           }
@@ -2123,11 +2426,91 @@ export default function CommonViewPage() {
                             </td>
                           )
                         })}
+                        {isAdmin ? (
+                          <td>
+                            {editingRowId === row.id ? (
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                <button className="btn-primary" type="button" onClick={() => saveMeetingRow(activeMeeting.id, row.id)}>
+                                  Save
+                                </button>
+                                <button className="btn-outline" type="button" onClick={cancelEditMeetingRow}>
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                <button className="btn-icon" type="button" onClick={() => startEditMeetingRow(row)} aria-label="Edit row">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M4 20h4l10.5-10.5a2.121 2.121 0 0 0-3-3L5 17v3z"
+                                      stroke="currentColor"
+                                      strokeWidth="1.6"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  className="btn-icon danger"
+                                  type="button"
+                                  onClick={() => deleteMeetingRow(activeMeeting.id, row.id)}
+                                  aria-label="Delete row"
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"
+                                      stroke="currentColor"
+                                      strokeWidth="1.6"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {isAdmin ? (
+                <div style={{ padding: "12px", borderTop: "1px solid #e2e8f0" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr)) auto", gap: "8px" }}>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      placeholder="Nr"
+                      value={addDraft.nr}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, nr: e.target.value }))}
+                    />
+                    {activeMeeting.columns.some((col) => col.key === "day") ? (
+                      <input
+                        className="input"
+                        type="text"
+                        placeholder="Day"
+                        value={addDraft.day}
+                        onChange={(e) => setAddDraft((prev) => ({ ...prev, day: e.target.value }))}
+                      />
+                    ) : (
+                      <span />
+                    )}
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder="Topic"
+                      value={addDraft.topic}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                      style={{ textTransform: "uppercase" }}
+                    />
+                    <button className="btn-primary" type="button" onClick={() => addMeetingRow(activeMeeting.id)}>
+                      Add meeting point
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="meeting-empty">No meeting selected.</div>

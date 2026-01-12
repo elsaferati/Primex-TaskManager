@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import ProjectPhaseStatus, TaskStatus
+from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus
 
 
 class ProjectOut(BaseModel):
@@ -15,6 +15,7 @@ class ProjectOut(BaseModel):
     description: str | None = None
     department_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
+    project_type: ProjectType | None = None
     current_phase: ProjectPhaseStatus
     status: TaskStatus
     progress_percentage: int
@@ -30,6 +31,7 @@ class ProjectCreate(BaseModel):
     description: str | None = Field(default=None)
     department_id: uuid.UUID
     manager_id: uuid.UUID | None = None
+    project_type: ProjectType | None = None
     current_phase: ProjectPhaseStatus | None = None
     status: TaskStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
@@ -42,6 +44,7 @@ class ProjectUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=200)
     description: str | None = Field(default=None)
     manager_id: uuid.UUID | None = None
+    project_type: ProjectType | None = None
     current_phase: ProjectPhaseStatus | None = None
     status: TaskStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)

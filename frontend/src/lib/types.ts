@@ -100,6 +100,7 @@ export interface Project {
   description?: string | null
   department_id?: string | null
   manager_id?: string | null
+  project_type?: string | null
   current_phase?: string
   status?: string
   progress_percentage?: number
@@ -175,6 +176,9 @@ export interface ChecklistItem {
   keyword?: string | null
   description?: string | null
   category?: string | null
+  day?: string | null
+  owner?: string | null
+  time?: string | null
   // Type-specific fields
   title?: string | null
   comment?: string | null

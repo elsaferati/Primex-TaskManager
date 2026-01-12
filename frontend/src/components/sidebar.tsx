@@ -28,6 +28,7 @@ type NavItem = {
   href: string; 
   label: string; 
   icon: LucideIcon;
+  match?: string[];
   roles?: UserRole[] 
 }
 
@@ -61,17 +62,20 @@ const items: NavItem[] = [
   { 
     href: "/departments/development", 
     label: "Development", 
-    icon: Code2 
+    icon: Code2,
+    match: ["/departments/development", "/projects/dev"]
   },
     { 
       href: "/departments/project-content-manager", 
       label: "Product Content", 
-      icon: FileText 
+      icon: FileText,
+      match: ["/departments/project-content-manager", "/projects/pcm"]
     },
   { 
     href: "/departments/graphic-design", 
     label: "Graphic Design", 
-    icon: Palette 
+    icon: Palette,
+    match: ["/departments/graphic-design", "/projects/design"]
   },
   { 
     href: "/weekly-planner", 
@@ -104,15 +108,17 @@ const items: NavItem[] = [
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const projectRoute =
+    pathname.startsWith("/projects/pcm") ? "pcm" : pathname.startsWith("/projects/design") ? "design" : pathname.startsWith("/projects/dev") ? "dev" : pathname.startsWith("/projects/") ? "dev" : null
 
   return (
     <aside className="w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen sticky top-0 print:hidden">
       {/* Header / Logo Area */}
       <div className="flex h-16 items-center border-b px-6">
-        <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
+        <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg tracking-tight">
           <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
           <span>PrimeFlow</span>
-        </div>
+        </Link>
       </div>
 
       {/* Navigation Links */}
@@ -120,7 +126,12 @@ export function Sidebar({ role }: { role: UserRole }) {
         {items
           .filter((i) => (!i.roles ? true : i.roles.includes(role)))
           .map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + "/")
+            const matchTargets = item.match || [item.href]
+            const active =
+              matchTargets.some((target) => pathname === target || pathname.startsWith(target + "/")) ||
+              (item.label === "Development" && projectRoute === "dev") ||
+              (item.label === "Product Content" && projectRoute === "pcm") ||
+              (item.label === "Graphic Design" && projectRoute === "design")
             return (
               <Link
                 key={item.href}

@@ -24,6 +24,9 @@ class ChecklistItemOut(BaseModel):
     keyword: str | None = None
     description: str | None = None
     category: str | None = None
+    day: str | None = None
+    owner: str | None = None
+    time: str | None = None
 
     # Type-specific fields
     title: str | None = None
@@ -44,6 +47,9 @@ class ChecklistItemCreate(BaseModel):
     keyword: str | None = None
     description: str | None = None
     category: str | None = None
+    day: str | None = None
+    owner: str | None = None
+    time: str | None = None
 
     # Type-specific fields
     title: str | None = None
@@ -83,6 +89,9 @@ class ChecklistItemUpdate(BaseModel):
     keyword: str | None = None
     description: str | None = None
     category: str | None = None
+    day: str | None = None
+    owner: str | None = None
+    time: str | None = None
 
     # Type-specific fields
     title: str | None = None
