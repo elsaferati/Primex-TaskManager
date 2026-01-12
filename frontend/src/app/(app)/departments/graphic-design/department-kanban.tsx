@@ -32,7 +32,8 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
-const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const GENERAL_PROJECT_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const MST_PROJECT_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
 
 const PHASE_LABELS: Record<string, string> = {
   MEETINGS: "Meetings",
@@ -40,10 +41,18 @@ const PHASE_LABELS: Record<string, string> = {
   DEVELOPMENT: "Development",
   TESTING: "Testing",
   DOCUMENTATION: "Documentation",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
   CLOSED: "Closed",
 }
 
 const WEEKDAYS_SQ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+const PROJECT_TYPES = [
+  { id: "GENERAL", label: "General" },
+  { id: "MST", label: "MST Project" },
+] as const
 
 const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   DAILY: "Daily",
@@ -363,6 +372,7 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
+  const [projectType, setProjectType] = React.useState<(typeof PROJECT_TYPES)[number]["id"]>("GENERAL")
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
 
@@ -464,6 +474,7 @@ export default function DepartmentKanban() {
     () => (department ? users.filter((u) => u.department_id === department.id) : []),
     [department, users]
   )
+  const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
   const todayDate = React.useMemo(() => new Date(), [])
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
@@ -873,6 +884,7 @@ export default function DepartmentKanban() {
         description: projectDescription.trim() || null,
         department_id: department.id,
         manager_id: projectManagerId === "__unassigned__" ? null : projectManagerId,
+        project_type: projectType,
         current_phase: projectPhase,
         status: projectStatus,
       }
@@ -883,6 +895,8 @@ export default function DepartmentKanban() {
       setCreateProjectOpen(false)
       setProjectTitle("")
       setProjectDescription("")
+      setProjectType("GENERAL")
+      setProjectPhase("MEETINGS")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -1211,7 +1225,34 @@ export default function DepartmentKanban() {
                           <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2"><Label>Manager</Label><Select value={projectManagerId} onValueChange={setProjectManagerId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div>
-                            <div className="space-y-2"><Label>Phase</Label><Select value={projectPhase} onValueChange={setProjectPhase}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{PHASES.map((p) => <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>)}</SelectContent></Select></div>
+                            <div className="space-y-2">
+                              <Label>Project Type</Label>
+                              <Select
+                                value={projectType}
+                                onValueChange={(value) => {
+                                  setProjectType(value as (typeof PROJECT_TYPES)[number]["id"])
+                                  setProjectPhase(value === "MST" ? "PLANNING" : "MEETINGS")
+                                }}
+                              >
+                                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {PROJECT_TYPES.map((type) => (
+                                    <SelectItem key={type.id} value={type.id}>{type.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Phase</Label>
+                            <Select value={projectPhase} onValueChange={setProjectPhase}>
+                              <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {projectPhaseOptions.map((p) => (
+                                  <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         </div>
                         <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitProject()}>Create</Button></div>

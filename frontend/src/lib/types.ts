@@ -100,6 +100,7 @@ export interface Project {
   description?: string | null
   department_id?: string | null
   manager_id?: string | null
+  project_type?: string | null
   current_phase?: string
   status?: string
   progress_percentage?: number

@@ -18,13 +18,26 @@ import { useAuth } from "@/lib/auth"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
 // Design-specific phases (mapped to backend enums)
-const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
-const PHASE_LABELS: Record<string, string> = {
+const GENERAL_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
+
+const GENERAL_PHASE_LABELS: Record<string, string> = {
   MEETINGS: "Briefing",
   PLANNING: "Concept",
   DEVELOPMENT: "Design",
   TESTING: "Feedback",
   DOCUMENTATION: "Final Files",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
+  CLOSED: "Closed",
+}
+
+const MST_PHASE_LABELS: Record<string, string> = {
+  PLANNING: "Planning",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
   CLOSED: "Closed",
 }
 
@@ -555,7 +568,11 @@ export default function DesignProjectPage() {
 
   const title = project.title || project.name || "Project"
   const phase = project.current_phase || "MEETINGS"
-  const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
+  const projectType = project.project_type === "MST" ? "MST" : "GENERAL"
+  const phaseSequence = projectType === "MST" ? MST_PHASES : GENERAL_PHASES
+  const phaseLabels = projectType === "MST" ? MST_PHASE_LABELS : GENERAL_PHASE_LABELS
+  const phaseIndex = phaseSequence.indexOf(phase as (typeof phaseSequence)[number])
+  const lockedAfterIndex = phaseIndex === -1 ? 0 : phaseIndex
   const canClosePhase = phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
 
@@ -566,13 +583,13 @@ export default function DesignProjectPage() {
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
           <div className="mt-3 text-3xl font-semibold">{title}</div>
           <div className="mt-3">
-            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">{PHASE_LABELS[phase] || "Design"}</Badge>
+            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">{phaseLabels[phase] || "Design"}</Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
-            {PHASES.map((p, idx) => {
+            {phaseSequence.map((p, idx) => {
               const isViewed = p === activePhase
               const isCurrent = p === phase
-              const isLocked = idx > phaseIndex
+              const isLocked = idx > lockedAfterIndex
               return (
                 <span key={p}>
                   <button
@@ -594,14 +611,14 @@ export default function DesignProjectPage() {
                     aria-pressed={isViewed}
                     disabled={isLocked}
                   >
-                    {PHASE_LABELS[p]}
+                    {phaseLabels[p] || p}
                   </button>
-                  {idx < PHASES.length - 1 ? " -> " : ""}
+                  {idx < phaseSequence.length - 1 ? " -> " : ""}
                 </span>
               )
             })}
           </div>
-          {activePhase !== phase ? <div className="mt-2 text-xs text-muted-foreground">View: {PHASE_LABELS[activePhase] || "Design"}</div> : null}
+          {activePhase !== phase ? <div className="mt-2 text-xs text-muted-foreground">View: {phaseLabels[activePhase] || "Design"}</div> : null}
         </div>
         <div className="flex items-center gap-2"><Button className="rounded-xl">Settings</Button></div>
       </div>
