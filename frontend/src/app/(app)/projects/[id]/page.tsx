@@ -18,14 +18,14 @@ import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
-const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Meetings",
-  PLANIFIKIMI: "Planning",
-  ZHVILLIMI: "Development",
-  TESTIMI: "Testing",
-  DOKUMENTIMI: "Documentation",
-  MBYLLUR: "Closed",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
+  CLOSED: "Closed",
 }
 
 const TABS = [
@@ -55,13 +55,13 @@ const MEETING_POINTS = [
 ]
 
 const MEETING_CHECKLIST_ITEMS = [
-  "Lloji i projektit",
-  "Kerkuesi/Mbeshtetesi i projektit",
-  "Udheheqesi i projektit",
-  "Pjesemarresit tjere ne projekt",
-  "Roli i pjesemarresve tjere",
-  "Kzg/Plnf i Projektit",
-  "Cfare problemesh parashihen?",
+  "Project Type",
+  "Requester/Supporter",
+  "Project Lead",
+  "Other Participants",
+  "Role of Other Participants",
+  "Concept/Planning",
+  "Anticipated Problems",
 ]
 const DOCUMENTATION_CHECKLIST_QUESTIONS = [
   "Does the documentation have a clear ending?",
@@ -225,7 +225,7 @@ export default function ProjectPage() {
   React.useEffect(() => {
     if (!createOpen) return
     if (newTaskPhase) return
-    const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+    const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
@@ -449,8 +449,8 @@ export default function ProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
-    const currentPhase = project.current_phase || "TAKIMET"
-    const isMeetingPhase = currentPhase === "TAKIMET"
+    const currentPhase = project.current_phase || "MEETINGS"
+    const isMeetingPhase = currentPhase === "MEETINGS"
     const openTasks = tasks.filter(
       (task) =>
         task.status !== "DONE" &&
@@ -483,7 +483,7 @@ export default function ProjectPage() {
       }
       const updated = (await res.json()) as Project
       setProject(updated)
-      setViewedPhase(updated.current_phase || "TAKIMET")
+      setViewedPhase(updated.current_phase || "MEETINGS")
       toast.success("Phase advanced")
     } finally {
       setAdvancingPhase(false)
@@ -548,9 +548,9 @@ export default function ProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+  const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
-    if (phaseValue === "TAKIMET") {
+    if (phaseValue === "MEETINGS") {
       return [
         ...MEETING_TABS.filter((tab) => tab.id === "meeting-focus"),
         ...TABS.filter((tab) => tab.id === "description"),
@@ -595,7 +595,7 @@ export default function ProjectPage() {
   const visibleTasks = React.useMemo(
     () =>
       tasks.filter((task) => {
-        const taskPhase = task.phase || project?.current_phase || "TAKIMET"
+        const taskPhase = task.phase || project?.current_phase || "MEETINGS"
         return taskPhase === activePhase
       }),
     [activePhase, project?.current_phase, tasks]
@@ -604,7 +604,7 @@ export default function ProjectPage() {
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
-  const phase = project.current_phase || "TAKIMET"
+  const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "MBYLLUR"
   const userMap = new Map(
@@ -666,33 +666,33 @@ export default function ProjectPage() {
             </Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
-          {PHASES.map((p, idx) => {
-            const isViewed = p === activePhase
-            const isCurrent = p === phase
-            const isLocked = idx > phaseIndex
-            return (
-              <span key={p}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isLocked) return
-                    setViewedPhase(p)
-                  }}
-                  className={[
-                    "transition-colors",
-                    isLocked
-                      ? "text-slate-300 cursor-not-allowed"
-                      : isViewed
-                        ? "text-blue-600 font-medium"
-                        : isCurrent
-                          ? "text-foreground"
-                          : "text-muted-foreground",
-                  ].join(" ")}
-                  aria-pressed={isViewed}
-                  disabled={isLocked}
-                >
-                  {PHASE_LABELS[p]}
-                </button>
+            {PHASES.map((p, idx) => {
+              const isViewed = p === activePhase
+              const isCurrent = p === phase
+              const isLocked = idx > phaseIndex
+              return (
+                <span key={p}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isLocked) return
+                      setViewedPhase(p)
+                    }}
+                    className={[
+                      "transition-colors",
+                      isLocked
+                        ? "text-slate-300 cursor-not-allowed"
+                        : isViewed
+                          ? "text-blue-600 font-medium"
+                          : isCurrent
+                            ? "text-foreground"
+                            : "text-muted-foreground",
+                    ].join(" ")}
+                    aria-pressed={isViewed}
+                    disabled={isLocked}
+                  >
+                    {PHASE_LABELS[p]}
+                  </button>
                   {idx < PHASES.length - 1 ? " -> " : ""}
                 </span>
               )
@@ -784,7 +784,7 @@ export default function ProjectPage() {
 
       {activeTab === "description" ? (
         <Card className="p-6">
-          {activePhase === "TAKIMET" ? (
+          {activePhase === "MEETINGS" ? (
             <>
               <div className="text-lg font-semibold">Project Description</div>
               <Textarea
@@ -1046,9 +1046,9 @@ export default function ProjectPage() {
                     onClick={() => void toggleChecklistItem(item.id, !item.is_checked)}
                   >
                     <div className="flex items-center gap-3">
-                      <Checkbox checked={item.is_checked} />
+                      <Checkbox checked={item.is_checked ?? false} />
                       <div className={item.is_checked ? "text-muted-foreground line-through" : ""}>
-                        {item.content}
+                        {(item as any).content || item.title}
                       </div>
                     </div>
                   </Card>
@@ -1141,14 +1141,14 @@ export default function ProjectPage() {
                 <SelectContent>
                   <SelectItem value="__none__">No priority</SelectItem>
                   <SelectItem value="NORMAL">Normal</SelectItem>
-                  
+
                   <SelectItem value="HIGH">High</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex items-start gap-2">
               <Textarea
-              placeholder="Add GA/KA note..."
+                placeholder="Add GA/KA note..."
                 value={newGaNote}
                 onChange={(e) => setNewGaNote(e.target.value)}
                 rows={3}
@@ -1158,7 +1158,7 @@ export default function ProjectPage() {
                 disabled={!newGaNote.trim() || addingGaNote}
                 onClick={() => void submitGaNote()}
               >
-              {addingGaNote ? "Adding..." : "Add"}
+                {addingGaNote ? "Adding..." : "Add"}
               </Button>
             </div>
           </div>

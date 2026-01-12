@@ -42,15 +42,15 @@ type MicrosoftEvent = {
   body_preview?: string | null
 }
 
-const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Meetings",
-  PLANIFIKIMI: "Planning",
-  ZHVILLIMI: "Development",
-  TESTIMI: "Testing",
-  DOKUMENTIMI: "Documentation",
-  MBYLLUR: "Closed",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
+  CLOSED: "Closed",
 }
 
 const WEEKDAYS_SQ = [
@@ -407,7 +407,7 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
-  const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
+  const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
@@ -1081,8 +1081,12 @@ export default function DepartmentKanban() {
       if (!res.ok) {
         let detail = "Failed to create project"
         try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
+          const data = await res.json()
+          if (Array.isArray(data)) {
+            detail = data.map(e => `${e.loc.join('.')}: ${e.msg}`).join(', ')
+          } else if (data?.detail) {
+            detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+          }
         } catch {
           // ignore
         }
@@ -1095,7 +1099,7 @@ export default function DepartmentKanban() {
       setProjectTitle("")
       setProjectDescription("")
       setProjectManagerId("__unassigned__")
-      setProjectPhase("TAKIMET")
+      setProjectPhase("MEETINGS")
       setProjectStatus("TODO")
       toast.success("Project created")
     } finally {
@@ -1658,7 +1662,7 @@ export default function DepartmentKanban() {
         </Card>
 
         {activeTab === "projects" ? (
-            <div className="space-y-6">
+          <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
@@ -1675,10 +1679,10 @@ export default function DepartmentKanban() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-slate-700">Title</Label>
-                        <Input 
-                          value={projectTitle} 
-                          onChange={(e) => handleProjectTitleChange(e.target.value)} 
-                          className="border-slate-200 focus:border-slate-400 rounded-xl uppercase placeholder:normal-case" 
+                        <Input
+                          value={projectTitle}
+                          onChange={(e) => handleProjectTitleChange(e.target.value)}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl uppercase placeholder:normal-case"
                           placeholder="Enter project shortcut (e.g., ABC, XYZ)"
                           style={{ textTransform: 'uppercase' }}
                         />
@@ -1737,13 +1741,13 @@ export default function DepartmentKanban() {
                       </div>
                     </div>
                   </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-                        <div className="grid gap-4 md:grid-cols-2">
+                </Dialog>
+              ) : null}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
-                const phase = project.current_phase || "TAKIMET"
+                const phase = project.current_phase || "MEETINGS"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
                     <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
@@ -1901,7 +1905,7 @@ export default function DepartmentKanban() {
                           <div className="mt-2 space-y-2">
                             {group.tasks.map((task) => {
                               const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                              const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                              const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                               return (
                                 <Link
                                   key={task.id}
@@ -1946,7 +1950,7 @@ export default function DepartmentKanban() {
                     <div className="space-y-2">
                       {todayNoProjectTasks.map((task) => {
                         const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                        const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                        const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                         const typeLabel = task.is_bllok
                           ? "Blocked"
                           : task.is_1h_report
@@ -2071,333 +2075,40 @@ export default function DepartmentKanban() {
                 </div>
               </div>
             </div>
-        </div>
-      ) : null}
-
-      {activeTab === "system" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold text-slate-900">System Tasks</div>
-              <div className="text-sm text-muted-foreground">
-                Department tasks organized by frequency and date.
-              </div>
-            </div>
-            {canManage ? (
-              <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add System Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Owner</Label>
-                      <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select owner" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Set by</Label>
-                      <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Date</Label>
-                      <Input
-                        type="date"
-                        value={systemDateInput}
-                        onChange={(e) => setSystemDateInput(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Frequency</Label>
-                      <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Frequency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="DAILY">Daily</SelectItem>
-                          <SelectItem value="WEEKLY">Weekly</SelectItem>
-                          <SelectItem value="MONTHLY">Monthly</SelectItem>
-                          <SelectItem value="3_MONTHS">3 months</SelectItem>
-                          <SelectItem value="6_MONTHS">6 months</SelectItem>
-                          <SelectItem value="YEARLY">Yearly</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Department</Label>
-                      <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Department" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="OPEN">Open</SelectItem>
-                          <SelectItem value="INACTIVE">Inactive</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={systemDescription}
-                        onChange={(e) => setSystemDescription(e.target.value)}
-                        placeholder="Enter task details..."
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
-                        {creatingSystem ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
           </div>
+        ) : null}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-              {[
-                { label: "Today", offset: 0 },
-                { label: "Yesterday", offset: -1 },
-                { label: "Tomorrow", offset: 1 },
-              ].map((opt) => {
-                const target = new Date()
-                target.setDate(target.getDate() + opt.offset)
-                const active =
-                  target.toDateString() === systemDate.toDateString()
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => setSystemDate(target)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                      active
-                        ? "bg-foreground text-background shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
-              <span>Multi-select</span>
-            </div>
-            <Input
-              type="date"
-              className="w-40"
-              value={formatDateInput(systemDate)}
-              onChange={(e) => setSystemDate(new Date(e.target.value))}
-            />
-            <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
-              {showAllSystem ? "Only date" : "Show all"}
-            </Button>
-          </div>
-
+        {activeTab === "system" ? (
           <div className="space-y-4">
-            {systemGroups.length ? (
-              systemGroups.map((group) => (
-                <Card key={group.label} className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
-                  <div className="flex items-center gap-3 border-b px-4 py-3">
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      {group.label.toUpperCase()}
-                    </span>
-                    <Badge variant="secondary">{group.items.length}</Badge>
-                  </div>
-                  <div
-                    className={[
-                      "grid gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-muted-foreground",
-                      showSystemActions
-                        ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
-                        : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
-                    ].join(" ")}
-                  >
-                    <div>Task Title</div>
-                    <div>Dept</div>
-                    <div>Owner</div>
-                    <div>Frequency</div>
-                    <div>Finish By</div>
-                    <div>Priority</div>
-                    {showSystemActions ? <div>Actions</div> : null}
-                  </div>
-                  <div className="divide-y">
-                    {group.items.map((item) => {
-                      const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
-                      const priorityValue = normalizePriority(item.priority)
-                      const priorityBadgeClass =
-                        priorityValue === "HIGH"
-                          ? "border-red-200 bg-red-50 text-red-700"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
-                      const statusValue = item.status || "TODO"
-                      const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
-                      const isAssigned =
-                        Boolean(user?.id) &&
-                        (item.default_assignee_id === user?.id ||
-                          item.assignees?.some((assignee) => assignee.id === user?.id))
-                      return (
-                        <div
-                          key={item.id}
-                          className={[
-                            "grid gap-3 border-l-4 px-4 py-4 text-sm",
-                            PRIORITY_BORDER_STYLES[priorityValue],
-                            showSystemActions
-                              ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
-                              : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
-                          ].join(" ")}
-                        >
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-medium">{item.title}</div>
-                              <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
-                            </div>
-                            <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
-                          </div>
-                          <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
-                          <div>{owner?.full_name || owner?.username || "-"}</div>
-                          <div className="text-muted-foreground">
-                            {FREQUENCY_LABELS[item.frequency] || item.frequency}
-                          </div>
-                          <div className="text-muted-foreground">{item.finish_period || "-"}</div>
-                          <div>
-                            <Badge
-                              variant="outline"
-                              className={`border px-2 py-0.5 text-[11px] ${priorityBadgeClass}`}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
-                          </div>
-                          {showSystemActions ? (
-                            <div>
-                              {isClosed ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                  <span className="text-[12px]">✓</span>
-                                  Done
-                                </span>
-                              ) : isAssigned ? (
-                                <button
-                                  type="button"
-                                  disabled={systemStatusUpdatingId === item.id}
-                                  className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                  onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
-                                >
-                                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
-                                    ✓
-                                  </span>
-                                  Mark Done
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="text-sm text-muted-foreground">No system tasks yet.</div>
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "no-project" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
-              <div className="text-sm text-slate-600">
-                Use these buckets to track non-project tasks and special cases.
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-semibold text-slate-900">System Tasks</div>
+                <div className="text-sm text-muted-foreground">
+                  Department tasks organized by frequency and date.
+                </div>
               </div>
-            </div>
-            {!isReadOnly ? (
-              <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
-                    + Add Task
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
-                  <DialogHeader>
-                    <DialogTitle className="text-slate-800">New Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Type</Label>
-                      <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {NO_PROJECT_TYPES.map((opt) => (
-                            <SelectItem key={opt.id} value={opt.id}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-xs text-slate-500">
-                        {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+              {canManage ? (
+                <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">+ Add Task</Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Add System Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label>Title</Label>
+                        <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Title</Label>
-                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Description</Label>
-                      <Textarea
-                        value={noProjectDescription}
-                        onChange={(e) => setNoProjectDescription(e.target.value)}
-                        rows={4}
-                        className="border-slate-200 focus:border-slate-400 rounded-xl"
-                      />
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-3">
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Assign to</Label>
-                        <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="Select assignee" />
+                        <Label>Owner</Label>
+                        <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select owner" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            <SelectItem value="__all__">All team</SelectItem>
                             {departmentUsers.map((u) => (
                               <SelectItem key={u.id} value={u.id}>
                                 {u.full_name || u.username || "-"}
@@ -2407,674 +2118,967 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Finish by (optional)</Label>
-                        <Select
-                          value={noProjectFinishPeriod}
-                          onValueChange={(value) =>
-                            setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                          }
-                        >
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="Select period" />
+                        <Label>Set by</Label>
+                        <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Date</Label>
+                        <Input
+                          type="date"
+                          value={systemDateInput}
+                          onChange={(e) => setSystemDateInput(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Frequency</Label>
+                        <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Frequency" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                            {FINISH_PERIOD_OPTIONS.map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {value}
+                            <SelectItem value="DAILY">Daily</SelectItem>
+                            <SelectItem value="WEEKLY">Weekly</SelectItem>
+                            <SelectItem value="MONTHLY">Monthly</SelectItem>
+                            <SelectItem value="3_MONTHS">3 months</SelectItem>
+                            <SelectItem value="6_MONTHS">6 months</SelectItem>
+                            <SelectItem value="YEARLY">Yearly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Status</Label>
+                        <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="OPEN">Open</SelectItem>
+                            <SelectItem value="INACTIVE">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          value={systemDescription}
+                          onChange={(e) => setSystemDescription(e.target.value)}
+                          placeholder="Enter task details..."
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2 md:col-span-2">
+                        <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
+                          {creatingSystem ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                {[
+                  { label: "Today", offset: 0 },
+                  { label: "Yesterday", offset: -1 },
+                  { label: "Tomorrow", offset: 1 },
+                ].map((opt) => {
+                  const target = new Date()
+                  target.setDate(target.getDate() + opt.offset)
+                  const active =
+                    target.toDateString() === systemDate.toDateString()
+                  return (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => setSystemDate(target)}
+                      className={[
+                        "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                        active
+                          ? "bg-foreground text-background shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
+                <span>Multi-select</span>
+              </div>
+              <Input
+                type="date"
+                className="w-40"
+                value={formatDateInput(systemDate)}
+                onChange={(e) => setSystemDate(new Date(e.target.value))}
+              />
+              <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
+                {showAllSystem ? "Only date" : "Show all"}
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {systemGroups.length ? (
+                systemGroups.map((group) => (
+                  <Card key={group.label} className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
+                    <div className="flex items-center gap-3 border-b px-4 py-3">
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        {group.label.toUpperCase()}
+                      </span>
+                      <Badge variant="secondary">{group.items.length}</Badge>
+                    </div>
+                    <div
+                      className={[
+                        "grid gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-muted-foreground",
+                        showSystemActions
+                          ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
+                          : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
+                      ].join(" ")}
+                    >
+                      <div>Task Title</div>
+                      <div>Dept</div>
+                      <div>Owner</div>
+                      <div>Frequency</div>
+                      <div>Finish By</div>
+                      <div>Priority</div>
+                      {showSystemActions ? <div>Actions</div> : null}
+                    </div>
+                    <div className="divide-y">
+                      {group.items.map((item) => {
+                        const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
+                        const priorityValue = normalizePriority(item.priority)
+                        const priorityBadgeClass =
+                          priorityValue === "HIGH"
+                            ? "border-red-200 bg-red-50 text-red-700"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        const statusValue = item.status || "TODO"
+                        const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                        const isAssigned =
+                          Boolean(user?.id) &&
+                          (item.default_assignee_id === user?.id ||
+                            item.assignees?.some((assignee) => assignee.id === user?.id))
+                        return (
+                          <div
+                            key={item.id}
+                            className={[
+                              "grid gap-3 border-l-4 px-4 py-4 text-sm",
+                              PRIORITY_BORDER_STYLES[priorityValue],
+                              showSystemActions
+                                ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
+                                : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
+                            ].join(" ")}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">{item.title}</div>
+                                <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
+                            </div>
+                            <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
+                            <div>{owner?.full_name || owner?.username || "-"}</div>
+                            <div className="text-muted-foreground">
+                              {FREQUENCY_LABELS[item.frequency] || item.frequency}
+                            </div>
+                            <div className="text-muted-foreground">{item.finish_period || "-"}</div>
+                            <div>
+                              <Badge
+                                variant="outline"
+                                className={`border px-2 py-0.5 text-[11px] ${priorityBadgeClass}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                            </div>
+                            {showSystemActions ? (
+                              <div>
+                                {isClosed ? (
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                    <span className="text-[12px]">✓</span>
+                                    Done
+                                  </span>
+                                ) : isAssigned ? (
+                                  <button
+                                    type="button"
+                                    disabled={systemStatusUpdatingId === item.id}
+                                    className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                                    onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                  >
+                                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
+                                      ✓
+                                    </span>
+                                    Mark Done
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-sm text-muted-foreground">No system tasks yet.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "no-project" ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                <div className="text-sm text-slate-600">
+                  Use these buckets to track non-project tasks and special cases.
+                </div>
+              </div>
+              {!isReadOnly ? (
+                <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                      + Add Task
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">New Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Type</Label>
+                        <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {NO_PROJECT_TYPES.map((opt) => (
+                              <SelectItem key={opt.id} value={opt.id}>
+                                {opt.label}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
+                        <div className="text-xs text-slate-500">
+                          {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                        </div>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Due date</Label>
-                        <Input
-                          type="date"
-                          value={noProjectDueDate}
-                          onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Description</Label>
+                        <Textarea
+                          value={noProjectDescription}
+                          onChange={(e) => setNoProjectDescription(e.target.value)}
+                          rows={4}
                           className="border-slate-200 focus:border-slate-400 rounded-xl"
                         />
                       </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
-                        Cancel
-                      </Button>
-                      <Button
-                        disabled={!noProjectTitle.trim() || creatingNoProject}
-                        onClick={() => void submitNoProjectTask()}
-                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
-                      >
-                        {creatingNoProject ? "Creating..." : "Create"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          <div className="space-y-4">
-            {statusRows.map((row) => (
-              <div
-                key={row.id}
-                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
-              >
-                <div
-                  className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
-                >
-                  <div className="text-sm font-semibold">{row.title}</div>
-                  <span
-                    className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
-                  >
-                    {row.count}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">
-                    {row.items.length ? "Active items" : "No items"}
-                  </div>
-                </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                  {row.items.length ? (
-                    <div className="flex flex-col gap-2">
-                      {row.items.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Assign to</Label>
+                          <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectValue placeholder="Select assignee" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                              <SelectItem value="__all__">All team</SelectItem>
+                              {departmentUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || "-"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Finish by (optional)</Label>
+                          <Select
+                            value={noProjectFinishPeriod}
+                            onValueChange={(value) =>
+                              setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                            }
+                          >
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectValue placeholder="Select period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                              {FINISH_PERIOD_OPTIONS.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {value}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date</Label>
+                          <Input
+                            type="date"
+                            value={noProjectDueDate}
+                            onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={!noProjectTitle.trim() || creatingNoProject}
+                          onClick={() => void submitNoProjectTask()}
+                          className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium text-slate-800">{t.title}</div>
-                            <div className="flex items-center gap-2">
-                              <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
-                                {row.itemBadge}
-                              </Badge>
-                              {t.assigned_to ? (
-                                <div
-                                  className="h-7 w-7 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center"
-                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                                >
-                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                          {t.description ? (
-                            <div className="mt-1 text-xs text-slate-500">{t.description}</div>
-                          ) : null}
-                        </Link>
-                      ))}
+                          {creatingNoProject ? "Creating..." : "Create"}
+                        </Button>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">No tasks in this category.</div>
-                  )}
+                  </DialogContent>
+                </Dialog>
+              ) : null}
+            </div>
+            <div className="space-y-4">
+              {statusRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+                >
+                  <div
+                    className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
+                  >
+                    <div className="text-sm font-semibold">{row.title}</div>
+                    <span
+                      className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
+                    >
+                      {row.count}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {row.items.length ? "Active items" : "No items"}
+                    </div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {row.items.length ? (
+                      <div className="flex flex-col gap-2">
+                        {row.items.map((t) => (
+                          <Link
+                            key={t.id}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium text-slate-800">{t.title}</div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                  {row.itemBadge}
+                                </Badge>
+                                {t.assigned_to ? (
+                                  <div
+                                    className="h-7 w-7 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center"
+                                    title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                  >
+                                    {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            {t.description ? (
+                              <div className="mt-1 text-xs text-slate-500">{t.description}</div>
+                            ) : null}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No tasks in this category.</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {activeTab === "ga-ka" ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">GA/KA Notes</div>
-            {!isReadOnly ? (
-              <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Note</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Add GA/KA Note</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
+        {activeTab === "ga-ka" ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-lg font-semibold">GA/KA Notes</div>
+              {!isReadOnly ? (
+                <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">+ Add Note</Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Add GA/KA Note</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label>Project</Label>
+                        <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select project (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">No project (General)</SelectItem>
+                            {projects.map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                {project.title || project.name || "Project"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!projects.length ? (
+                          <div className="text-xs text-muted-foreground">No projects available.</div>
+                        ) : null}
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Type</Label>
+                          <Select value={newGaNoteType} onValueChange={(v) => setNewGaNoteType(v as "GA" | "KA")}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="GA/KA" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="GA">GA</SelectItem>
+                              <SelectItem value="KA">KA</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Priority</Label>
+                          <Select value={newGaNotePriority} onValueChange={(v) => setNewGaNotePriority(v as typeof newGaNotePriority)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">No priority</SelectItem>
+                              <SelectItem value="NORMAL">Normal</SelectItem>
+                              <SelectItem value="HIGH">High</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Note</Label>
+                        <Textarea
+                          placeholder="Add GA/KA note..."
+                          value={newGaNote}
+                          onChange={(e) => setNewGaNote(e.target.value)}
+                          rows={4}
+                        />
+                      </div>
+                      {canCreate ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={gaNoteCreateTask}
+                              onCheckedChange={(value) => setGaNoteCreateTask(Boolean(value))}
+                            />
+                            <div className="text-sm font-medium">Create task from this note</div>
+                          </div>
+                          {gaNoteCreateTask ? (
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>Assign to</Label>
+                                <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Unassigned" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                    {departmentUsers.map((member) => (
+                                      <SelectItem key={member.id} value={member.id}>
+                                        {member.full_name || member.username}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Finish by (optional)</Label>
+                                <Select
+                                  value={gaNoteCreateTaskFinishPeriod}
+                                  onValueChange={(value) =>
+                                    setGaNoteCreateTaskFinishPeriod(
+                                      value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select period" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                    {FINISH_PERIOD_OPTIONS.map((value) => (
+                                      <SelectItem key={value} value={value}>
+                                        {value}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
+                          {addingGaNote ? "Saving..." : "Add Note"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
+            </div>
+            <Dialog
+              open={Boolean(gaNoteTaskOpenId)}
+              onOpenChange={(open) => {
+                if (!open) setGaNoteTaskOpenId(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Create Task from Note</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    This will create a task linked to the GA/KA note.
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Title</Label>
+                    <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea
+                      value={gaNoteTaskDescription}
+                      onChange={(e) => setGaNoteTaskDescription(e.target.value)}
+                      rows={4}
+                    />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-2">
-                      <Label>Project</Label>
-                      <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                      <Label>Priority</Label>
+                      <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select project (optional)" />
+                          <SelectValue placeholder="Priority" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__none__">No project (General)</SelectItem>
-                          {projects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name || "Project"}
+                          <SelectItem value="NORMAL">Normal</SelectItem>
+                          <SelectItem value="HIGH">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Finish by (optional)</Label>
+                      <Select
+                        value={gaNoteTaskFinishPeriod}
+                        onValueChange={(value) =>
+                          setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select period" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {!projects.length ? (
-                        <div className="text-xs text-muted-foreground">No projects available.</div>
-                      ) : null}
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <Select value={newGaNoteType} onValueChange={(v) => setNewGaNoteType(v as "GA" | "KA")}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="GA/KA" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GA">GA</SelectItem>
-                            <SelectItem value="KA">KA</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Priority</Label>
-                        <Select value={newGaNotePriority} onValueChange={(v) => setNewGaNotePriority(v as typeof newGaNotePriority)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Priority" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">No priority</SelectItem>
-                            <SelectItem value="NORMAL">Normal</SelectItem>
-                            <SelectItem value="HIGH">High</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Note</Label>
-                      <Textarea
-                        placeholder="Add GA/KA note..."
-                        value={newGaNote}
-                        onChange={(e) => setNewGaNote(e.target.value)}
-                        rows={4}
+                      <Label>Due date</Label>
+                      <Input
+                        type="date"
+                        value={gaNoteTaskDueDate}
+                        onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
                       />
                     </div>
-                    {canCreate ? (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={gaNoteCreateTask}
-                            onCheckedChange={(value) => setGaNoteCreateTask(Boolean(value))}
-                          />
-                          <div className="text-sm font-medium">Create task from this note</div>
-                        </div>
-                        {gaNoteCreateTask ? (
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-2">
-                              <Label>Assign to</Label>
-                              <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Unassigned" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                                  {departmentUsers.map((member) => (
-                                    <SelectItem key={member.id} value={member.id}>
-                                      {member.full_name || member.username}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Finish by (optional)</Label>
-                              <Select
-                                value={gaNoteCreateTaskFinishPeriod}
-                                onValueChange={(value) =>
-                                  setGaNoteCreateTaskFinishPeriod(
-                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
-                                  )
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select period" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                                  {FINISH_PERIOD_OPTIONS.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
-                        {addingGaNote ? "Saving..." : "Add Note"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          <Dialog
-            open={Boolean(gaNoteTaskOpenId)}
-            onOpenChange={(open) => {
-              if (!open) setGaNoteTaskOpenId(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Create Task from Note</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  This will create a task linked to the GA/KA note.
-                </div>
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea
-                    value={gaNoteTaskDescription}
-                    onChange={(e) => setGaNoteTaskDescription(e.target.value)}
-                    rows={4}
-                  />
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="NORMAL">Normal</SelectItem>
-                        <SelectItem value="HIGH">High</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Finish by (optional)</Label>
-                    <Select
-                      value={gaNoteTaskFinishPeriod}
-                      onValueChange={(value) =>
-                        setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                      }
-                    >
+                    <Label>Assign to</Label>
+                    <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select period" />
+                        <SelectValue placeholder="Unassigned" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                        {FINISH_PERIOD_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {value}
+                        <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                        {departmentUsers.map((member) => (
+                          <SelectItem key={member.id} value={member.id}>
+                            {member.full_name || member.username}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Due date</Label>
-                    <Input
-                      type="date"
-                      value={gaNoteTaskDueDate}
-                      onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Assign to</Label>
-                  <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                      {departmentUsers.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          {member.full_name || member.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
-                    Cancel
-                  </Button>
-                  <Button disabled={creatingGaNoteTask} onClick={() => void submitGaNoteTask()}>
-                    {creatingGaNoteTask ? "Creating..." : "Create Task"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-            <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-              <div className="text-sm font-semibold">GA/KA NOTES</div>
-              <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                {visibleGaNotes.length}
-              </span>
-              <div className="mt-2 text-xs text-slate-500">Quick reminders</div>
-            </div>
-            <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-              {visibleGaNotes.length ? (
-                <div className="space-y-3">
-                  {[...visibleGaNotes]
-                    .sort((a, b) => {
-                      const order = ["HIGH", "NORMAL"]
-                      const aRank = a.priority ? order.indexOf(a.priority) : order.length
-                      const bRank = b.priority ? order.indexOf(b.priority) : order.length
-                      if (aRank !== bRank) return aRank - bRank
-                      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-                      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
-                      return bTime - aTime
-                    })
-                    .map((note) => {
-                      const author = users.find((u) => u.id === note.created_by) || null
-                      const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
-                      const linkedTask = gaNoteTaskMap.get(note.id) || null
-                      return (
-                        <div
-                          key={note.id}
-                          className="rounded-xl border-l-4 border-sky-500 border border-slate-200 bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Badge
-                                variant="outline"
-                                className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-slate-200 text-blue-600"}
-                              >
-                                {note.note_type || "GA"}
-                              </Badge>
-                              <span>By {author?.full_name || author?.username || "-"}</span>
-                              <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
-                              {project ? (
-                                <Badge variant="outline" className="text-sm px-2 py-0.5">
-                                  {project.title || project.name || "Project"}
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-sm px-2 py-0.5">
-                                  General
-                                </Badge>
-                              )}
-                              {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {linkedTask ? (
-                                <Button asChild variant="outline" size="sm">
-                                  <Link href={`/tasks/${linkedTask.id}?returnTo=${encodeURIComponent(returnToTasks)}`}>
-                                    View Task
-                                  </Link>
-                                </Button>
-                              ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setGaNoteTaskOpenId(note.id)
-                                    setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
-                                    setGaNoteTaskDescription(note.content || "")
-                                    setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
-                                    setGaNoteTaskDueDate("")
-                                    setGaNoteTaskAssigneeId("__unassigned__")
-                                    setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-                                  }}
-                                >
-                                  Create Task
-                                </Button>
-                              ) : null}
-                              {note.status !== "CLOSED" ? (
-                                !isReadOnly ? (
-                                  <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                                    Close
-                                  </Button>
-                                ) : (
-                                  <Badge variant="secondary">Open</Badge>
-                                )
-                              ) : (
-                                <Badge variant="secondary">Closed</Badge>
-                              )}
-                            </div>
-                          </div>
-                          <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
-                        </div>
-                      )
-                    })}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
-              )}
-            </div>
-          </div>
-          </div>
-        ) : null}
-
-      {activeTab === "meetings" ? (
-        <div className="space-y-4">
-          <div className="text-xl font-semibold">Meetings</div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="text-sm font-semibold">External Meetings</div>
-              {!isReadOnly ? (
-                <div className="grid gap-3">
-                  <Input
-                    placeholder="Meeting title"
-                    value={meetingTitle}
-                    onChange={(e) => setMeetingTitle(e.target.value)}
-                  />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Input
-                      placeholder="Platform (Zoom, Meet, Office...)"
-                      value={meetingPlatform}
-                      onChange={(e) => setMeetingPlatform(e.target.value)}
-                    />
-                    <Input
-                      type="datetime-local"
-                      value={meetingStartsAt}
-                      onChange={(e) => setMeetingStartsAt(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Project (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No project</SelectItem>
-                        {filteredProjects.map((project) => (
-                          <SelectItem key={project.id} value={project.id}>
-                            {project.title || project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                      {creatingMeeting ? "Saving..." : "Add"}
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
+                      Cancel
+                    </Button>
+                    <Button disabled={creatingGaNoteTask} onClick={() => void submitGaNoteTask()}>
+                      {creatingGaNoteTask ? "Creating..." : "Create Task"}
                     </Button>
                   </div>
                 </div>
-              ) : null}
-              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
-                  <div className="flex items-center gap-2">
-                    {msConnected ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void loadMicrosoftEvents()}
-                        disabled={loadingMsEvents}
-                        className="rounded-full border-slate-200"
-                      >
-                        {loadingMsEvents ? "Syncing..." : "Sync"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void connectMicrosoft()}
-                        disabled={checkingMsStatus}
-                        className="rounded-full border-slate-200"
-                      >
-                        {checkingMsStatus ? "Checking..." : "Connect"}
-                      </Button>
-                    )}
-                    {msConnected ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void disconnectMicrosoft()}
-                        className="rounded-full text-slate-500"
-                      >
-                        Disconnect
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-                {msConnected ? (
-                  loadingMsEvents ? (
-                    <div className="text-xs text-muted-foreground">Loading events...</div>
-                  ) : msEvents.length ? (
-                    <div className="space-y-2">
-                      {msEvents.map((event) => (
-                        <div key={event.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <div className="text-sm font-semibold text-slate-800">
-                            {event.subject || "Untitled event"}
+              </DialogContent>
+            </Dialog>
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                <div className="text-sm font-semibold">GA/KA NOTES</div>
+                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {visibleGaNotes.length}
+                </span>
+                <div className="mt-2 text-xs text-slate-500">Quick reminders</div>
+              </div>
+              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                {visibleGaNotes.length ? (
+                  <div className="space-y-3">
+                    {[...visibleGaNotes]
+                      .sort((a, b) => {
+                        const order = ["HIGH", "NORMAL"]
+                        const aRank = a.priority ? order.indexOf(a.priority) : order.length
+                        const bRank = b.priority ? order.indexOf(b.priority) : order.length
+                        if (aRank !== bRank) return aRank - bRank
+                        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+                        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+                        return bTime - aTime
+                      })
+                      .map((note) => {
+                        const author = users.find((u) => u.id === note.created_by) || null
+                        const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+                        const linkedTask = gaNoteTaskMap.get(note.id) || null
+                        return (
+                          <div
+                            key={note.id}
+                            className="rounded-xl border-l-4 border-sky-500 border border-slate-200 bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Badge
+                                  variant="outline"
+                                  className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-slate-200 text-blue-600"}
+                                >
+                                  {note.note_type || "GA"}
+                                </Badge>
+                                <span>By {author?.full_name || author?.username || "-"}</span>
+                                <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
+                                {project ? (
+                                  <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                    {project.title || project.name || "Project"}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                    General
+                                  </Badge>
+                                )}
+                                {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {linkedTask ? (
+                                  <Button asChild variant="outline" size="sm">
+                                    <Link href={`/tasks/${linkedTask.id}?returnTo=${encodeURIComponent(returnToTasks)}`}>
+                                      View Task
+                                    </Link>
+                                  </Button>
+                                ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setGaNoteTaskOpenId(note.id)
+                                      setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
+                                      setGaNoteTaskDescription(note.content || "")
+                                      setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                      setGaNoteTaskDueDate("")
+                                      setGaNoteTaskAssigneeId("__unassigned__")
+                                      setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                                    }}
+                                  >
+                                    Create Task
+                                  </Button>
+                                ) : null}
+                                {note.status !== "CLOSED" ? (
+                                  !isReadOnly ? (
+                                    <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                                      Close
+                                    </Button>
+                                  ) : (
+                                    <Badge variant="secondary">Open</Badge>
+                                  )
+                                ) : (
+                                  <Badge variant="secondary">Closed</Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
                           </div>
-                          <div className="text-xs text-slate-600">{formatMsEventWindow(event)}</div>
-                          {event.location ? (
-                            <div className="text-xs text-slate-500">Location: {event.location}</div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">No upcoming events.</div>
-                  )
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    Connect your Microsoft account to read calendar events.
+                        )
+                      })}
                   </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
                 )}
               </div>
-              <div className="space-y-3">
-                {visibleMeetings.length ? (
-                  visibleMeetings.map((meeting) => {
-                    const project = meeting.project_id
-                      ? projects.find((p) => p.id === meeting.project_id) || null
-                      : null
-                    const isEditing = !isReadOnly && editingMeetingId === meeting.id
-                    return (
-                      <Card key={meeting.id} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
-                        {isEditing ? (
-                          <div className="space-y-3">
-                            <Input
-                              value={editMeetingTitle}
-                              onChange={(e) => setEditMeetingTitle(e.target.value)}
-                            />
-                            <div className="grid gap-3 md:grid-cols-2">
-                              <Input
-                                value={editMeetingPlatform}
-                                onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                placeholder="Platform"
-                              />
-                              <Input
-                                type="datetime-local"
-                                value={editMeetingStartsAt}
-                                onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                              />
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "meetings" ? (
+          <div className="space-y-4">
+            <div className="text-xl font-semibold">Meetings</div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="text-sm font-semibold">External Meetings</div>
+                {!isReadOnly ? (
+                  <div className="grid gap-3">
+                    <Input
+                      placeholder="Meeting title"
+                      value={meetingTitle}
+                      onChange={(e) => setMeetingTitle(e.target.value)}
+                    />
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Input
+                        placeholder="Platform (Zoom, Meet, Office...)"
+                        value={meetingPlatform}
+                        onChange={(e) => setMeetingPlatform(e.target.value)}
+                      />
+                      <Input
+                        type="datetime-local"
+                        value={meetingStartsAt}
+                        onChange={(e) => setMeetingStartsAt(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Project (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No project</SelectItem>
+                          {filteredProjects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.title || project.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
+                        {creatingMeeting ? "Saving..." : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
+                    <div className="flex items-center gap-2">
+                      {msConnected ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void loadMicrosoftEvents()}
+                          disabled={loadingMsEvents}
+                          className="rounded-full border-slate-200"
+                        >
+                          {loadingMsEvents ? "Syncing..." : "Sync"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void connectMicrosoft()}
+                          disabled={checkingMsStatus}
+                          className="rounded-full border-slate-200"
+                        >
+                          {checkingMsStatus ? "Checking..." : "Connect"}
+                        </Button>
+                      )}
+                      {msConnected ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void disconnectMicrosoft()}
+                          className="rounded-full text-slate-500"
+                        >
+                          Disconnect
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {msConnected ? (
+                    loadingMsEvents ? (
+                      <div className="text-xs text-muted-foreground">Loading events...</div>
+                    ) : msEvents.length ? (
+                      <div className="space-y-2">
+                        {msEvents.map((event) => (
+                          <div key={event.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <div className="text-sm font-semibold text-slate-800">
+                              {event.subject || "Untitled event"}
                             </div>
-                            <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Project (optional)" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">No project</SelectItem>
-                                {filteredProjects.map((p) => (
-                                  <SelectItem key={p.id} value={p.id}>
-                                    {p.title || p.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <div className="flex justify-end gap-2">
-                              <Button variant="outline" onClick={cancelEditMeeting}>
-                                Cancel
-                              </Button>
-                              <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
-                            </div>
+                            <div className="text-xs text-slate-600">{formatMsEventWindow(event)}</div>
+                            {event.location ? (
+                              <div className="text-xs text-slate-500">Location: {event.location}</div>
+                            ) : null}
                           </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
-                              {project ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  Project: {project.title || project.name}
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">No upcoming events.</div>
+                    )
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      Connect your Microsoft account to read calendar events.
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {visibleMeetings.length ? (
+                    visibleMeetings.map((meeting) => {
+                      const project = meeting.project_id
+                        ? projects.find((p) => p.id === meeting.project_id) || null
+                        : null
+                      const isEditing = !isReadOnly && editingMeetingId === meeting.id
+                      return (
+                        <Card key={meeting.id} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <Input
+                                value={editMeetingTitle}
+                                onChange={(e) => setEditMeetingTitle(e.target.value)}
+                              />
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <Input
+                                  value={editMeetingPlatform}
+                                  onChange={(e) => setEditMeetingPlatform(e.target.value)}
+                                  placeholder="Platform"
+                                />
+                                <Input
+                                  type="datetime-local"
+                                  value={editMeetingStartsAt}
+                                  onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                />
+                              </div>
+                              <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Project (optional)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">No project</SelectItem>
+                                  {filteredProjects.map((p) => (
+                                    <SelectItem key={p.id} value={p.id}>
+                                      {p.title || p.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <div className="flex justify-end gap-2">
+                                <Button variant="outline" onClick={cancelEditMeeting}>
+                                  Cancel
+                                </Button>
+                                <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
+                                {project ? (
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    Project: {project.title || project.name}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {!isReadOnly ? (
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
+                                    Edit
+                                  </Button>
+                                  <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
+                                    Delete
+                                  </Button>
                                 </div>
                               ) : null}
                             </div>
-                            {!isReadOnly ? (
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
-                                  Edit
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
-                                  Delete
-                                </Button>
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
-                      </Card>
-                    )
-                  })
-                ) : (
-                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="text-sm font-semibold">Internal Meetings</div>
-              <div>
-                <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {INTERNAL_MEETING.team.join(", ")}
+                          )}
+                        </Card>
+                      )
+                    })
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                  )}
                 </div>
-              </div>
-              <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-                {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    onClick={() => setInternalSlot(slot)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                      internalSlot === slot
-                        ? "bg-foreground text-background shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    {slot}
-                  </button>
-                ))}
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
-                <div className="space-y-2">
-                  {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                    <div key={item} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                      <Checkbox checked={false} disabled />
-                      <div className="text-sm text-muted-foreground">
-                        {idx + 1}. {item}
-                      </div>
-                    </div>
+              </Card>
+
+              <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="text-sm font-semibold">Internal Meetings</div>
+                <div>
+                  <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {INTERNAL_MEETING.team.join(", ")}
+                  </div>
+                </div>
+                <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                  {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => setInternalSlot(slot)}
+                      className={[
+                        "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                        internalSlot === slot
+                          ? "bg-foreground text-background shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      {slot}
+                    </button>
                   ))}
                 </div>
-              </div>
-            </Card>
+                <div className="space-y-3">
+                  <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
+                  <div className="space-y-2">
+                    {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
+                      <div key={item} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <Checkbox checked={false} disabled />
+                        <div className="text-sm text-muted-foreground">
+                          {idx + 1}. {item}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
         {/* Title Warning Confirmation Dialog */}
         <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
@@ -3109,22 +3113,22 @@ export default function DepartmentKanban() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowTitleWarning(false)
                   setPendingProjectTitle("")
-                }} 
+                }}
                 className="rounded-xl border-slate-200 hover:bg-slate-100"
               >
                 Go Back & Edit
               </Button>
-              <Button 
+              <Button
                 onClick={() => {
                   setShowTitleWarning(false)
                   setPendingProjectTitle("")
                   void submitProject()
-                }} 
+                }}
                 className="bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm rounded-xl"
               >
                 Yes, Use This Title

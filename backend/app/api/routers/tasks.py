@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, cast, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -153,7 +153,7 @@ async def list_tasks(
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)
     if status:
-        stmt = stmt.where(Task.status == status)
+        stmt = stmt.where(cast(Task.status, SQLString) == status.value)
     if assigned_to:
         stmt = stmt.where(Task.assigned_to == assigned_to)
     if created_by:
@@ -163,7 +163,7 @@ async def list_tasks(
     if due_to:
         stmt = stmt.where(Task.due_date <= due_to)
     if not include_done:
-        stmt = stmt.where(Task.status != TaskStatus.DONE)
+        stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
 
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]

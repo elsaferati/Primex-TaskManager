@@ -48,19 +48,19 @@ const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
   DREAMROBOT: "Dreamrobot",
 }
 const VS_VL_ACCEPTANCE_QUESTIONS = [
-  "A ESHTE HAPUR GRUPI NE TEAMS?",
-  "A JANE VENDOSUR PIKAT NE TRELLO?",
-  "A ESHTE HAPUR PROJEKTI NE CHATGPT?",
+  "IS TEAMS GROUP OPENED?",
+  "ARE TRELLO POINTS ADDED?",
+  "IS CHATGPT PROJECT OPENED?",
 ]
 const VS_VL_META_PREFIX = "VS_VL_META:"
 
 const MST_PLANNING_QUESTIONS = [
-  "A eshte hapur grupi ne Teams?",
-  "A eshte hapur projekti ne chat GPT?",
-  "A jane pranuar te gjitha dokumentet e nevojshme (PDF, Stammdaten, Artikelliste)?",
-  "A eshte analizuar kategoria dhe PDF?",
-  "A jane identifikuar karakteristikat e programit?",
-  "A eshte bere plani kur parashihet me u perfundu projekti?",
+  "Is the group opened in Teams?",
+  "Is the project opened in Chat GPT?",
+  "Have all necessary documents been received (PDF, Stammdaten, Artikelliste)?",
+  "Has the category and PDF been analyzed?",
+  "Have the program characteristics been identified?",
+  "Is there a plan for when the project is expected to be completed?",
 ]
 
 // Helper function to initialize MST checklist items in database
@@ -75,38 +75,86 @@ async function initializeMstChecklistItems(
     if (item.path && item.title) {
       const key = `${item.path}|${item.title}`
       existingMap.set(key, item)
+    } else if (item.title && !item.path) {
+      // For planning questions, use just title as key
+      const key = `PLANNING|${item.title}`
+      existingMap.set(key, item)
     }
   })
 
   // Find user IDs for "DV, LM" initials (we'll need to parse this)
   // For now, we'll create items without assignees and they can be added later
 
-  // Create missing items
-  const itemsToCreate = MST_FINAL_CHECKLIST.filter((row) => {
+  // Create missing items from final checklist
+  const finalItemsToCreate = MST_FINAL_CHECKLIST.filter((row) => {
     const key = `${row.path}|${row.detyrat}`
     return !existingMap.has(key)
   })
 
-  // Create items in batches
-  for (const row of itemsToCreate) {
+  // Create missing planning questions
+  const planningItemsToCreate = MST_PLANNING_QUESTIONS.filter((question) => {
+    const key = `PLANNING|${question}`
+    return !existingMap.has(key)
+  })
+
+  // Combine all items to create
+  const itemsToCreate = [
+    ...finalItemsToCreate.map((row) => ({
+      type: "final" as const,
+      path: row.path,
+      title: row.detyrat,
+      keyword: row.keywords,
+      description: row.pershkrimi,
+      category: row.kategoria,
+    })),
+    ...planningItemsToCreate.map((question) => ({
+      type: "planning" as const,
+      path: "PLANNING",
+      title: question,
+      keyword: "PLANNING",
+      description: question,
+      category: "PLANNING",
+    })),
+  ]
+
+  // Create items in batches - ensure all are created
+  const createPromises = itemsToCreate.map(async (item) => {
     try {
-      await apiFetch("/checklist-items", {
+      const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: projectId,
           item_type: "CHECKBOX",
-          path: row.path,
-          title: row.detyrat,
-          keyword: row.keywords,
-          description: row.pershkrimi,
-          category: row.kategoria,
+          path: item.path,
+          title: item.title,
+          keyword: item.keyword,
+          description: item.description,
+          category: item.category,
           is_checked: false,
         }),
       })
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "Unknown error")
+        console.error(`Failed to create checklist item "${item.title}":`, errorText)
+        return false
+      }
+      return true
     } catch (error) {
-      console.error("Failed to create checklist item:", error)
+      console.error(`Failed to create checklist item "${item.title}":`, error)
+      return false
     }
+  })
+
+  // Wait for all items to be created
+  const results = await Promise.all(createPromises)
+  const successCount = results.filter(Boolean).length
+  const totalCount = itemsToCreate.length
+
+  if (successCount < totalCount) {
+    console.warn(`Only created ${successCount} out of ${totalCount} checklist items`)
+  } else if (totalCount > 0) {
+    console.log(`Successfully initialized ${successCount} checklist items`)
   }
 }
 
@@ -505,6 +553,7 @@ export default function PcmProjectPage() {
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
+  const [planningComments, setPlanningComments] = React.useState<Record<string, string>>({})
   const [vsVlAcceptanceChecks, setVsVlAcceptanceChecks] = React.useState<Record<string, boolean>>({})
   const [vsVlTaskTitle, setVsVlTaskTitle] = React.useState("")
   const [vsVlTaskDetail, setVsVlTaskDetail] = React.useState("")
@@ -573,14 +622,40 @@ export default function PcmProjectPage() {
       if (cRes.ok) {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
-        
+
         // Initialize MST checklist items if this is an MST project
         if (isMstProject(p)) {
-          await initializeMstChecklistItems(p.id, items, apiFetch)
-          // Reload checklist items after initialization
-          const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
-          if (reloadRes.ok) {
-            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+          try {
+            await initializeMstChecklistItems(p.id, items, apiFetch)
+            // Reload checklist items after initialization to get all created items
+            const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+            if (reloadRes.ok) {
+              const reloadedItems = (await reloadRes.json()) as ChecklistItem[]
+              setChecklistItems(reloadedItems)
+
+              // Verify all items were created - if not, try again
+              const mstItems = reloadedItems.filter((item) => {
+                if (item.item_type !== "CHECKBOX") return false
+                return MST_FINAL_CHECKLIST.some(
+                  (row) => item.path === row.path && item.title === row.detyrat
+                )
+              })
+
+              if (mstItems.length < MST_FINAL_CHECKLIST.length) {
+                console.warn(
+                  `Only ${mstItems.length} out of ${MST_FINAL_CHECKLIST.length} MST checklist items found. Retrying...`
+                )
+                // Try to create missing items again
+                await initializeMstChecklistItems(p.id, reloadedItems, apiFetch)
+                // Reload one more time
+                const finalReloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+                if (finalReloadRes.ok) {
+                  setChecklistItems((await finalReloadRes.json()) as ChecklistItem[])
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Failed to initialize MST checklist items:", error)
           }
         }
       }
@@ -607,11 +682,11 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
-  
+
   // Initialize MST checklist checked state and comments from database
   React.useEffect(() => {
     if (!isMst || !project) return
-    
+
     const mstChecklistItems = checklistItems.filter((item) => {
       if (item.item_type !== "CHECKBOX") return false
       return MST_FINAL_CHECKLIST.some(
@@ -630,6 +705,35 @@ export default function PcmProjectPage() {
     })
     setMstChecklistChecked(checked)
     setMstChecklistComments(comments)
+
+    // Load planning questions from database
+    const planningItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return item.path === "PLANNING" && MST_PLANNING_QUESTIONS.includes(item.title || "")
+    })
+
+    const planningChecked: Record<string, boolean> = {}
+    const descriptionChecked: Record<string, boolean> = {}
+    const planningCommentsData: Record<string, string> = {}
+    planningItems.forEach((item) => {
+      if (item.title) {
+        planningChecked[item.title] = item.is_checked || false
+        descriptionChecked[item.title] = item.is_checked || false
+
+        // Load planning comments
+        if (item.comment) {
+          planningCommentsData[item.title] = item.comment
+        }
+
+        // Load program name from the second question's comment
+        if (item.title === "A eshte hapur projekti ne chat GPT?" && item.comment) {
+          setProgramName(item.comment)
+        }
+      }
+    })
+    setMstPlanningChecks(planningChecked)
+    setDescriptionChecks(descriptionChecked)
+    setPlanningComments(planningCommentsData)
   }, [checklistItems, isMst, project])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
 
@@ -1002,10 +1106,10 @@ export default function PcmProjectPage() {
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
     if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
       const blockers: string[] = []
-      if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
-      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
-      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
-      toast.error(`Ka ${blockers.join(" dhe ")}.`)
+      if (openTasks.length) blockers.push(`${openTasks.length} open tasks`)
+      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist items`)
+      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} meeting checklist items`)
+      toast.error(`There are ${blockers.join(" and ")} remaining.`)
       return
     }
     setAdvancingPhase(true)
@@ -1024,7 +1128,7 @@ export default function PcmProjectPage() {
       }
       const updated = (await res.json()) as Project
       setProject(updated)
-      setViewedPhase(updated.current_phase || "INICIMI")
+      setViewedPhase(updated.current_phase || "MEETINGS")
       toast.success("Phase advanced")
     } finally {
       setAdvancingPhase(false)
@@ -1082,29 +1186,29 @@ export default function PcmProjectPage() {
       } catch {
         // ignore
       }
-      toast.error(detail)
+      toast.error(typeof detail === "string" ? detail : Array.isArray(detail) ? (detail as any[]).map((e: any) => e.msg || String(e)).join(", ") : "An error occurred")
       return
     }
     const updated = (await res.json()) as GaNote
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const phaseValue = viewedPhase || project?.current_phase || "INICIMI"
+  const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
     // PCM: meetings phase shows meeting tabs + GA
-    if (phaseValue === "INICIMI") {
+    if (phaseValue === "MEETINGS") {
       return [...MEETING_TABS, ...TABS.filter((tab) => tab.id === "ga")]
     }
     // planning: show description/tasks/financials
-    if (phaseValue === "PLANIFIKIMI") {
+    if (phaseValue === "PLANNING") {
       return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members")
     }
     // execution: tasks, members, ga, financials
-    if (phaseValue === "EKZEKUTIMI") {
+    if (phaseValue === "DEVELOPMENT") {
       return TABS.filter((tab) => tab.id === "tasks" || tab.id === "members" || tab.id === "ga" || tab.id === "financials")
     }
     // monitoring: show most tabs
-    if (phaseValue === "MONITORIMI") {
+    if (phaseValue === "TESTING") {
       return TABS
     }
     return TABS
@@ -1144,7 +1248,7 @@ export default function PcmProjectPage() {
   const visibleTasks = React.useMemo(
     () =>
       tasks.filter((task) => {
-        const taskPhase = task.phase || project?.current_phase || "INICIMI"
+        const taskPhase = task.phase || project?.current_phase || "MEETINGS"
         return taskPhase === activePhase
       }),
     [activePhase, project?.current_phase, tasks]
@@ -1154,9 +1258,9 @@ export default function PcmProjectPage() {
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
-  const phase = project.current_phase || "INICIMI"
+  const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-  const canClosePhase = phase !== "MBYLLJA" && phase !== "MBYLLUR"
+  const canClosePhase = phase !== "CLOSED"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
 
   const renderGaNotes = () => (
@@ -1840,9 +1944,70 @@ export default function PcmProjectPage() {
   }
 
   if (isMst) {
+    // Get planning items from database
+    const planningItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return item.path === "PLANNING" && MST_PLANNING_QUESTIONS.includes(item.title || "")
+    })
+
+    const planningItemMap = new Map<string, ChecklistItem>()
+    planningItems.forEach((item) => {
+      if (item.title) {
+        planningItemMap.set(item.title, item)
+      }
+    })
+
     const planningChecks = mstPlanningChecks
-    const togglePlanning = (q: string) =>
-      setMstPlanningChecks((prev) => ({ ...prev, [q]: !prev[q] }))
+    const togglePlanning = async (q: string) => {
+      const newChecked = !mstPlanningChecks[q]
+      // Optimistically update UI
+      setMstPlanningChecks((prev) => ({ ...prev, [q]: newChecked }))
+      setDescriptionChecks((prev) => ({ ...prev, [q]: newChecked }))
+
+      let item = planningItemMap.get(q)
+
+      // Create item if it doesn't exist
+      if (!item && project) {
+        try {
+          const createRes = await apiFetch("/checklist-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: project.id,
+              item_type: "CHECKBOX",
+              path: "PLANNING",
+              title: q,
+              keyword: "PLANNING",
+              description: q,
+              category: "PLANNING",
+              is_checked: newChecked,
+            }),
+          })
+
+          if (createRes.ok) {
+            const created = (await createRes.json()) as ChecklistItem
+            item = created
+            setChecklistItems((prev) => [...prev, created])
+            planningItemMap.set(q, created)
+          }
+        } catch (error) {
+          console.error("Failed to create planning item:", error)
+        }
+      }
+
+      if (item) {
+        // Update in background
+        try {
+          await apiFetch(`/checklist-items/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ is_checked: newChecked }),
+          })
+        } catch (error) {
+          // Silently handle errors - update might still succeed
+        }
+      }
+    }
     // Get MST checklist items from database (filtered by path matching template)
     const mstChecklistItems = checklistItems.filter((item) => {
       if (item.item_type !== "CHECKBOX") return false
@@ -1864,31 +2029,160 @@ export default function PcmProjectPage() {
 
     const toggleFinalChecklist = async (path: string, title: string) => {
       const key = `${path}|${title}`
-      const item = mstItemMap.get(key)
+      let item = mstItemMap.get(key)
+
+      // If item doesn't exist in database, create it first
+      if (!item) {
+        // Find the template row
+        const templateRow = MST_FINAL_CHECKLIST.find(
+          (row) => row.path === path && row.detyrat === title
+        )
+        if (!templateRow || !project) return
+
+        try {
+          // Create the item
+          const createRes = await apiFetch("/checklist-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: project.id,
+              item_type: "CHECKBOX",
+              path: templateRow.path,
+              title: templateRow.detyrat,
+              keyword: templateRow.keywords,
+              description: templateRow.pershkrimi,
+              category: templateRow.kategoria,
+              is_checked: true, // Set to checked since user is checking it
+            }),
+          })
+
+          if (!createRes.ok) {
+            toast.error("Failed to create checklist item")
+            return
+          }
+
+          const created = (await createRes.json()) as ChecklistItem
+          item = created
+
+          // Add to local state
+          setChecklistItems((prev) => [...prev, created])
+          mstItemMap.set(key, created)
+        } catch (error) {
+          toast.error("Failed to create checklist item")
+          return
+        }
+      }
+
       if (!item) return
 
       const newChecked = !mstChecklistChecked[key]
+      // Optimistically update UI immediately
       setMstChecklistChecked((prev) => ({ ...prev, [key]: newChecked }))
+      setChecklistItems((prev) =>
+        prev.map((i) =>
+          i.id === item.id
+            ? { ...i, is_checked: newChecked }
+            : i
+        )
+      )
+      const updatedItem = { ...item, is_checked: newChecked }
+      mstItemMap.set(key, updatedItem)
 
+      // Update in background - don't block UI
       try {
         const res = await apiFetch(`/checklist-items/${item.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_checked: newChecked }),
         })
+
         if (!res.ok) {
-          setMstChecklistChecked((prev) => ({ ...prev, [key]: !newChecked }))
-          toast.error("Failed to update checklist")
+          // Only show error if it's a real error (not 503 timeout)
+          // Don't revert UI - the backend might have processed it
+          if (res.status !== 503) {
+            let errorMessage = "Failed to update checklist"
+            try {
+              const errorData = await res.json()
+              if (errorData.detail) {
+                if (typeof errorData.detail === "string") {
+                  errorMessage = errorData.detail
+                } else if (Array.isArray(errorData.detail)) {
+                  errorMessage = errorData.detail.map((e: any) => e.msg || String(e)).join(", ")
+                } else {
+                  errorMessage = String(errorData.detail)
+                }
+              } else if (errorData.message) {
+                errorMessage = typeof errorData.message === "string" ? errorData.message : String(errorData.message)
+              }
+            } catch {
+              errorMessage = `${errorMessage} (${res.status})`
+            }
+            toast.error(errorMessage)
+          }
+          // For 503, silently continue - the update might have succeeded
+        } else {
+          // Success - update with server response
+          try {
+            const updated = (await res.json()) as ChecklistItem
+            setChecklistItems((prev) =>
+              prev.map((i) => (i.id === item.id ? updated : i))
+            )
+            mstItemMap.set(key, updated)
+          } catch {
+            // Response parsing failed, but update already applied optimistically
+          }
         }
       } catch (error) {
-        setMstChecklistChecked((prev) => ({ ...prev, [key]: !newChecked }))
-        toast.error("Failed to update checklist")
+        // Network error - don't show message if it's just a timeout
+        // The update might still succeed, and we don't want to spam the user
+        // Only log for debugging
+        console.error("Error updating checklist (may still succeed):", error)
       }
     }
 
     const updateMstChecklistComment = async (path: string, title: string, comment: string) => {
       const key = `${path}|${title}`
-      const item = mstItemMap.get(key)
+      let item = mstItemMap.get(key)
+
+      // If item doesn't exist in database, create it first
+      if (!item) {
+        const templateRow = MST_FINAL_CHECKLIST.find(
+          (row) => row.path === path && row.detyrat === title
+        )
+        if (!templateRow || !project) return
+
+        try {
+          const createRes = await apiFetch("/checklist-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: project.id,
+              item_type: "CHECKBOX",
+              path: templateRow.path,
+              title: templateRow.detyrat,
+              keyword: templateRow.keywords,
+              description: templateRow.pershkrimi,
+              category: templateRow.kategoria,
+              is_checked: false,
+              comment: comment || null,
+            }),
+          })
+
+          if (!createRes.ok) {
+            toast.error("Failed to create checklist item")
+            return
+          }
+
+          const created = (await createRes.json()) as ChecklistItem
+          item = created
+          setChecklistItems((prev) => [...prev, created])
+          mstItemMap.set(key, created)
+        } catch (error) {
+          toast.error("Failed to create checklist item")
+          return
+        }
+      }
+
       if (!item) return
 
       setMstChecklistComments((prev) => ({ ...prev, [key]: comment }))
@@ -1900,7 +2194,14 @@ export default function PcmProjectPage() {
           body: JSON.stringify({ comment: comment || null }),
         })
         if (!res.ok) {
-          toast.error("Failed to save comment")
+          const errorData = await res.json().catch(() => ({}))
+          const detail = errorData.detail
+          const errorMsg = typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((e: any) => e.msg || String(e)).join(", ")
+              : "Failed to save comment"
+          toast.error(errorMsg)
         }
       } catch (error) {
         toast.error("Failed to save comment")
@@ -1996,15 +2297,12 @@ export default function PcmProjectPage() {
                 <div className="p-4 space-y-4">
                   <div className="text-lg font-semibold">Planifikimi</div>
                   <div className="grid gap-3">
-                    {[
-                      "A eshte hapur grupi ne Teams?",
-                      "A eshte hapur projekti ne chat GPT?",
-                    ].map((q, idx) => (
+                    {MST_PLANNING_QUESTIONS.slice(0, 2).map((q, idx) => (
                       <div key={q} className="grid grid-cols-12 gap-3 items-center">
                         <div className="col-span-9 flex items-center gap-3">
                           <Checkbox
                             checked={Boolean(descriptionChecks[q])}
-                            onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                            onCheckedChange={() => togglePlanning(q)}
                           />
                           <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
                         </div>
@@ -2013,7 +2311,98 @@ export default function PcmProjectPage() {
                             <Textarea
                               placeholder="Shkruaj emrin e programit..."
                               value={programName}
-                              onChange={(e) => setProgramName(e.target.value)}
+                              onChange={(e) => {
+                                const newValue = e.target.value
+                                setProgramName(newValue)
+
+                                // Save to database as comment on the checklist item
+                                const planningItem = planningItemMap.get(q)
+
+                                if (planningItem) {
+                                  // Item exists, update it
+                                  apiFetch(`/checklist-items/${planningItem.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ comment: newValue || null }),
+                                  }).catch(() => {
+                                    // Silently handle errors - update might still succeed
+                                  })
+                                } else if (project) {
+                                  // Item doesn't exist, create it
+                                  apiFetch("/checklist-items", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      project_id: project.id,
+                                      item_type: "CHECKBOX",
+                                      path: "PLANNING",
+                                      title: q,
+                                      keyword: "PLANNING",
+                                      description: q,
+                                      category: "PLANNING",
+                                      is_checked: false,
+                                      comment: newValue || null,
+                                    }),
+                                  }).then((createRes) => {
+                                    if (createRes.ok) {
+                                      createRes.json().then((created: ChecklistItem) => {
+                                        setChecklistItems((prev) => [...prev, created])
+                                        planningItemMap.set(q, created)
+                                      }).catch(() => { })
+                                    }
+                                  }).catch(() => {
+                                    // Silently handle errors
+                                  })
+                                }
+                              }}
+                              onBlur={async (e) => {
+                                // Ensure it's saved on blur
+                                const planningItem = planningItemMap.get(q)
+                                const newValue = e.target.value
+
+                                if (planningItem) {
+                                  // Item exists, update it
+                                  try {
+                                    const res = await apiFetch(`/checklist-items/${planningItem.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ comment: newValue || null }),
+                                    })
+                                    if (!res.ok && res.status !== 503) {
+                                      // Real error, but don't spam the user
+                                    }
+                                  } catch {
+                                    // Silently handle network errors - update might still succeed
+                                  }
+                                } else if (project) {
+                                  // Item doesn't exist, create it
+                                  try {
+                                    const createRes = await apiFetch("/checklist-items", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        project_id: project.id,
+                                        item_type: "CHECKBOX",
+                                        path: "PLANNING",
+                                        title: q,
+                                        keyword: "PLANNING",
+                                        description: q,
+                                        category: "PLANNING",
+                                        is_checked: false,
+                                        comment: newValue || null,
+                                      }),
+                                    })
+
+                                    if (createRes.ok) {
+                                      const created = (await createRes.json()) as ChecklistItem
+                                      setChecklistItems((prev) => [...prev, created])
+                                      planningItemMap.set(q, created)
+                                    }
+                                  } catch {
+                                    // Silently handle network errors
+                                  }
+                                }
+                              }}
                             />
                           ) : null}
                         </div>
@@ -2027,20 +2416,138 @@ export default function PcmProjectPage() {
                   </div>
 
                   <div className="divide-y border rounded-lg">
-                    {MST_PLANNING_QUESTIONS.slice(2).map((q) => (
-                      <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
-                        <div className="col-span-10 flex items-start gap-3">
-                          <Checkbox
-                            checked={Boolean(descriptionChecks[q])}
-                            onCheckedChange={() => setDescriptionChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
-                          />
-                          <span className="text-sm">{q}</span>
+                    {MST_PLANNING_QUESTIONS.slice(2).map((q) => {
+                      const planningItem = planningItemMap.get(q)
+                      // Use local state for immediate UI updates, fallback to database value
+                      const comment = planningComments[q] || planningItem?.comment || ""
+
+                      return (
+                        <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
+                          <div className="col-span-10 flex items-start gap-3">
+                            <Checkbox
+                              checked={Boolean(descriptionChecks[q])}
+                              onCheckedChange={() => togglePlanning(q)}
+                            />
+                            <span className="text-sm">{q}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              placeholder="Comment"
+                              value={comment}
+                              onChange={(e) => {
+                                const newComment = e.target.value
+                                // Update local state immediately for responsive UI
+                                setPlanningComments((prev) => ({ ...prev, [q]: newComment }))
+
+                                // Also update in checklistItems for consistency
+                                setChecklistItems((prev) =>
+                                  prev.map((item) =>
+                                    item.id === planningItem?.id
+                                      ? { ...item, comment: newComment }
+                                      : item
+                                  )
+                                )
+
+                                // Save to database
+                                const saveComment = async (item: ChecklistItem | undefined) => {
+                                  if (item) {
+                                    // Item exists, update it
+                                    try {
+                                      const res = await apiFetch(`/checklist-items/${item.id}`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ comment: newComment || null }),
+                                      })
+                                      if (!res.ok && res.status !== 503) {
+                                        // Real error, but don't spam the user
+                                      }
+                                    } catch {
+                                      // Silently handle network errors - update might still succeed
+                                    }
+                                  } else if (project) {
+                                    // Item doesn't exist, create it
+                                    try {
+                                      const createRes = await apiFetch("/checklist-items", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          project_id: project.id,
+                                          item_type: "CHECKBOX",
+                                          path: "PLANNING",
+                                          title: q,
+                                          keyword: "PLANNING",
+                                          description: q,
+                                          category: "PLANNING",
+                                          is_checked: false,
+                                          comment: newComment || null,
+                                        }),
+                                      })
+
+                                      if (createRes.ok) {
+                                        const created = (await createRes.json()) as ChecklistItem
+                                        setChecklistItems((prev) => [...prev, created])
+                                        planningItemMap.set(q, created)
+                                      }
+                                    } catch {
+                                      // Silently handle network errors
+                                    }
+                                  }
+                                }
+
+                                // Save in background
+                                saveComment(planningItem)
+                              }}
+                              onBlur={async (e) => {
+                                const newComment = e.target.value
+
+                                if (planningItem) {
+                                  // Item exists, update it
+                                  try {
+                                    const res = await apiFetch(`/checklist-items/${planningItem.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ comment: newComment || null }),
+                                    })
+                                    if (!res.ok && res.status !== 503) {
+                                      // Real error, but don't spam the user
+                                    }
+                                  } catch {
+                                    // Silently handle network errors - update might still succeed
+                                  }
+                                } else if (project) {
+                                  // Item doesn't exist, create it
+                                  try {
+                                    const createRes = await apiFetch("/checklist-items", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        project_id: project.id,
+                                        item_type: "CHECKBOX",
+                                        path: "PLANNING",
+                                        title: q,
+                                        keyword: "PLANNING",
+                                        description: q,
+                                        category: "PLANNING",
+                                        is_checked: false,
+                                        comment: newComment || null,
+                                      }),
+                                    })
+
+                                    if (createRes.ok) {
+                                      const created = (await createRes.json()) as ChecklistItem
+                                      setChecklistItems((prev) => [...prev, created])
+                                      planningItemMap.set(q, created)
+                                    }
+                                  } catch {
+                                    // Silently handle network errors
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="col-span-2">
-                          <Input placeholder="Koment" />
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               </Card>

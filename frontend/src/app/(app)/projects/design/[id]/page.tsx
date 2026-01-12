@@ -17,15 +17,15 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
-// Design-specific phases
-const PHASES = ["BRIEFING", "KONCEPTI", "DESIGN", "FEEDBACK", "FINALIZIMI"] as const
+// Design-specific phases (mapped to backend enums)
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const PHASE_LABELS: Record<string, string> = {
-  BRIEFING: "Briefing",
-  KONCEPTI: "Concept",
-  DESIGN: "Design",
-  FEEDBACK: "Feedback",
-  FINALIZIMI: "Final Files",
-  MBYLLUR: "Closed",
+  MEETINGS: "Briefing",
+  PLANNING: "Concept",
+  DEVELOPMENT: "Design",
+  TESTING: "Feedback",
+  DOCUMENTATION: "Final Files",
+  CLOSED: "Closed",
 }
 
 const TABS = [
@@ -421,8 +421,8 @@ export default function DesignProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
-    const currentPhase = project.current_phase || "BRIEFING"
-    const isMeetingPhase = currentPhase === "BRIEFING"
+    const currentPhase = project.current_phase || "MEETINGS"
+    const isMeetingPhase = currentPhase === "MEETINGS"
     const openTasks = tasks.filter(
       (task) =>
         task.status !== "DONE" &&
@@ -433,10 +433,10 @@ export default function DesignProjectPage() {
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
     if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
       const blockers: string[] = []
-      if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
-      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
-      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
-      toast.error(`Ka ${blockers.join(" dhe ")}.`)
+      if (openTasks.length) blockers.push(`${openTasks.length} open tasks`)
+      if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist items`)
+      if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} meeting checklist items`)
+      toast.error(`There are ${blockers.join(" and ")} remaining.`)
       return
     }
     setAdvancingPhase(true)
@@ -520,15 +520,15 @@ export default function DesignProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const phaseValue = viewedPhase || project?.current_phase || "BRIEFING"
+  const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
-    if (phaseValue === "BRIEFING") {
+    if (phaseValue === "MEETINGS") {
       return [...MEETING_TABS, ...TABS.filter((tab) => tab.id === "ga" || tab.id === "inspiration")]
     }
-    if (phaseValue === "KONCEPTI") {
+    if (phaseValue === "PLANNING") {
       return TABS.filter((tab) => tab.id !== "checklists")
     }
-    if (phaseValue === "DESIGN") {
+    if (phaseValue === "DEVELOPMENT") {
       return TABS
     }
     return TABS
@@ -545,7 +545,7 @@ export default function DesignProjectPage() {
   const visibleTasks = React.useMemo(
     () =>
       tasks.filter((task) => {
-        const taskPhase = task.phase || project?.current_phase || "BRIEFING"
+        const taskPhase = task.phase || project?.current_phase || "MEETINGS"
         return taskPhase === activePhase
       }),
     [activePhase, project?.current_phase, tasks]
@@ -554,7 +554,7 @@ export default function DesignProjectPage() {
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
-  const phase = project.current_phase || "BRIEFING"
+  const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))

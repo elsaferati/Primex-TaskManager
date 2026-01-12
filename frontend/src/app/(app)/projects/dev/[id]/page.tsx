@@ -18,13 +18,13 @@ import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
-const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Meetings",
-  PLANIFIKIMI: "Planning",
-  ZHVILLIMI: "Development",
-  TESTIMI: "Testing",
-  DOKUMENTIMI: "Documentation",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
   MBYLLUR: "Closed",
 }
 
@@ -55,13 +55,13 @@ const MEETING_POINTS = [
 ]
 
 const MEETING_CHECKLIST_ITEMS = [
-  "Lloji i projektit",
-  "Kerkuesi/Mbeshtetesi i projektit",
-  "Udheheqesi i projektit",
-  "Pjesemarresit tjere ne projekt",
-  "Roli i pjesemarresve tjere",
-  "Kzg/Plnf i Projektit",
-  "Cfare problemesh parashihen?",
+  "Project Type",
+  "Requester/Supporter",
+  "Project Lead",
+  "Other Participants",
+  "Role of Other Participants",
+  "Concept/Planning",
+  "Anticipated Problems",
 ]
 const DOCUMENTATION_CHECKLIST_QUESTIONS = [
   "Does the documentation have a clear ending?",
@@ -224,7 +224,7 @@ export default function DevelopmentProjectPage() {
   React.useEffect(() => {
     if (!createOpen) return
     if (newTaskPhase) return
-    const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+    const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
@@ -257,7 +257,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as Task
@@ -318,7 +318,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const updated = (await res.json()) as Project
@@ -350,7 +350,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as ChecklistItem
@@ -430,7 +430,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const added = (await res.json()) as User[]
@@ -448,8 +448,8 @@ export default function DevelopmentProjectPage() {
 
   const advancePhase = async () => {
     if (!project) return
-    const currentPhase = project.current_phase || "TAKIMET"
-    const isMeetingPhase = currentPhase === "TAKIMET"
+    const currentPhase = project.current_phase || "MEETINGS"
+    const isMeetingPhase = currentPhase === "MEETINGS"
     const openTasks = tasks.filter(
       (task) =>
         task.status !== "DONE" &&
@@ -477,12 +477,12 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const updated = (await res.json()) as Project
       setProject(updated)
-      setViewedPhase(updated.current_phase || "TAKIMET")
+      setViewedPhase(updated.current_phase || "MEETINGS")
       toast.success("Phase advanced")
     } finally {
       setAdvancingPhase(false)
@@ -512,7 +512,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as GaNote
@@ -540,16 +540,16 @@ export default function DevelopmentProjectPage() {
       } catch {
         // ignore
       }
-      toast.error(detail)
+      toast.error(typeof detail === "string" ? detail : "An error occurred")
       return
     }
     const updated = (await res.json()) as GaNote
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const phaseValue = viewedPhase || project?.current_phase || "TAKIMET"
+  const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
-    if (phaseValue === "TAKIMET") {
+    if (phaseValue === "MEETINGS") {
       return [
         ...TABS.filter((tab) => tab.id === "description"),
         ...MEETING_TABS,
@@ -587,7 +587,7 @@ export default function DevelopmentProjectPage() {
   const visibleTasks = React.useMemo(
     () =>
       tasks.filter((task) => {
-        const taskPhase = task.phase || project?.current_phase || "TAKIMET"
+        const taskPhase = task.phase || project?.current_phase || "MEETINGS"
         return taskPhase === activePhase
       }),
     [activePhase, project?.current_phase, tasks]
@@ -604,7 +604,7 @@ export default function DevelopmentProjectPage() {
     )
 
   const title = project.title || project.name || "Project"
-  const phase = project.current_phase || "TAKIMET"
+  const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
@@ -632,7 +632,7 @@ export default function DevelopmentProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const created = (await res.json()) as ProjectPrompt
@@ -652,41 +652,41 @@ export default function DevelopmentProjectPage() {
         {/* Header Section with Soft Blue Background */}
         <Card className="bg-white/80 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-sky-100/50 via-blue-50/50 to-sky-100/50 px-6 py-5 border-b border-sky-100/50">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-          <button
-            type="button"
-            onClick={() => router.back()}
+                <button
+                  type="button"
+                  onClick={() => router.back()}
                   className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors mb-4 inline-flex items-center gap-1.5 font-medium"
-          >
+                >
                   <span className="text-sky-500">←</span> Back to Projects
-          </button>
+                </button>
                 <h1 className="text-4xl font-bold text-slate-800 mb-4 tracking-tight">{title}</h1>
                 <div className="flex flex-wrap items-center gap-3 mb-4">
                   <Badge className="bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-200/80 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm">
-              {PHASE_LABELS[phase] || "Meetings"}
-            </Badge>
+                    {PHASE_LABELS[phase] || "Meetings"}
+                  </Badge>
                   {activePhase !== phase && (
                     <Badge variant="outline" className="bg-blue-50/50 text-blue-600 border-blue-200 px-3 py-1.5 text-xs font-medium rounded-lg">
                       View: {PHASE_LABELS[activePhase] || "Meetings"}
                     </Badge>
                   )}
-          </div>
+                </div>
                 {/* Phase Navigation - Beautiful Soft Blue Pills */}
                 <div className="flex flex-wrap items-center gap-2">
-            {PHASES.map((p, idx) => {
-              const isViewed = p === activePhase
-              const isCurrent = p === phase
-              const isLocked = idx > phaseIndex
-              return (
+                  {PHASES.map((p, idx) => {
+                    const isViewed = p === activePhase
+                    const isCurrent = p === phase
+                    const isLocked = idx > phaseIndex
+                    return (
                       <React.Fragment key={p}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isLocked) return
-                      setViewedPhase(p)
-                    }}
-                    className={[
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isLocked) return
+                            setViewedPhase(p)
+                          }}
+                          className={[
                             "px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200",
                             isLocked
                               ? "bg-white/60 text-slate-300 border border-slate-200 cursor-not-allowed"
@@ -695,27 +695,27 @@ export default function DevelopmentProjectPage() {
                                 : isCurrent
                                   ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80 border border-sky-200"
                                   : "bg-white/60 text-slate-500 hover:bg-sky-50/80 border border-slate-200 hover:border-sky-200",
-                    ].join(" ")}
-                    aria-pressed={isViewed}
-                    disabled={isLocked}
-                  >
-                    {PHASE_LABELS[p]}
-                  </button>
+                          ].join(" ")}
+                          aria-pressed={isViewed}
+                          disabled={isLocked}
+                        >
+                          {PHASE_LABELS[p]}
+                        </button>
                         {idx < PHASES.length - 1 && (
                           <span className="text-sky-300 text-lg font-light">→</span>
                         )}
                       </React.Fragment>
-              )
-            })}
-          </div>
-        </div>
+                    )
+                  })}
+                </div>
+              </div>
               <div className="flex items-center gap-3">
                 <Button className="bg-white hover:bg-sky-50 text-slate-700 border border-slate-200 shadow-sm rounded-xl px-4 py-2 font-medium transition-all">
                   Settings
                 </Button>
               </div>
-        </div>
-      </div>
+            </div>
+          </div>
 
           {/* Close Phase Button */}
           <div className="px-6 py-4 bg-white/50 flex justify-end">
@@ -725,9 +725,9 @@ export default function DevelopmentProjectPage() {
               onClick={() => void advancePhase()}
               className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-          {advancingPhase ? "Closing..." : "Close Phase"}
-        </Button>
-      </div>
+              {advancingPhase ? "Closing..." : "Close Phase"}
+            </Button>
+          </div>
         </Card>
 
         {/* Tabs Navigation - Soft Blue Design */}
@@ -805,7 +805,7 @@ export default function DevelopmentProjectPage() {
           {activeTab === "description" ? (
             <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
               <div className="p-6">
-                {activePhase === "TAKIMET" ? (
+                {activePhase === "MEETINGS" ? (
                   <>
                     <div className="text-xl font-semibold text-slate-800 mb-2">Project Description</div>
                     <Textarea
@@ -1096,9 +1096,9 @@ export default function DevelopmentProjectPage() {
                         onClick={() => void toggleChecklistItem(item.id, !item.is_checked)}
                       >
                         <div className="flex items-center gap-3">
-                          <Checkbox checked={item.is_checked} />
+                          <Checkbox checked={item.is_checked ?? false} />
                           <div className={item.is_checked ? "text-slate-400 line-through" : "text-slate-700"}>
-                            {item.content}
+                            {(item as any).content || item.title}
                           </div>
                         </div>
                       </Card>
@@ -1198,7 +1198,7 @@ export default function DevelopmentProjectPage() {
                       <SelectContent>
                         <SelectItem value="__none__">No priority</SelectItem>
                         <SelectItem value="NORMAL">Normal</SelectItem>
-                        
+
                         <SelectItem value="HIGH">High</SelectItem>
                       </SelectContent>
                     </Select>

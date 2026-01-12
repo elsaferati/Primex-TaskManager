@@ -31,10 +31,15 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
-const PHASES = ["PROJEKTE"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
 const PHASE_LABELS: Record<string, string> = {
- PROJEKTE: "Projects",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
+  CLOSED: "Closed",
 }
 
 const WEEKDAYS_SQ = [
@@ -101,23 +106,30 @@ const NO_PROJECT_TYPES = [
 ] as const
 
 const PROJECT_TEMPLATES = [
-  { id: "__custom__", label: "Custom", description: "Create a project from scratch." },
+  {
+    id: "__custom__",
+    label: "Custom",
+    description: "Create a project from scratch.",
+    status: "TODO" as string,
+    current_phase: "MEETINGS" as string,
+    progress_percentage: 0 as number,
+  },
   {
     id: "MST",
     label: "MST",
     title: "MST",
     description: "Menaxhimi i programit dhe checklistes se produkteve.",
     status: "IN_PROGRESS",
-    current_phase: "PLANIFIKIMI",
+    current_phase: "PLANNING",
     progress_percentage: 48,
   },
   {
     id: "VS/VL",
     label: "VS/VL",
     title: "VS/VL",
-    description: "VS/VL project phases: Project Acceptance, Amazone, Control, Dreamrobot.",
+    description: "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot.",
     status: "IN_PROGRESS",
-    current_phase: "PLANIFIKIMI",
+    current_phase: "PLANNING",
     progress_percentage: 0,
   },
   {
@@ -126,7 +138,7 @@ const PROJECT_TEMPLATES = [
     title: "TT",
     description: "Menaxhimi i programit dhe checklistes se produkteve.",
     status: "IN_PROGRESS",
-    current_phase: "PLANIFIKIMI",
+    current_phase: "PLANNING",
     progress_percentage: 48,
   },
 ] as const
@@ -177,44 +189,49 @@ const INTERNAL_MEETING = {
 
 const VS_VL_META_PREFIX = "VS_VL_META:"
 
-const VS_VL_TEMPLATE_TASKS = [
+const VS_VL_TEMPLATE_TASKS: readonly {
+  key: string;
+  title: string;
+  phase: string;
+  dependencyKey?: string;
+}[] = [
   {
     key: "base",
     title: "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE",
-    phase: "AMAZONE",
+    phase: "AMAZON",
   },
   {
     key: "template",
     title: "PLOTESIMI I TEMPLATE-IT TE AMAZONIT",
-    phase: "AMAZONE",
+    phase: "AMAZON",
     dependencyKey: "base",
   },
   {
     key: "prices",
     title: "KALKULIMI I CMIMEVE",
-    phase: "AMAZONE",
+    phase: "AMAZON",
   },
   {
     key: "photos",
     title: "GJENERIMI I FOTOVE",
-    phase: "AMAZONE",
+    phase: "AMAZON",
   },
   {
     key: "kontrol",
     title: "KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON",
-    phase: "AMAZONE",
+    phase: "AMAZON",
     dependencyKey: "ko2",
   },
   {
     key: "ko1",
     title: "KO1 E PROJEKTIT VS",
-    phase: "CONTROL",
+    phase: "CHECK",
     dependencyKey: "base",
   },
   {
     key: "ko2",
     title: "KO2 E PROJEKTIT VS",
-    phase: "CONTROL",
+    phase: "CHECK",
     dependencyKey: "ko1",
   },
   {
@@ -1238,10 +1255,10 @@ export default function DepartmentKanban() {
       const phase = meta?.vs_vl_phase || VS_VL_PHASE_BY_TITLE.get(normalizeTaskTitle(task.title))
       const normalizedMeta = phase
         ? {
-            ...meta,
-            vs_vl_phase: phase,
-            dependency_task_id: undefined,
-          }
+          ...meta,
+          vs_vl_phase: phase,
+          dependency_task_id: undefined,
+        }
         : meta
       const internalNotes = normalizedMeta ? serializeVsVlMeta(normalizedMeta) : null
       const assigneeIds =
@@ -1740,907 +1757,1307 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50/30 to-stone-50 p-6 shadow-lg print:hidden dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950/30">
-      <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
-      <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
-      <div className="relative space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
-              Department
+        <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
+        <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
+        <div className="relative space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
+                Department
+              </div>
+              <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
+                {departmentDisplayName}
+              </div>
+              <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
             </div>
-            <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
-              {departmentDisplayName}
-            </div>
-            <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
-          </div>
-          <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-            <button
-              type="button"
-              onClick={() => setViewMode("department")}
-              className={[
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                viewMode === "department"
-                  ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                  : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-              ].join(" ")}
-            >
-              Department
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("mine")}
-              className={[
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                viewMode === "mine"
-                  ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                  : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-              ].join(" ")}
-            >
-              My View
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-          <div className="flex flex-wrap gap-2">
-            {TABS.map((tab) => {
-              const isActive = tab.id === activeTab
-              const badgeTone =
-                tab.tone === "blue"
-                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
-                  : tab.tone === "red"
-                    ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200"
-                    : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-200"
-              const badgeClass = isActive
-                ? "bg-white/90 text-stone-900 dark:bg-stone-100 dark:text-stone-900"
-                : badgeTone
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={[
-                    "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
-                    isActive
-                      ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                      : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
-                  ].join(" ")}
-                >
-                  <span className="uppercase tracking-wide">{tab.label}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-      {activeTab === "projects" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">Active Projects</div>
-            {canManage ? (
-              <Dialog open={createProjectOpen} onOpenChange={handleProjectDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button className="rounded-xl">+ New Project</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add Project</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Template</Label>
-                      <Select value={projectTemplateId} onValueChange={setProjectTemplateId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PROJECT_TEMPLATES.map((template) => (
-                            <SelectItem key={template.id} value={template.id}>
-                              {template.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input
-                        value={projectTitle}
-                        onChange={(e) => handleProjectTitleChange(e.target.value)}
-                        className="uppercase placeholder:normal-case"
-                        placeholder="Enter project shortcut (e.g., ABC, XYZ)"
-                        style={{ textTransform: "uppercase" }}
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        Use a shortcut/abbreviation, not the full client name (e.g., "ABC" instead of "ABC Company").
-                      </div>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={projectDescription}
-                        onChange={(e) => setProjectDescription(e.target.value)}
-                        placeholder="Enter the project description..."
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Manager</Label>
-                      <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select manager" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={projectStatus} onValueChange={setProjectStatus}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="TODO">To do</SelectItem>
-                          <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                          <SelectItem value="REVIEW">Review</SelectItem>
-                          <SelectItem value="DONE">Done</SelectItem>
-                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => handleProjectDialogOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!projectTitle.trim() || creatingProject} onClick={attemptSubmitProject}>
-                        {creatingProject ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {filteredProjects.map((project) => {
-              const manager = project.manager_id ? userMap.get(project.manager_id) : null
-              const phase = project.current_phase || "TAKIMET"
-              const membersForProject = projectMembers[project.id] || []
-              const memberColors = [
-                "bg-slate-100 text-slate-700",
-                "bg-amber-100 text-amber-800",
-                "bg-rose-100 text-rose-700",
-                "bg-emerald-100 text-emerald-700",
-                "bg-blue-100 text-blue-700",
-              ]
-              return (
-                <Card
-                  key={project.id}
-                  className="rounded-2xl border border-stone-200/70 bg-white/80 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-stone-800/70 dark:bg-stone-900/70"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold leading-tight">{project.title || project.name}</div>
-                      <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                        {project.description || "-"}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      {canDeleteProjects ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={deletingProjectId === project.id}
-                          onClick={() => void deleteProject(project.id)}
-                          className="h-7 rounded-full border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50"
-                        >
-                          {deletingProjectId === project.id ? "Deleting..." : "Delete"}
-                        </Button>
-                      ) : null}
-                      <Badge variant="outline" className="text-[10px]">
-                        {PHASE_LABELS[phase] || "Meetings"}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-[11px] text-muted-foreground">
-                    {PHASES.map((p, idx) => {
-                      const isCurrent = p === phase
-                      return (
-                        <span key={p}>
-                          <span className={isCurrent ? "text-rose-600 font-semibold" : ""}>
-                            {PHASE_LABELS[p]}
-                          </span>
-                          {idx < PHASES.length - 1 ? " -> " : ""}
-                        </span>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-2">
-                    <div className="text-[10px] uppercase tracking-wide text-stone-500">Members</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {membersForProject.length ? (
-                        membersForProject.slice(0, 6).map((member, idx) => (
-                          <div
-                            key={member.id}
-                            className={[
-                              "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
-                              memberColors[idx % memberColors.length],
-                            ].join(" ")}
-                            title={member.full_name || member.username || "-"}
-                          >
-                            {initials(member.full_name || member.username || "-")}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-[11px] text-muted-foreground">No members yet.</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {manager ? (
-                        <div className="h-6 w-6 rounded-full bg-amber-100 text-[9px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200">
-                        {initials(manager.full_name || manager.username || "-")}
-                        </div>
-                      ) : (
-                        <div className="h-6 w-6 rounded-full bg-muted text-[9px] font-semibold flex items-center justify-center">
-                          -
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Link
-                        href={`/projects/pcm/${project.id}`}
-                        className="text-[11px] font-semibold text-rose-700 transition-colors hover:text-rose-800 hover:underline dark:text-rose-200 dark:hover:text-rose-100"
-                      >
-                        View details -&gt;
-                      </Link>
-                    </div>
-                  </div>
-                </Card>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "all" ? (
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-2xl font-bold tracking-tight text-slate-800">
-                {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
-              </div>
-              <div className="text-sm text-slate-600 mt-1">
-                {viewMode === "department"
-                  ? "All of today's tasks for the department team."
-                  : "All of today's tasks, organized in one place."}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-                {formatToday()}
-              </div>
-              {viewMode === "department" && departmentUsers.length ? (
-                <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                  <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
-                    <SelectValue placeholder="All users" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All users</SelectItem>
-                    {departmentUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name || u.username || "-"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-              {viewMode === "mine" ? (
-                <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                  <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                  <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                    <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                      <SelectValue placeholder="This Week" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="today">Today</SelectItem>
-                      <SelectItem value="week">This Week</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="ghost"
-                    className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
-                    onClick={() => window.print()}
-                  >
-                    Print
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-            {[
-              { label: "PROJECT TASKS", value: todayProjectTasks.length },
-              { label: "NO PROJECT", value: todayNoProjectTasks.length },
-              { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-              { label: "SYSTEM", value: todaySystemTasks.length },
-            ].map((stat) => (
-              <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
-                <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
-              </Card>
-            ))}
-          </div>
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                <div className="text-sm font-semibold">PROJECT TASKS</div>
-                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  {todayProjectTasks.length}
-                </span>
-                <div className="mt-2 text-xs text-slate-500">Due today</div>
-              </div>
-              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                {todayProjectTaskGroups.length ? (
-                  <div className="space-y-3">
-                    {todayProjectTaskGroups.map((group) => (
-                      <div key={group.id}>
-                        <div className="text-xs font-semibold text-slate-700">{group.name}</div>
-                        <div className="mt-2 space-y-2">
-                          {group.tasks.map((task) => {
-                            const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                            const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                            return (
-                              <Link
-                                key={task.id}
-                                href={`/tasks/${task.id}`}
-                                className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                    {task.status || "TODO"}
-                                  </Badge>
-                                  <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
-                                    {phaseLabel}
-                                  </Badge>
-                                  <div className="font-medium text-slate-800">{task.title}</div>
-                                </div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                  {assignee?.full_name || assignee?.username || "Unassigned"}
-                                </div>
-                              </Link>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-slate-500">No project tasks today.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                <div className="text-sm font-semibold">NO PROJECT</div>
-                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  {todayNoProjectTasks.length}
-                </span>
-                <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
-              </div>
-              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                {todayNoProjectTasks.length ? (
-                  <div className="space-y-2">
-                    {todayNoProjectTasks.map((task) => {
-                      const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                      const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
-                      const typeLabel = task.is_bllok
-                        ? "Blocked"
-                        : task.is_1h_report
-                          ? "1H"
-                          : task.is_r1
-                            ? "R1"
-                            : "Normal"
-                      return (
-                        <Link
-                          key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                              {typeLabel}
-                            </Badge>
-                            <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
-                              {phaseLabel}
-                            </Badge>
-                            <div className="font-medium text-slate-800">{task.title}</div>
-                          </div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            {assignee?.full_name || assignee?.username || "Unassigned"}
-                          </div>
-                        </Link>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-sm text-slate-500">No tasks today.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                <div className="text-sm font-semibold">NOTES (OPEN)</div>
-                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  {todayOpenNotes.length}
-                </span>
-                <div className="mt-2 text-xs text-slate-500">Quick notes</div>
-              </div>
-              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                {todayOpenNotes.length ? (
-                  <div className="space-y-2">
-                    {todayOpenNotes.map((note) => (
-                      <div
-                        key={note.id}
-                        className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">
-                            {note.note_type || "GA"}
-                          </Badge>
-                          <div className="font-medium">{note.content}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">No open notes today.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                <div className="text-sm font-semibold">SYSTEM</div>
-                <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  {todaySystemTasks.length}
-                </span>
-                <div className="mt-2 text-xs text-slate-500">Scheduled</div>
-              </div>
-              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                {todaySystemTasks.length ? (
-                  <div className="space-y-2">
-                    {todaySystemTasks.map((task) => {
-                      const description = task.description?.trim() || ""
-                      const isExpanded = Boolean(expandedSystemDescriptions[task.id])
-                      const { text, truncated } = truncateDescription(description)
-                      const displayText = description ? (isExpanded ? description : text) : "-"
-                      return (
-                        <div
-                          key={task.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="font-medium text-slate-800">{task.title}</div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            {displayText}
-                            {description && truncated ? (
-                              <button
-                                type="button"
-                                onClick={() => toggleSystemDescription(task.id)}
-                                className="ml-2 text-[11px] font-semibold text-amber-700 hover:underline"
-                              >
-                                {isExpanded ? "Show less" : "Read more"}
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-sm text-slate-500">No system tasks today.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-              <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                <div className="text-sm font-semibold">MEETINGS</div>
-                <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                  {todayMeetings.length}
-                </span>
-                <div className="mt-2 text-xs text-slate-500">Today</div>
-              </div>
-              <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                {todayMeetings.length ? (
-                  <div className="space-y-2">
-                    {todayMeetings.map((meeting) => (
-                      <div
-                        key={meeting.id}
-                        className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
-                      >
-                        <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                        {meeting.project_id ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">No meetings today.</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "system" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold">System Tasks</div>
-              <div className="text-sm text-muted-foreground">
-                Department tasks organized by frequency and date.
-              </div>
-            </div>
-            {canManage ? (
-              <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Add System Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Title</Label>
-                      <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Owner</Label>
-                      <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select owner" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || "-"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Set by</Label>
-                      <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Date</Label>
-                      <Input
-                        type="date"
-                        value={systemDateInput}
-                        onChange={(e) => setSystemDateInput(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Frequency</Label>
-                      <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Frequency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="DAILY">Daily</SelectItem>
-                          <SelectItem value="WEEKLY">Weekly</SelectItem>
-                          <SelectItem value="MONTHLY">Monthly</SelectItem>
-                          <SelectItem value="3_MONTHS">3 months</SelectItem>
-                          <SelectItem value="6_MONTHS">6 months</SelectItem>
-                          <SelectItem value="YEARLY">Yearly</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Department</Label>
-                      <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Department" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Status</Label>
-                      <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="OPEN">Open</SelectItem>
-                          <SelectItem value="INACTIVE">Inactive</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={systemDescription}
-                        onChange={(e) => setSystemDescription(e.target.value)}
-                        placeholder="Enter task details..."
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 md:col-span-2">
-                      <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
-                        {creatingSystem ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-              {[
-                { label: "Today", offset: 0 },
-                { label: "Yesterday", offset: -1 },
-                { label: "Tomorrow", offset: 1 },
-              ].map((opt) => {
-                const target = new Date()
-                target.setDate(target.getDate() + opt.offset)
-                const active =
-                  target.toDateString() === systemDate.toDateString()
+              <button
+                type="button"
+                onClick={() => setViewMode("department")}
+                className={[
+                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  viewMode === "department"
+                    ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                    : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                ].join(" ")}
+              >
+                Department
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("mine")}
+                className={[
+                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  viewMode === "mine"
+                    ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                    : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                ].join(" ")}
+              >
+                My View
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
+            <div className="flex flex-wrap gap-2">
+              {TABS.map((tab) => {
+                const isActive = tab.id === activeTab
+                const badgeTone =
+                  tab.tone === "blue"
+                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+                    : tab.tone === "red"
+                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200"
+                      : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                const badgeClass = isActive
+                  ? "bg-white/90 text-stone-900 dark:bg-stone-100 dark:text-stone-900"
+                  : badgeTone
                 return (
                   <button
-                    key={opt.label}
+                    key={tab.id}
                     type="button"
-                    onClick={() => setSystemDate(target)}
+                    onClick={() => setActiveTab(tab.id)}
                     className={[
-                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                      active
+                      "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
+                      isActive
                         ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                        : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                        : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
                     ].join(" ")}
                   >
-                    {opt.label}
+                    <span className="uppercase tracking-wide">{tab.label}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
                   </button>
                 )
               })}
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
-              <span>Multi-select</span>
-            </div>
-            <Input
-              type="date"
-              className="w-40"
-              value={formatDateInput(systemDate)}
-              onChange={(e) => setSystemDate(new Date(e.target.value))}
-            />
-            <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
-              {showAllSystem ? "Only date" : "Show all"}
-            </Button>
           </div>
 
-          <div className="space-y-4">
-            {systemGroups.length ? (
-              systemGroups.map((group) => (
-                <Card
-                  key={group.label}
-                  className="overflow-hidden rounded-2xl border-stone-200/70 bg-white/80 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70"
-                >
-                  <div className="flex items-center gap-3 border-b px-4 py-3">
-                    <Badge variant="outline" className="text-xs font-semibold">
-                      {group.label}
-                    </Badge>
-                    <Badge variant="secondary">{group.items.length}</Badge>
+          {activeTab === "projects" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-lg font-semibold">Active Projects</div>
+                {canManage ? (
+                  <Dialog open={createProjectOpen} onOpenChange={handleProjectDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="rounded-xl">+ New Project</Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>Add Project</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2 md:col-span-2">
+                          <Label>Template</Label>
+                          <Select value={projectTemplateId} onValueChange={(v) => setProjectTemplateId(v as ProjectTemplateId)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select template" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PROJECT_TEMPLATES.map((template) => (
+                                <SelectItem key={template.id} value={template.id}>
+                                  {template.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label>Title</Label>
+                          <Input
+                            value={projectTitle}
+                            onChange={(e) => handleProjectTitleChange(e.target.value)}
+                            className="uppercase placeholder:normal-case"
+                            placeholder="Enter project shortcut (e.g., ABC, XYZ)"
+                            style={{ textTransform: "uppercase" }}
+                          />
+                          <div className="text-xs text-muted-foreground">
+                            Use a shortcut/abbreviation, not the full client name (e.g., "ABC" instead of "ABC Company").
+                          </div>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label>Description</Label>
+                          <Textarea
+                            value={projectDescription}
+                            onChange={(e) => setProjectDescription(e.target.value)}
+                            placeholder="Enter the project description..."
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Manager</Label>
+                          <Select value={projectManagerId} onValueChange={setProjectManagerId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select manager" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                              {departmentUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || "-"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select value={projectStatus} onValueChange={setProjectStatus}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="TODO">To do</SelectItem>
+                              <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                              <SelectItem value="REVIEW">Review</SelectItem>
+                              <SelectItem value="DONE">Done</SelectItem>
+                              <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex justify-end gap-2 md:col-span-2">
+                          <Button variant="outline" onClick={() => handleProjectDialogOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button disabled={!projectTitle.trim() || creatingProject} onClick={attemptSubmitProject}>
+                            {creatingProject ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                ) : null}
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {filteredProjects.map((project) => {
+                  const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                  const phase = project.current_phase || "MEETINGS"
+                  const membersForProject = projectMembers[project.id] || []
+                  const memberColors = [
+                    "bg-slate-100 text-slate-700",
+                    "bg-amber-100 text-amber-800",
+                    "bg-rose-100 text-rose-700",
+                    "bg-emerald-100 text-emerald-700",
+                    "bg-blue-100 text-blue-700",
+                  ]
+                  return (
+                    <Card
+                      key={project.id}
+                      className="rounded-2xl border border-stone-200/70 bg-white/80 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-stone-800/70 dark:bg-stone-900/70"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold leading-tight">{project.title || project.name}</div>
+                          <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
+                            {project.description || "-"}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          {canDeleteProjects ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={deletingProjectId === project.id}
+                              onClick={() => void deleteProject(project.id)}
+                              className="h-7 rounded-full border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50"
+                            >
+                              {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                            </Button>
+                          ) : null}
+                          <Badge variant="outline" className="text-[10px]">
+                            {PHASE_LABELS[phase] || "Meetings"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-[11px] text-muted-foreground">
+                        {PHASES.map((p, idx) => {
+                          const isCurrent = p === phase
+                          return (
+                            <span key={p}>
+                              <span className={isCurrent ? "text-rose-600 font-semibold" : ""}>
+                                {PHASE_LABELS[p]}
+                              </span>
+                              {idx < PHASES.length - 1 ? " -> " : ""}
+                            </span>
+                          )
+                        })}
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-[10px] uppercase tracking-wide text-stone-500">Members</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {membersForProject.length ? (
+                            membersForProject.slice(0, 6).map((member, idx) => (
+                              <div
+                                key={member.id}
+                                className={[
+                                  "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
+                                  memberColors[idx % memberColors.length],
+                                ].join(" ")}
+                                title={member.full_name || member.username || "-"}
+                              >
+                                {initials(member.full_name || member.username || "-")}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-[11px] text-muted-foreground">No members yet.</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {manager ? (
+                            <div className="h-6 w-6 rounded-full bg-amber-100 text-[9px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200">
+                              {initials(manager.full_name || manager.username || "-")}
+                            </div>
+                          ) : (
+                            <div className="h-6 w-6 rounded-full bg-muted text-[9px] font-semibold flex items-center justify-center">
+                              -
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`/projects/pcm/${project.id}`}
+                            className="text-[11px] font-semibold text-rose-700 transition-colors hover:text-rose-800 hover:underline dark:text-rose-200 dark:hover:text-rose-100"
+                          >
+                            View details -&gt;
+                          </Link>
+                        </div>
+                      </div>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "all" ? (
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-bold tracking-tight text-slate-800">
+                    {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
                   </div>
-                  <div
-                    className={[
-                      "grid gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground",
-                      showSystemActions ? "grid-cols-8" : "grid-cols-7",
-                    ].join(" ")}
-                  >
-                    <div className="col-span-2">TASK</div>
-                    <div>DEPARTMENT</div>
-                    <div>WHEN</div>
-                    <div>STATUS</div>
-                    <div>OWNER</div>
-                    <div>SET BY</div>
-                    {showSystemActions ? <div>ACTIONS</div> : null}
+                  <div className="text-sm text-slate-600 mt-1">
+                    {viewMode === "department"
+                      ? "All of today's tasks for the department team."
+                      : "All of today's tasks, organized in one place."}
                   </div>
-                  <div className="divide-y">
-                    {group.items.map((item) => {
-                      const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
-                      const priorityValue = normalizePriority(item.priority)
-                      const statusValue = item.status || "TODO"
-                      const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
-                      const isAssigned =
-                        Boolean(user?.id) &&
-                        (item.default_assignee_id === user?.id ||
-                          item.assignees?.some((assignee) => assignee.id === user?.id))
-                      return (
-                        <div
-                          key={item.id}
-                          className={[
-                            "grid gap-3 border-l-4 px-4 py-4 text-sm",
-                            PRIORITY_BORDER_STYLES[priorityValue],
-                            showSystemActions ? "grid-cols-8" : "grid-cols-7",
-                          ].join(" ")}
-                        >
-                          <div className="col-span-2">
-                            <div className="font-medium">{item.title}</div>
-                            {(() => {
-                              const description = item.description?.trim() || ""
-                              const isExpanded = Boolean(expandedSystemDescriptions[item.id])
-                              const { text, truncated } = truncateDescription(description)
-                              const displayText = description ? (isExpanded ? description : text) : "-"
-                              return (
-                                <div className="text-xs text-muted-foreground">
-                                  {displayText}
-                                  {description && truncated ? (
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
+                    {formatToday()}
+                  </div>
+                  {viewMode === "department" && departmentUsers.length ? (
+                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                        <SelectValue placeholder="All users" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All users</SelectItem>
+                        {departmentUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.username || "-"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  {viewMode === "mine" ? (
+                    <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                      <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                        <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                          <SelectValue placeholder="This Week" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="today">Today</SelectItem>
+                          <SelectItem value="week">This Week</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="ghost"
+                        className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
+                        onClick={() => window.print()}
+                      >
+                        Print
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-4">
+                {[
+                  { label: "PROJECT TASKS", value: todayProjectTasks.length },
+                  { label: "NO PROJECT", value: todayNoProjectTasks.length },
+                  { label: "NOTES (OPEN)", value: todayOpenNotes.length },
+                  { label: "SYSTEM", value: todaySystemTasks.length },
+                ].map((stat) => (
+                  <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                    <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
+                  </Card>
+                ))}
+              </div>
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                  <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                    <div className="text-sm font-semibold">PROJECT TASKS</div>
+                    <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {todayProjectTasks.length}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">Due today</div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {todayProjectTaskGroups.length ? (
+                      <div className="space-y-3">
+                        {todayProjectTaskGroups.map((group) => (
+                          <div key={group.id}>
+                            <div className="text-xs font-semibold text-slate-700">{group.name}</div>
+                            <div className="mt-2 space-y-2">
+                              {group.tasks.map((task) => {
+                                const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                                const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                                return (
+                                  <Link
+                                    key={task.id}
+                                    href={`/tasks/${task.id}`}
+                                    className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                        {task.status || "TODO"}
+                                      </Badge>
+                                      <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
+                                        {phaseLabel}
+                                      </Badge>
+                                      <div className="font-medium text-slate-800">{task.title}</div>
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-600">
+                                      {assignee?.full_name || assignee?.username || "Unassigned"}
+                                    </div>
+                                  </Link>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No project tasks today.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                  <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                    <div className="text-sm font-semibold">NO PROJECT</div>
+                    <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {todayNoProjectTasks.length}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {todayNoProjectTasks.length ? (
+                      <div className="space-y-2">
+                        {todayNoProjectTasks.map((task) => {
+                          const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                          const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                          const typeLabel = task.is_bllok
+                            ? "Blocked"
+                            : task.is_1h_report
+                              ? "1H"
+                              : task.is_r1
+                                ? "R1"
+                                : "Normal"
+                          return (
+                            <Link
+                              key={task.id}
+                              href={`/tasks/${task.id}`}
+                              className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                  {typeLabel}
+                                </Badge>
+                                <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
+                                  {phaseLabel}
+                                </Badge>
+                                <div className="font-medium text-slate-800">{task.title}</div>
+                              </div>
+                              <div className="mt-1 text-xs text-slate-600">
+                                {assignee?.full_name || assignee?.username || "Unassigned"}
+                              </div>
+                            </Link>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No tasks today.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                  <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                    <div className="text-sm font-semibold">NOTES (OPEN)</div>
+                    <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {todayOpenNotes.length}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">Quick notes</div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {todayOpenNotes.length ? (
+                      <div className="space-y-2">
+                        {todayOpenNotes.map((note) => (
+                          <div
+                            key={note.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                {note.note_type || "GA"}
+                              </Badge>
+                              <div className="font-medium">{note.content}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No open notes today.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                  <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                    <div className="text-sm font-semibold">SYSTEM</div>
+                    <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {todaySystemTasks.length}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {todaySystemTasks.length ? (
+                      <div className="space-y-2">
+                        {todaySystemTasks.map((task) => {
+                          const description = task.description?.trim() || ""
+                          const isExpanded = Boolean(expandedSystemDescriptions[task.id])
+                          const { text, truncated } = truncateDescription(description)
+                          const displayText = description ? (isExpanded ? description : text) : "-"
+                          return (
+                            <div
+                              key={task.id}
+                              className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                            >
+                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <div className="mt-1 text-xs text-slate-600">
+                                {displayText}
+                                {description && truncated ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSystemDescription(task.id)}
+                                    className="ml-2 text-[11px] font-semibold text-amber-700 hover:underline"
+                                  >
+                                    {isExpanded ? "Show less" : "Read more"}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No system tasks today.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                  <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                    <div className="text-sm font-semibold">MEETINGS</div>
+                    <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                      {todayMeetings.length}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">Today</div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    {todayMeetings.length ? (
+                      <div className="space-y-2">
+                        {todayMeetings.map((meeting) => (
+                          <div
+                            key={meeting.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="font-medium">{formatMeetingLabel(meeting)}</div>
+                            {meeting.project_id ? (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No meetings today.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "system" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xl font-semibold">System Tasks</div>
+                  <div className="text-sm text-muted-foreground">
+                    Department tasks organized by frequency and date.
+                  </div>
+                </div>
+                {canManage ? (
+                  <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">+ Add Task</Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>Add System Task</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2 md:col-span-2">
+                          <Label>Title</Label>
+                          <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Owner</Label>
+                          <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select owner" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                              {departmentUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || "-"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Set by</Label>
+                          <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Date</Label>
+                          <Input
+                            type="date"
+                            value={systemDateInput}
+                            onChange={(e) => setSystemDateInput(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Frequency</Label>
+                          <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Frequency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="DAILY">Daily</SelectItem>
+                              <SelectItem value="WEEKLY">Weekly</SelectItem>
+                              <SelectItem value="MONTHLY">Monthly</SelectItem>
+                              <SelectItem value="3_MONTHS">3 months</SelectItem>
+                              <SelectItem value="6_MONTHS">6 months</SelectItem>
+                              <SelectItem value="YEARLY">Yearly</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Department</Label>
+                          <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="OPEN">Open</SelectItem>
+                              <SelectItem value="INACTIVE">Inactive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label>Description</Label>
+                          <Textarea
+                            value={systemDescription}
+                            onChange={(e) => setSystemDescription(e.target.value)}
+                            placeholder="Enter task details..."
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2 md:col-span-2">
+                          <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
+                            {creatingSystem ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
+                  {[
+                    { label: "Today", offset: 0 },
+                    { label: "Yesterday", offset: -1 },
+                    { label: "Tomorrow", offset: 1 },
+                  ].map((opt) => {
+                    const target = new Date()
+                    target.setDate(target.getDate() + opt.offset)
+                    const active =
+                      target.toDateString() === systemDate.toDateString()
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => setSystemDate(target)}
+                        className={[
+                          "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                          active
+                            ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                            : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                        ].join(" ")}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
+                  <span>Multi-select</span>
+                </div>
+                <Input
+                  type="date"
+                  className="w-40"
+                  value={formatDateInput(systemDate)}
+                  onChange={(e) => setSystemDate(new Date(e.target.value))}
+                />
+                <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
+                  {showAllSystem ? "Only date" : "Show all"}
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {systemGroups.length ? (
+                  systemGroups.map((group) => (
+                    <Card
+                      key={group.label}
+                      className="overflow-hidden rounded-2xl border-stone-200/70 bg-white/80 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70"
+                    >
+                      <div className="flex items-center gap-3 border-b px-4 py-3">
+                        <Badge variant="outline" className="text-xs font-semibold">
+                          {group.label}
+                        </Badge>
+                        <Badge variant="secondary">{group.items.length}</Badge>
+                      </div>
+                      <div
+                        className={[
+                          "grid gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground",
+                          showSystemActions ? "grid-cols-8" : "grid-cols-7",
+                        ].join(" ")}
+                      >
+                        <div className="col-span-2">TASK</div>
+                        <div>DEPARTMENT</div>
+                        <div>WHEN</div>
+                        <div>STATUS</div>
+                        <div>OWNER</div>
+                        <div>SET BY</div>
+                        {showSystemActions ? <div>ACTIONS</div> : null}
+                      </div>
+                      <div className="divide-y">
+                        {group.items.map((item) => {
+                          const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
+                          const priorityValue = normalizePriority(item.priority)
+                          const statusValue = item.status || "TODO"
+                          const isClosed = statusValue === "DONE" || statusValue === "CANCELLED"
+                          const isAssigned =
+                            Boolean(user?.id) &&
+                            (item.default_assignee_id === user?.id ||
+                              item.assignees?.some((assignee) => assignee.id === user?.id))
+                          return (
+                            <div
+                              key={item.id}
+                              className={[
+                                "grid gap-3 border-l-4 px-4 py-4 text-sm",
+                                PRIORITY_BORDER_STYLES[priorityValue],
+                                showSystemActions ? "grid-cols-8" : "grid-cols-7",
+                              ].join(" ")}
+                            >
+                              <div className="col-span-2">
+                                <div className="font-medium">{item.title}</div>
+                                {(() => {
+                                  const description = item.description?.trim() || ""
+                                  const isExpanded = Boolean(expandedSystemDescriptions[item.id])
+                                  const { text, truncated } = truncateDescription(description)
+                                  const displayText = description ? (isExpanded ? description : text) : "-"
+                                  return (
+                                    <div className="text-xs text-muted-foreground">
+                                      {displayText}
+                                      {description && truncated ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleSystemDescription(item.id)}
+                                          className="ml-2 text-[11px] font-semibold text-blue-600 hover:underline"
+                                        >
+                                          {isExpanded ? "Show less" : "Read more"}
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  )
+                                })()}
+                              </div>
+                              <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
+                              <div className="whitespace-pre-line text-muted-foreground">
+                                {formatSchedule(item, systemDate)}
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="secondary">
+                                    {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
+                                  </Badge>
+                                  <Badge variant="secondary" className="uppercase text-[10px]">
+                                    {statusValue}
+                                  </Badge>
+                                  <Badge
+                                    variant="outline"
+                                    className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                  >
+                                    {PRIORITY_LABELS[priorityValue]}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div>{owner?.full_name || owner?.username || "-"}</div>
+                              <div>{user?.full_name || user?.username || "-"}</div>
+                              {showSystemActions ? (
+                                <div>
+                                  {isClosed ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                      <span className="text-[12px]">✓</span>
+                                      Done
+                                    </span>
+                                  ) : isAssigned ? (
                                     <button
                                       type="button"
-                                      onClick={() => toggleSystemDescription(item.id)}
-                                      className="ml-2 text-[11px] font-semibold text-blue-600 hover:underline"
+                                      disabled={systemStatusUpdatingId === item.id}
+                                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                                      onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
                                     >
-                                      {isExpanded ? "Show less" : "Read more"}
+                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
+                                        ✓
+                                      </span>
+                                      Mark Done
                                     </button>
                                   ) : null}
                                 </div>
-                              )
-                            })()}
-                          </div>
-                          <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
-                          <div className="whitespace-pre-line text-muted-foreground">
-                            {formatSchedule(item, systemDate)}
-                          </div>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="secondary">
-                                {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
-                              </Badge>
-                              <Badge variant="secondary" className="uppercase text-[10px]">
-                                {statusValue}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                              >
-                                {PRIORITY_LABELS[priorityValue]}
-                              </Badge>
-                            </div>
-                          </div>
-                          <div>{owner?.full_name || owner?.username || "-"}</div>
-                          <div>{user?.full_name || user?.username || "-"}</div>
-                          {showSystemActions ? (
-                            <div>
-                              {isClosed ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                  <span className="text-[12px]">✓</span>
-                                  Done
-                                </span>
-                              ) : isAssigned ? (
-                                <button
-                                  type="button"
-                                  disabled={systemStatusUpdatingId === item.id}
-                                  className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                  onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
-                                >
-                                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
-                                    ✓
-                                  </span>
-                                  Mark Done
-                                </button>
                               ) : null}
                             </div>
-                          ) : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="text-sm text-muted-foreground">No system tasks yet.</div>
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "no-project" ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-semibold">Tasks (No Project)</div>
-              <div className="text-sm text-muted-foreground">
-                Use these buckets to track non-project tasks and special cases.
+                          )
+                        })}
+                      </div>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-sm text-muted-foreground">No system tasks yet.</div>
+                )}
               </div>
             </div>
-            {!isReadOnly ? (
-              <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
+          ) : null}
+
+          {activeTab === "no-project" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xl font-semibold">Tasks (No Project)</div>
+                  <div className="text-sm text-muted-foreground">
+                    Use these buckets to track non-project tasks and special cases.
+                  </div>
+                </div>
+                {!isReadOnly ? (
+                  <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">+ Add Task</Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>New Task</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label>Type</Label>
+                          <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {NO_PROJECT_TYPES.map((opt) => (
+                                <SelectItem key={opt.id} value={opt.id}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="text-xs text-muted-foreground">
+                            {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Title</Label>
+                          <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Description</Label>
+                          <Textarea
+                            value={noProjectDescription}
+                            onChange={(e) => setNoProjectDescription(e.target.value)}
+                            rows={4}
+                          />
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <div className="space-y-2">
+                            <Label>Assign to</Label>
+                            <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select assignee" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                <SelectItem value="__all__">All team</SelectItem>
+                                {departmentUsers.map((u) => (
+                                  <SelectItem key={u.id} value={u.id}>
+                                    {u.full_name || u.username || "-"}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Finish by (optional)</Label>
+                            <Select
+                              value={noProjectFinishPeriod}
+                              onValueChange={(value) =>
+                                setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select period" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                {FINISH_PERIOD_OPTIONS.map((value) => (
+                                  <SelectItem key={value} value={value}>
+                                    {value}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Due date</Label>
+                            <Input
+                              type="date"
+                              value={noProjectDueDate}
+                              onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            disabled={!noProjectTitle.trim() || creatingNoProject}
+                            onClick={() => void submitNoProjectTask()}
+                          >
+                            {creatingNoProject ? "Creating..." : "Create"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                ) : null}
+              </div>
+              <div className="grid gap-4 md:grid-cols-4">
+                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
+                  <div className="text-sm font-semibold">Normal</div>
+                  <div className="mt-3 space-y-3">
+                    {noProjectBuckets.normal.length ? (
+                      noProjectBuckets.normal.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">{t.title}</div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                Normal
+                              </Badge>
+                              {t.assigned_to ? (
+                                <div
+                                  className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200"
+                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                >
+                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No tasks</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
+                  <div className="text-sm font-semibold">GA</div>
+                  <div className="mt-3 space-y-3">
+                    {noProjectBuckets.ga.length ? (
+                      noProjectBuckets.ga.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">{t.title}</div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                GA
+                              </Badge>
+                              {t.assigned_to ? (
+                                <div
+                                  className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center dark:bg-rose-900/40 dark:text-rose-200"
+                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                >
+                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No tasks</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-2xl border-rose-100 bg-rose-50/60 p-4 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/30">
+                  <div className="flex items-center gap-2 text-rose-700 font-semibold">
+                    <span className="h-5 w-5 rounded-full bg-rose-500" />
+                    <span>BLOCKED</span>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {noProjectBuckets.blocked.length ? (
+                      noProjectBuckets.blocked.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className="block rounded-xl border border-rose-100/80 bg-white/80 px-4 py-3 transition hover:bg-rose-50 hover:shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">{t.title}</div>
+                            {t.assigned_to ? (
+                              <div
+                                className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center"
+                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                              >
+                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <Badge variant="outline" className="mt-2 text-xs border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-200">
+                            BLOCKED
+                          </Badge>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No tasks</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-2xl border-amber-100 bg-amber-50/60 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/25">
+                  <div className="flex items-center gap-2 text-amber-700 font-semibold">
+                    <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
+                    <span>1H Report</span>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {noProjectBuckets.oneHour.length ? (
+                      noProjectBuckets.oneHour.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className="block rounded-xl border border-amber-100/80 bg-white/80 px-4 py-3 transition hover:bg-amber-50 hover:shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">{t.title}</div>
+                            {t.assigned_to ? (
+                              <div
+                                className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-700 flex items-center justify-center"
+                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                              >
+                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <Badge variant="outline" className="mt-2 text-xs border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-200">
+                            1H
+                          </Badge>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No tasks</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-2xl border-emerald-100 bg-emerald-50/60 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
+                  <div className="text-emerald-700 font-semibold">R1</div>
+                  <div className="mt-2 text-sm text-emerald-700/80">
+                    New project (first case) is handled with the manager.
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {noProjectBuckets.r1.length ? (
+                      noProjectBuckets.r1.map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                          className="block rounded-xl border border-emerald-100/80 bg-white/80 px-4 py-3 transition hover:bg-emerald-50 hover:shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">{t.title}</div>
+                            {t.assigned_to ? (
+                              <div
+                                className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
+                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                              >
+                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <Badge variant="outline" className="mt-2 text-xs border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
+                            R1
+                          </Badge>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No tasks</div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "ga-ka" ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-lg font-semibold">GA/KA Notes</div>
+                {!isReadOnly ? (
+                  <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">+ Add Note</Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Add GA/KA Note</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label>Project</Label>
+                          <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select project (optional)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">No project (General)</SelectItem>
+                              {projects.map((project) => (
+                                <SelectItem key={project.id} value={project.id}>
+                                  {project.title || project.name || "Project"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {!projects.length ? (
+                            <div className="text-xs text-muted-foreground">No projects available.</div>
+                          ) : null}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Type</Label>
+                            <Select value={newGaNoteType} onValueChange={(value) => setNewGaNoteType(value as "GA" | "KA")}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="GA/KA" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="GA">GA</SelectItem>
+                                <SelectItem value="KA">KA</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Priority</Label>
+                            <Select
+                              value={newGaNotePriority}
+                              onValueChange={(value) => setNewGaNotePriority(value as "NORMAL" | "HIGH" | "__none__")}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Priority" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">No priority</SelectItem>
+                                <SelectItem value="NORMAL">Normal</SelectItem>
+
+                                <SelectItem value="HIGH">High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Note</Label>
+                          <Textarea
+                            placeholder="Add GA/KA note..."
+                            value={newGaNote}
+                            onChange={(e) => setNewGaNote(e.target.value)}
+                            rows={4}
+                          />
+                        </div>
+                        {canCreate ? (
+                          <div className="rounded-xl border border-stone-200/70 bg-white/70 p-3 space-y-3">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                checked={gaNoteCreateTask}
+                                onCheckedChange={(value) => setGaNoteCreateTask(Boolean(value))}
+                              />
+                              <div className="text-sm font-medium">Create task from this note</div>
+                            </div>
+                            {gaNoteCreateTask ? (
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div className="space-y-2">
+                                  <Label>Assign to</Label>
+                                  <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Unassigned" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                      {departmentUsers.map((member) => (
+                                        <SelectItem key={member.id} value={member.id}>
+                                          {member.full_name || member.username}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Finish by (optional)</Label>
+                                  <Select
+                                    value={gaNoteCreateTaskFinishPeriod}
+                                    onValueChange={(value) =>
+                                      setGaNoteCreateTaskFinishPeriod(
+                                        value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                      )
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select period" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                      {FINISH_PERIOD_OPTIONS.map((value) => (
+                                        <SelectItem key={value} value={value}>
+                                          {value}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
+                            {addingGaNote ? "Saving..." : "Add Note"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                ) : null}
+              </div>
+              <Dialog
+                open={Boolean(gaNoteTaskOpenId)}
+                onOpenChange={(open) => {
+                  if (!open) setGaNoteTaskOpenId(null)
+                }}
+              >
+                <DialogContent className="sm:max-w-md">
                   <DialogHeader>
-                    <DialogTitle>New Task</DialogTitle>
+                    <DialogTitle>Create Task from Note</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label>Type</Label>
-                      <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {NO_PROJECT_TYPES.map((opt) => (
-                            <SelectItem key={opt.id} value={opt.id}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-xs text-muted-foreground">
-                        {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
-                      </div>
-                    </div>
+                    <div className="text-sm text-muted-foreground">This will create a task linked to the GA/KA note.</div>
                     <div className="space-y-2">
                       <Label>Title</Label>
-                      <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                      <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
                     </div>
                     <div className="space-y-2">
                       <Label>Description</Label>
                       <Textarea
-                        value={noProjectDescription}
-                        onChange={(e) => setNoProjectDescription(e.target.value)}
+                        value={gaNoteTaskDescription}
+                        onChange={(e) => setGaNoteTaskDescription(e.target.value)}
                         rows={4}
                       />
                     </div>
                     <div className="grid gap-3 md:grid-cols-3">
                       <div className="space-y-2">
-                        <Label>Assign to</Label>
-                        <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                        <Label>Priority</Label>
+                        <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select assignee" />
+                            <SelectValue placeholder="Priority" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            <SelectItem value="__all__">All team</SelectItem>
-                            {departmentUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || "-"}
-                              </SelectItem>
-                            ))}
+                            <SelectItem value="NORMAL">Normal</SelectItem>
+                            <SelectItem value="HIGH">High</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-2">
                         <Label>Finish by (optional)</Label>
                         <Select
-                          value={noProjectFinishPeriod}
+                          value={gaNoteTaskFinishPeriod}
                           onValueChange={(value) =>
-                            setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                            setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                           }
                         >
                           <SelectTrigger>
@@ -2660,743 +3077,343 @@ export default function DepartmentKanban() {
                         <Label>Due date</Label>
                         <Input
                           type="date"
-                          value={noProjectDueDate}
-                          onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                          value={gaNoteTaskDueDate}
+                          onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
                         />
                       </div>
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button
-                        disabled={!noProjectTitle.trim() || creatingNoProject}
-                        onClick={() => void submitNoProjectTask()}
-                      >
-                        {creatingNoProject ? "Creating..." : "Create"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            ) : null}
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-          <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-            <div className="text-sm font-semibold">Normal</div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.normal.length ? (
-                noProjectBuckets.normal.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          Normal
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-            <div className="text-sm font-semibold">GA</div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.ga.length ? (
-                noProjectBuckets.ga.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          GA
-                        </Badge>
-                        {t.assigned_to ? (
-                          <div
-                            className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center dark:bg-rose-900/40 dark:text-rose-200"
-                            title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                          >
-                            {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-rose-100 bg-rose-50/60 p-4 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/30">
-            <div className="flex items-center gap-2 text-rose-700 font-semibold">
-              <span className="h-5 w-5 rounded-full bg-rose-500" />
-              <span>BLOCKED</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.blocked.length ? (
-                noProjectBuckets.blocked.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-rose-100/80 bg-white/80 px-4 py-3 transition hover:bg-rose-50 hover:shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-200">
-                      BLOCKED
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-amber-100 bg-amber-50/60 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/25">
-            <div className="flex items-center gap-2 text-amber-700 font-semibold">
-              <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
-              <span>1H Report</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.oneHour.length ? (
-                noProjectBuckets.oneHour.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-amber-100/80 bg-white/80 px-4 py-3 transition hover:bg-amber-50 hover:shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-200">
-                      1H
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl border-emerald-100 bg-emerald-50/60 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
-            <div className="text-emerald-700 font-semibold">R1</div>
-            <div className="mt-2 text-sm text-emerald-700/80">
-              New project (first case) is handled with the manager.
-            </div>
-            <div className="mt-3 space-y-3">
-              {noProjectBuckets.r1.length ? (
-                noProjectBuckets.r1.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                    className="block rounded-xl border border-emerald-100/80 bg-white/80 px-4 py-3 transition hover:bg-emerald-50 hover:shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{t.title}</div>
-                      {t.assigned_to ? (
-                        <div
-                          className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
-                          title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                        >
-                          {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Badge variant="outline" className="mt-2 text-xs border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
-                      R1
-                    </Badge>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No tasks</div>
-              )}
-            </div>
-          </Card>
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === "ga-ka" ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-semibold">GA/KA Notes</div>
-            {!isReadOnly ? (
-              <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">+ Add Note</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Add GA/KA Note</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label>Project</Label>
-                      <Select value={newGaNoteProjectId} onValueChange={setNewGaNoteProjectId}>
+                      <Label>Assign to</Label>
+                      <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select project (optional)" />
+                          <SelectValue placeholder="Unassigned" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__none__">No project (General)</SelectItem>
-                          {projects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name || "Project"}
+                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                          {departmentUsers.map((member) => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {member.full_name || member.username}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {!projects.length ? (
-                        <div className="text-xs text-muted-foreground">No projects available.</div>
-                      ) : null}
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <Select value={newGaNoteType} onValueChange={(value) => setNewGaNoteType(value as "GA" | "KA")}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="GA/KA" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GA">GA</SelectItem>
-                            <SelectItem value="KA">KA</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Priority</Label>
-                        <Select
-                          value={newGaNotePriority}
-                          onValueChange={(value) => setNewGaNotePriority(value as "NORMAL" | "HIGH" | "__none__")}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Priority" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">No priority</SelectItem>
-                            <SelectItem value="NORMAL">Normal</SelectItem>
-                            
-                            <SelectItem value="HIGH">High</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Note</Label>
-                      <Textarea
-                        placeholder="Add GA/KA note..."
-                        value={newGaNote}
-                        onChange={(e) => setNewGaNote(e.target.value)}
-                        rows={4}
-                      />
-                    </div>
-                    {canCreate ? (
-                      <div className="rounded-xl border border-stone-200/70 bg-white/70 p-3 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={gaNoteCreateTask}
-                            onCheckedChange={(value) => setGaNoteCreateTask(Boolean(value))}
-                          />
-                          <div className="text-sm font-medium">Create task from this note</div>
-                        </div>
-                        {gaNoteCreateTask ? (
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-2">
-                              <Label>Assign to</Label>
-                              <Select value={gaNoteTaskAssignee} onValueChange={setGaNoteTaskAssignee}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Unassigned" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                                  {departmentUsers.map((member) => (
-                                    <SelectItem key={member.id} value={member.id}>
-                                      {member.full_name || member.username}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Finish by (optional)</Label>
-                              <Select
-                                value={gaNoteCreateTaskFinishPeriod}
-                                onValueChange={(value) =>
-                                  setGaNoteCreateTaskFinishPeriod(
-                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
-                                  )
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select period" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                                  {FINISH_PERIOD_OPTIONS.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setGaNoteOpen(false)}>
+                      <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
                         Cancel
                       </Button>
-                      <Button disabled={!newGaNote.trim() || addingGaNote} onClick={() => void submitGaNote()}>
-                        {addingGaNote ? "Saving..." : "Add Note"}
+                      <Button disabled={creatingGaNoteTask} onClick={() => void submitGaNoteTask()}>
+                        {creatingGaNoteTask ? "Creating..." : "Create Task"}
                       </Button>
                     </div>
                   </div>
                 </DialogContent>
               </Dialog>
-            ) : null}
-          </div>
-          <Dialog
-            open={Boolean(gaNoteTaskOpenId)}
-            onOpenChange={(open) => {
-              if (!open) setGaNoteTaskOpenId(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Create Task from Note</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground">This will create a task linked to the GA/KA note.</div>
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea
-                    value={gaNoteTaskDescription}
-                    onChange={(e) => setGaNoteTaskDescription(e.target.value)}
-                    rows={4}
-                  />
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="NORMAL">Normal</SelectItem>
-                        <SelectItem value="HIGH">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Finish by (optional)</Label>
-                    <Select
-                      value={gaNoteTaskFinishPeriod}
-                      onValueChange={(value) =>
-                        setGaNoteTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select period" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                        {FINISH_PERIOD_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {value}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Due date</Label>
-                    <Input
-                      type="date"
-                      value={gaNoteTaskDueDate}
-                      onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Assign to</Label>
-                  <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                      {departmentUsers.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          {member.full_name || member.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
-                    Cancel
-                  </Button>
-                  <Button disabled={creatingGaNoteTask} onClick={() => void submitGaNoteTask()}>
-                    {creatingGaNoteTask ? "Creating..." : "Create Task"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-          {visibleGaNotes.length ? (
-            [...visibleGaNotes]
-              .sort((a, b) => {
-                const order = ["HIGH", "NORMAL"]
-                const aRank = a.priority ? order.indexOf(a.priority) : order.length
-                const bRank = b.priority ? order.indexOf(b.priority) : order.length
-                if (aRank !== bRank) return aRank - bRank
-                const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-                const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
-                return bTime - aTime
-              })
-              .map((note) => {
-              const author = users.find((u) => u.id === note.created_by) || null
-              const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
-              const linkedTask = gaNoteTaskMap.get(note.id) || null
-              return (
-                <Card key={note.id} className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Badge
-                        variant="outline"
-                        className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
-                        >
-                          {note.note_type || "GA"}
-                        </Badge>
-                        <span>By {author?.full_name || author?.username || "-"}</span>
-                        <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
-                        {project ? (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            {project.title || project.name || "Project"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-sm px-2 py-0.5">
-                            General
-                          </Badge>
-                        )}
-                        {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
-                      </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {linkedTask ? (
-                        <Button asChild variant="outline" size="sm">
-                          <Link href={`/tasks/${linkedTask.id}?returnTo=${encodeURIComponent(returnToTasks)}`}>
-                            View Task
-                          </Link>
-                        </Button>
-                      ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setGaNoteTaskOpenId(note.id)
-                            setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
-                            setGaNoteTaskDescription(note.content || "")
-                            setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
-                            setGaNoteTaskDueDate("")
-                            setGaNoteTaskAssigneeId("__unassigned__")
-                            setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-                          }}
-                        >
-                          Create Task
-                        </Button>
-                      ) : null}
-                      {note.status !== "CLOSED" ? (
-                        !isReadOnly ? (
-                          <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
-                            Close
-                          </Button>
-                        ) : (
-                          <Badge variant="secondary">Open</Badge>
-                        )
-                      ) : (
-                        <Badge variant="secondary">Closed</Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
-                </Card>
-              )
-            })
-            ) : (
-              <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
-            )}
-          </div>
-        ) : null}
-
-      {activeTab === "meetings" ? (
-        <div className="space-y-4">
-          <div className="text-xl font-semibold">Meetings</div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
-              <div className="text-sm font-semibold">External Meetings</div>
-              {!isReadOnly ? (
-                <div className="grid gap-3">
-                  <Input
-                    placeholder="Meeting title"
-                    value={meetingTitle}
-                    onChange={(e) => setMeetingTitle(e.target.value)}
-                  />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Input
-                      placeholder="Platform (Zoom, Meet, Office...)"
-                      value={meetingPlatform}
-                      onChange={(e) => setMeetingPlatform(e.target.value)}
-                    />
-                    <Input
-                      type="datetime-local"
-                      value={meetingStartsAt}
-                      onChange={(e) => setMeetingStartsAt(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Project (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No project</SelectItem>
-                        {filteredProjects.map((project) => (
-                          <SelectItem key={project.id} value={project.id}>
-                            {project.title || project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                      {creatingMeeting ? "Saving..." : "Add"}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              <div className="space-y-3">
-                {visibleMeetings.length ? (
-                  visibleMeetings.map((meeting) => {
-                    const project = meeting.project_id
-                      ? projects.find((p) => p.id === meeting.project_id) || null
-                      : null
-                    const isEditing = !isReadOnly && editingMeetingId === meeting.id
+              {visibleGaNotes.length ? (
+                [...visibleGaNotes]
+                  .sort((a, b) => {
+                    const order = ["HIGH", "NORMAL"]
+                    const aRank = a.priority ? order.indexOf(a.priority) : order.length
+                    const bRank = b.priority ? order.indexOf(b.priority) : order.length
+                    if (aRank !== bRank) return aRank - bRank
+                    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+                    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+                    return bTime - aTime
+                  })
+                  .map((note) => {
+                    const author = users.find((u) => u.id === note.created_by) || null
+                    const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+                    const linkedTask = gaNoteTaskMap.get(note.id) || null
                     return (
-                      <Card key={meeting.id} className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                        {isEditing ? (
-                          <div className="space-y-3">
-                            <Input
-                              value={editMeetingTitle}
-                              onChange={(e) => setEditMeetingTitle(e.target.value)}
-                            />
-                            <div className="grid gap-3 md:grid-cols-2">
-                              <Input
-                                value={editMeetingPlatform}
-                                onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                placeholder="Platform"
-                              />
-                              <Input
-                                type="datetime-local"
-                                value={editMeetingStartsAt}
-                                onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                              />
-                            </div>
-                            <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Project (optional)" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">No project</SelectItem>
-                                {filteredProjects.map((p) => (
-                                  <SelectItem key={p.id} value={p.id}>
-                                    {p.title || p.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <div className="flex justify-end gap-2">
-                              <Button variant="outline" onClick={cancelEditMeeting}>
-                                Cancel
+                      <Card key={note.id} className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Badge
+                              variant="outline"
+                              className={note.note_type === "KA" ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"}
+                            >
+                              {note.note_type || "GA"}
+                            </Badge>
+                            <span>By {author?.full_name || author?.username || "-"}</span>
+                            <span>- {note.created_at ? new Date(note.created_at).toLocaleString("en-US") : "-"}</span>
+                            {project ? (
+                              <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                {project.title || project.name || "Project"}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-sm px-2 py-0.5">
+                                General
+                              </Badge>
+                            )}
+                            {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {linkedTask ? (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href={`/tasks/${linkedTask.id}?returnTo=${encodeURIComponent(returnToTasks)}`}>
+                                  View Task
+                                </Link>
                               </Button>
-                              <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
-                              {project ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  Project: {project.title || project.name}
-                                </div>
-                              ) : null}
-                            </div>
-                            {!isReadOnly ? (
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
-                                  Edit
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
-                                  Delete
-                                </Button>
-                              </div>
+                            ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setGaNoteTaskOpenId(note.id)
+                                  setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
+                                  setGaNoteTaskDescription(note.content || "")
+                                  setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                  setGaNoteTaskDueDate("")
+                                  setGaNoteTaskAssigneeId("__unassigned__")
+                                  setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                                }}
+                              >
+                                Create Task
+                              </Button>
                             ) : null}
+                            {note.status !== "CLOSED" ? (
+                              !isReadOnly ? (
+                                <Button variant="outline" size="sm" onClick={() => void closeGaNote(note.id)}>
+                                  Close
+                                </Button>
+                              ) : (
+                                <Badge variant="secondary">Open</Badge>
+                              )
+                            ) : (
+                              <Badge variant="secondary">Closed</Badge>
+                            )}
                           </div>
-                        )}
+                        </div>
+                        <div className="mt-3 text-sm text-muted-foreground">{note.content}</div>
                       </Card>
                     )
                   })
-                ) : (
-                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
-                )}
-              </div>
-            </Card>
+              ) : (
+                <div className="text-sm text-muted-foreground">No GA/KA notes yet.</div>
+              )}
+            </div>
+          ) : null}
 
-            <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
-              <div className="text-sm font-semibold">Internal Meetings</div>
-              <div>
-                <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {INTERNAL_MEETING.team.join(", ")}
-                </div>
-              </div>
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-                {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    onClick={() => setInternalSlot(slot)}
-                    className={[
-                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                      internalSlot === slot
-                        ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                        : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                    ].join(" ")}
-                  >
-                    {slot}
-                  </button>
-                ))}
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
-                <div className="space-y-2">
-                  {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                    <div key={item} className="flex items-start gap-3 rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 dark:border-stone-800/70 dark:bg-stone-900/70">
-                      <Checkbox checked={false} disabled />
-                      <div className="text-sm text-muted-foreground">
-                        {idx + 1}. {item}
+          {activeTab === "meetings" ? (
+            <div className="space-y-4">
+              <div className="text-xl font-semibold">Meetings</div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
+                  <div className="text-sm font-semibold">External Meetings</div>
+                  {!isReadOnly ? (
+                    <div className="grid gap-3">
+                      <Input
+                        placeholder="Meeting title"
+                        value={meetingTitle}
+                        onChange={(e) => setMeetingTitle(e.target.value)}
+                      />
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Input
+                          placeholder="Platform (Zoom, Meet, Office...)"
+                          value={meetingPlatform}
+                          onChange={(e) => setMeetingPlatform(e.target.value)}
+                        />
+                        <Input
+                          type="datetime-local"
+                          value={meetingStartsAt}
+                          onChange={(e) => setMeetingStartsAt(e.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Project (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">No project</SelectItem>
+                            {filteredProjects.map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                {project.title || project.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
+                          {creatingMeeting ? "Saving..." : "Add"}
+                        </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      ) : null}
+                  ) : null}
+                  <div className="space-y-3">
+                    {visibleMeetings.length ? (
+                      visibleMeetings.map((meeting) => {
+                        const project = meeting.project_id
+                          ? projects.find((p) => p.id === meeting.project_id) || null
+                          : null
+                        const isEditing = !isReadOnly && editingMeetingId === meeting.id
+                        return (
+                          <Card key={meeting.id} className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
+                            {isEditing ? (
+                              <div className="space-y-3">
+                                <Input
+                                  value={editMeetingTitle}
+                                  onChange={(e) => setEditMeetingTitle(e.target.value)}
+                                />
+                                <div className="grid gap-3 md:grid-cols-2">
+                                  <Input
+                                    value={editMeetingPlatform}
+                                    onChange={(e) => setEditMeetingPlatform(e.target.value)}
+                                    placeholder="Platform"
+                                  />
+                                  <Input
+                                    type="datetime-local"
+                                    value={editMeetingStartsAt}
+                                    onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                  />
+                                </div>
+                                <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Project (optional)" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">No project</SelectItem>
+                                    {filteredProjects.map((p) => (
+                                      <SelectItem key={p.id} value={p.id}>
+                                        {p.title || p.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <div className="flex justify-end gap-2">
+                                  <Button variant="outline" onClick={cancelEditMeeting}>
+                                    Cancel
+                                  </Button>
+                                  <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
+                                  {project ? (
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                      Project: {project.title || project.name}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                {!isReadOnly ? (
+                                  <div className="flex items-center gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => startEditMeeting(meeting)}>
+                                      Edit
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => void deleteMeeting(meeting.id)}>
+                                      Delete
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          </Card>
+                        )
+                      })
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                    )}
+                  </div>
+                </Card>
 
-      <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
-        <DialogContent className="sm:max-w-md border-red-200 bg-white shadow-xl">
-          <DialogHeader>
-            <DialogTitle className="text-slate-900 flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white text-lg shadow-sm">
-                !
-              </span>
-              <span>Confirm Project Title</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="text-sm text-slate-700">
-              Please confirm the title "<span className="font-semibold text-red-900">{pendingProjectTitle}</span>" is
-              the correct shortcut to use.
-            </div>
-            {looksLikeFullName(pendingProjectTitle) ? (
-              <div className="text-sm text-red-700 font-semibold">
-                This looks longer than a typical shortcut. Consider shortening it.
+                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
+                  <div className="text-sm font-semibold">Internal Meetings</div>
+                  <div>
+                    <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {INTERNAL_MEETING.team.join(", ")}
+                    </div>
+                  </div>
+                  <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
+                    {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setInternalSlot(slot)}
+                        className={[
+                          "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                          internalSlot === slot
+                            ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                            : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                        ].join(" ")}
+                      >
+                        {slot}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
+                    <div className="space-y-2">
+                      {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
+                        <div key={item} className="flex items-start gap-3 rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 dark:border-stone-800/70 dark:bg-stone-900/70">
+                          <Checkbox checked={false} disabled />
+                          <div className="text-sm text-muted-foreground">
+                            {idx + 1}. {item}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
               </div>
-            ) : null}
-            <div className="rounded-xl border border-red-200 bg-red-50/60 p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-red-700 mb-2">Remember</div>
-              <div className="text-xs text-red-800 space-y-1">
-                <div>• Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
-                <div>• Keep it short and simple (typically 2-6 characters)</div>
-                <div>• Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
-              </div>
             </div>
-            <div className="text-sm text-slate-700">Are you sure you want to use this as the project title?</div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowTitleWarning(false)
-                setPendingProjectTitle("")
-              }}
-            >
-              Go Back & Edit
-            </Button>
-            <Button
-              onClick={() => {
-                setShowTitleWarning(false)
-                setPendingProjectTitle("")
-                void submitProject()
-              }}
-              className="bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm"
-            >
-              Yes, Use This Title
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      </div>
+          ) : null}
+
+          <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
+            <DialogContent className="sm:max-w-md border-red-200 bg-white shadow-xl">
+              <DialogHeader>
+                <DialogTitle className="text-slate-900 flex items-center gap-3">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white text-lg shadow-sm">
+                    !
+                  </span>
+                  <span>Confirm Project Title</span>
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="text-sm text-slate-700">
+                  Please confirm the title "<span className="font-semibold text-red-900">{pendingProjectTitle}</span>" is
+                  the correct shortcut to use.
+                </div>
+                {looksLikeFullName(pendingProjectTitle) ? (
+                  <div className="text-sm text-red-700 font-semibold">
+                    This looks longer than a typical shortcut. Consider shortening it.
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-red-200 bg-red-50/60 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-red-700 mb-2">Remember</div>
+                  <div className="text-xs text-red-800 space-y-1">
+                    <div>• Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
+                    <div>• Keep it short and simple (typically 2-6 characters)</div>
+                    <div>• Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
+                  </div>
+                </div>
+                <div className="text-sm text-slate-700">Are you sure you want to use this as the project title?</div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowTitleWarning(false)
+                    setPendingProjectTitle("")
+                  }}
+                >
+                  Go Back & Edit
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowTitleWarning(false)
+                    setPendingProjectTitle("")
+                    void submitProject()
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm"
+                >
+                  Yes, Use This Title
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
       <div className="hidden print:block">
         <div className="px-6 py-4">

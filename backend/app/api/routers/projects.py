@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, cast, String as SQLString
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,7 +146,7 @@ async def create_project(
         if manager.department_id != payload.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Manager must be in department")
 
-    current_phase = payload.current_phase or ProjectPhaseStatus.TAKIMET
+    current_phase = payload.current_phase or ProjectPhaseStatus.MEETINGS
     status_value = payload.status or TaskStatus.TODO
     project = Project(
         title=payload.title,
@@ -313,7 +313,7 @@ async def advance_project_phase(
             select(func.count(Task.id)).where(
                 Task.project_id == project.id,
                 Task.phase == project.current_phase,
-                Task.status != TaskStatus.DONE,
+                cast(Task.status, SQLString) != TaskStatus.DONE.value,
             )
         )
     ).scalar_one()

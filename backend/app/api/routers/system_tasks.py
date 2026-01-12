@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import and_, delete, insert, or_, select, text
+from sqlalchemy import and_, delete, insert, or_, select, text, cast, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -161,10 +161,10 @@ async def list_system_tasks(
         template_stmt = template_stmt.where(
             or_(
                 and_(
-                    SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT,
+                    SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
                     SystemTaskTemplate.department_id == department_id,
                 ),
-                SystemTaskTemplate.scope == SystemTaskScope.ALL,
+                SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
             )
         )
     elif user.role != UserRole.ADMIN:
@@ -174,10 +174,10 @@ async def list_system_tasks(
         else:
             template_stmt = template_stmt.where(
                 or_(
-                    SystemTaskTemplate.scope == SystemTaskScope.ALL,
-                    SystemTaskTemplate.scope == SystemTaskScope.GA,
+                    SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
+                    SystemTaskTemplate.scope == SystemTaskScope.GA.value,
                     and_(
-                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT,
+                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
                         SystemTaskTemplate.department_id == user.department_id,
                     ),
                 )

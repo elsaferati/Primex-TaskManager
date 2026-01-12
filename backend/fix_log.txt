@@ -1,0 +1,37 @@
+--- REFACTORED FIX LOG ---
+
+Processing table: system_task_templates
+Executing: ALTER TABLE system_task_templates ALTER COLUMN scope TYPE VARCHAR(50) USING scope::VARCHAR(50)
+Success.
+Executing: ALTER TABLE system_task_templates ALTER COLUMN priority TYPE VARCHAR(50) USING priority::VARCHAR(50)
+ERROR: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedFunctionError'>: operator does not exist: character varying = task_priority
+HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+[SQL: ALTER TABLE system_task_templates ALTER COLUMN priority TYPE VARCHAR(50) USING priority::VARCHAR(50)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Executing: ALTER TABLE system_task_templates ALTER COLUMN frequency TYPE VARCHAR(50) USING frequency::VARCHAR(50)
+ERROR: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.InFailedSQLTransactionError'>: current transaction is aborted, commands ignored until end of transaction block
+[SQL: ALTER TABLE system_task_templates ALTER COLUMN frequency TYPE VARCHAR(50) USING frequency::VARCHAR(50)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+Executing: ALTER TABLE system_task_templates ALTER COLUMN finish_period TYPE VARCHAR(50) USING finish_period::VARCHAR(50)
+ERROR: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.InFailedSQLTransactionError'>: current transaction is aborted, commands ignored until end of transaction block
+[SQL: ALTER TABLE system_task_templates ALTER COLUMN finish_period TYPE VARCHAR(50) USING finish_period::VARCHAR(50)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+Committed changes for system_task_templates.
+
+Processing table: projects
+Executing: ALTER TABLE projects ALTER COLUMN current_phase TYPE VARCHAR(50) USING current_phase::VARCHAR(50)
+Success.
+Executing: ALTER TABLE projects ALTER COLUMN status TYPE VARCHAR(50) USING status::VARCHAR(50)
+Success.
+Committed changes for projects.
+
+Processing table: tasks
+Executing: ALTER TABLE tasks ALTER COLUMN phase TYPE VARCHAR(50) USING phase::VARCHAR(50)
+Success.
+Executing: ALTER TABLE tasks ALTER COLUMN status TYPE VARCHAR(50) USING status::VARCHAR(50)
+Success.
+Executing: ALTER TABLE tasks ALTER COLUMN priority TYPE VARCHAR(50) USING priority::VARCHAR(50)
+Success.
+Executing: ALTER TABLE tasks ALTER COLUMN finish_period TYPE VARCHAR(50) USING finish_period::VARCHAR(50)
+Success.
+Committed changes for tasks.

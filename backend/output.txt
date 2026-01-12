@@ -1,0 +1,61 @@
+--- SCHEMA INSPECTION ---
+
+Table: system_task_templates
+  COL: created_at           | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: day_of_month         | TYPE: integer              | UDT: int4
+  COL: day_of_week          | TYPE: integer              | UDT: int4
+  COL: days_of_week         | TYPE: ARRAY                | UDT: _int4
+  COL: default_assignee_id  | TYPE: uuid                 | UDT: uuid
+  COL: department_id        | TYPE: uuid                 | UDT: uuid
+  COL: description          | TYPE: text                 | UDT: text
+  COL: finish_period        | TYPE: USER-DEFINED         | UDT: finish_period
+  COL: frequency            | TYPE: USER-DEFINED         | UDT: frequency_type
+  COL: id                   | TYPE: uuid                 | UDT: uuid
+  COL: internal_notes       | TYPE: text                 | UDT: text
+  COL: is_active            | TYPE: boolean              | UDT: bool
+  COL: month_of_year        | TYPE: integer              | UDT: int4
+  COL: priority             | TYPE: USER-DEFINED         | UDT: task_priority
+  COL: scope                | TYPE: character varying    | UDT: varchar
+  COL: title                | TYPE: character varying    | UDT: varchar
+
+Table: projects
+  COL: completed_at         | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: created_at           | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: current_phase        | TYPE: character varying    | UDT: varchar
+  COL: department_id        | TYPE: uuid                 | UDT: uuid
+  COL: description          | TYPE: text                 | UDT: text
+  COL: due_date             | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: id                   | TYPE: uuid                 | UDT: uuid
+  COL: manager_id           | TYPE: uuid                 | UDT: uuid
+  COL: progress_percentage  | TYPE: integer              | UDT: int4
+  COL: start_date           | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: status               | TYPE: character varying    | UDT: varchar
+  COL: title                | TYPE: character varying    | UDT: varchar
+  COL: updated_at           | TYPE: timestamp with time zone | UDT: timestamptz
+
+Table: tasks
+  COL: assigned_to          | TYPE: uuid                 | UDT: uuid
+  COL: completed_at         | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: created_at           | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: created_by           | TYPE: uuid                 | UDT: uuid
+  COL: department_id        | TYPE: uuid                 | UDT: uuid
+  COL: dependency_task_id   | TYPE: uuid                 | UDT: uuid
+  COL: description          | TYPE: text                 | UDT: text
+  COL: due_date             | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: finish_period        | TYPE: character varying    | UDT: varchar
+  COL: ga_note_origin_id    | TYPE: uuid                 | UDT: uuid
+  COL: id                   | TYPE: uuid                 | UDT: uuid
+  COL: internal_notes       | TYPE: text                 | UDT: text
+  COL: is_1h_report         | TYPE: boolean              | UDT: bool
+  COL: is_active            | TYPE: boolean              | UDT: bool
+  COL: is_bllok             | TYPE: boolean              | UDT: bool
+  COL: is_r1                | TYPE: boolean              | UDT: bool
+  COL: phase                | TYPE: character varying    | UDT: varchar
+  COL: priority             | TYPE: character varying    | UDT: varchar
+  COL: progress_percentage  | TYPE: integer              | UDT: int4
+  COL: project_id           | TYPE: uuid                 | UDT: uuid
+  COL: start_date           | TYPE: timestamp with time zone | UDT: timestamptz
+  COL: status               | TYPE: character varying    | UDT: varchar
+  COL: system_template_origin_id | TYPE: uuid                 | UDT: uuid
+  COL: title                | TYPE: character varying    | UDT: varchar
+  COL: updated_at           | TYPE: timestamp with time zone | UDT: timestamptz

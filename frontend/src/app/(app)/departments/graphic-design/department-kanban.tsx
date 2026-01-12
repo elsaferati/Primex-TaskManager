@@ -32,15 +32,15 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"]
 
-const PHASES = ["TAKIMET", "PLANIFIKIMI", "ZHVILLIMI", "TESTIMI", "DOKUMENTIMI"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
 const PHASE_LABELS: Record<string, string> = {
-  TAKIMET: "Meetings",
-  PLANIFIKIMI: "Planning",
-  ZHVILLIMI: "Development",
-  TESTIMI: "Testing",
-  DOKUMENTIMI: "Documentation",
-  MBYLLUR: "Closed",
+  MEETINGS: "Meetings",
+  PLANNING: "Planning",
+  DEVELOPMENT: "Development",
+  TESTING: "Testing",
+  DOCUMENTATION: "Documentation",
+  CLOSED: "Closed",
 }
 
 const WEEKDAYS_SQ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -359,7 +359,7 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
-  const [projectPhase, setProjectPhase] = React.useState("TAKIMET")
+  const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
 
   const [meetingTitle, setMeetingTitle] = React.useState("")
@@ -1093,7 +1093,7 @@ export default function DepartmentKanban() {
                   {filteredProjects.map((project) => {
                     // Derived Data Calculation
                     const tasks = departmentTasks.filter(t => t.project_id === project.id);
-                    const phase = project.current_phase || "TAKIMET";
+                    const phase = project.current_phase || "MEETINGS";
                     const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
 
                     // Calculate members from tasks assignees + manager
@@ -1257,7 +1257,7 @@ export default function DepartmentKanban() {
                               <div className="mt-2 space-y-2">
                                 {group.tasks.map((task) => {
                                   const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                                  const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                                  const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                                   return (
                                     <Link
                                       key={task.id}
@@ -1302,7 +1302,7 @@ export default function DepartmentKanban() {
                         <div className="space-y-2">
                           {todayNoProjectTasks.map((task) => {
                             const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                            const phaseLabel = PHASE_LABELS[task.phase || "TAKIMET"] || task.phase || "TAKIMET"
+                            const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                             const typeLabel = task.is_bllok
                               ? "Blocked"
                               : task.is_1h_report
