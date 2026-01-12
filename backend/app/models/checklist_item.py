@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,14 +23,14 @@ class ChecklistItem(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     # Common fields (all types)
-    path: Mapped[str | None] = mapped_column(String, nullable=True)
-    keyword: Mapped[str | None] = mapped_column(String, nullable=True)
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
-    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    keyword: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Type-specific fields
-    title: Mapped[str | None] = mapped_column(String, nullable=True)  # For TITLE and CHECKBOX
-    comment: Mapped[str | None] = mapped_column(String, nullable=True)  # For COMMENT
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)  # For TITLE and CHECKBOX
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)  # For COMMENT
     is_checked: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Only for CHECKBOX
 
     # Relationships
