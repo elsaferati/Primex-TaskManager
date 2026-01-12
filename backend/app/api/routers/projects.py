@@ -255,6 +255,11 @@ async def update_project(
                 detail="Cannot skip phases forward. Use advance-phase endpoint to move to the next phase.",
             )
         project.current_phase = payload.current_phase
+        await db.execute(
+            update(Task)
+            .where(Task.project_id == project.id)
+            .values(phase=payload.current_phase)
+        )
     if payload.status is not None:
         project.status = payload.status
     if payload.progress_percentage is not None:
@@ -349,6 +354,11 @@ async def advance_project_phase(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     project.current_phase = sequence[current_idx + 1]
+    await db.execute(
+        update(Task)
+        .where(Task.project_id == project.id)
+        .values(phase=project.current_phase)
+    )
     await db.commit()
     await db.refresh(project)
     return ProjectOut(
