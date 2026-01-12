@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -17,19 +19,67 @@ from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
+from app.models.vs_workflow_item import VsWorkflowItem
 from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
+from app.schemas.vs_workflow_item import VsWorkflowItemOut, VsWorkflowItemUpdate
+from app.services.workflow_service import initialize_vs_workflow, get_active_workflow_items
 
 
 router = APIRouter()
 
-PHASE_SEQUENCE = [
-    ProjectPhaseStatus.TAKIMET,
-    ProjectPhaseStatus.PLANIFIKIMI,
-    ProjectPhaseStatus.ZHVILLIMI,
-    ProjectPhaseStatus.TESTIMI,
-    ProjectPhaseStatus.DOKUMENTIMI,
-    ProjectPhaseStatus.MBYLLUR,
+DEV_PHASES = [
+    ProjectPhaseStatus.MEETINGS,
+    ProjectPhaseStatus.PLANNING,
+    ProjectPhaseStatus.DEVELOPMENT,
+    ProjectPhaseStatus.TESTING,
+    ProjectPhaseStatus.DOCUMENTATION,
+    ProjectPhaseStatus.CLOSED,
 ]
+
+MST_PHASES = [
+    ProjectPhaseStatus.PLANNING,
+    ProjectPhaseStatus.PRODUCT,
+    ProjectPhaseStatus.CONTROL,
+    ProjectPhaseStatus.FINAL,
+    ProjectPhaseStatus.CLOSED,
+]
+
+VS_PHASES = [
+    ProjectPhaseStatus.PLANNING,
+    ProjectPhaseStatus.AMAZON,
+    ProjectPhaseStatus.CHECK,
+    ProjectPhaseStatus.DREAMROBOT,
+    ProjectPhaseStatus.CLOSED,
+]
+
+# Standard/Fallback sequence
+PHASE_SEQUENCE = [
+    ProjectPhaseStatus.MEETINGS,
+    ProjectPhaseStatus.PLANNING,
+    ProjectPhaseStatus.DEVELOPMENT,
+    ProjectPhaseStatus.TESTING,
+    ProjectPhaseStatus.DOCUMENTATION,
+    ProjectPhaseStatus.PRODUCT,
+    ProjectPhaseStatus.CONTROL,
+    ProjectPhaseStatus.FINAL,
+    ProjectPhaseStatus.AMAZON,
+    ProjectPhaseStatus.CHECK,
+    ProjectPhaseStatus.DREAMROBOT,
+    ProjectPhaseStatus.CLOSED,
+]
+
+
+def get_project_sequence(project: Project) -> list[ProjectPhaseStatus]:
+    # This is a bit simplistic, but we can refine it
+    title = project.title.upper()
+    # Check department if available (would need department name)
+    # For now, base it on title patterns similar to trigger logic
+    if "VS" in title or "VL" in title:
+        return VS_PHASES
+    if "MST" in title:
+        return MST_PHASES
+    # Default to DEV if it looks like a dev project or fallback
+    return DEV_PHASES
 
 
 def phase_index(phase: ProjectPhaseStatus) -> int:
@@ -111,6 +161,13 @@ async def create_project(
         completed_at=payload.completed_at,
     )
     db.add(project)
+    await db.flush() # Ensure project ID is generated
+    
+    # Trigger VS Amazon Workflow if applicable
+    title_upper = project.title.upper()
+    if "VS/VL AMAZON" in title_upper or "VS AMAZON" in title_upper:
+        await initialize_vs_workflow(db, project.id)
+    
     await db.commit()
     await db.refresh(project)
     return ProjectOut(
@@ -188,10 +245,10 @@ async def update_project(
         next_idx = phase_index(payload.current_phase)
         if current_idx == -1 or next_idx == -1:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project phase")
-        if next_idx > current_idx:
+        if next_idx < current_idx: # Allow moving backward, but not skipping forward
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Complete the current phase before moving forward",
+                detail="Cannot skip phases forward. Use advance-phase endpoint to move to the next phase.",
             )
         project.current_phase = payload.current_phase
     if payload.status is not None:
@@ -237,10 +294,18 @@ async def advance_project_phase(
     if project.department_id is not None:
         ensure_department_access(user, project.department_id)
 
-    current_idx = phase_index(project.current_phase)
-    if current_idx == -1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project phase")
-    if current_idx >= len(PHASE_SEQUENCE) - 1:
+    sequence = get_project_sequence(project)
+    try:
+        current_idx = sequence.index(project.current_phase)
+    except ValueError:
+        # If not in its specific sequence, fallback to general
+        try:
+            current_idx = PHASE_SEQUENCE.index(project.current_phase)
+            sequence = PHASE_SEQUENCE
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project phase")
+            
+    if current_idx >= len(sequence) - 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is already in the final phase")
 
     open_tasks = (
@@ -248,7 +313,7 @@ async def advance_project_phase(
             select(func.count(Task.id)).where(
                 Task.project_id == project.id,
                 Task.phase == project.current_phase,
-                Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                Task.status != TaskStatus.DONE,
             )
         )
     ).scalar_one()
@@ -272,7 +337,7 @@ async def advance_project_phase(
             detail = f"Cannot advance phase: {unchecked_items} unchecked checklist items."
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
-    project.current_phase = PHASE_SEQUENCE[current_idx + 1]
+    project.current_phase = sequence[current_idx + 1]
     await db.commit()
     await db.refresh(project)
     return ProjectOut(
@@ -320,3 +385,49 @@ async def delete_project(
     await db.commit()
     return {"status": "deleted"}
 
+
+@router.get("/{project_id}/workflow-items", response_model=list[VsWorkflowItemOut])
+async def list_workflow_items(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[VsWorkflowItemOut]:
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.department_id is not None:
+        ensure_department_access(user, project.department_id)
+    
+    # We need to bridge AsyncSession to Session if the service uses sync DB calls, 
+    # but here we'll assume the service function is adapted or we use the async pattern.
+    # For now, let's keep it consistent with the existing codebase's DB patterns.
+    # Note: get_active_workflow_items in the service was written as sync, let's make it async in the service and call it here.
+    items = await get_active_workflow_items(db, project_id)
+    return items
+
+
+@router.patch("/workflow-items/{item_id}", response_model=VsWorkflowItemOut)
+async def update_workflow_item(
+    item_id: uuid.UUID,
+    payload: VsWorkflowItemUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> VsWorkflowItemOut:
+    item = (await db.execute(select(VsWorkflowItem).where(VsWorkflowItem.id == item_id))).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow item not found")
+    
+    project = (await db.execute(select(Project).where(Project.id == item.project_id))).scalar_one_or_none()
+    if project and project.department_id:
+        ensure_department_access(user, project.department_id)
+    
+    if payload.status is not None:
+        item.status = payload.status
+    if payload.assigned_to is not None:
+        item.assigned_to = payload.assigned_to
+    if payload.internal_notes is not None:
+        item.internal_notes = payload.internal_notes
+        
+    await db.commit()
+    await db.refresh(item)
+    return item

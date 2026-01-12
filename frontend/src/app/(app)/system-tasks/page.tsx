@@ -342,7 +342,7 @@ function sanitizeBoldOnlyHtml(raw: string) {
 
   // Second pass: normalize b to strong, remove unwanted tags
   const clean = document.createElement("div")
-  
+
   const sanitizeNode = (node: Node): Node[] => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent ?? ""
@@ -455,11 +455,10 @@ function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm font-semibold shadow-sm transition ${
-            isBold
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm font-semibold shadow-sm transition ${isBold
               ? "border-blue-500 bg-blue-100 text-blue-700"
               : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-          }`}
+            }`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={applyBold}
           aria-label="Bold"
@@ -605,22 +604,22 @@ export function SystemTasksView({
         apiFetch("/system-tasks"),
         apiFetch("/departments"),
       ])
-        if (templatesRes.ok) {
-          setTemplates((await templatesRes.json()) as SystemTaskTemplate[])
-        } else {
-          console.error("Failed to load system tasks", templatesRes.status)
-        }
-        if (departmentsRes.ok) {
-          setDepartments((await departmentsRes.json()) as Department[])
-        } else {
-          console.error("Failed to load departments", departmentsRes.status)
-        }
-        const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
-        if (usersRes.ok) {
-          setUsers((await usersRes.json()) as AssigneeUser[])
-        } else {
-          console.error("Failed to load users", usersRes.status)
-        }
+      if (templatesRes.ok) {
+        setTemplates((await templatesRes.json()) as SystemTaskTemplate[])
+      } else {
+        console.error("Failed to load system tasks", templatesRes.status)
+      }
+      if (departmentsRes.ok) {
+        setDepartments((await departmentsRes.json()) as Department[])
+      } else {
+        console.error("Failed to load departments", departmentsRes.status)
+      }
+      const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
+      if (usersRes.ok) {
+        setUsers((await usersRes.json()) as AssigneeUser[])
+      } else {
+        console.error("Failed to load users", usersRes.status)
+      }
     } finally {
       setLoading(false)
     }
@@ -1049,7 +1048,7 @@ export function SystemTasksView({
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       setCreateOpen(false)
@@ -1139,7 +1138,7 @@ export function SystemTasksView({
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
       const updated = (await res.json()) as SystemTaskTemplate
@@ -1175,10 +1174,10 @@ export function SystemTasksView({
     const base = !query
       ? editAvailableAssignees
       : editAvailableAssignees.filter((person) => {
-          const email = "email" in person ? person.email || "" : ""
-          const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
-          return name.includes(query)
-        })
+        const email = "email" in person ? person.email || "" : ""
+        const name = `${person.full_name || ""} ${person.username || ""} ${email}`.toLowerCase()
+        return name.includes(query)
+      })
     return [...base].sort((a, b) => {
       const aSelected = editAssigneeIds.includes(a.id)
       const bSelected = editAssigneeIds.includes(b.id)
@@ -1657,607 +1656,607 @@ export function SystemTasksView({
                   </Button>
                 </DialogTrigger>
                 {/* CREATE DIALOG CONTENT (Omitted for brevity, assumed same as original) */}
-                 <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
-                <DialogHeader>
-                  <DialogTitle>Add system task</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Department</Label>
-                      <Select value={departmentId} onValueChange={handleDepartmentChange}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select department" />
-                        </SelectTrigger>
-                        <SelectContent>
+                <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>Add system task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select value={departmentId} onValueChange={handleDepartmentChange}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                          <SelectContent>
                             <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
                             <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
-                          {departments.map((dept) => (
-                            <SelectItem key={dept.id} value={dept.id}>
-                              {formatDepartmentName(dept.name)} ({dept.code})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Title</Label>
-                      <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <BoldOnlyEditor value={description} onChange={setDescription} />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label>Repeat</Label>
-                      <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select repeat" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {FREQUENCY_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Finish by (optional)</Label>
-                      <Select
-                        value={finishPeriod}
-                        onValueChange={(value) =>
-                          setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select period" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                          {FINISH_PERIOD_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {FINISH_PERIOD_LABELS[value]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select priority" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PRIORITY_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {PRIORITY_LABELS[value]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {frequency === "WEEKLY" ? (
-                    <div className="space-y-2">
-                      <Label>Days of week</Label>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {WEEKDAY_OPTIONS.map((day) => {
-                          const checked = daysOfWeek.includes(day.value)
-                          return (
-                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
-                            />
-                            <span>{day.label}</span>
-                          </label>
-                        )
-                      })}
-                      <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
-                        <Checkbox
-                          checked={showWeekendDays}
-                          onCheckedChange={(value) => setShowWeekendDays(Boolean(value))}
-                        />
-                        <span>Show weekend days</span>
-                      </label>
-                    </div>
-                    {showWeekendDays ? (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {WEEKEND_OPTIONS.map((day) => {
-                          const checked = daysOfWeek.includes(day.value)
-                          return (
-                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
-                              <Checkbox
-                                checked={checked}
-                                onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
-                              />
-                              <span>{day.label}</span>
-                            </label>
-                          )
-                        })}
+                            {departments.map((dept) => (
+                              <SelectItem key={dept.id} value={dept.id}>
+                                {formatDepartmentName(dept.name)} ({dept.code})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    ) : null}
-                    <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
-                  </div>
-                ) : null}
-                {(frequency === "MONTHLY" ||
-                  frequency === "YEARLY" ||
-                  frequency === "3_MONTHS" ||
-                  frequency === "6_MONTHS") && (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Day of month</Label>
-                      <Select value={dayOfMonth} onValueChange={setDayOfMonth}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
-                          <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
-                          {DAY_OF_MONTH_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Month (optional)</Label>
-                      <Select value={monthOfYear} onValueChange={setMonthOfYear}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select month" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={EMPTY_VALUE}>None</SelectItem>
-                          {MONTH_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Description</Label>
+                      <BoldOnlyEditor value={description} onChange={setDescription} />
                     </div>
-                  </div>
-                )}
-                <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
-                  <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                    More details
-                  </summary>
-                  <div className="mt-3 space-y-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {INTERNAL_NOTE_FIELDS.map((field) => (
-                        <div key={field.key} className="space-y-1">
-                          <Label className="text-sm">{field.label}</Label>
-                          <Input
-                            value={internalNotes[field.key] || ""}
-                            onChange={(event) =>
-                              setInternalNoteValue(field.key, event.target.value, setInternalNotes)
-                            }
-                            placeholder={field.placeholder}
-                            className="placeholder:text-muted-foreground/60"
-                          />
-                        </div>
-                      ))}
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>Repeat</Label>
+                        <Select value={frequency} onValueChange={(value) => setFrequency(value as SystemTaskFrequency)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select repeat" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {FREQUENCY_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Finish by (optional)</Label>
+                        <Select
+                          value={finishPeriod}
+                          onValueChange={(value) =>
+                            setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {FINISH_PERIOD_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Priority</Label>
+                        <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PRIORITY_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {PRIORITY_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
-                      <Textarea
-                        value={internalNotes.QA || ""}
-                        onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
-                        placeholder="Type any questions/answers..."
-                        className="placeholder:text-muted-foreground/60"
-                      />
-                    </div>
-                  </div>
-                </details>
-                <div className="space-y-2">
-                  <Label>Assignees (optional)</Label>
-                  {isGlobalScopeValue(departmentId) ? (
-                    assigneeDeptNames.length ? (
-                      <p className="text-[13px] text-muted-foreground">
-                        Departments: {formatDepartmentNames(assigneeDeptNames)}
-                      </p>
-                    ) : (
-                      <p className="text-[13px] text-muted-foreground">
-                        When you select an owner, the department will appear here.
-                      </p>
-                    )
-                  ) : null}
-                  <div className="rounded-lg border border-border/60 bg-white p-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {assigneeIds.map((id) => {
-                        const person = userMap.get(id)
-                        const email = person && "email" in person ? person.email || "" : ""
-                        const label = person?.full_name || person?.username || email || id
-                        return (
-                          <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
-                            <span>{label}</span>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground"
-                              onClick={() => removeAssignee(id)}
-                              aria-label={`Remove ${label}`}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        )
-                      })}
-                      <Input
-                        value={assigneeQuery}
-                        onChange={(event) => setAssigneeQuery(event.target.value)}
-                        onFocus={() => setAssigneeOpen(true)}
-                        onBlur={() => setTimeout(() => setAssigneeOpen(false), 120)}
-                        placeholder="Search users..."
-                        className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
-                      />
-                    </div>
-                    {assigneeOpen ? (
-                      <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
-                        {filteredAssignees.length ? (
-                          filteredAssignees.map((person) => {
-                            const isSelected = assigneeIds.includes(person.id)
-                            const nextIds = isSelected
-                              ? assigneeIds.filter((item) => item !== person.id)
-                              : [...assigneeIds, person.id]
+                    {frequency === "WEEKLY" ? (
+                      <div className="space-y-2">
+                        <Label>Days of week</Label>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {WEEKDAY_OPTIONS.map((day) => {
+                            const checked = daysOfWeek.includes(day.value)
                             return (
-                              <button
-                                key={person.id}
-                                type="button"
-                                className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => handleAssigneesChange(nextIds)}
-                              >
-                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
-                                {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
-                              </button>
+                              <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
+                                />
+                                <span>{day.label}</span>
+                              </label>
                             )
-                          })
-                        ) : (
-                          <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                  {assigneeError ? (
-                    <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
-                  <span className="text-base">Active</span>
-                </div>
-                <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
-                  <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
-                    {saving ? "Saving..." : "Save task"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-            </Dialog>
-
-            {/* EDIT DIALOG */}
-            <Dialog
-              open={editOpen}
-              onOpenChange={(open) => {
-                setEditOpen(open)
-                if (!open) setEditTemplate(null)
-              }}
-            >
-              {/* EDIT DIALOG CONTENT (Same structure as create) */}
-              <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Edit system task</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-5">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Department</Label>
-                    <Select value={editDepartmentId} onValueChange={handleEditDepartmentChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                          <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
-                        {departments.map((dept) => (
-                          <SelectItem key={dept.id} value={dept.id}>
-                            {formatDepartmentName(dept.name)} ({dept.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value.toUpperCase())} />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Repeat</Label>
-                    <Select
-                      value={editFrequency}
-                      onValueChange={(value) => setEditFrequency(value as SystemTaskFrequency)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select repeat" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FREQUENCY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Finish by (optional)</Label>
-                    <Select
-                      value={editFinishPeriod}
-                      onValueChange={(value) =>
-                        setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select period" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                        {FINISH_PERIOD_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {FINISH_PERIOD_LABELS[value]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={editPriority} onValueChange={(value) => setEditPriority(value as TaskPriority)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PRIORITY_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {PRIORITY_LABELS[value]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {editFrequency === "WEEKLY" ? (
-                  <div className="space-y-2">
-                    <Label>Days of week</Label>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {WEEKDAY_OPTIONS.map((day) => {
-                        const checked = editDaysOfWeek.includes(day.value)
-                        return (
-                          <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                          })}
+                          <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
                             <Checkbox
-                              checked={checked}
-                              onCheckedChange={() =>
-                                toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
-                              }
+                              checked={showWeekendDays}
+                              onCheckedChange={(value) => setShowWeekendDays(Boolean(value))}
                             />
-                            <span>{day.label}</span>
+                            <span>Show weekend days</span>
                           </label>
-                        )
-                      })}
-                      <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
-                        <Checkbox
-                          checked={editShowWeekendDays}
-                          onCheckedChange={(value) => setEditShowWeekendDays(Boolean(value))}
-                        />
-                        <span>Show weekend days</span>
-                      </label>
-                    </div>
-                    {editShowWeekendDays ? (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {WEEKEND_OPTIONS.map((day) => {
-                          const checked = editDaysOfWeek.includes(day.value)
-                          return (
-                            <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
-                              <Checkbox
-                                checked={checked}
-                                onCheckedChange={() =>
-                                  toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
-                                }
-                              />
-                              <span>{day.label}</span>
-                            </label>
-                          )
-                        })}
+                        </div>
+                        {showWeekendDays ? (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {WEEKEND_OPTIONS.map((day) => {
+                              const checked = daysOfWeek.includes(day.value)
+                              return (
+                                <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={() => toggleDayValue(day.value, daysOfWeek, setDaysOfWeek)}
+                                  />
+                                  <span>{day.label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                       </div>
                     ) : null}
-                    <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
-                  </div>
-                ) : null}
-                {(editFrequency === "MONTHLY" ||
-                  editFrequency === "YEARLY" ||
-                  editFrequency === "3_MONTHS" ||
-                  editFrequency === "6_MONTHS") && (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Day of month</Label>
-                      <Select value={editDayOfMonth} onValueChange={setEditDayOfMonth}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
-                          <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
-                          {DAY_OF_MONTH_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
+                    {(frequency === "MONTHLY" ||
+                      frequency === "YEARLY" ||
+                      frequency === "3_MONTHS" ||
+                      frequency === "6_MONTHS") && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Day of month</Label>
+                            <Select value={dayOfMonth} onValueChange={setDayOfMonth}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select day" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
+                                <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
+                                {DAY_OF_MONTH_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Month (optional)</Label>
+                            <Select value={monthOfYear} onValueChange={setMonthOfYear}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select month" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={EMPTY_VALUE}>None</SelectItem>
+                                {MONTH_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                    <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                        More details
+                      </summary>
+                      <div className="mt-3 space-y-4">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {INTERNAL_NOTE_FIELDS.map((field) => (
+                            <div key={field.key} className="space-y-1">
+                              <Label className="text-sm">{field.label}</Label>
+                              <Input
+                                value={internalNotes[field.key] || ""}
+                                onChange={(event) =>
+                                  setInternalNoteValue(field.key, event.target.value, setInternalNotes)
+                                }
+                                placeholder={field.placeholder}
+                                className="placeholder:text-muted-foreground/60"
+                              />
+                            </div>
                           ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Month (optional)</Label>
-                      <Select value={editMonthOfYear} onValueChange={setEditMonthOfYear}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select month" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={EMPTY_VALUE}>None</SelectItem>
-                          {MONTH_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-                <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
-                  <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                    More details
-                  </summary>
-                  <div className="mt-3 space-y-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {INTERNAL_NOTE_FIELDS.map((field) => (
-                        <div key={field.key} className="space-y-1">
-                          <Label className="text-sm">{field.label}</Label>
-                          <Input
-                            value={editInternalNotes[field.key] || ""}
-                            onChange={(event) =>
-                              setInternalNoteValue(field.key, event.target.value, setEditInternalNotes)
-                            }
-                            placeholder={field.placeholder}
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Textarea
+                            value={internalNotes.QA || ""}
+                            onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
+                            placeholder="Type any questions/answers..."
                             className="placeholder:text-muted-foreground/60"
                           />
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    </details>
                     <div className="space-y-2">
-                      <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
-                      <Textarea
-                        value={editInternalNotes.QA || ""}
-                        onChange={(event) => setInternalNoteValue("QA", event.target.value, setEditInternalNotes)}
-                        placeholder="Type any questions/answers..."
-                        className="placeholder:text-muted-foreground/60"
-                      />
-                    </div>
-                  </div>
-                </details>
-                <div className="space-y-2">
-                  <Label>Assignees (optional)</Label>
-                  {isGlobalScopeValue(editDepartmentId) ? (
-                    editAssigneeDeptNames.length ? (
-                      <p className="text-[13px] text-muted-foreground">
-                        Departments: {formatDepartmentNames(editAssigneeDeptNames)}
-                      </p>
-                    ) : (
-                      <p className="text-[13px] text-muted-foreground">
-                        When you select an owner, the department will appear here.
-                      </p>
-                    )
-                  ) : null}
-                  <div className="rounded-lg border border-border/60 bg-white p-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {editAssigneeIds.map((id) => {
-                        const person = userMap.get(id)
+                      <Label>Assignees (optional)</Label>
+                      {isGlobalScopeValue(departmentId) ? (
+                        assigneeDeptNames.length ? (
+                          <p className="text-[13px] text-muted-foreground">
+                            Departments: {formatDepartmentNames(assigneeDeptNames)}
+                          </p>
+                        ) : (
+                          <p className="text-[13px] text-muted-foreground">
+                            When you select an owner, the department will appear here.
+                          </p>
+                        )
+                      ) : null}
+                      <div className="rounded-lg border border-border/60 bg-white p-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {assigneeIds.map((id) => {
+                            const person = userMap.get(id)
                             const email = person && "email" in person ? person.email || "" : ""
                             const label = person?.full_name || person?.username || email || id
-                        return (
-                          <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
-                            <span>{label}</span>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground"
-                              onClick={() => removeEditAssignee(id)}
-                              aria-label={`Remove ${label}`}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        )
-                      })}
-                      <Input
-                        value={editAssigneeQuery}
-                        onChange={(event) => setEditAssigneeQuery(event.target.value)}
-                        onFocus={() => setEditAssigneeOpen(true)}
-                        onBlur={() => setTimeout(() => setEditAssigneeOpen(false), 120)}
-                        placeholder="Search users..."
-                        className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
-                      />
-                    </div>
-                    {editAssigneeOpen ? (
-                      <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
-                        {filteredEditAssignees.length ? (
-                          filteredEditAssignees.map((person) => {
-                            const isSelected = editAssigneeIds.includes(person.id)
-                            const nextIds = isSelected
-                              ? editAssigneeIds.filter((item) => item !== person.id)
-                              : [...editAssigneeIds, person.id]
                             return (
-                              <button
-                                key={person.id}
-                                type="button"
-                                className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => handleEditAssigneesChange(nextIds)}
-                              >
-                                <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
-                                {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
-                              </button>
+                              <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                                <span>{label}</span>
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  onClick={() => removeAssignee(id)}
+                                  aria-label={`Remove ${label}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
                             )
-                          })
-                        ) : (
-                          <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
-                        )}
+                          })}
+                          <Input
+                            value={assigneeQuery}
+                            onChange={(event) => setAssigneeQuery(event.target.value)}
+                            onFocus={() => setAssigneeOpen(true)}
+                            onBlur={() => setTimeout(() => setAssigneeOpen(false), 120)}
+                            placeholder="Search users..."
+                            className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
+                          />
+                        </div>
+                        {assigneeOpen ? (
+                          <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
+                            {filteredAssignees.length ? (
+                              filteredAssignees.map((person) => {
+                                const isSelected = assigneeIds.includes(person.id)
+                                const nextIds = isSelected
+                                  ? assigneeIds.filter((item) => item !== person.id)
+                                  : [...assigneeIds, person.id]
+                                return (
+                                  <button
+                                    key={person.id}
+                                    type="button"
+                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => handleAssigneesChange(nextIds)}
+                                  >
+                                    <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
+                                    {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
+                                  </button>
+                                )
+                              })
+                            ) : (
+                              <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                      {assigneeError ? (
+                        <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
+                      <span className="text-base">Active</span>
+                    </div>
+                    <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
+                      <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
+                        {saving ? "Saving..." : "Save task"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* EDIT DIALOG */}
+              <Dialog
+                open={editOpen}
+                onOpenChange={(open) => {
+                  setEditOpen(open)
+                  if (!open) setEditTemplate(null)
+                }}
+              >
+                {/* EDIT DIALOG CONTENT (Same structure as create) */}
+                <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>Edit system task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select value={editDepartmentId} onValueChange={handleEditDepartmentChange}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
+                            <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
+                            {departments.map((dept) => (
+                              <SelectItem key={dept.id} value={dept.id}>
+                                {formatDepartmentName(dept.name)} ({dept.code})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value.toUpperCase())} />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>Repeat</Label>
+                        <Select
+                          value={editFrequency}
+                          onValueChange={(value) => setEditFrequency(value as SystemTaskFrequency)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select repeat" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {FREQUENCY_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Finish by (optional)</Label>
+                        <Select
+                          value={editFinishPeriod}
+                          onValueChange={(value) =>
+                            setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {FINISH_PERIOD_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Priority</Label>
+                        <Select value={editPriority} onValueChange={(value) => setEditPriority(value as TaskPriority)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PRIORITY_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {PRIORITY_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {editFrequency === "WEEKLY" ? (
+                      <div className="space-y-2">
+                        <Label>Days of week</Label>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {WEEKDAY_OPTIONS.map((day) => {
+                            const checked = editDaysOfWeek.includes(day.value)
+                            return (
+                              <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() =>
+                                    toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
+                                  }
+                                />
+                                <span>{day.label}</span>
+                              </label>
+                            )
+                          })}
+                          <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-start-2 lg:col-start-3">
+                            <Checkbox
+                              checked={editShowWeekendDays}
+                              onCheckedChange={(value) => setEditShowWeekendDays(Boolean(value))}
+                            />
+                            <span>Show weekend days</span>
+                          </label>
+                        </div>
+                        {editShowWeekendDays ? (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {WEEKEND_OPTIONS.map((day) => {
+                              const checked = editDaysOfWeek.includes(day.value)
+                              return (
+                                <label key={day.value} className="flex items-center gap-2 text-sm text-slate-700">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={() =>
+                                      toggleDayValue(day.value, editDaysOfWeek, setEditDaysOfWeek)
+                                    }
+                                  />
+                                  <span>{day.label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        <p className="text-[12px] text-muted-foreground">Select one or more days.</p>
                       </div>
                     ) : null}
+                    {(editFrequency === "MONTHLY" ||
+                      editFrequency === "YEARLY" ||
+                      editFrequency === "3_MONTHS" ||
+                      editFrequency === "6_MONTHS") && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Day of month</Label>
+                            <Select value={editDayOfMonth} onValueChange={setEditDayOfMonth}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select day" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={FIRST_WORKING_DAY_VALUE}>First working day</SelectItem>
+                                <SelectItem value={END_OF_MONTH_VALUE}>End of month/year</SelectItem>
+                                {DAY_OF_MONTH_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Month (optional)</Label>
+                            <Select value={editMonthOfYear} onValueChange={setEditMonthOfYear}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select month" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={EMPTY_VALUE}>None</SelectItem>
+                                {MONTH_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                    <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                        More details
+                      </summary>
+                      <div className="mt-3 space-y-4">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {INTERNAL_NOTE_FIELDS.map((field) => (
+                            <div key={field.key} className="space-y-1">
+                              <Label className="text-sm">{field.label}</Label>
+                              <Input
+                                value={editInternalNotes[field.key] || ""}
+                                onChange={(event) =>
+                                  setInternalNoteValue(field.key, event.target.value, setEditInternalNotes)
+                                }
+                                placeholder={field.placeholder}
+                                className="placeholder:text-muted-foreground/60"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Textarea
+                            value={editInternalNotes.QA || ""}
+                            onChange={(event) => setInternalNoteValue("QA", event.target.value, setEditInternalNotes)}
+                            placeholder="Type any questions/answers..."
+                            className="placeholder:text-muted-foreground/60"
+                          />
+                        </div>
+                      </div>
+                    </details>
+                    <div className="space-y-2">
+                      <Label>Assignees (optional)</Label>
+                      {isGlobalScopeValue(editDepartmentId) ? (
+                        editAssigneeDeptNames.length ? (
+                          <p className="text-[13px] text-muted-foreground">
+                            Departments: {formatDepartmentNames(editAssigneeDeptNames)}
+                          </p>
+                        ) : (
+                          <p className="text-[13px] text-muted-foreground">
+                            When you select an owner, the department will appear here.
+                          </p>
+                        )
+                      ) : null}
+                      <div className="rounded-lg border border-border/60 bg-white p-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {editAssigneeIds.map((id) => {
+                            const person = userMap.get(id)
+                            const email = person && "email" in person ? person.email || "" : ""
+                            const label = person?.full_name || person?.username || email || id
+                            return (
+                              <span key={id} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                                <span>{label}</span>
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  onClick={() => removeEditAssignee(id)}
+                                  aria-label={`Remove ${label}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            )
+                          })}
+                          <Input
+                            value={editAssigneeQuery}
+                            onChange={(event) => setEditAssigneeQuery(event.target.value)}
+                            onFocus={() => setEditAssigneeOpen(true)}
+                            onBlur={() => setTimeout(() => setEditAssigneeOpen(false), 120)}
+                            placeholder="Search users..."
+                            className="h-8 min-w-[180px] border-0 px-0 focus-visible:ring-0"
+                          />
+                        </div>
+                        {editAssigneeOpen ? (
+                          <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-white shadow-sm">
+                            {filteredEditAssignees.length ? (
+                              filteredEditAssignees.map((person) => {
+                                const isSelected = editAssigneeIds.includes(person.id)
+                                const nextIds = isSelected
+                                  ? editAssigneeIds.filter((item) => item !== person.id)
+                                  : [...editAssigneeIds, person.id]
+                                return (
+                                  <button
+                                    key={person.id}
+                                    type="button"
+                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => handleEditAssigneesChange(nextIds)}
+                                  >
+                                    <span>{person.full_name || person.username || ("email" in person ? person.email : "")}</span>
+                                    {isSelected ? <span className="text-xs text-muted-foreground">Selected</span> : null}
+                                  </button>
+                                )
+                              })
+                            ) : (
+                              <div className="px-2 py-2 text-sm text-muted-foreground">No users found.</div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                      {editAssigneeError ? (
+                        <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
+                      <span className="text-base">Active</span>
+                    </div>
+                    <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
+                      <Button variant="outline" onClick={() => setEditOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={editSaving || !editTitle.trim() || !editDepartmentId}
+                        onClick={() => void submitEdit()}
+                      >
+                        {editSaving ? "Saving..." : "Save changes"}
+                      </Button>
+                    </div>
                   </div>
-                  {editAssigneeError ? (
-                    <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
-                  <span className="text-base">Active</span>
-                </div>
-                <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
-                  <Button variant="outline" onClick={() => setEditOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    disabled={editSaving || !editTitle.trim() || !editDepartmentId}
-                    onClick={() => void submitEdit()}
-                  >
-                    {editSaving ? "Saving..." : "Save changes"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-            </Dialog>
+                </DialogContent>
+              </Dialog>
 
-            {!canCreate ? (
-              <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
-            ) : null}
-          </div>
+              {!canCreate ? (
+                <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -2438,24 +2437,24 @@ export function SystemTasksView({
                         const frequencyLabel =
                           FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
                           template.frequency
-                        
+
                         const isInactive = template.is_active === false
                         const showInactiveDivider =
                           isInactive && (index === 0 || section.templates[index - 1]?.is_active !== false)
-                        
+
                         // Grouping Logic
                         const prev = index > 0 ? section.templates[index - 1] : null
                         const prevPriority = prev ? normalizePriority(prev.priority) : null
-                          const showFrequencyDivider =
-                            !isInactive &&
-                            (index === 0 || (prev && prev.frequency !== template.frequency))
+                        const showFrequencyDivider =
+                          !isInactive &&
+                          (index === 0 || (prev && prev.frequency !== template.frequency))
 
-                          const showPriorityDivider =
-                            !isInactive &&
-                            !showFrequencyDivider &&
-                            prevPriority !== null &&
-                            prevPriority !== priorityValue &&
-                            priorityValue === "HIGH"
+                        const showPriorityDivider =
+                          !isInactive &&
+                          !showFrequencyDivider &&
+                          prevPriority !== null &&
+                          prevPriority !== priorityValue &&
+                          priorityValue === "HIGH"
 
                         return (
                           <React.Fragment key={template.id}>
@@ -2499,18 +2498,18 @@ export function SystemTasksView({
                                   </Badge>
                                 </div>
                               </div>
-                              
+
                               <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
                                 {departmentLabel}
                               </div>
-                              
+
                               <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
                                 {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
                               </div>
 
                               <div>
                                 <span className="text-sm text-slate-700 font-normal">
-                                    {frequencyLabel}
+                                  {frequencyLabel}
                                 </span>
                               </div>
 

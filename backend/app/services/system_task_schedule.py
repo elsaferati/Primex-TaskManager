@@ -73,7 +73,7 @@ def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
 def should_reopen_system_task(
     task: Task, template: SystemTaskTemplate, now: datetime
 ) -> bool:
-    if task.status not in (TaskStatus.DONE, TaskStatus.CANCELLED):
+    if task.status != TaskStatus.DONE:
         return False
     if task.completed_at is None:
         return False

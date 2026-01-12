@@ -163,7 +163,7 @@ async def list_tasks(
     if due_to:
         stmt = stmt.where(Task.due_date <= due_to)
     if not include_done:
-        stmt = stmt.where(Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]))
+        stmt = stmt.where(Task.status != TaskStatus.DONE)
 
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
@@ -233,6 +233,7 @@ async def create_task(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency task not found")
         if dependency_task.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency must be in the same project")
+        task.dependency_task_id = payload.dependency_task_id
 
     if payload.ga_note_origin_id is not None:
         ga_note = (
@@ -266,9 +267,9 @@ async def create_task(
 
     status_value = payload.status or TaskStatus.TODO
     priority_value = payload.priority or TaskPriority.NORMAL
-    phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.TAKIMET)
+    phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
     completed_at = payload.completed_at
-    if completed_at is None and status_value in (TaskStatus.DONE, TaskStatus.CANCELLED):
+    if completed_at is None and status_value == TaskStatus.DONE:
         completed_at = datetime.now(timezone.utc)
 
     task = Task(
@@ -541,7 +542,7 @@ async def update_task(
 
     if payload.status is not None and payload.status != task.status:
         task.status = payload.status
-        if task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+        if task.status == TaskStatus.DONE:
             task.completed_at = datetime.now(timezone.utc)
         else:
             task.completed_at = None
@@ -658,5 +659,3 @@ async def deactivate_task(
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     return _task_to_out(task, assignee_map.get(task.id, []))
-
-
