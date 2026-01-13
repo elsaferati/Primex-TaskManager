@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
+from app.models.project import Project
 from app.schemas.checklist import ChecklistWithItemsOut
 from app.schemas.checklist_item import ChecklistItemAssigneeOut, ChecklistItemOut
 
@@ -47,15 +51,26 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
 
 @router.get("", response_model=list[ChecklistWithItemsOut])
 async def list_checklists(
+    project_id: uuid.UUID | None = None,
     group_key: str | None = None,
     meeting_only: bool = False,
+    template_only: bool = False,
     include_items: bool = True,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[ChecklistWithItemsOut]:
     stmt = select(Checklist)
+    if project_id is not None:
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if project.department_id is not None:
+            ensure_department_access(user, project.department_id)
+        stmt = stmt.where(Checklist.project_id == project_id)
     if meeting_only:
         stmt = stmt.where(Checklist.group_key.isnot(None))
+    if template_only:
+        stmt = stmt.where(Checklist.project_id.is_(None))
     if group_key is not None:
         stmt = stmt.where(Checklist.group_key == group_key)
     if include_items:

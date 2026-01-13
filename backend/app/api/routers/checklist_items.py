@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -96,6 +96,8 @@ class ChecklistItemCreateWithProject(BaseModel):
     """Wrapper to support project_id in create payload."""
     project_id: uuid.UUID | None = None
     checklist_id: uuid.UUID | None = None
+    group_key: str | None = None
+    checklist_title: str | None = None
     item_type: ChecklistItemType
     position: int | None = None
     path: str | None = None
@@ -146,13 +148,39 @@ async def create_checklist_item(
         if project.department_id is not None:
             ensure_department_access(user, project.department_id)
 
-        checklist = (
-            await db.execute(select(Checklist).where(Checklist.project_id == payload.project_id))
-        ).scalar_one_or_none()
-        if checklist is None:
-            checklist = Checklist(project_id=payload.project_id, title="Checklist")
-            db.add(checklist)
-            await db.flush()
+        if payload.group_key is not None:
+            # Structured/grouped checklist (admin-managed template-style checklists)
+            if user.role != "ADMIN":
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            checklist = (
+                await db.execute(
+                    select(Checklist).where(
+                        Checklist.project_id == payload.project_id,
+                        Checklist.group_key == payload.group_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if checklist is None:
+                checklist = Checklist(
+                    project_id=payload.project_id,
+                    title=payload.checklist_title or payload.group_key,
+                    group_key=payload.group_key,
+                )
+                db.add(checklist)
+                await db.flush()
+        else:
+            # Default checklist for ad-hoc items (avoid colliding with structured/grouped checklists)
+            checklist = (
+                await db.execute(
+                    select(Checklist)
+                    .where(Checklist.project_id == payload.project_id, Checklist.group_key.is_(None))
+                    .order_by(Checklist.created_at)
+                )
+            ).scalars().first()
+            if checklist is None:
+                checklist = Checklist(project_id=payload.project_id, title="Checklist")
+                db.add(checklist)
+                await db.flush()
 
     if checklist is None and payload.checklist_id is not None:
         checklist = (
@@ -182,6 +210,13 @@ async def create_checklist_item(
             )
         ).scalars().first()
         position = (max_position + 1) if max_position is not None else 0
+    else:
+        # Insert by position: shift existing items down to keep numbering consistent.
+        await db.execute(
+            update(ChecklistItem)
+            .where(ChecklistItem.checklist_id == checklist.id, ChecklistItem.position >= position)
+            .values(position=ChecklistItem.position + 1)
+        )
 
     item = ChecklistItem(
         checklist_id=checklist.id,
@@ -261,7 +296,34 @@ async def update_checklist_item(
     if payload.item_type is not None:
         item.item_type = payload.item_type
     if payload.position is not None:
-        item.position = payload.position
+        new_pos = payload.position
+        old_pos = item.position
+        if new_pos != old_pos and item.checklist_id is not None:
+            if new_pos > old_pos:
+                # Moving down: pull intervening items up.
+                await db.execute(
+                    update(ChecklistItem)
+                    .where(
+                        ChecklistItem.checklist_id == item.checklist_id,
+                        ChecklistItem.position > old_pos,
+                        ChecklistItem.position <= new_pos,
+                        ChecklistItem.id != item.id,
+                    )
+                    .values(position=ChecklistItem.position - 1)
+                )
+            else:
+                # Moving up: push intervening items down.
+                await db.execute(
+                    update(ChecklistItem)
+                    .where(
+                        ChecklistItem.checklist_id == item.checklist_id,
+                        ChecklistItem.position >= new_pos,
+                        ChecklistItem.position < old_pos,
+                        ChecklistItem.id != item.id,
+                    )
+                    .values(position=ChecklistItem.position + 1)
+                )
+            item.position = new_pos
     if payload.path is not None:
         item.path = payload.path
     if payload.keyword is not None:
@@ -336,6 +398,18 @@ async def delete_checklist_item(
             if project and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
 
+    deleted_checklist_id = item.checklist_id
+    deleted_position = item.position
     await db.delete(item)
+    # Keep numbering contiguous.
+    if deleted_checklist_id is not None:
+        await db.execute(
+            update(ChecklistItem)
+            .where(
+                ChecklistItem.checklist_id == deleted_checklist_id,
+                ChecklistItem.position > deleted_position,
+            )
+            .values(position=ChecklistItem.position - 1)
+        )
     await db.commit()
     return {"ok": True}

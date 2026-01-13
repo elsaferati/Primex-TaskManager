@@ -10,9 +10,12 @@ from sqlalchemy import select
 from app.auth.security import get_password_hash
 from app.db import SessionLocal
 from app.models.department import Department
-from app.models.enums import ProjectPhaseStatus, TaskStatus, UserRole
+from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus, UserRole
+from app.models.checklist import Checklist
+from app.models.checklist_item import ChecklistItem
 from app.models.project import Project
 from app.models.user import User
+from app.models.enums import ChecklistItemType
 
 # 2. Load environment variables immediately
 load_dotenv()
@@ -30,6 +33,7 @@ PCM_PROJECTS = [
         "status": TaskStatus.IN_PROGRESS,
         "current_phase": ProjectPhaseStatus.PLANNING,
         "progress_percentage": 48,
+        "project_type": ProjectType.MST.value,
     },
     {
         "title": "VS/VL",
@@ -60,6 +64,20 @@ PCM_PROJECTS = [
         "progress_percentage": 100,
     },
 ]
+
+GD_PROJECTS = [
+    {
+        "title": "MST",
+        "description": "MST (Graphic Design) with phases: Planning, Product, Control, Final.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.PLANNING,
+        "progress_percentage": 0,
+        "project_type": ProjectType.MST.value,
+    }
+]
+
+MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
+MST_PLANNING_GA_MEETING_GROUP_KEY = "MST_PLANNING_GA_MEETING"
 
 
 async def seed() -> None:
@@ -101,6 +119,7 @@ async def seed() -> None:
                         title=project["title"],
                         description=project["description"],
                         department_id=pcm_department.id,
+                        project_type=project.get("project_type"),
                         status=project["status"],
                         current_phase=project["current_phase"],
                         progress_percentage=project["progress_percentage"],
@@ -108,6 +127,82 @@ async def seed() -> None:
                 )
             await db.commit()
             print("PCM projects seeded.")
+
+        gd_department = next((dept for dept in departments if dept.name == "Graphic Design"), None)
+        if gd_department:
+            existing_gd = (
+                await db.execute(select(Project).where(Project.department_id == gd_department.id))
+            ).scalars().all()
+            existing_titles = {p.title for p in existing_gd}
+            for project in GD_PROJECTS:
+                if project["title"] in existing_titles:
+                    continue
+                db.add(
+                    Project(
+                        title=project["title"],
+                        description=project["description"],
+                        department_id=gd_department.id,
+                        project_type=project.get("project_type"),
+                        status=project["status"],
+                        current_phase=project["current_phase"],
+                        progress_percentage=project["progress_percentage"],
+                    )
+                )
+            await db.commit()
+            print("Graphic Design projects seeded.")
+
+        # --- Seed MST checklist templates (global) ---
+        templates = (await db.execute(select(Checklist).where(Checklist.project_id.is_(None)))).scalars().all()
+        template_by_key = {c.group_key: c for c in templates if c.group_key}
+
+        async def ensure_template(group_key: str, title: str) -> Checklist:
+            checklist = template_by_key.get(group_key)
+            if checklist is None:
+                checklist = Checklist(title=title, group_key=group_key, position=0)
+                db.add(checklist)
+                await db.flush()
+                template_by_key[group_key] = checklist
+            return checklist
+
+        await ensure_template(
+            MST_PLANNING_ACCEPTANCE_GROUP_KEY,
+            "MST Planning - Project Acceptance (Template)",
+        )
+        await ensure_template(
+            MST_PLANNING_GA_MEETING_GROUP_KEY,
+            "MST Planning - GA Meeting (Template)",
+        )
+        await db.commit()
+        print("MST checklist templates seeded.")
+
+        # --- Ensure MST checklist instances exist for MST projects (EMPTY by default) ---
+        mst_projects = (
+            await db.execute(select(Project).where(Project.project_type == ProjectType.MST.value))
+        ).scalars().all()
+
+        for proj in mst_projects:
+            if proj.department_id is None:
+                continue
+
+            # Fetch or create project checklists by group_key
+            existing_proj_checklists = (
+                await db.execute(select(Checklist).where(Checklist.project_id == proj.id))
+            ).scalars().all()
+            by_key = {c.group_key: c for c in existing_proj_checklists if c.group_key}
+
+            for group_key, title in [
+                (MST_PLANNING_ACCEPTANCE_GROUP_KEY, "Project Acceptance"),
+                (MST_PLANNING_GA_MEETING_GROUP_KEY, "GA Meeting"),
+            ]:
+                proj_checklist = by_key.get(group_key)
+                if proj_checklist is None:
+                    proj_checklist = Checklist(project_id=proj.id, title=title, group_key=group_key)
+                    db.add(proj_checklist)
+                    await db.flush()
+                    by_key[group_key] = proj_checklist
+
+        await db.commit()
+        print("MST project checklist instances ensured.")
 
         # --- Seed Admin User ---
         admin_email = os.getenv("ADMIN_EMAIL")
