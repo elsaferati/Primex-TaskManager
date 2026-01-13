@@ -1330,7 +1330,7 @@ export default function DepartmentKanban() {
                             )}
                           </div>
 
-                          <Link href={`/projects/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
+                          <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
                             View <span aria-hidden="true">&rarr;</span>
                           </Link>
                         </div>

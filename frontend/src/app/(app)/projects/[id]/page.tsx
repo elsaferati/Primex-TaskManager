@@ -18,13 +18,18 @@ import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
-const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const GENERAL_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
+
 const PHASE_LABELS: Record<string, string> = {
   MEETINGS: "Meetings",
   PLANNING: "Planning",
   DEVELOPMENT: "Development",
   TESTING: "Testing",
   DOCUMENTATION: "Documentation",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
   CLOSED: "Closed",
 }
 
@@ -32,6 +37,8 @@ const TABS = [
   { id: "description", label: "Description" },
   { id: "tasks", label: "Tasks" },
   { id: "checklists", label: "Checklists" },
+  { id: "mst-acceptance", label: "Project Acceptance" },
+  { id: "mst-ga-meeting", label: "GA Meeting" },
   { id: "members", label: "Members" },
   { id: "ga", label: "GA/KA Notes" },
   { id: "prompts", label: "Prompts" },
@@ -68,6 +75,9 @@ const DOCUMENTATION_CHECKLIST_QUESTIONS = [
   "Did you follow the documentation template?",
   "Did you save it as files?",
 ]
+
+const MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
+const MST_PLANNING_GA_MEETING_GROUP_KEY = "MST_PLANNING_GA_MEETING"
 
 function initials(src: string) {
   return src
@@ -162,6 +172,22 @@ export default function ProjectPage() {
       isChecked: false,
     }))
   )
+  const [mstAcceptanceChecklist, setMstAcceptanceChecklist] = React.useState<ChecklistItem[]>([])
+  const [mstGaMeetingChecklist, setMstGaMeetingChecklist] = React.useState<ChecklistItem[]>([])
+  const [mstAcceptanceNewText, setMstAcceptanceNewText] = React.useState("")
+  const [mstAcceptanceNewNumber, setMstAcceptanceNewNumber] = React.useState("")
+  const [mstAcceptanceEditingId, setMstAcceptanceEditingId] = React.useState<string | null>(null)
+  const [mstAcceptanceEditingText, setMstAcceptanceEditingText] = React.useState("")
+  const [mstAcceptanceSaving, setMstAcceptanceSaving] = React.useState(false)
+  const [mstGaMeetingNewText, setMstGaMeetingNewText] = React.useState("")
+  const [mstGaMeetingNewNumber, setMstGaMeetingNewNumber] = React.useState("")
+  const [mstGaMeetingEditingId, setMstGaMeetingEditingId] = React.useState<string | null>(null)
+  const [mstGaMeetingEditingText, setMstGaMeetingEditingText] = React.useState("")
+  const [mstGaMeetingSaving, setMstGaMeetingSaving] = React.useState(false)
+  const [mstAcceptanceCommentEditingId, setMstAcceptanceCommentEditingId] = React.useState<string | null>(null)
+  const [mstAcceptanceCommentText, setMstAcceptanceCommentText] = React.useState("")
+  const [mstGaMeetingCommentEditingId, setMstGaMeetingCommentEditingId] = React.useState<string | null>(null)
+  const [mstGaMeetingCommentText, setMstGaMeetingCommentText] = React.useState("")
   const [documentationChecklist, setDocumentationChecklist] = React.useState(() =>
     DOCUMENTATION_CHECKLIST_QUESTIONS.map((question, index) => ({
       id: `doc-${index}`,
@@ -392,6 +418,21 @@ export default function ProjectPage() {
     )
   }
 
+  const toggleChecklistDbItem = async (item: ChecklistItem, next: boolean) => {
+    const res = await apiFetch(`/checklist-items/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_checked: next }),
+    })
+    if (!res.ok) {
+      toast.error("Failed to update checklist")
+      return
+    }
+    const updated = (await res.json()) as ChecklistItem
+    setMstAcceptanceChecklist((prev) => prev.map((it) => (it.id === updated.id ? updated : it)))
+    setMstGaMeetingChecklist((prev) => prev.map((it) => (it.id === updated.id ? updated : it)))
+  }
+
   const toggleDocumentationChecklistItem = (itemId: string, next: boolean) => {
     setDocumentationChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
@@ -451,6 +492,8 @@ export default function ProjectPage() {
     if (!project) return
     const currentPhase = project.current_phase || "MEETINGS"
     const isMeetingPhase = currentPhase === "MEETINGS"
+    const projectTitle = (project.title || project.name || "").toUpperCase()
+    const isMst = project.project_type === "MST" || projectTitle.includes("MST")
     const openTasks = tasks.filter(
       (task) =>
         task.status !== "DONE" &&
@@ -459,11 +502,20 @@ export default function ProjectPage() {
     )
     const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
-    if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length) {
+    const uncheckedMstPlanning =
+      isMst && currentPhase === "PLANNING"
+        ? [
+            ...mstAcceptanceChecklist.filter((item) => item.item_type === "CHECKBOX" && !item.is_checked),
+            ...mstGaMeetingChecklist.filter((item) => item.item_type === "CHECKBOX" && !item.is_checked),
+          ]
+        : []
+
+    if (openTasks.length || uncheckedItems.length || uncheckedMeeting.length || uncheckedMstPlanning.length) {
       const blockers: string[] = []
       if (openTasks.length) blockers.push(`${openTasks.length} detyra te hapura`)
       if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist te pa kryera`)
       if (uncheckedMeeting.length) blockers.push(`${uncheckedMeeting.length} checklist te takimeve te pa kryera`)
+      if (uncheckedMstPlanning.length) blockers.push(`${uncheckedMstPlanning.length} checklist te planifikimit te pa kryera`)
       toast.error(`Ka ${blockers.join(" dhe ")}.`)
       return
     }
@@ -549,6 +601,8 @@ export default function ProjectPage() {
   }
 
   const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
+  const titleUpper = (project?.title || project?.name || "").toUpperCase()
+  const isMstProject = project?.project_type === "MST" || titleUpper.includes("MST")
   const visibleTabs = React.useMemo(() => {
     if (phaseValue === "MEETINGS") {
       return [
@@ -558,21 +612,32 @@ export default function ProjectPage() {
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "PLANIFIKIMI") {
+    if (phaseValue === "PLANNING") {
+      if (isMstProject) {
+        return TABS.filter((tab) =>
+          tab.id === "description" ||
+          tab.id === "tasks" ||
+          tab.id === "mst-acceptance" ||
+          tab.id === "mst-ga-meeting" ||
+          tab.id === "members" ||
+          tab.id === "checklists" ||
+          tab.id === "ga"
+        )
+      }
       return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
     }
-    if (phaseValue === "ZHVILLIMI") {
+    if (phaseValue === "DEVELOPMENT") {
       return [
         ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "TESTIMI") {
+    if (phaseValue === "TESTING") {
       return TABS.filter(
         (tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts"
       )
     }
-    if (phaseValue === "DOKUMENTIMI") {
+    if (phaseValue === "DOCUMENTATION") {
       return TABS.filter(
         (tab) =>
           tab.id !== "description" &&
@@ -580,6 +645,10 @@ export default function ProjectPage() {
           tab.id !== "members" &&
           tab.id !== "prompts"
       )
+    }
+    if (isMstProject) {
+      // Outside PLANNING, hide the MST-only checklist tabs.
+      return TABS.filter((tab) => tab.id !== "mst-acceptance" && tab.id !== "mst-ga-meeting")
     }
     return TABS
   }, [phaseValue])
@@ -590,6 +659,246 @@ export default function ProjectPage() {
       setActiveTab(visibleTabs[0].id)
     }
   }, [activeTab, visibleTabs])
+
+  React.useEffect(() => {
+    if (!project) return
+    if (!isMstProject) return
+    if (phaseValue !== "PLANNING") return
+    const loadMstChecklists = async () => {
+      const [accRes, gaRes] = await Promise.all([
+        apiFetch(`/checklists?project_id=${project.id}&group_key=${MST_PLANNING_ACCEPTANCE_GROUP_KEY}&include_items=true`),
+        apiFetch(`/checklists?project_id=${project.id}&group_key=${MST_PLANNING_GA_MEETING_GROUP_KEY}&include_items=true`),
+      ])
+      if (accRes.ok) {
+        const data = (await accRes.json()) as { items?: ChecklistItem[] }[]
+        setMstAcceptanceChecklist(data?.[0]?.items || [])
+      }
+      if (gaRes.ok) {
+        const data = (await gaRes.json()) as { items?: ChecklistItem[] }[]
+        setMstGaMeetingChecklist(data?.[0]?.items || [])
+      }
+    }
+    void loadMstChecklists()
+  }, [apiFetch, project, isMstProject, phaseValue])
+
+  const reloadMstPlanningChecklists = React.useCallback(async () => {
+    if (!project) return
+    const [accRes, gaRes] = await Promise.all([
+      apiFetch(`/checklists?project_id=${project.id}&group_key=${MST_PLANNING_ACCEPTANCE_GROUP_KEY}&include_items=true`),
+      apiFetch(`/checklists?project_id=${project.id}&group_key=${MST_PLANNING_GA_MEETING_GROUP_KEY}&include_items=true`),
+    ])
+    if (accRes.ok) {
+      const data = (await accRes.json()) as { items?: ChecklistItem[] }[]
+      setMstAcceptanceChecklist(data?.[0]?.items || [])
+    }
+    if (gaRes.ok) {
+      const data = (await gaRes.json()) as { items?: ChecklistItem[] }[]
+      setMstGaMeetingChecklist(data?.[0]?.items || [])
+    }
+  }, [apiFetch, project])
+
+  const isAdmin = user?.role === "ADMIN"
+
+  const addMstAcceptanceItem = async () => {
+    if (!project) return
+    const text = mstAcceptanceNewText.trim()
+    if (!text) return
+    const rawNumber = mstAcceptanceNewNumber.trim()
+    const position =
+      rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setMstAcceptanceSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          group_key: MST_PLANNING_ACCEPTANCE_GROUP_KEY,
+          checklist_title: "Project Acceptance",
+          item_type: "CHECKBOX",
+          title: text,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setMstAcceptanceNewText("")
+      setMstAcceptanceNewNumber("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstAcceptanceSaving(false)
+    }
+  }
+
+  const startEditMstAcceptanceItem = (item: ChecklistItem) => {
+    setMstAcceptanceEditingId(item.id)
+    setMstAcceptanceEditingText(item.title || "")
+  }
+
+  const saveEditMstAcceptanceItem = async () => {
+    if (!mstAcceptanceEditingId) return
+    const text = mstAcceptanceEditingText.trim()
+    if (!text) return
+    setMstAcceptanceSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstAcceptanceEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setMstAcceptanceEditingId(null)
+      setMstAcceptanceEditingText("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstAcceptanceSaving(false)
+    }
+  }
+
+  const deleteMstAcceptanceItem = async (itemId: string) => {
+    setMstAcceptanceSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstAcceptanceSaving(false)
+    }
+  }
+
+  const addMstGaMeetingItem = async () => {
+    if (!project || !mstGaMeetingNewText.trim()) return
+    const text = mstGaMeetingNewText.trim()
+    const position = mstGaMeetingNewNumber.trim() ? parseInt(mstGaMeetingNewNumber.trim(), 10) - 1 : mstGaMeetingChecklist.length
+    if (isNaN(position) || position < 0) {
+      toast.error("Invalid position number")
+      return
+    }
+    setMstGaMeetingSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          group_key: MST_PLANNING_GA_MEETING_GROUP_KEY,
+          checklist_title: "GA Meeting",
+          item_type: "CHECKBOX",
+          title: text,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setMstGaMeetingNewText("")
+      setMstGaMeetingNewNumber("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstGaMeetingSaving(false)
+    }
+  }
+
+  const startEditMstGaMeetingItem = (item: ChecklistItem) => {
+    setMstGaMeetingEditingId(item.id)
+    setMstGaMeetingEditingText(item.title || "")
+  }
+
+  const saveEditMstGaMeetingItem = async () => {
+    if (!mstGaMeetingEditingId) return
+    const text = mstGaMeetingEditingText.trim()
+    if (!text) return
+    setMstGaMeetingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstGaMeetingEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setMstGaMeetingEditingId(null)
+      setMstGaMeetingEditingText("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstGaMeetingSaving(false)
+    }
+  }
+
+  const deleteMstGaMeetingItem = async (itemId: string) => {
+    setMstGaMeetingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstGaMeetingSaving(false)
+    }
+  }
+
+  const startEditMstAcceptanceComment = (item: ChecklistItem) => {
+    setMstAcceptanceCommentEditingId(item.id)
+    setMstAcceptanceCommentText(item.comment || "")
+  }
+
+  const saveMstAcceptanceComment = async (itemId: string) => {
+    setMstAcceptanceSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: mstAcceptanceCommentText.trim() || null }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to save comment")
+        return
+      }
+      setMstAcceptanceCommentEditingId(null)
+      setMstAcceptanceCommentText("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstAcceptanceSaving(false)
+    }
+  }
+
+  const startEditMstGaMeetingComment = (item: ChecklistItem) => {
+    setMstGaMeetingCommentEditingId(item.id)
+    setMstGaMeetingCommentText(item.comment || "")
+  }
+
+  const saveMstGaMeetingComment = async (itemId: string) => {
+    setMstGaMeetingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: mstGaMeetingCommentText.trim() || null }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to save comment")
+        return
+      }
+      setMstGaMeetingCommentEditingId(null)
+      setMstGaMeetingCommentText("")
+      await reloadMstPlanningChecklists()
+    } finally {
+      setMstGaMeetingSaving(false)
+    }
+  }
 
   const activePhase = phaseValue
   const visibleTasks = React.useMemo(
@@ -605,8 +914,10 @@ export default function ProjectPage() {
 
   const title = project.title || project.name || "Project"
   const phase = project.current_phase || "MEETINGS"
-  const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-  const canClosePhase = phase !== "MBYLLUR"
+
+  const phaseSteps: string[] = isMstProject ? [...MST_PHASES, "CLOSED"] : [...GENERAL_PHASES, "CLOSED"]
+  const phaseIndex = phaseSteps.indexOf(phase)
+  const canClosePhase = phase !== "CLOSED"
   const userMap = new Map(
     [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
   )
@@ -666,10 +977,10 @@ export default function ProjectPage() {
             </Badge>
           </div>
           <div className="mt-3 text-sm text-muted-foreground">
-            {PHASES.map((p, idx) => {
+            {phaseSteps.map((p, idx) => {
               const isViewed = p === activePhase
               const isCurrent = p === phase
-              const isLocked = idx > phaseIndex
+              const isLocked = phaseIndex !== -1 && idx > phaseIndex
               return (
                 <span key={p}>
                   <button
@@ -691,9 +1002,9 @@ export default function ProjectPage() {
                     aria-pressed={isViewed}
                     disabled={isLocked}
                   >
-                    {PHASE_LABELS[p]}
+                    {PHASE_LABELS[p] || p}
                   </button>
-                  {idx < PHASES.length - 1 ? " -> " : ""}
+                  {idx < phaseSteps.length - 1 ? " -> " : ""}
                 </span>
               )
             })}
@@ -723,7 +1034,7 @@ export default function ProjectPage() {
         <div className="flex flex-wrap gap-6">
           {visibleTabs.map((tab) => {
             const isActive = tab.id === activeTab
-            const label = activePhase === "TESTIMI" && tab.id === "description" ? "Testing" : tab.label
+            const label = activePhase === "TESTING" && tab.id === "description" ? "Testing" : tab.label
             return (
               <button
                 key={tab.id}
@@ -799,7 +1110,7 @@ export default function ProjectPage() {
                 </Button>
               </div>
             </>
-          ) : activePhase === "TESTIMI" ? (
+          ) : activePhase === "TESTING" ? (
             <>
               <div className="text-lg font-semibold">Testing Questions</div>
               <div className="mt-4 space-y-2 text-sm text-muted-foreground">
@@ -905,9 +1216,9 @@ export default function ProjectPage() {
                           <SelectValue placeholder="Select phase" />
                         </SelectTrigger>
                         <SelectContent>
-                          {PHASES.map((p) => (
+                          {(isMstProject ? MST_PHASES : GENERAL_PHASES).map((p) => (
                             <SelectItem key={p} value={p}>
-                              {PHASE_LABELS[p]}
+                              {PHASE_LABELS[p] || p}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -975,7 +1286,7 @@ export default function ProjectPage() {
 
       {activeTab === "checklists" ? (
         <div className="space-y-3">
-          {activePhase === "DOKUMENTIMI" ? (
+          {activePhase === "DOCUMENTATION" ? (
             <Card className="p-6">
               <div className="text-lg font-semibold">Documentation checklist</div>
               <div className="mt-4 space-y-3">
@@ -1024,6 +1335,13 @@ export default function ProjectPage() {
             </Card>
           ) : (
             <>
+              {isMstProject && activePhase === "PLANNING" ? (
+                <div className="text-sm text-muted-foreground">
+                  Planning checklists are available under <span className="font-medium">Project Acceptance</span> and{" "}
+                  <span className="font-medium">GA Meeting</span>.
+                </div>
+              ) : null}
+
               <div className="flex items-center gap-2">
                 <Input
                   placeholder="Add item..."
@@ -1059,6 +1377,198 @@ export default function ProjectPage() {
             </>
           )}
         </div>
+      ) : null}
+
+      {activeTab === "mst-acceptance" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">Project Acceptance</div>
+          {isAdmin ? (
+            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+              <div className="space-y-1">
+                <Label>Number</Label>
+                <Input
+                  value={mstAcceptanceNewNumber}
+                  onChange={(e) => setMstAcceptanceNewNumber(e.target.value)}
+                  placeholder="e.g. 3"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Item</Label>
+                <Input
+                  value={mstAcceptanceNewText}
+                  onChange={(e) => setMstAcceptanceNewText(e.target.value)}
+                  placeholder="Add new checklist item..."
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  disabled={!mstAcceptanceNewText.trim() || mstAcceptanceSaving}
+                  onClick={() => void addMstAcceptanceItem()}
+                >
+                  {mstAcceptanceSaving ? "Saving..." : "Add"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-4 space-y-3">
+            {mstAcceptanceChecklist.length ? (
+              mstAcceptanceChecklist
+                .filter((item) => item.item_type === "CHECKBOX")
+                .map((item) => (
+                  <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                      {(item.position ?? 0) + 1}.
+                    </div>
+                    <Checkbox
+                      checked={Boolean(item.is_checked)}
+                      onCheckedChange={(checked) => void toggleChecklistDbItem(item, Boolean(checked))}
+                    />
+                    <div className="flex-1">
+                      {isAdmin && mstAcceptanceEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={mstAcceptanceEditingText}
+                            onChange={(e) => setMstAcceptanceEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!mstAcceptanceEditingText.trim() || mstAcceptanceSaving}
+                            onClick={() => void saveEditMstAcceptanceItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setMstAcceptanceEditingId(null)
+                              setMstAcceptanceEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className={item.is_checked ? "text-muted-foreground line-through" : ""}>{item.title}</div>
+                      )}
+                    </div>
+                    {isAdmin && mstAcceptanceEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditMstAcceptanceItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={mstAcceptanceSaving}
+                          onClick={() => void deleteMstAcceptanceItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+            ) : (
+              <div className="text-sm text-muted-foreground">No items yet.</div>
+            )}
+          </div>
+        </Card>
+      ) : null}
+
+      {activeTab === "mst-ga-meeting" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">GA Meeting</div>
+          {isAdmin ? (
+            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+              <div className="space-y-1">
+                <Label>Number</Label>
+                <Input
+                  value={mstGaMeetingNewNumber}
+                  onChange={(e) => setMstGaMeetingNewNumber(e.target.value)}
+                  placeholder="e.g. 3"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Item</Label>
+                <Input
+                  value={mstGaMeetingNewText}
+                  onChange={(e) => setMstGaMeetingNewText(e.target.value)}
+                  placeholder="Add new checklist item..."
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  disabled={!mstGaMeetingNewText.trim() || mstGaMeetingSaving}
+                  onClick={() => void addMstGaMeetingItem()}
+                >
+                  {mstGaMeetingSaving ? "Saving..." : "Add"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-4 space-y-3">
+            {mstGaMeetingChecklist.length ? (
+              mstGaMeetingChecklist
+                .filter((item) => item.item_type === "CHECKBOX")
+                .map((item) => (
+                  <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                      {(item.position ?? 0) + 1}.
+                    </div>
+                    <Checkbox
+                      checked={Boolean(item.is_checked)}
+                      onCheckedChange={(checked) => void toggleChecklistDbItem(item, Boolean(checked))}
+                    />
+                    <div className="flex-1">
+                      {isAdmin && mstGaMeetingEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={mstGaMeetingEditingText}
+                            onChange={(e) => setMstGaMeetingEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!mstGaMeetingEditingText.trim() || mstGaMeetingSaving}
+                            onClick={() => void saveEditMstGaMeetingItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setMstGaMeetingEditingId(null)
+                              setMstGaMeetingEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className={item.is_checked ? "text-muted-foreground line-through" : ""}>{item.title}</div>
+                      )}
+                    </div>
+                    {isAdmin && mstGaMeetingEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditMstGaMeetingItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={mstGaMeetingSaving}
+                          onClick={() => void deleteMstGaMeetingItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+            ) : (
+              <div className="text-sm text-muted-foreground">No items yet.</div>
+            )}
+          </div>
+        </Card>
       ) : null}
 
       {activeTab === "members" ? (
