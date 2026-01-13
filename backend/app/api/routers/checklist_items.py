@@ -155,8 +155,15 @@ async def create_checklist_item(
             ensure_department_access(user, project.department_id)
 
         checklist = (
-            await db.execute(select(Checklist).where(Checklist.project_id == payload.project_id))
-        ).scalar_one_or_none()
+            await db.execute(
+                select(Checklist)
+                .where(
+                    Checklist.project_id == payload.project_id,
+                    Checklist.group_key.is_(None),
+                )
+                .order_by(Checklist.created_at.desc(), Checklist.id)
+            )
+        ).scalars().first()
         if checklist is None:
             checklist = Checklist(project_id=payload.project_id, title="Checklist")
             db.add(checklist)

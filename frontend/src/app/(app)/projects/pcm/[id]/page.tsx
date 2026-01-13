@@ -4,6 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
+import { Check, Pencil, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,6 +63,7 @@ const MST_PLANNING_QUESTIONS = [
   "Have the program characteristics been identified?",
   "Is there a plan for when the project is expected to be completed?",
 ]
+const MST_PROGRAM_QUESTION_LEGACY = "A eshte hapur projekti ne chat GPT?"
 const FINALIZATION_PATH = "FINALIZATION"
 const FINALIZATION_CHECKLIST = [
   { id: "kontrollat", question: "A jane kryer kontrollat?" },
@@ -469,6 +471,22 @@ function normalizeTaskTitle(value: string) {
     .trim()
 }
 
+function parseTaskTotals(notes?: string | null) {
+  if (!notes) return { total: 0, completed: 0 }
+  const totalMatch = notes.match(/total_products[:=]\s*(\d+)/i)
+  const completedMatch = notes.match(/completed_products[:=]\s*(\d+)/i)
+  return {
+    total: totalMatch ? parseInt(totalMatch[1], 10) : 0,
+    completed: completedMatch ? parseInt(completedMatch[1], 10) : 0,
+  }
+}
+
+function getOriginTaskId(notes?: string | null) {
+  if (!notes) return null
+  const match = notes.match(/origin_task_id[:=]\s*([a-f0-9-]+)/i)
+  return match ? match[1] : null
+}
+
 function addBusinessDaysToIso(baseIso: string, days: number) {
   const base = new Date(baseIso)
   if (Number.isNaN(base.getTime())) return null
@@ -584,12 +602,10 @@ export default function PcmProjectPage() {
   const [vsVlTaskChecklist, setVsVlTaskChecklist] = React.useState("")
   const [vsVlTaskComment, setVsVlTaskComment] = React.useState("")
   const [vsVlCommentEdits, setVsVlCommentEdits] = React.useState<Record<string, string>>({})
+  const [vsVlChecklistEdits, setVsVlChecklistEdits] = React.useState<Record<string, string>>({})
+  const [vsVlAssigneeOpen, setVsVlAssigneeOpen] = React.useState<Record<string, boolean>>({})
+  const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
-  const vsVlScrollRef = React.useRef<HTMLDivElement | null>(null)
-  const vsVlDraggingRef = React.useRef(false)
-  const vsVlPointerIdRef = React.useRef<number | null>(null)
-  const vsVlDragStartXRef = React.useRef(0)
-  const vsVlDragScrollLeftRef = React.useRef(0)
   const [programName, setProgramName] = React.useState("")
   const [mstTab, setMstTab] = React.useState<"description" | "tasks" | "checklists" | "members" | "ga" | "final">(
     "description"
@@ -744,8 +760,11 @@ export default function PcmProjectPage() {
           planningCommentsData[item.title] = item.comment
         }
 
-        // Load program name from the second question's comment
-        if (item.title === "A eshte hapur projekti ne chat GPT?" && item.comment) {
+        // Load program name from the second question's comment (supports legacy title)
+        if (
+          (item.title === MST_PLANNING_QUESTIONS[1] || item.title === MST_PROGRAM_QUESTION_LEGACY) &&
+          item.comment
+        ) {
           setProgramName(item.comment)
         }
       }
@@ -1276,6 +1295,49 @@ export default function PcmProjectPage() {
     setControlEdits(next)
   }, [tasks])
 
+  React.useEffect(() => {
+    if (!project || mstPhase !== "CONTROL") return
+    const productTasks = tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
+    const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
+    const existingOrigins = new Set(controlTasks.map((task) => getOriginTaskId(task.internal_notes)).filter(Boolean))
+    const findUserIdByName = (needle: string) =>
+      allUsers.find((u) => (u.full_name || u.username || "").toLowerCase().includes(needle))?.id || null
+    const getKoAssigneeId = (assignedTo?: string | null) => {
+      if (!assignedTo) return null
+      const assignedUser = allUsers.find((u) => u.id === assignedTo)
+      const assignedName = (assignedUser?.full_name || assignedUser?.username || "").toLowerCase()
+      if (assignedName.includes("diellza")) return findUserIdByName("lea")
+      if (assignedName.includes("lea")) return findUserIdByName("diellza")
+      return findUserIdByName("elsa")
+    }
+    const createMissing = async () => {
+      for (const task of productTasks) {
+        if (existingOrigins.has(task.id)) continue
+        const totals = parseTaskTotals(task.internal_notes)
+        const koAssigneeId = getKoAssigneeId(task.assigned_to)
+        const res = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: task.title,
+            project_id: project.id,
+            department_id: project.department_id,
+            assigned_to: koAssigneeId,
+            status: "TODO",
+            priority: task.priority || "NORMAL",
+            phase: "CONTROL",
+            internal_notes: `origin_task_id=${task.id}; total_products=${totals.total || 0}; completed_products=0`,
+          }),
+        })
+        if (res?.ok) {
+          const created = (await res.json()) as Task
+          setTasks((prev) => [...prev, created])
+        }
+      }
+    }
+    void createMissing()
+  }, [allUsers, apiFetch, mstPhase, project, tasks])
+
   const activePhase = phaseValue
   const visibleTasks = React.useMemo(
     () =>
@@ -1427,48 +1489,6 @@ export default function PcmProjectPage() {
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
 
-    const shouldIgnoreDragTarget = (target: EventTarget | null) => {
-      if (!(target instanceof HTMLElement)) return false
-      if (target.isContentEditable) return true
-      return Boolean(target.closest("input, textarea, select, option, button, label"))
-    }
-    const handleVsVlPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0 && event.pointerType !== "touch") return
-      if (shouldIgnoreDragTarget(event.target)) return
-      const node = vsVlScrollRef.current
-      if (!node) return
-      vsVlPointerIdRef.current = event.pointerId
-      vsVlDragStartXRef.current = event.clientX
-      vsVlDragScrollLeftRef.current = node.scrollLeft
-      vsVlDraggingRef.current = false
-    }
-    const handleVsVlPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-      if (vsVlPointerIdRef.current !== event.pointerId) return
-      const node = vsVlScrollRef.current
-      if (!node) return
-      const delta = event.clientX - vsVlDragStartXRef.current
-      if (!vsVlDraggingRef.current) {
-        if (Math.abs(delta) < 6) return
-        vsVlDraggingRef.current = true
-        node.setPointerCapture(event.pointerId)
-      }
-      node.scrollLeft = vsVlDragScrollLeftRef.current - delta
-      event.preventDefault()
-    }
-    const handleVsVlPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-      if (vsVlPointerIdRef.current !== event.pointerId) return
-      const node = vsVlScrollRef.current
-      if (node && vsVlDraggingRef.current) {
-        try {
-          node.releasePointerCapture(event.pointerId)
-        } catch {
-          // ignore
-        }
-      }
-      vsVlDraggingRef.current = false
-      vsVlPointerIdRef.current = null
-    }
-
     return (
       <div className="space-y-5 max-w-6xl mx-auto px-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1562,315 +1582,363 @@ export default function PcmProjectPage() {
             </div>
           </Card>
         ) : (
-          <Card className="border-0 shadow-sm">
-            <div className="p-6 space-y-4">
-              <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-              <div
-                ref={vsVlScrollRef}
-                className="overflow-x-auto border rounded-lg cursor-grab active:cursor-grabbing"
-                style={{ touchAction: "pan-x" }}
-                onPointerDown={handleVsVlPointerDown}
-                onPointerMove={handleVsVlPointerMove}
-                onPointerUp={handleVsVlPointerUp}
-                onPointerLeave={handleVsVlPointerUp}
-                onPointerCancel={handleVsVlPointerUp}
-              >
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-slate-600 uppercase tracking-wide">
-                    <tr>
-                      <th className="border px-2 py-2 text-left">PLATFORMA</th>
-                      <th className="border px-2 py-2 text-left">PERSHKRIMI</th>
-                      <th className="border px-2 py-2 text-left">PERSHKRIMI/DETAL</th>
-                      <th className="border px-2 py-2 text-left">DATA E SHFAQJES</th>
-                      <th className="border px-2 py-2 text-left">PRIORITETI</th>
-                      <th className="border px-2 py-2 text-left">USERID</th>
-                      <th className="border px-2 py-2 text-left">VARESIA</th>
-                      <th className="border px-2 py-2 text-left">STATUS</th>
-                      <th className="border px-2 py-2 text-left">COMMENT</th>
-                      <th className="border px-2 py-2 text-left">CHECKLISTA</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="align-top bg-slate-50">
-                      <td className="border px-2 py-2 text-[11px] font-semibold text-slate-600">
-                        {VS_VL_PHASE_LABELS[vsVlPhase]}
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Input
-                          value={vsVlTaskTitle}
-                          onChange={(e) => setVsVlTaskTitle(e.target.value)}
-                          placeholder="Pershkrimi..."
-                          className="h-8 text-xs"
-                        />
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Textarea
-                          value={vsVlTaskDetail}
-                          onChange={(e) => setVsVlTaskDetail(e.target.value)}
-                          placeholder="Pershkrimi/Detaj"
-                          rows={3}
-                          className="text-xs"
-                        />
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Input
-                          value={vsVlTaskDate}
-                          onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
-                          type="date"
-                          className="h-8 text-xs"
-                        />
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="NORMAL">NORMAL</SelectItem>
-                            <SelectItem value="HIGH">I LARTE</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="border px-2 py-2">
-                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                          {assignableUsers.length ? (
-                            assignableUsers.map((u) => {
-                              const checked = vsVlTaskAssignees.includes(u.id)
-                              return (
-                                <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                  <input
-                                    type="checkbox"
-                                    className="h-3 w-3 rounded border-slate-300"
-                                    checked={checked}
-                                    onChange={() =>
-                                      setVsVlTaskAssignees((prev) =>
-                                        checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
-                                      )
+                    <Card className="border-0 shadow-sm">
+            <div className="p-6 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
+                <Badge variant="outline" className="text-slate-600 border-slate-200 bg-white">
+                  {VS_VL_PHASE_LABELS[vsVlPhase]}
+                </Badge>
+              </div>
+              <div className="rounded-xl border bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-700">Add task</div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Task title</Label>
+                    <Input
+                      value={vsVlTaskTitle}
+                      onChange={(e) => setVsVlTaskTitle(e.target.value)}
+                      placeholder="Pershkrimi..."
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Description</Label>
+                    <Textarea
+                      value={vsVlTaskDetail}
+                      onChange={(e) => setVsVlTaskDetail(e.target.value)}
+                      placeholder="Pershkrimi/Detaj"
+                      rows={3}
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Due date</Label>
+                    <Input
+                      value={vsVlTaskDate}
+                      onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
+                      type="date"
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Priority</Label>
+                    <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="NORMAL">NORMAL</SelectItem>
+                        <SelectItem value="HIGH">I LARTE</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Status</Label>
+                    <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TASK_STATUSES.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {statusLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Dependency</Label>
+                    <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="-" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">-</SelectItem>
+                        {dependencyOptions.map((task) => (
+                          <SelectItem key={task.id} value={task.id}>
+                            {task.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Assignees</Label>
+                    <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg border bg-white p-2">
+                      {assignableUsers.length ? (
+                        assignableUsers.map((u) => {
+                          const checked = vsVlTaskAssignees.includes(u.id)
+                          return (
+                            <label key={u.id} className="flex items-center gap-2 text-xs text-slate-600">
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3 rounded border-slate-300"
+                                checked={checked}
+                                onChange={() =>
+                                  setVsVlTaskAssignees((prev) =>
+                                    checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                                  )
+                                }
+                              />
+                              <span className="truncate">{u.full_name || u.username || u.email}</span>
+                            </label>
+                          )
+                        })
+                      ) : (
+                        <div className="text-xs text-slate-400">-</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Comment</Label>
+                    <Textarea
+                      value={vsVlTaskComment}
+                      onChange={(e) => setVsVlTaskComment(e.target.value)}
+                      placeholder="Koment..."
+                      rows={3}
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Checklist</Label>
+                    <Textarea
+                      value={vsVlTaskChecklist}
+                      onChange={(e) => setVsVlTaskChecklist(e.target.value)}
+                      placeholder="Checklist..."
+                      rows={3}
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    size="sm"
+                    disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
+                    onClick={async () => {
+                      if (!project || !vsVlTaskTitle.trim()) return
+                      setCreatingVsVlTask(true)
+                      try {
+                        const meta: VsVlTaskMeta = {
+                          vs_vl_phase: vsVlPhase,
+                          checklist: vsVlTaskChecklist.trim() || undefined,
+                          comment: vsVlTaskComment.trim() || undefined,
+                        }
+                        const res = await apiFetch("/tasks", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: vsVlTaskTitle.trim(),
+                            description: vsVlTaskDetail.trim() || null,
+                            project_id: project.id,
+                            department_id: project.department_id,
+                            assignees: vsVlTaskAssignees,
+                            dependency_task_id:
+                              vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
+                            status: vsVlTaskStatus || "TODO",
+                            priority: vsVlTaskPriority,
+                            phase: vsVlPhase,
+                            due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
+                            internal_notes: serializeVsVlMeta(meta),
+                          }),
+                        })
+                        if (!res?.ok) {
+                          toast.error("Failed to add task")
+                          return
+                        }
+                        const created = (await res.json()) as Task
+                        setTasks((prev) => [...prev, created])
+                        setVsVlTaskTitle("")
+                        setVsVlTaskDetail("")
+                        setVsVlTaskDate("")
+                        setVsVlTaskPriority("NORMAL")
+                        setVsVlTaskStatus("TODO")
+                        setVsVlTaskAssignees([])
+                        setVsVlTaskDependencyId("__none__")
+                        setVsVlTaskChecklist("")
+                        setVsVlTaskComment("")
+                        toast.success("Task added")
+                      } finally {
+                        setCreatingVsVlTask(false)
+                      }
+                    }}
+                  >
+                    {creatingVsVlTask ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {orderedVsVlTasks.length ? (
+                  orderedVsVlTasks.map((task) => {
+                    const meta = parseVsVlMeta(task.internal_notes)
+                    const titleKey = normalizeTaskTitle(task.title)
+                    const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
+                    const dependencyId = isBaseTask
+                      ? null
+                      : task.dependency_task_id || meta?.dependency_task_id || null
+                    const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
+                    const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
+                    const isLocked = isDependencyLocked
+                    const selectedAssignees = taskAssigneeIds(task)
+                    const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
+                    const checklistValue = vsVlChecklistEdits[task.id] ?? meta?.checklist ?? ""
+                    const isEditing = Boolean(vsVlEditMode[task.id])
+                    return (
+                      <div key={task.id} className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-sm ring-1 ring-slate-100/80 transition-shadow hover:shadow-md sm:p-4 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <Input
+                              key={`title-${task.id}-${task.updated_at}`}
+                              defaultValue={task.title}
+                              onBlur={(e) => {
+                                const nextValue = e.target.value.trim()
+                                if (!nextValue || nextValue === task.title) return
+                                void patchTask(task.id, { title: nextValue }, "Failed to update title")
+                              }}
+                              className={`h-9 text-base font-semibold ${!isEditing ? "bg-slate-50 text-slate-500" : "bg-white"} border-slate-200`}
+                              readOnly={!isEditing}
+                              disabled={isLocked || !isEditing}
+                            />
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                                {VS_VL_PHASE_LABELS[vsVlPhase]}
+                              </span>
+                              <span>Created {toDateInput(task.created_at) || "-"}</span>
+                              {isDependencyLocked ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">Blocked</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              className={
+                                task.priority === "HIGH"
+                                  ? "bg-rose-500 text-white"
+                                  : "bg-slate-200 text-slate-700"
+                              }
+                            >
+                              {vsVlPriorityLabel(task.priority)}
+                            </Badge>
+                            <Select
+                              value={task.status || "TODO"}
+                              onValueChange={(value) => {
+                                if (isLocked) return
+                                void patchTask(task.id, { status: value }, "Failed to update status")
+                              }}
+                              disabled={isLocked}
+                            >
+                              <SelectTrigger className="h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {TASK_STATUSES.map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {statusLabel(status)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                onClick={() =>
+                                  setVsVlEditMode((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
+                                }
+                                aria-label={isEditing ? "Done editing" : "Edit task"}
+                                title={isEditing ? "Done" : "Edit"}
+                              >
+                                {isEditing ? <Check className="h-4 w-4 text-emerald-600" /> : <Pencil className="h-4 w-4" />}
+                                <span className="sr-only">{isEditing ? "Done" : "Edit"}</span>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full text-red-600 hover:bg-red-50"
+                                onClick={async () => {
+                                  const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                  if (!res?.ok) {
+                                    if (res?.status == 405) {
+                                      toast.error("Delete endpoint not active. Restart backend.")
+                                    } else {
+                                      toast.error("Failed to delete task")
                                     }
-                                  />
-                                  <span className="truncate">{u.full_name || u.username || u.email}</span>
-                                </label>
-                              )
-                            })
-                          ) : (
-                            <div className="text-[11px] text-slate-400">-</div>
-                          )}
+                                    return
+                                  }
+                                  setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                  toast.success("Task deleted")
+                                }}
+                                aria-label="Delete task"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="sr-only">Delete</span>
+                              </Button>
+                            </div>
+                          </div>
                         </div>
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="-" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">-</SelectItem>
-                            {dependencyOptions.map((task) => (
-                              <SelectItem key={task.id} value={task.id}>
-                                {task.title}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TASK_STATUSES.map((status) => (
-                              <SelectItem key={status} value={status}>
-                                {statusLabel(status)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="border px-2 py-2">
-                        <Textarea
-                          value={vsVlTaskComment}
-                          onChange={(e) => setVsVlTaskComment(e.target.value)}
-                          placeholder="Koment..."
-                          rows={2}
-                          className="text-xs"
-                        />
-                      </td>
-                      <td className="border px-2 py-2 space-y-2">
-                        <Textarea
-                          value={vsVlTaskChecklist}
-                          onChange={(e) => setVsVlTaskChecklist(e.target.value)}
-                          placeholder="Checklist..."
-                          rows={2}
-                          className="text-xs"
-                        />
-                        <Button
-                          size="sm"
-                          className="w-full"
-                          disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
-                          onClick={async () => {
-                            if (!project || !vsVlTaskTitle.trim()) return
-                            setCreatingVsVlTask(true)
-                            try {
-                              const meta: VsVlTaskMeta = {
-                                vs_vl_phase: vsVlPhase,
-                                checklist: vsVlTaskChecklist.trim() || undefined,
-                                comment: vsVlTaskComment.trim() || undefined,
-                              }
-                              const res = await apiFetch("/tasks", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  title: vsVlTaskTitle.trim(),
-                                  description: vsVlTaskDetail.trim() || null,
-                                  project_id: project.id,
-                                  department_id: project.department_id,
-                                  assignees: vsVlTaskAssignees,
-                                  dependency_task_id:
-                                    vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
-                                  status: vsVlTaskStatus || "TODO",
-                                  priority: vsVlTaskPriority,
-                                  phase: vsVlPhase,
-                                  due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
-                                  internal_notes: serializeVsVlMeta(meta),
-                                }),
-                              })
-                              if (!res?.ok) {
-                                toast.error("Failed to add task")
-                                return
-                              }
-                              const created = (await res.json()) as Task
-                              setTasks((prev) => [...prev, created])
-                              setVsVlTaskTitle("")
-                              setVsVlTaskDetail("")
-                              setVsVlTaskDate("")
-                              setVsVlTaskPriority("NORMAL")
-                              setVsVlTaskStatus("TODO")
-                              setVsVlTaskAssignees([])
-                              setVsVlTaskDependencyId("__none__")
-                              setVsVlTaskChecklist("")
-                              setVsVlTaskComment("")
-                              toast.success("Task added")
-                            } finally {
-                              setCreatingVsVlTask(false)
-                            }
-                          }}
-                        >
-                          {creatingVsVlTask ? "Saving..." : "Save"}
-                        </Button>
-                      </td>
-                    </tr>
-                    {orderedVsVlTasks.length ? (
-                      orderedVsVlTasks.map((task) => {
-                        const meta = parseVsVlMeta(task.internal_notes)
-                        const titleKey = normalizeTaskTitle(task.title)
-                        const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
-                        const dependencyId = isBaseTask
-                          ? null
-                          : task.dependency_task_id || meta?.dependency_task_id || null
-                        const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
-                        const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
-                        const isLocked = isDependencyLocked
-                        const selectedAssignees = taskAssigneeIds(task)
-                        const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
-                        return (
-                          <tr key={task.id} className="align-top">
-                            <td className="border px-2 py-2">{VS_VL_PHASE_LABELS[vsVlPhase]}</td>
-                            <td className="border px-2 py-2 font-medium">{task.title}</td>
-                            <td className="border px-2 py-2 whitespace-pre-wrap">{task.description || "-"}</td>
-                            <td className="border px-2 py-2">
+                        <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Details
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-[2fr_1fr]">
+                            <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Description</Label>
+                            <Textarea
+                              key={`description-${task.id}-${task.updated_at}`}
+                              defaultValue={task.description || ""}
+                              onBlur={(e) => {
+                                const nextValue = e.target.value.trim()
+                                const currentValue = task.description || ""
+                                if (nextValue === currentValue) return
+                                void patchTask(task.id, { description: nextValue || null }, "Failed to update description")
+                              }}
+                              rows={2}
+                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
+                              readOnly={!isEditing}
+                              disabled={isLocked || !isEditing}
+                            />
+                          </div>
+                            <div className="space-y-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-slate-500">Due date</Label>
                               <Input
                                 value={toDateInput(task.due_date)}
-                                onChange={async (e) => {
+                                onChange={(e) => {
                                   if (isLocked) return
                                   const nextValue = normalizeDueDateInput(e.target.value)
                                   const dueDate = nextValue ? new Date(nextValue).toISOString() : null
-                                  const res = await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ due_date: dueDate }),
-                                  })
-                                  if (!res.ok) {
-                                    toast.error("Failed to update date")
-                                    return
-                                  }
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                  void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
                                 }}
                                 type="date"
-                                className="h-8 text-xs"
-                                disabled={isLocked}
+                                className="h-9 text-sm"
+                                disabled={isLocked || !isEditing}
                               />
-                            </td>
-                            <td className="border px-2 py-2">{vsVlPriorityLabel(task.priority)}</td>
-                            <td className="border px-2 py-2">
-                              <div className="space-y-2">
-                                <div className="text-[11px] text-slate-500">
-                                  {selectedAssignees.length
-                                    ? selectedAssignees.map((id) => memberLabel(id)).join(", ")
-                                    : "-"}
-                                </div>
-                                <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                                  {assignableUsers.length ? (
-                                    assignableUsers.map((u) => {
-                                      const checked = selectedAssignees.includes(u.id)
-                                      return (
-                                        <label key={u.id} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                          <input
-                                            type="checkbox"
-                                            className="h-3 w-3 rounded border-slate-300"
-                                            checked={checked}
-                                            disabled={isLocked}
-                                            onChange={async () => {
-                                              if (isLocked) return
-                                              const nextIds = checked
-                                                ? selectedAssignees.filter((id) => id !== u.id)
-                                                : [...selectedAssignees, u.id]
-                                              const res = await apiFetch(`/tasks/${task.id}`, {
-                                                method: "PATCH",
-                                                headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ assignees: nextIds }),
-                                              })
-                                              if (!res.ok) {
-                                                toast.error("Failed to update assignees")
-                                                return
-                                              }
-                                              const updated = (await res.json()) as Task
-                                              setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                            }}
-                                          />
-                                          <span className="truncate">{u.full_name || u.username || u.email}</span>
-                                        </label>
-                                      )
-                                    })
-                                  ) : (
-                                    <div className="text-[11px] text-slate-400">-</div>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="border px-2 py-2">
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-slate-500">Dependency</Label>
                               <Select
                                 value={
                                   isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
                                 }
-                                onValueChange={async (value) => {
-                                  const res = await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      dependency_task_id: value === "__none__" ? null : value,
-                                    }),
-                                  })
-                                  if (!res.ok) {
-                                    toast.error("Failed to update dependency")
-                                    return
-                                  }
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                onValueChange={(value) => {
+                                  void patchTask(
+                                    task.id,
+                                    { dependency_task_id: value === "__none__" ? null : value },
+                                    "Failed to update dependency"
+                                  )
                                 }}
                                 disabled={isBaseTask}
                               >
-                                <SelectTrigger className="h-8 text-xs">
+                                <SelectTrigger className="h-9 text-sm">
                                   <SelectValue placeholder="-" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1884,90 +1952,158 @@ export default function PcmProjectPage() {
                                     ))}
                                 </SelectContent>
                               </Select>
-                            </td>
-                            <td className="border px-2 py-2">
-                              <Select
-                                value={task.status || "TODO"}
-                                onValueChange={async (value) => {
-                                  if (isLocked) return
-                                  const res = await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ status: value }),
-                                  })
-                                  if (!res.ok) {
-                                    toast.error("Failed to update status")
-                                    return
-                                  }
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                }}
-                                disabled={isLocked}
-                              >
-                                <SelectTrigger className="h-8 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {TASK_STATUSES.map((status) => (
-                                    <SelectItem key={status} value={status}>
-                                      {statusLabel(status)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="border px-2 py-2">
-                              <Textarea
-                                value={commentValue}
-                                onChange={(e) =>
-                                  setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
-                                }
-                                onBlur={async (e) => {
-                                  if (isLocked) return
-                                  const nextValue = e.target.value.trim()
-                                  const currentValue = meta?.comment || ""
-                                  if (nextValue === currentValue) return
-                                  const nextMeta: VsVlTaskMeta = {
-                                    ...(meta || {}),
-                                    vs_vl_phase: meta?.vs_vl_phase || vsVlPhase,
-                                  }
-                                  if (nextValue) {
-                                    nextMeta.comment = nextValue
-                                  } else {
-                                    delete nextMeta.comment
-                                  }
-                                  const res = await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
-                                  })
-                                  if (!res.ok) {
-                                    toast.error("Failed to update comment")
-                                    return
-                                  }
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                            </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200/70 bg-white p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                              Assignees
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs"
+                              onClick={() =>
+                                setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
+                              }
+                              disabled={isLocked}
+                            >
+                              {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
+                            </Button>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            {selectedAssignees.length ? (
+                              selectedAssignees.map((id, idx) => {
+                                const user = userMap.get(id)
+                                const label = user?.full_name || user?.username || user?.email || "-"
+                                const colorClass = [
+                                  "bg-blue-100 text-blue-800",
+                                  "bg-emerald-100 text-emerald-800",
+                                  "bg-amber-100 text-amber-800",
+                                  "bg-rose-100 text-rose-800",
+                                  "bg-slate-100 text-slate-800",
+                                ][idx % 5]
+                                return (
+                                  <div key={id} className="flex items-center">
+                                    <div
+                                      className={`-ml-1 h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-semibold ring-2 ring-white shadow-sm ${colorClass}`}
+                                      title={label}
+                                    >
+                                      {initials(label)}
+                                    </div>
+                                  </div>
+                                )
+                              })
+                            ) : (
+                              <div className="flex items-center gap-2 text-sm text-slate-400">
+                                <div className="h-9 w-9 rounded-full border border-dashed border-slate-300" />
+                                <span>Unassigned</span>
+                              </div>
+                            )}
+                          </div>
+                          {vsVlAssigneeOpen[task.id] ? (
+                            <div className="mt-3 grid gap-2 rounded-lg border bg-white p-3 sm:grid-cols-2">
+                              {assignableUsers.length ? (
+                                assignableUsers.map((u) => {
+                                  const checked = selectedAssignees.includes(u.id)
+                                  return (
+                                    <label key={u.id} className="flex items-center gap-2 text-xs text-slate-600">
+                                      <input
+                                        type="checkbox"
+                                        className="h-3 w-3 rounded border-slate-300"
+                                        checked={checked}
+                                        disabled={isLocked}
+                                        onChange={() => {
+                                          if (isLocked) return
+                                          const nextIds = checked
+                                            ? selectedAssignees.filter((id) => id !== u.id)
+                                            : [...selectedAssignees, u.id]
+                                          void patchTask(task.id, { assignees: nextIds }, "Failed to update assignees")
+                                        }}
+                                      />
+                                      <span className="truncate">{u.full_name || u.username || u.email}</span>
+                                    </label>
+                                  )
+                                })
+                              ) : (
+                                <div className="text-xs text-slate-400">-</div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Notes
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Comment</Label>
+                            <Textarea
+                              value={commentValue}
+                              onChange={(e) =>
+                                setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                              }
+                              onBlur={async (e) => {
+                                if (isLocked) return
+                                const nextValue = e.target.value.trim()
+                                const currentValue = meta?.comment || ""
+                                if (nextValue === currentValue) return
+                                const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
+                                const updated = await updateVsVlMeta(task, {
+                                  comment: nextValue || undefined,
+                                  checklist: checklist || undefined,
+                                })
+                                if (updated) {
                                   setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                }}
-                                placeholder="Koment..."
-                                rows={2}
-                                className="text-xs"
-                                disabled={isLocked}
-                              />
-                            </td>
-                            <td className="border px-2 py-2 whitespace-pre-wrap">{meta?.checklist || "-"}</td>
-                          </tr>
-                        )
-                      })
-                    ) : (
-                      <tr>
-                        <td className="border px-2 py-4 text-center text-muted-foreground" colSpan={10}>
-                          No tasks yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                                }
+                              }}
+                              placeholder="Koment..."
+                              rows={2}
+                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
+                              readOnly={!isEditing}
+                              disabled={isLocked || !isEditing}
+                            />
+                          </div>
+                            <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Checklist</Label>
+                            <Textarea
+                              value={checklistValue}
+                              onChange={(e) =>
+                                setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                              }
+                              onBlur={async (e) => {
+                                if (isLocked) return
+                                const nextValue = e.target.value.trim()
+                                const currentValue = meta?.checklist || ""
+                                if (nextValue === currentValue) return
+                                const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
+                                const updated = await updateVsVlMeta(task, {
+                                  checklist: nextValue || undefined,
+                                  comment: comment || undefined,
+                                })
+                                if (updated) {
+                                  setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                }
+                              }}
+                              placeholder="Checklist..."
+                              rows={2}
+                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
+                              readOnly={!isEditing}
+                              disabled={isLocked || !isEditing}
+                            />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No tasks yet.
+                  </div>
+                )}
               </div>
             </div>
           </Card>
@@ -2330,6 +2466,42 @@ export default function PcmProjectPage() {
           prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
         )
       }
+    }
+    const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        toast.error(errorMessage)
+        return null
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      return updated
+    }
+    const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
+      const current = parseVsVlMeta(task.internal_notes) || {}
+      const nextMeta: VsVlTaskMeta = {
+        ...current,
+        ...updates,
+        vs_vl_phase: current.vs_vl_phase || vsVlPhase,
+      }
+      if (!nextMeta.comment) delete nextMeta.comment
+      if (!nextMeta.checklist) delete nextMeta.checklist
+      const res = await apiFetch(`/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update task")
+        return null
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      return updated
     }
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
@@ -2777,8 +2949,9 @@ export default function PcmProjectPage() {
                                 project_id: project.id,
                                 department_id: project.department_id,
                                 assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
-                                status: "IN_PROGRESS",
+                                status: "TODO",
                                 priority: "NORMAL",
+                                phase: "PRODUCT",
                                 internal_notes: `total_products=${newInlineTaskTotal || 0}; completed_products=${newInlineTaskCompleted || 0}`,
                               }),
                             })
@@ -2806,7 +2979,7 @@ export default function PcmProjectPage() {
                   </div>
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
-                    {tasks.map((task) => {
+                    {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
@@ -2814,46 +2987,63 @@ export default function PcmProjectPage() {
                           <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
                           <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
                           <div className="col-span-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max={totalVal > 0 ? totalVal : undefined}
-                              className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
-                              value={controlEdits[task.id]?.completed || ""}
-                              onChange={async (e) => {
-                                let completedNum = parseInt(e.target.value, 10) || 0
-                                // Cap at total value
-                                if (totalVal > 0 && completedNum > totalVal) {
-                                  completedNum = totalVal
-                                }
-                                const newCompleted = completedNum.toString()
-                                const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
-
-                                // Update local state immediately
-                                setControlEdits((prev) => ({
-                                  ...prev,
-                                  [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                }))
-
-                                // Update task on server
-                                const res = await apiFetch(`/tasks/${task.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                    status: newStatus,
-                                  }),
-                                })
-                                if (res?.ok) {
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                  if (shouldMarkDone && task.status !== "DONE") {
-                                    toast.success("Task marked as Done!")
-                                  }
-                                }
-                              }}
-                            />
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                onClick={async () => {
+                                  const completedNum = Math.max(
+                                    0,
+                                    (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
+                                  )
+                                  const newCompleted = completedNum.toString()
+                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  setControlEdits((prev) => ({
+                                    ...prev,
+                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                  }))
+                                  await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                      status: newStatus,
+                                    }),
+                                  })
+                                }}
+                              >
+                                -
+                              </button>
+                              <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                {controlEdits[task.id]?.completed || "0"}
+                              </div>
+                              <button
+                                type="button"
+                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                onClick={async () => {
+                                  let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
+                                  if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                  const newCompleted = completedNum.toString()
+                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  setControlEdits((prev) => ({
+                                    ...prev,
+                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                  }))
+                                  await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                      status: newStatus,
+                                    }),
+                                  })
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
                           <div className="col-span-2">
                             <Badge
@@ -2871,7 +3061,11 @@ export default function PcmProjectPage() {
                               onClick={async () => {
                                 const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                 if (!res?.ok) {
-                                  toast.error("Failed to delete task")
+                                  if (res?.status == 405) {
+                                    toast.error("Delete endpoint not active. Restart backend.")
+                                  } else {
+                                    toast.error("Failed to delete task")
+                                  }
                                   return
                                 }
                                 setTasks((prev) => prev.filter((t) => t.id !== task.id))
@@ -3152,8 +3346,10 @@ export default function PcmProjectPage() {
                                 project_id: project.id,
                                 department_id: project.department_id,
                                 assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                                status: "IN_PROGRESS",
+                                status: "TODO",
                                 priority: "NORMAL",
+                                phase: "CONTROL",
+                                internal_notes: "total_products=0; completed_products=0",
                               }),
                             })
                             if (!res?.ok) {
@@ -3178,7 +3374,7 @@ export default function PcmProjectPage() {
                   </div>
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
-                    {tasks.map((task) => {
+                    {tasks.filter((task) => task.phase === "CONTROL").map((task) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
                       const assignedName = assignedUser?.full_name?.toLowerCase() || ""
@@ -3189,46 +3385,63 @@ export default function PcmProjectPage() {
                           <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
                           <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
                           <div className="col-span-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max={totalVal > 0 ? totalVal : undefined}
-                              className="w-16 bg-transparent border-0 border-b-2 border-transparent focus:border-blue-500 hover:border-slate-300 outline-none py-1 text-sm transition-colors text-center"
-                              value={controlEdits[task.id]?.completed || ""}
-                              onChange={async (e) => {
-                                let completedNum = parseInt(e.target.value, 10) || 0
-                                // Cap at total value
-                                if (totalVal > 0 && completedNum > totalVal) {
-                                  completedNum = totalVal
-                                }
-                                const newCompleted = completedNum.toString()
-                                const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                const newStatus = shouldMarkDone ? "DONE" : controlEdits[task.id]?.status || task.status
-
-                                // Update local state immediately
-                                setControlEdits((prev) => ({
-                                  ...prev,
-                                  [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                }))
-
-                                // Update task on server
-                                const res = await apiFetch(`/tasks/${task.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                    status: newStatus,
-                                  }),
-                                })
-                                if (res?.ok) {
-                                  const updated = (await res.json()) as Task
-                                  setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                  if (shouldMarkDone && task.status !== "DONE") {
-                                    toast.success("Task marked as Done!")
-                                  }
-                                }
-                              }}
-                            />
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                onClick={async () => {
+                                  const completedNum = Math.max(
+                                    0,
+                                    (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
+                                  )
+                                  const newCompleted = completedNum.toString()
+                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  setControlEdits((prev) => ({
+                                    ...prev,
+                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                  }))
+                                  await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                      status: newStatus,
+                                    }),
+                                  })
+                                }}
+                              >
+                                -
+                              </button>
+                              <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                {controlEdits[task.id]?.completed || "0"}
+                              </div>
+                              <button
+                                type="button"
+                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                onClick={async () => {
+                                  let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
+                                  if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                  const newCompleted = completedNum.toString()
+                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  setControlEdits((prev) => ({
+                                    ...prev,
+                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                  }))
+                                  await apiFetch(`/tasks/${task.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                      status: newStatus,
+                                    }),
+                                  })
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
                           <div className="col-span-1 text-slate-500">{koName}</div>
                           <div className="col-span-2">
@@ -3247,7 +3460,11 @@ export default function PcmProjectPage() {
                               onClick={async () => {
                                 const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                 if (!res?.ok) {
-                                  toast.error("Failed to delete task")
+                                  if (res?.status == 405) {
+                                    toast.error("Delete endpoint not active. Restart backend.")
+                                  } else {
+                                    toast.error("Failed to delete task")
+                                  }
                                   return
                                 }
                                 setTasks((prev) => prev.filter((t) => t.id !== task.id))
