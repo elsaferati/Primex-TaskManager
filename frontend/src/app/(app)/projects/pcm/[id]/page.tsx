@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2 } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -193,6 +193,7 @@ type VsVlTaskMeta = {
   checklist?: string
   dependency_task_id?: string
   comment?: string
+  unlock_after_days?: number  // Days after dependency task's creation before this task is editable
 }
 
 const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
@@ -404,6 +405,41 @@ function formatDateTime(value?: string | null) {
   })
 }
 
+async function initializeMeetingChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.path === "MEETINGS" && item.item_type === "CHECKBOX")
+      .map((item) => (item.title || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = MEETING_CHECKLIST_ITEMS.filter(
+    (title) => !existingTitles.has(title.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const title of missing) {
+    const position = MEETING_CHECKLIST_ITEMS.indexOf(title)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        path: "MEETINGS",
+        title,
+        is_checked: false,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create meeting checklist item", title)
+    }
+  }
+}
+
 function formatMeetingLabel(meeting: Meeting) {
   const platformLabel = meeting.platform ? ` (${meeting.platform})` : ""
   if (!meeting.starts_at) return `${meeting.title}${platformLabel}`
@@ -425,6 +461,13 @@ function toDateInput(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   return date.toISOString().slice(0, 10)
+}
+
+function formatDateDisplay(value?: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
 }
 
 function isMstProject(project?: Project | null) {
@@ -563,13 +606,15 @@ export default function PcmProjectPage() {
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
-  const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
-    MEETING_CHECKLIST_ITEMS.map((content, index) => ({
-      id: `meeting-${index}`,
-      content,
-      isChecked: false,
-    }))
-  )
+  const [meetingChecklist, setMeetingChecklist] = React.useState<
+    { id: string; content: string; answer: string; isChecked: boolean; position: number }[]
+  >([])
+  const [newMeetingItemContent, setNewMeetingItemContent] = React.useState("")
+  const [newMeetingItemAnswer, setNewMeetingItemAnswer] = React.useState("")
+  const [addingMeetingItem, setAddingMeetingItem] = React.useState(false)
+  const [editingMeetingItemId, setEditingMeetingItemId] = React.useState<string | null>(null)
+  const [editingMeetingItemContent, setEditingMeetingItemContent] = React.useState("")
+  const [editingMeetingItemAnswer, setEditingMeetingItemAnswer] = React.useState("")
   const [documentationChecklist, setDocumentationChecklist] = React.useState(() =>
     DOCUMENTATION_CHECKLIST_QUESTIONS.map((question, index) => ({
       id: `doc-${index}`,
@@ -658,9 +703,9 @@ export default function PcmProjectPage() {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
 
-        // Initialize MST checklist items if this is an MST project
-        if (isMstProject(p)) {
-          try {
+        try {
+          // Initialize MST checklist items if this is an MST project
+          if (isMstProject(p)) {
             await initializeMstChecklistItems(p.id, items, apiFetch)
             // Reload checklist items after initialization to get all created items
             const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
@@ -689,9 +734,15 @@ export default function PcmProjectPage() {
                 }
               }
             }
-          } catch (error) {
-            console.error("Failed to initialize MST checklist items:", error)
           }
+
+          await initializeMeetingChecklistItems(p.id, items, apiFetch)
+          const meetingReloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+          if (meetingReloadRes.ok) {
+            setChecklistItems((await meetingReloadRes.json()) as ChecklistItem[])
+          }
+        } catch (error) {
+          console.error("Failed to initialize meeting checklist items:", error)
         }
       }
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
@@ -786,6 +837,46 @@ export default function PcmProjectPage() {
       setFinalizationChecks(finalizationData)
     }
   }, [checklistItems, isMst, project])
+
+  // Load VS/VL acceptance questions from database (separate from MST)
+  const isVsVlForEffect = React.useMemo(() => isVsVlProject(project), [project])
+  React.useEffect(() => {
+    if (!isVsVlForEffect || !project) return
+
+    const vsVlAcceptanceItems = checklistItems.filter((item) => {
+      if (item.item_type !== "CHECKBOX") return false
+      return item.path === "VS_VL_PLANNING" && VS_VL_ACCEPTANCE_QUESTIONS.includes(item.title || "")
+    })
+    const vsVlChecked: Record<string, boolean> = {}
+    vsVlAcceptanceItems.forEach((item) => {
+      if (item.title) {
+        vsVlChecked[item.title] = item.is_checked || false
+      }
+    })
+    setVsVlAcceptanceChecks(vsVlChecked)
+  }, [checklistItems, isVsVlForEffect, project])
+
+  React.useEffect(() => {
+    const meetingItems = checklistItems.filter(
+      (item) => item.path === "MEETINGS" && item.item_type === "CHECKBOX"
+    )
+    if (!meetingItems.length) {
+      setMeetingChecklist([])
+      return
+    }
+    const sorted = meetingItems
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    setMeetingChecklist(
+      sorted.map((item, index) => ({
+        id: item.id,
+        content: item.title || "",
+        answer: item.comment || "",
+        isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
   const isVsVl = React.useMemo(() => isVsVlProject(project), [project])
 
   const vsVlTabs = React.useMemo(() => {
@@ -1027,6 +1118,27 @@ export default function PcmProjectPage() {
     }
   }
 
+  const toggleTemplate = async () => {
+    if (!project) return
+    const newValue = !project.is_template
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_template: newValue }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update template status")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      toast.success(newValue ? "Marked as template" : "Unmarked as template")
+    } catch {
+      toast.error("Failed to update template status")
+    }
+  }
+
   const submitChecklistItem = async () => {
     if (!project || !newChecklistContent.trim()) return
     setAddingChecklist(true)
@@ -1076,16 +1188,109 @@ export default function PcmProjectPage() {
     }
   }
 
+  const patchMeetingChecklistItem = async (
+    itemId: string,
+    payload: Partial<{ title: string; comment: string | null; is_checked: boolean }>
+  ) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      toast.error("Failed to save meeting checklist")
+      return null
+    }
+    const updated = (await res.json()) as ChecklistItem
+    setChecklistItems((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)))
+    return updated
+  }
+
   const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
+    const previous = meetingChecklist.find((item) => item.id === itemId)?.isChecked ?? false
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
+    void patchMeetingChecklistItem(itemId, { is_checked: next }).then((saved) => {
+      if (!saved) {
+        setMeetingChecklist((prev) =>
+          prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+        )
+      }
+    })
   }
 
-  const updateMeetingChecklistItem = (itemId: string, content: string) => {
-    setMeetingChecklist((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, content } : item))
-    )
+  const startEditMeetingChecklistItem = (itemId: string) => {
+    const item = meetingChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    setEditingMeetingItemId(itemId)
+    setEditingMeetingItemContent(item.content)
+    setEditingMeetingItemAnswer(item.answer)
+  }
+
+  const cancelEditMeetingChecklistItem = () => {
+    setEditingMeetingItemId(null)
+    setEditingMeetingItemContent("")
+    setEditingMeetingItemAnswer("")
+  }
+
+  const saveMeetingChecklistItem = async () => {
+    if (!editingMeetingItemId) return
+    const title = editingMeetingItemContent.trim()
+    if (!title) return
+    const comment = editingMeetingItemAnswer.trim()
+    const saved = await patchMeetingChecklistItem(editingMeetingItemId, {
+      title,
+      comment: comment || null,
+    })
+    if (saved) {
+      cancelEditMeetingChecklistItem()
+    }
+  }
+
+  const deleteMeetingChecklistItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete meeting checklist item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((entry) => entry.id !== itemId))
+    toast.success("Checklist item deleted")
+  }
+
+  const addMeetingChecklistItem = async () => {
+    if (!project) return
+    const title = newMeetingItemContent.trim()
+    if (!title) return
+    setAddingMeetingItem(true)
+    try {
+      const nextPosition =
+        meetingChecklist.reduce((max, item) => Math.max(max, item.position), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "MEETINGS",
+          title,
+          comment: newMeetingItemAnswer.trim() || null,
+          is_checked: false,
+          position: nextPosition,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add meeting checklist item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewMeetingItemContent("")
+      setNewMeetingItemAnswer("")
+      toast.success("Checklist item added")
+    } finally {
+      setAddingMeetingItem(false)
+    }
   }
 
   const toggleDocumentationChecklistItem = (itemId: string, next: boolean) => {
@@ -1489,6 +1694,102 @@ export default function PcmProjectPage() {
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
 
+    const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        toast.error(errorMessage)
+        return null
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      return updated
+    }
+    const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
+      const current = parseVsVlMeta(task.internal_notes) || {}
+      const nextMeta: VsVlTaskMeta = {
+        ...current,
+        ...updates,
+        vs_vl_phase: current.vs_vl_phase || vsVlPhase,
+      }
+      if (!nextMeta.comment) delete nextMeta.comment
+      if (!nextMeta.checklist) delete nextMeta.checklist
+      if (!nextMeta.unlock_after_days) delete nextMeta.unlock_after_days
+      const res = await apiFetch(`/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update task")
+        return null
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      return updated
+    }
+
+    // VS/VL acceptance checklist items map
+    const vsVlAcceptanceItemMap = new Map<string, ChecklistItem>()
+    checklistItems
+      .filter((item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING")
+      .forEach((item) => {
+        if (item.title) vsVlAcceptanceItemMap.set(item.title, item)
+      })
+
+    const toggleVsVlAcceptance = async (q: string) => {
+      const newChecked = !vsVlAcceptanceChecks[q]
+      // Optimistically update UI
+      setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: newChecked }))
+
+      let item = vsVlAcceptanceItemMap.get(q)
+
+      // Create item if it doesn't exist
+      if (!item && project) {
+        try {
+          const createRes = await apiFetch("/checklist-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: project.id,
+              item_type: "CHECKBOX",
+              path: "VS_VL_PLANNING",
+              title: q,
+              keyword: "VS_VL_PLANNING",
+              description: q,
+              category: "VS_VL_PLANNING",
+              is_checked: newChecked,
+            }),
+          })
+
+          if (createRes.ok) {
+            const created = (await createRes.json()) as ChecklistItem
+            item = created
+            setChecklistItems((prev) => [...prev, created])
+            vsVlAcceptanceItemMap.set(q, created)
+          }
+        } catch (error) {
+          console.error("Failed to create VS/VL acceptance item:", error)
+        }
+      }
+
+      if (item) {
+        // Update in background
+        try {
+          await apiFetch(`/checklist-items/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ is_checked: newChecked }),
+          })
+        } catch (error) {
+          // Silently handle errors
+        }
+      }
+    }
+
     return (
       <div className="space-y-5 max-w-6xl mx-auto px-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1496,7 +1797,12 @@ export default function PcmProjectPage() {
             <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
               &larr; Back to Projects
             </button>
-            <div className="text-3xl font-semibold">{title}</div>
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-semibold">{title}</span>
+              {project?.is_template && (
+                <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               {VS_VL_PHASES.map((p) => {
                 const isActive = p === vsVlPhase
@@ -1530,7 +1836,44 @@ export default function PcmProjectPage() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {project?.start_date ? (
+              <div className="text-xs text-slate-500">
+                Started: {new Date(project.start_date).toLocaleDateString()}
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-7"
+                onClick={async () => {
+                  if (!project) return
+                  const res = await apiFetch(`/projects/${project.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ start_date: new Date().toISOString() }),
+                  })
+                  if (res.ok) {
+                    const updated = (await res.json()) as Project
+                    setProject(updated)
+                    toast.success("Project started!")
+                  } else {
+                    toast.error("Failed to start project")
+                  }
+                }}
+              >
+                Start Project
+              </Button>
+            )}
+            {user?.role === "ADMIN" && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={project?.is_template ?? false}
+                  onCheckedChange={() => void toggleTemplate()}
+                />
+                <span className="text-muted-foreground">Template</span>
+              </label>
+            )}
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
               VS/VL
             </Badge>
@@ -1572,7 +1915,7 @@ export default function PcmProjectPage() {
                   <div key={q} className="flex items-center gap-3">
                     <Checkbox
                       checked={Boolean(vsVlAcceptanceChecks[q])}
-                      onCheckedChange={() => setVsVlAcceptanceChecks((prev) => ({ ...prev, [q]: !prev[q] }))}
+                      onCheckedChange={() => void toggleVsVlAcceptance(q)}
                       className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                     />
                     <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
@@ -1583,144 +1926,47 @@ export default function PcmProjectPage() {
           </Card>
         ) : (
                     <Card className="border-0 shadow-sm">
-            <div className="p-6 space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-lg font-semibold tracking-tight">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-                <Badge variant="outline" className="text-slate-600 border-slate-200 bg-white">
+            <div className="p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-base font-semibold">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
+                <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
                   {VS_VL_PHASE_LABELS[vsVlPhase]}
                 </Badge>
               </div>
-              <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="text-sm font-semibold text-slate-700">Add task</div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Task title</Label>
-                    <Input
-                      value={vsVlTaskTitle}
-                      onChange={(e) => setVsVlTaskTitle(e.target.value)}
-                      placeholder="Pershkrimi..."
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Description</Label>
-                    <Textarea
-                      value={vsVlTaskDetail}
-                      onChange={(e) => setVsVlTaskDetail(e.target.value)}
-                      placeholder="Pershkrimi/Detaj"
-                      rows={3}
-                      className="text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Due date</Label>
-                    <Input
-                      value={vsVlTaskDate}
-                      onChange={(e) => setVsVlTaskDate(normalizeDueDateInput(e.target.value))}
-                      type="date"
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Priority</Label>
-                    <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="NORMAL">NORMAL</SelectItem>
-                        <SelectItem value="HIGH">I LARTE</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Status</Label>
-                    <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TASK_STATUSES.map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {statusLabel(status)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Dependency</Label>
-                    <Select value={vsVlTaskDependencyId} onValueChange={setVsVlTaskDependencyId}>
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="-" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">-</SelectItem>
-                        {dependencyOptions.map((task) => (
-                          <SelectItem key={task.id} value={task.id}>
-                            {task.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Assignees</Label>
-                    <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg border bg-white p-2">
-                      {assignableUsers.length ? (
-                        assignableUsers.map((u) => {
-                          const checked = vsVlTaskAssignees.includes(u.id)
-                          return (
-                            <label key={u.id} className="flex items-center gap-2 text-xs text-slate-600">
-                              <input
-                                type="checkbox"
-                                className="h-3 w-3 rounded border-slate-300"
-                                checked={checked}
-                                onChange={() =>
-                                  setVsVlTaskAssignees((prev) =>
-                                    checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
-                                  )
-                                }
-                              />
-                              <span className="truncate">{u.full_name || u.username || u.email}</span>
-                            </label>
-                          )
-                        })
-                      ) : (
-                        <div className="text-xs text-slate-400">-</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Comment</Label>
-                    <Textarea
-                      value={vsVlTaskComment}
-                      onChange={(e) => setVsVlTaskComment(e.target.value)}
-                      placeholder="Koment..."
-                      rows={3}
-                      className="text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500">Checklist</Label>
-                    <Textarea
-                      value={vsVlTaskChecklist}
-                      onChange={(e) => setVsVlTaskChecklist(e.target.value)}
-                      placeholder="Checklist..."
-                      rows={3}
-                      className="text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="mt-4 flex justify-end">
+              
+              {/* Compact Add Task Form */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={vsVlTaskTitle}
+                    onChange={(e) => setVsVlTaskTitle(e.target.value)}
+                    placeholder="Task title..."
+                    className="h-8 text-sm flex-1 min-w-[200px]"
+                  />
+                  <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
+                    <SelectTrigger className="h-8 w-[100px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NORMAL">NORMAL</SelectItem>
+                      <SelectItem value="HIGH">I LARTE</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
+                    <SelectTrigger className="h-8 w-[100px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TASK_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {statusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     size="sm"
+                    className="h-8 px-3 text-xs"
                     disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
                     onClick={async () => {
                       if (!project || !vsVlTaskTitle.trim()) return
@@ -1770,11 +2016,12 @@ export default function PcmProjectPage() {
                       }
                     }}
                   >
-                    {creatingVsVlTask ? "Saving..." : "Save"}
+                    {creatingVsVlTask ? "..." : "Add"}
                   </Button>
                 </div>
               </div>
-              <div className="space-y-4">
+              
+              <div className="space-y-2">
                 {orderedVsVlTasks.length ? (
                   orderedVsVlTasks.map((task) => {
                     const meta = parseVsVlMeta(task.internal_notes)
@@ -1784,16 +2031,98 @@ export default function PcmProjectPage() {
                       ? null
                       : task.dependency_task_id || meta?.dependency_task_id || null
                     const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
-                    const isDependencyLocked = Boolean(dependencyId && dependencyStatus !== "DONE")
-                    const isLocked = isDependencyLocked
+                    const dependencyTask = dependencyId ? tasks.find((t) => t.id === dependencyId) : null
+                    
+                    // Calculate lock status based on unlock_after_days from PROJECT start date
+                    let isTimeLocked = false
+                    let daysRemaining = 0
+                    let unlockDateDisplay: Date | null = null
+                    
+                    // Helper to add business days (skip weekends)
+                    const addBusinessDays = (start: Date, days: number): Date => {
+                      const result = new Date(start)
+                      let addedDays = 0
+                      while (addedDays < days) {
+                        result.setDate(result.getDate() + 1)
+                        const dayOfWeek = result.getDay()
+                        // Skip Saturday (6) and Sunday (0)
+                        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                          addedDays++
+                        }
+                      }
+                      // If result lands on weekend, move to Monday
+                      while (result.getDay() === 0 || result.getDay() === 6) {
+                        result.setDate(result.getDate() + 1)
+                      }
+                      return result
+                    }
+                    
+                    // Time-based lock: task unlocks X business days after project start
+                    if (meta?.unlock_after_days !== undefined && meta.unlock_after_days > 0 && project) {
+                      const projectStart = new Date(project.start_date || project.created_at || Date.now())
+                      const unlockDate = addBusinessDays(projectStart, meta.unlock_after_days)
+                      unlockDateDisplay = unlockDate
+                      const now = new Date()
+                      // Reset time to start of day for comparison
+                      now.setHours(0, 0, 0, 0)
+                      unlockDate.setHours(0, 0, 0, 0)
+                      isTimeLocked = now < unlockDate
+                      if (isTimeLocked) {
+                        // Calculate business days remaining
+                        let remaining = 0
+                        const temp = new Date(now)
+                        while (temp < unlockDate) {
+                          temp.setDate(temp.getDate() + 1)
+                          if (temp.getDay() !== 0 && temp.getDay() !== 6) {
+                            remaining++
+                          }
+                        }
+                        daysRemaining = remaining
+                      }
+                    }
+                    
+                    // Dependency-based lock: locked until dependency is DONE
+                    const isDependencyNotDone = Boolean(dependencyId && dependencyStatus !== "DONE")
+                    
+                    // Combined lock: if has unlock_after_days, must ALSO have dependency done (if exists)
+                    // If no unlock_after_days, just check dependency
+                    const isLocked = isTimeLocked || isDependencyNotDone
                     const selectedAssignees = taskAssigneeIds(task)
                     const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
                     const checklistValue = vsVlChecklistEdits[task.id] ?? meta?.checklist ?? ""
                     const isEditing = Boolean(vsVlEditMode[task.id])
                     return (
-                      <div key={task.id} className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-sm ring-1 ring-slate-100/80 transition-shadow hover:shadow-md sm:p-4 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1 space-y-1">
+                      <div 
+                        key={task.id} 
+                        className={`rounded-lg border bg-white transition-shadow hover:shadow-sm ${
+                          isLocked 
+                            ? "border-amber-200 bg-amber-50/20" 
+                            : "border-slate-200"
+                        }`}
+                      >
+                        {/* Main Row - Compact */}
+                        <div className="p-2.5 flex items-center gap-2">
+                          {isLocked && (
+                            <div 
+                              className="flex items-center gap-1 flex-shrink-0" 
+                              title={
+                                isTimeLocked && isDependencyNotDone
+                                  ? `Locked: ${daysRemaining}d remaining + waiting for "${dependencyTask?.title || 'dependency'}"`
+                                  : isTimeLocked
+                                    ? `Unlocks in ${daysRemaining} business day(s)`
+                                    : `Waiting for "${dependencyTask?.title || 'dependency'}" to complete`
+                              }
+                            >
+                              <Lock className="h-3.5 w-3.5 text-amber-600" />
+                              {daysRemaining > 0 && (
+                                <span className="text-xs text-amber-600 font-medium">{daysRemaining}d</span>
+                              )}
+                              {!isTimeLocked && isDependencyNotDone && (
+                                <span className="text-xs text-amber-600">dep</span>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
                             <Input
                               key={`title-${task.id}-${task.updated_at}`}
                               defaultValue={task.title}
@@ -1802,300 +2131,305 @@ export default function PcmProjectPage() {
                                 if (!nextValue || nextValue === task.title) return
                                 void patchTask(task.id, { title: nextValue }, "Failed to update title")
                               }}
-                              className={`h-9 text-base font-semibold ${!isEditing ? "bg-slate-50 text-slate-500" : "bg-white"} border-slate-200`}
-                              readOnly={!isEditing}
-                              disabled={isLocked || !isEditing}
-                            />
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
-                                {VS_VL_PHASE_LABELS[vsVlPhase]}
-                              </span>
-                              <span>Created {toDateInput(task.created_at) || "-"}</span>
-                              {isDependencyLocked ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">Blocked</span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              className={
-                                task.priority === "HIGH"
-                                  ? "bg-rose-500 text-white"
-                                  : "bg-slate-200 text-slate-700"
-                              }
-                            >
-                              {vsVlPriorityLabel(task.priority)}
-                            </Badge>
-                            <Select
-                              value={task.status || "TODO"}
-                              onValueChange={(value) => {
-                                if (isLocked) return
-                                void patchTask(task.id, { status: value }, "Failed to update status")
-                              }}
-                              disabled={isLocked}
-                            >
-                              <SelectTrigger className="h-9 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {TASK_STATUSES.map((status) => (
-                                  <SelectItem key={status} value={status}>
-                                    {statusLabel(status)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full"
-                                onClick={() =>
-                                  setVsVlEditMode((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
-                                }
-                                aria-label={isEditing ? "Done editing" : "Edit task"}
-                                title={isEditing ? "Done" : "Edit"}
-                              >
-                                {isEditing ? <Check className="h-4 w-4 text-emerald-600" /> : <Pencil className="h-4 w-4" />}
-                                <span className="sr-only">{isEditing ? "Done" : "Edit"}</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full text-red-600 hover:bg-red-50"
-                                onClick={async () => {
-                                  const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                                  if (!res?.ok) {
-                                    if (res?.status == 405) {
-                                      toast.error("Delete endpoint not active. Restart backend.")
-                                    } else {
-                                      toast.error("Failed to delete task")
-                                    }
-                                    return
-                                  }
-                                  setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                                  toast.success("Task deleted")
-                                }}
-                                aria-label="Delete task"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Delete</span>
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 p-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            Details
-                          </div>
-                          <div className="mt-3 grid gap-3 md:grid-cols-[2fr_1fr]">
-                            <div className="space-y-1">
-                            <Label className="text-xs text-slate-500">Description</Label>
-                            <Textarea
-                              key={`description-${task.id}-${task.updated_at}`}
-                              defaultValue={task.description || ""}
-                              onBlur={(e) => {
-                                const nextValue = e.target.value.trim()
-                                const currentValue = task.description || ""
-                                if (nextValue === currentValue) return
-                                void patchTask(task.id, { description: nextValue || null }, "Failed to update description")
-                              }}
-                              rows={2}
-                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
+                              className={`h-auto text-sm font-semibold px-0 border-0 bg-transparent focus-visible:ring-1 focus-visible:ring-slate-300 ${
+                                !isEditing ? "text-slate-700" : "text-slate-900"
+                              }`}
                               readOnly={!isEditing}
                               disabled={isLocked || !isEditing}
                             />
                           </div>
-                            <div className="space-y-3">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-slate-500">Due date</Label>
-                              <Input
-                                value={toDateInput(task.due_date)}
-                                onChange={(e) => {
-                                  if (isLocked) return
-                                  const nextValue = normalizeDueDateInput(e.target.value)
-                                  const dueDate = nextValue ? new Date(nextValue).toISOString() : null
-                                  void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
-                                }}
-                                type="date"
-                                className="h-9 text-sm"
-                                disabled={isLocked || !isEditing}
-                              />
+                          <Badge
+                            className={`text-[10px] px-1.5 py-0 h-5 flex-shrink-0 ${
+                              task.priority === "HIGH"
+                                ? "bg-rose-500 text-white"
+                                : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {vsVlPriorityLabel(task.priority)}
+                          </Badge>
+                          <Select
+                            value={task.status || "TODO"}
+                            onValueChange={(value) => {
+                              if (isLocked) return
+                              void patchTask(task.id, { status: value }, "Failed to update status")
+                            }}
+                            disabled={isLocked}
+                          >
+                            <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_STATUSES.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {statusLabel(status)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {task.due_date && (
+                            <div className="flex items-center gap-0.5 text-[10px] text-slate-500 flex-shrink-0" title="Due date">
+                              <Calendar className="h-3 w-3" />
+                              <span>{formatDateDisplay(task.due_date)}</span>
                             </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-slate-500">Dependency</Label>
-                              <Select
-                                value={
-                                  isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
-                                }
-                                onValueChange={(value) => {
-                                  void patchTask(
-                                    task.id,
-                                    { dependency_task_id: value === "__none__" ? null : value },
-                                    "Failed to update dependency"
-                                  )
-                                }}
-                                disabled={isBaseTask}
-                              >
-                                <SelectTrigger className="h-9 text-sm">
-                                  <SelectValue placeholder="-" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">-</SelectItem>
-                                  {dependencyOptions
-                                    .filter((opt) => opt.id !== task.id)
-                                    .map((opt) => (
-                                      <SelectItem key={opt.id} value={opt.id}>
-                                        {opt.title}
-                                      </SelectItem>
-                                    ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200/70 bg-white p-3">
-                          <div className="flex items-center justify-between">
-                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Assignees
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs"
-                              onClick={() =>
-                                setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
-                              }
-                              disabled={isLocked}
-                            >
-                              {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
-                            </Button>
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-1">
-                            {selectedAssignees.length ? (
-                              selectedAssignees.map((id, idx) => {
-                                const user = userMap.get(id)
-                                const label = user?.full_name || user?.username || user?.email || "-"
-                                const colorClass = [
-                                  "bg-blue-100 text-blue-800",
-                                  "bg-emerald-100 text-emerald-800",
-                                  "bg-amber-100 text-amber-800",
-                                  "bg-rose-100 text-rose-800",
-                                  "bg-slate-100 text-slate-800",
-                                ][idx % 5]
-                                return (
-                                  <div key={id} className="flex items-center">
-                                    <div
-                                      className={`-ml-1 h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-semibold ring-2 ring-white shadow-sm ${colorClass}`}
-                                      title={label}
-                                    >
-                                      {initials(label)}
-                                    </div>
-                                  </div>
-                                )
-                              })
-                            ) : (
-                              <div className="flex items-center gap-2 text-sm text-slate-400">
-                                <div className="h-9 w-9 rounded-full border border-dashed border-slate-300" />
-                                <span>Unassigned</span>
+                          )}
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {selectedAssignees.slice(0, 3).map((id, idx) => {
+                              const user = userMap.get(id)
+                              const label = user?.full_name || user?.username || user?.email || "-"
+                              const colorClass = [
+                                "bg-blue-500 text-white",
+                                "bg-emerald-500 text-white",
+                                "bg-amber-500 text-white",
+                                "bg-rose-500 text-white",
+                                "bg-purple-500 text-white",
+                              ][idx % 5]
+                              return (
+                                <div
+                                  key={id}
+                                  className={`h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-semibold ring-1 ring-slate-200 ${colorClass}`}
+                                  title={label}
+                                >
+                                  {initials(label)}
+                                </div>
+                              )
+                            })}
+                            {selectedAssignees.length > 3 && (
+                              <span className="text-[10px] text-slate-500">+{selectedAssignees.length - 3}</span>
+                            )}
+                            {selectedAssignees.length === 0 && (
+                              <div className="h-6 w-6 rounded-full bg-slate-200 flex items-center justify-center" title="Unassigned">
+                                <Users className="h-3 w-3 text-slate-400" />
                               </div>
                             )}
                           </div>
-                          {vsVlAssigneeOpen[task.id] ? (
-                            <div className="mt-3 grid gap-2 rounded-lg border bg-white p-3 sm:grid-cols-2">
-                              {assignableUsers.length ? (
-                                assignableUsers.map((u) => {
-                                  const checked = selectedAssignees.includes(u.id)
-                                  return (
-                                    <label key={u.id} className="flex items-center gap-2 text-xs text-slate-600">
-                                      <input
-                                        type="checkbox"
-                                        className="h-3 w-3 rounded border-slate-300"
-                                        checked={checked}
-                                        disabled={isLocked}
-                                        onChange={() => {
-                                          if (isLocked) return
-                                          const nextIds = checked
-                                            ? selectedAssignees.filter((id) => id !== u.id)
-                                            : [...selectedAssignees, u.id]
-                                          void patchTask(task.id, { assignees: nextIds }, "Failed to update assignees")
-                                        }}
-                                      />
-                                      <span className="truncate">{u.full_name || u.username || u.email}</span>
-                                    </label>
-                                  )
-                                })
-                              ) : (
-                                <div className="text-xs text-slate-400">-</div>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 p-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            Notes
-                          </div>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <div className="space-y-1">
-                            <Label className="text-xs text-slate-500">Comment</Label>
-                            <Textarea
-                              value={commentValue}
-                              onChange={(e) =>
-                                setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
-                              }
-                              onBlur={async (e) => {
-                                if (isLocked) return
-                                const nextValue = e.target.value.trim()
-                                const currentValue = meta?.comment || ""
-                                if (nextValue === currentValue) return
-                                const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
-                                const updated = await updateVsVlMeta(task, {
-                                  comment: nextValue || undefined,
-                                  checklist: checklist || undefined,
-                                })
-                                if (updated) {
-                                  setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 flex-shrink-0"
+                            onClick={() =>
+                              setVsVlEditMode((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
+                            }
+                            aria-label={isEditing ? "Done editing" : "Edit task"}
+                            title={isEditing ? "Done" : "Edit"}
+                          >
+                            {isEditing ? (
+                              <Check className="h-3 w-3 text-emerald-600" />
+                            ) : (
+                              <Pencil className="h-3 w-3 text-slate-600" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-600 hover:bg-red-50 flex-shrink-0"
+                            onClick={async () => {
+                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                              if (!res?.ok) {
+                                if (res?.status == 405) {
+                                  toast.error("Delete endpoint not active. Restart backend.")
+                                } else {
+                                  toast.error("Failed to delete task")
                                 }
-                              }}
-                              placeholder="Koment..."
-                              rows={2}
-                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
-                              readOnly={!isEditing}
-                              disabled={isLocked || !isEditing}
-                            />
-                          </div>
-                            <div className="space-y-1">
-                            <Label className="text-xs text-slate-500">Checklist</Label>
-                            <Textarea
-                              value={checklistValue}
-                              onChange={(e) =>
-                                setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                return
                               }
-                              onBlur={async (e) => {
-                                if (isLocked) return
-                                const nextValue = e.target.value.trim()
-                                const currentValue = meta?.checklist || ""
-                                if (nextValue === currentValue) return
-                                const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
-                                const updated = await updateVsVlMeta(task, {
-                                  checklist: nextValue || undefined,
-                                  comment: comment || undefined,
-                                })
-                                if (updated) {
-                                  setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                              toast.success("Task deleted")
+                            }}
+                            aria-label="Delete task"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+
+                        {/* Expandable Details - Only when editing */}
+                        {isEditing && (
+                          <div className="border-t border-slate-100 p-2.5 space-y-2 bg-slate-50/30">
+                            <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
+                              <div>
+                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Description</Label>
+                                <Textarea
+                                  key={`description-${task.id}-${task.updated_at}`}
+                                  defaultValue={task.description || ""}
+                                  onBlur={(e) => {
+                                    const nextValue = e.target.value.trim()
+                                    const currentValue = task.description || ""
+                                    if (nextValue === currentValue) return
+                                    void patchTask(task.id, { description: nextValue || null }, "Failed to update description")
+                                  }}
+                                  rows={2}
+                                  className="text-xs border-slate-300 bg-white resize-none h-auto"
+                                  placeholder="Description..."
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Due date</Label>
+                                  <Input
+                                    value={toDateInput(task.due_date)}
+                                    onChange={(e) => {
+                                      if (isLocked) return
+                                      const nextValue = normalizeDueDateInput(e.target.value)
+                                      const dueDate = nextValue ? new Date(nextValue).toISOString() : null
+                                      void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
+                                    }}
+                                    type="date"
+                                    className="h-7 text-xs border-slate-300 bg-white"
+                                    disabled={isLocked}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Dependency</Label>
+                                  <Select
+                                    value={
+                                      isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
+                                    }
+                                    onValueChange={(value) => {
+                                      void patchTask(
+                                        task.id,
+                                        { dependency_task_id: value === "__none__" ? null : value },
+                                        "Failed to update dependency"
+                                      )
+                                    }}
+                                    disabled={isBaseTask}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs border-slate-300 bg-white">
+                                      <SelectValue placeholder="-" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">-</SelectItem>
+                                      {dependencyOptions
+                                        .filter((opt) => opt.id !== task.id)
+                                        .map((opt) => (
+                                          <SelectItem key={opt.id} value={opt.id}>
+                                            {opt.title}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Unlock on day</Label>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    placeholder="0"
+                                    defaultValue={meta?.unlock_after_days || ""}
+                                    className="h-7 text-xs border-slate-300 bg-white w-20"
+                                    disabled={isBaseTask}
+                                    onBlur={(e) => {
+                                      const value = parseInt(e.target.value, 10)
+                                      const newValue = isNaN(value) || value <= 0 ? undefined : value
+                                      if (newValue === meta?.unlock_after_days) return
+                                      void updateVsVlMeta(task, { unlock_after_days: newValue })
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <Label className="text-[10px] font-medium text-slate-700">Assignees</Label>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-[10px] h-5 px-2"
+                                onClick={() =>
+                                  setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
                                 }
-                              }}
-                              placeholder="Checklist..."
-                              rows={2}
-                              className="text-sm bg-slate-50 border-slate-200 leading-snug"
-                              readOnly={!isEditing}
-                              disabled={isLocked || !isEditing}
-                            />
+                                disabled={isLocked}
+                              >
+                                {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
+                              </Button>
+                            </div>
+                            {vsVlAssigneeOpen[task.id] && (
+                              <div className="rounded border border-slate-200 bg-white p-1.5 space-y-1 max-h-32 overflow-y-auto">
+                                {assignableUsers.length ? (
+                                  assignableUsers.map((u) => {
+                                    const checked = selectedAssignees.includes(u.id)
+                                    return (
+                                      <label
+                                        key={u.id}
+                                        className="flex items-center gap-1.5 p-1 rounded hover:bg-slate-50 transition-colors cursor-pointer"
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          disabled={isLocked}
+                                          onCheckedChange={() => {
+                                            if (isLocked) return
+                                            const nextIds = checked
+                                              ? selectedAssignees.filter((id) => id !== u.id)
+                                              : [...selectedAssignees, u.id]
+                                            void patchTask(task.id, { assignees: nextIds }, "Failed to update assignees")
+                                          }}
+                                          className="h-3.5 w-3.5"
+                                        />
+                                        <span className="text-[10px] text-slate-700 flex-1">
+                                          {u.full_name || u.username || u.email}
+                                        </span>
+                                      </label>
+                                    )
+                                  })
+                                ) : (
+                                  <div className="text-[10px] text-slate-400 text-center py-1">No users available</div>
+                                )}
+                              </div>
+                            )}
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <div>
+                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Comment</Label>
+                                <Textarea
+                                  value={commentValue}
+                                  onChange={(e) =>
+                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                  }
+                                  onBlur={async (e) => {
+                                    if (isLocked) return
+                                    const nextValue = e.target.value.trim()
+                                    const currentValue = meta?.comment || ""
+                                    if (nextValue === currentValue) return
+                                    const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
+                                    const updated = await updateVsVlMeta(task, {
+                                      comment: nextValue || undefined,
+                                      checklist: checklist || undefined,
+                                    })
+                                    if (updated) {
+                                      setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                    }
+                                  }}
+                                  placeholder="Koment..."
+                                  rows={2}
+                                  className="text-xs border-slate-300 bg-white resize-none"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Checklist</Label>
+                                <Textarea
+                                  value={checklistValue}
+                                  onChange={(e) =>
+                                    setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                  }
+                                  onBlur={async (e) => {
+                                    if (isLocked) return
+                                    const nextValue = e.target.value.trim()
+                                    const currentValue = meta?.checklist || ""
+                                    if (nextValue === currentValue) return
+                                    const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
+                                    const updated = await updateVsVlMeta(task, {
+                                      checklist: nextValue || undefined,
+                                      comment: comment || undefined,
+                                    })
+                                    if (updated) {
+                                      setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                    }
+                                  }}
+                                  placeholder="Checklist..."
+                                  rows={2}
+                                  className="text-xs border-slate-300 bg-white resize-none"
+                                />
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     )
                   })
@@ -2466,42 +2800,6 @@ export default function PcmProjectPage() {
           prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
         )
       }
-    }
-    const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
-      const res = await apiFetch(`/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        toast.error(errorMessage)
-        return null
-      }
-      const updated = (await res.json()) as Task
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-      return updated
-    }
-    const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
-      const current = parseVsVlMeta(task.internal_notes) || {}
-      const nextMeta: VsVlTaskMeta = {
-        ...current,
-        ...updates,
-        vs_vl_phase: current.vs_vl_phase || vsVlPhase,
-      }
-      if (!nextMeta.comment) delete nextMeta.comment
-      if (!nextMeta.checklist) delete nextMeta.checklist
-      const res = await apiFetch(`/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
-      })
-      if (!res.ok) {
-        toast.error("Failed to update task")
-        return null
-      }
-      const updated = (await res.json()) as Task
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-      return updated
     }
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
@@ -3569,7 +3867,12 @@ export default function PcmProjectPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
-          <div className="mt-3 text-3xl font-semibold">{title}</div>
+          <div className="mt-3 flex items-center gap-3">
+            <span className="text-3xl font-semibold">{title}</span>
+            {project?.is_template && (
+              <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
+            )}
+          </div>
           <div className="mt-3">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">{PHASE_LABELS[phase] || "PCM"}</Badge>
           </div>
@@ -3608,7 +3911,18 @@ export default function PcmProjectPage() {
           </div>
           {activePhase !== phase ? <div className="mt-2 text-xs text-muted-foreground">View: {PHASE_LABELS[activePhase] || "PCM"}</div> : null}
         </div>
-        <div className="flex items-center gap-2"><Button className="rounded-xl">Settings</Button></div>
+        <div className="flex items-center gap-3">
+          {user?.role === "ADMIN" && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={project?.is_template ?? false}
+                onCheckedChange={() => void toggleTemplate()}
+              />
+              <span className="text-muted-foreground">Template</span>
+            </label>
+          )}
+          <Button className="rounded-xl">Settings</Button>
+        </div>
       </div>
 
       <div className="flex justify-end">
@@ -3637,6 +3951,115 @@ export default function PcmProjectPage() {
           })}
         </div>
       </div>
+
+      {activeTab === "meeting-focus" ? (
+        <Card className="p-6 mt-6">
+          <div className="text-lg font-semibold">Meeting focus</div>
+          <div className="mt-2 text-sm text-muted-foreground">Main points to discuss in the meeting.</div>
+          <div className="mt-4 space-y-2">
+            {MEETING_POINTS.map((point) => (
+              <div key={point} className="flex items-start gap-2 text-sm text-muted-foreground">
+                <span className="mt-1 h-2 w-2 rounded-full bg-blue-500" aria-hidden />
+                <span>{point}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {activeTab === "meeting-checklist" ? (
+        <Card className="p-6 mt-6">
+          <div className="text-lg font-semibold">Meeting checklist</div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Input
+              value={newMeetingItemContent}
+              onChange={(e) => setNewMeetingItemContent(e.target.value)}
+              placeholder="Add checklist item..."
+              className="min-w-[220px] flex-1"
+            />
+            <Input
+              value={newMeetingItemAnswer}
+              onChange={(e) => setNewMeetingItemAnswer(e.target.value)}
+              placeholder="Notes (optional)"
+              className="min-w-[220px] flex-1"
+            />
+            <Button
+              variant="outline"
+              disabled={!newMeetingItemContent.trim() || addingMeetingItem}
+              onClick={() => void addMeetingChecklistItem()}
+            >
+              {addingMeetingItem ? "Adding..." : "Add"}
+            </Button>
+          </div>
+          <div className="mt-3 space-y-3">
+            {meetingChecklist.length ? (
+              meetingChecklist.map((item) => {
+                const isEditing = editingMeetingItemId === item.id
+                return (
+                  <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <Checkbox
+                      checked={item.isChecked}
+                      onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
+                    />
+                    <div className="flex-1 space-y-2">
+                      {isEditing ? (
+                        <Input
+                          value={editingMeetingItemContent}
+                          onChange={(e) => setEditingMeetingItemContent(e.target.value)}
+                          placeholder="Checklist item"
+                        />
+                      ) : (
+                        <div className="text-sm font-semibold text-slate-700">{item.content}</div>
+                      )}
+                      {isEditing ? (
+                        <Input
+                          value={editingMeetingItemAnswer}
+                          onChange={(e) => setEditingMeetingItemAnswer(e.target.value)}
+                          placeholder="Notes (optional)"
+                        />
+                      ) : item.answer ? (
+                        <div className="text-sm text-muted-foreground">{item.answer}</div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No notes</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => void saveMeetingChecklistItem()}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={cancelEditMeetingChecklistItem}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => startEditMeetingChecklistItem(item.id)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => void deleteMeetingChecklistItem(item.id)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                No meeting checklist items yet.
+              </div>
+            )}
+          </div>
+        </Card>
+      ) : null}
 
       {/* Keep the rest of rendering logic similar to the source component; tabs will include Financials placeholder when active */}
     </div>

@@ -21,6 +21,7 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
 from app.models.vs_workflow_item import VsWorkflowItem
+from app.models.task_assignee import TaskAssignee
 from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
 from app.schemas.vs_workflow_item import VsWorkflowItemOut, VsWorkflowItemUpdate
 from app.services.workflow_service import (
@@ -28,9 +29,72 @@ from app.services.workflow_service import (
     get_active_workflow_items,
     dependency_item_ids_from_info,
 )
+from datetime import timedelta
 
 
 router = APIRouter()
+
+
+async def _copy_tasks_from_template_project(
+    db: AsyncSession, project: Project, created_by_id: uuid.UUID
+) -> None:
+    """Copy tasks from a VS/VL template project to a newly created project."""
+    # Find the template project (is_template=True and contains VS or VL in title)
+    stmt = select(Project).where(
+        Project.is_template == True,
+    )
+    template_projects = (await db.execute(stmt)).scalars().all()
+    
+    # Find a VS/VL template project
+    template_project = None
+    for tp in template_projects:
+        title_upper = tp.title.upper()
+        if "VS" in title_upper or "VL" in title_upper:
+            template_project = tp
+            break
+    
+    if not template_project:
+        return
+    
+    # Fetch all tasks from the template project
+    template_tasks = (await db.execute(
+        select(Task).where(Task.project_id == template_project.id).order_by(Task.created_at)
+    )).scalars().all()
+    
+    if not template_tasks:
+        return
+    
+    # Map old task IDs to new task IDs for dependency linking
+    old_to_new_task_id: dict[uuid.UUID, uuid.UUID] = {}
+    
+    for template_task in template_tasks:
+        # Create new task based on template
+        new_task = Task(
+            title=template_task.title,
+            description=template_task.description,
+            internal_notes=template_task.internal_notes,
+            priority=template_task.priority or "NORMAL",
+            status="TODO",
+            phase=template_task.phase or "AMAZON",
+            project_id=project.id,
+            department_id=project.department_id,
+            created_by=created_by_id,
+            # Don't copy: due_date (will be set based on project start), assigned_to, dependency
+        )
+        db.add(new_task)
+        await db.flush()  # Get the new task ID
+        
+        old_to_new_task_id[template_task.id] = new_task.id
+    
+    # Second pass: set dependencies using the mapping
+    for template_task in template_tasks:
+        if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
+            new_task_id = old_to_new_task_id[template_task.id]
+            new_dependency_id = old_to_new_task_id[template_task.dependency_task_id]
+            await db.execute(
+                update(Task).where(Task.id == new_task_id).values(dependency_task_id=new_dependency_id)
+            )
+
 
 DEV_PHASES = [
     ProjectPhaseStatus.MEETINGS,
@@ -103,10 +167,16 @@ def phase_index(phase: ProjectPhaseStatus) -> int:
 async def list_projects(
     department_id: uuid.UUID | None = None,
     include_all_departments: bool = False,
+    include_templates: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[ProjectOut]:
     stmt = select(Project)
+    
+    # Exclude template projects by default
+    if not include_templates:
+        stmt = stmt.where(Project.is_template == False)
+    
     if department_id:
         if not include_all_departments:
             ensure_department_access(user, department_id)
@@ -131,6 +201,7 @@ async def list_projects(
             current_phase=p.current_phase,
             status=p.status,
             progress_percentage=p.progress_percentage,
+            is_template=p.is_template,
             start_date=p.start_date,
             due_date=p.due_date,
             completed_at=p.completed_at,
@@ -180,6 +251,11 @@ async def create_project(
     if "VS/VL AMAZON" in title_upper or "VS AMAZON" in title_upper:
         await initialize_vs_workflow(db, project.id)
     
+    # Copy tasks from template project if this is a VS/VL project
+    is_vs_vl_project = "VS" in title_upper or "VL" in title_upper
+    if is_vs_vl_project:
+        await _copy_tasks_from_template_project(db, project, user.id)
+    
     await db.commit()
     await db.refresh(project)
     return ProjectOut(
@@ -192,6 +268,7 @@ async def create_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
         completed_at=project.completed_at,
@@ -221,6 +298,7 @@ async def get_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
         completed_at=project.completed_at,
@@ -271,6 +349,8 @@ async def update_project(
         project.status = payload.status
     if payload.progress_percentage is not None:
         project.progress_percentage = payload.progress_percentage
+    if payload.is_template is not None:
+        project.is_template = payload.is_template
     if payload.start_date is not None:
         project.start_date = payload.start_date
     if payload.due_date is not None:
@@ -290,6 +370,7 @@ async def update_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
         completed_at=project.completed_at,
@@ -374,6 +455,7 @@ async def advance_project_phase(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
         completed_at=project.completed_at,

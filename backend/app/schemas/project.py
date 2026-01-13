@@ -19,6 +19,7 @@ class ProjectOut(BaseModel):
     current_phase: ProjectPhaseStatus
     status: TaskStatus
     progress_percentage: int
+    is_template: bool = False
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
@@ -48,6 +49,7 @@ class ProjectUpdate(BaseModel):
     current_phase: ProjectPhaseStatus | None = None
     status: TaskStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
+    is_template: bool | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
