@@ -35,6 +35,7 @@ const PHASE_LABELS: Record<string, string> = {
 
 const TABS = [
   { id: "description", label: "Description" },
+  { id: "testing", label: "Testing" },
   { id: "tasks", label: "Tasks" },
   { id: "checklists", label: "Checklists" },
   { id: "mst-acceptance", label: "Project Acceptance" },
@@ -96,6 +97,24 @@ function statusLabel(status?: string) {
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase())
 }
 
+function formatErrorDetail(detail: unknown) {
+  if (typeof detail === "string") return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? (item as { msg?: string }).msg
+          : String(item)
+      )
+      .filter(Boolean)
+      .join(", ")
+  }
+  if (detail && typeof detail === "object" && "msg" in detail) {
+    return String((detail as { msg?: string }).msg || "An error occurred")
+  }
+  return "An error occurred"
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
@@ -107,6 +126,41 @@ function formatDateTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+async function initializeMeetingChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.path === "MEETINGS" && item.item_type === "CHECKBOX")
+      .map((item) => (item.title || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = MEETING_CHECKLIST_ITEMS.filter(
+    (title) => !existingTitles.has(title.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const title of missing) {
+    const position = MEETING_CHECKLIST_ITEMS.indexOf(title)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        path: "MEETINGS",
+        title,
+        is_checked: false,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create meeting checklist item", title)
+    }
+  }
 }
 
 function formatMeetingLabel(meeting: Meeting) {
@@ -164,14 +218,15 @@ export default function ProjectPage() {
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
-  const [meetingChecklist, setMeetingChecklist] = React.useState(() =>
-    MEETING_CHECKLIST_ITEMS.map((content, index) => ({
-      id: `meeting-${index}`,
-      content,
-      answer: "",
-      isChecked: false,
-    }))
-  )
+  const [meetingChecklist, setMeetingChecklist] = React.useState<
+    { id: string; content: string; answer: string; isChecked: boolean; position: number }[]
+  >([])
+  const [newMeetingItemContent, setNewMeetingItemContent] = React.useState("")
+  const [newMeetingItemAnswer, setNewMeetingItemAnswer] = React.useState("")
+  const [addingMeetingItem, setAddingMeetingItem] = React.useState(false)
+  const [editingMeetingItemId, setEditingMeetingItemId] = React.useState<string | null>(null)
+  const [editingMeetingItemContent, setEditingMeetingItemContent] = React.useState("")
+  const [editingMeetingItemAnswer, setEditingMeetingItemAnswer] = React.useState("")
   const [mstAcceptanceChecklist, setMstAcceptanceChecklist] = React.useState<ChecklistItem[]>([])
   const [mstGaMeetingChecklist, setMstGaMeetingChecklist] = React.useState<ChecklistItem[]>([])
   const [mstAcceptanceNewText, setMstAcceptanceNewText] = React.useState("")
@@ -222,7 +277,19 @@ export default function ProjectPage() {
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
       if (mRes.ok) setMembers((await mRes.json()) as User[])
-      if (cRes.ok) setChecklistItems((await cRes.json()) as ChecklistItem[])
+      if (cRes.ok) {
+        const items = (await cRes.json()) as ChecklistItem[]
+        setChecklistItems(items)
+        try {
+          await initializeMeetingChecklistItems(p.id, items, apiFetch)
+          const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+          if (reloadRes.ok) {
+            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+          }
+        } catch (error) {
+          console.error("Failed to initialize meeting checklist items:", error)
+        }
+      }
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
       if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -242,6 +309,28 @@ export default function ProjectPage() {
   React.useEffect(() => {
     if (!prompts.length) return
   }, [prompts])
+
+  React.useEffect(() => {
+    const meetingItems = checklistItems.filter(
+      (item) => item.path === "MEETINGS" && item.item_type === "CHECKBOX"
+    )
+    if (!meetingItems.length) {
+      setMeetingChecklist([])
+      return
+    }
+    const sorted = meetingItems
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    setMeetingChecklist(
+      sorted.map((item, index) => ({
+        id: item.id,
+        content: item.title || "",
+        answer: item.comment || "",
+        isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
 
   React.useEffect(() => {
     if (!membersOpen) return
@@ -341,7 +430,10 @@ export default function ProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: project.id,
-          content: newChecklistContent.trim(),
+          item_type: "CHECKBOX",
+          path: activePhase,
+          title: newChecklistContent.trim(),
+          is_checked: false,
         }),
       })
       if (!res.ok) {
@@ -352,7 +444,7 @@ export default function ProjectPage() {
         } catch {
           // ignore
         }
-        toast.error(detail)
+        toast.error(formatErrorDetail(detail))
         return
       }
       const created = (await res.json()) as ChecklistItem
@@ -406,16 +498,109 @@ export default function ProjectPage() {
     }
   }
 
+  const patchMeetingChecklistItem = async (
+    itemId: string,
+    payload: Partial<{ title: string; comment: string | null; is_checked: boolean }>
+  ) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      toast.error("Failed to save meeting checklist")
+      return null
+    }
+    const updated = (await res.json()) as ChecklistItem
+    setChecklistItems((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)))
+    return updated
+  }
+
   const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
+    const previous = meetingChecklist.find((item) => item.id === itemId)?.isChecked ?? false
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
+    void patchMeetingChecklistItem(itemId, { is_checked: next }).then((saved) => {
+      if (!saved) {
+        setMeetingChecklist((prev) =>
+          prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+        )
+      }
+    })
   }
 
-  const updateMeetingChecklistItem = (itemId: string, answer: string) => {
-    setMeetingChecklist((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, answer } : item))
-    )
+  const startEditMeetingChecklistItem = (itemId: string) => {
+    const item = meetingChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    setEditingMeetingItemId(itemId)
+    setEditingMeetingItemContent(item.content)
+    setEditingMeetingItemAnswer(item.answer)
+  }
+
+  const cancelEditMeetingChecklistItem = () => {
+    setEditingMeetingItemId(null)
+    setEditingMeetingItemContent("")
+    setEditingMeetingItemAnswer("")
+  }
+
+  const saveMeetingChecklistItem = async () => {
+    if (!editingMeetingItemId) return
+    const title = editingMeetingItemContent.trim()
+    if (!title) return
+    const comment = editingMeetingItemAnswer.trim()
+    const saved = await patchMeetingChecklistItem(editingMeetingItemId, {
+      title,
+      comment: comment || null,
+    })
+    if (saved) {
+      cancelEditMeetingChecklistItem()
+    }
+  }
+
+  const deleteMeetingChecklistItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete meeting checklist item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((entry) => entry.id !== itemId))
+    toast.success("Checklist item deleted")
+  }
+
+  const addMeetingChecklistItem = async () => {
+    if (!project) return
+    const title = newMeetingItemContent.trim()
+    if (!title) return
+    setAddingMeetingItem(true)
+    try {
+      const nextPosition =
+        meetingChecklist.reduce((max, item) => Math.max(max, item.position), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "MEETINGS",
+          title,
+          comment: newMeetingItemAnswer.trim() || null,
+          is_checked: false,
+          position: nextPosition,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add meeting checklist item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewMeetingItemContent("")
+      setNewMeetingItemAnswer("")
+      toast.success("Checklist item added")
+    } finally {
+      setAddingMeetingItem(false)
+    }
   }
 
   const toggleChecklistDbItem = async (item: ChecklistItem, next: boolean) => {
@@ -612,7 +797,7 @@ export default function ProjectPage() {
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "PLANNING") {
+    if (phaseValue === "PLANIFIKIMI" || phaseValue === "PLANNING") {
       if (isMstProject) {
         return TABS.filter((tab) =>
           tab.id === "description" ||
@@ -624,20 +809,24 @@ export default function ProjectPage() {
           tab.id === "ga"
         )
       }
-      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
+      return TABS.filter(
+        (tab) =>
+          tab.id !== "checklists" &&
+          tab.id !== "members" &&
+          tab.id !== "prompts" &&
+          tab.id !== "testing"
+      )
     }
-    if (phaseValue === "DEVELOPMENT") {
+    if (phaseValue === "ZHVILLIMI" || phaseValue === "DEVELOPMENT") {
       return [
         ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
-    if (phaseValue === "TESTING") {
-      return TABS.filter(
-        (tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts"
-      )
+    if (phaseValue === "TESTIMI" || phaseValue === "TESTING") {
+      return TABS.filter((tab) => tab.id === "testing" || tab.id === "tasks" || tab.id === "ga")
     }
-    if (phaseValue === "DOCUMENTATION") {
+    if (phaseValue === "DOKUMENTIMI" || phaseValue === "DOCUMENTATION") {
       return TABS.filter(
         (tab) =>
           tab.id !== "description" &&
@@ -646,11 +835,12 @@ export default function ProjectPage() {
           tab.id !== "prompts"
       )
     }
+    const baseTabs = TABS.filter((tab) => tab.id !== "testing")
     if (isMstProject) {
       // Outside PLANNING, hide the MST-only checklist tabs.
-      return TABS.filter((tab) => tab.id !== "mst-acceptance" && tab.id !== "mst-ga-meeting")
+      return baseTabs.filter((tab) => tab.id !== "mst-acceptance" && tab.id !== "mst-ga-meeting")
     }
-    return TABS
+    return baseTabs
   }, [phaseValue])
 
   React.useEffect(() => {
@@ -663,7 +853,7 @@ export default function ProjectPage() {
   React.useEffect(() => {
     if (!project) return
     if (!isMstProject) return
-    if (phaseValue !== "PLANNING") return
+    if (phaseValue !== "PLANNING" && phaseValue !== "PLANIFIKIMI") return
     const loadMstChecklists = async () => {
       const [accRes, gaRes] = await Promise.all([
         apiFetch(`/checklists?project_id=${project.id}&group_key=${MST_PLANNING_ACCEPTANCE_GROUP_KEY}&include_items=true`),
@@ -909,6 +1099,10 @@ export default function ProjectPage() {
       }),
     [activePhase, project?.current_phase, tasks]
   )
+  const visibleChecklistItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === activePhase),
+    [activePhase, checklistItems]
+  )
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -1072,23 +1266,93 @@ export default function ProjectPage() {
       {activeTab === "meeting-checklist" ? (
         <Card className="p-6">
           <div className="text-lg font-semibold">Meeting checklist</div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Input
+              value={newMeetingItemContent}
+              onChange={(e) => setNewMeetingItemContent(e.target.value)}
+              placeholder="Add checklist item..."
+              className="min-w-[220px] flex-1"
+            />
+            <Input
+              value={newMeetingItemAnswer}
+              onChange={(e) => setNewMeetingItemAnswer(e.target.value)}
+              placeholder="Notes (optional)"
+              className="min-w-[220px] flex-1"
+            />
+            <Button
+              variant="outline"
+              disabled={!newMeetingItemContent.trim() || addingMeetingItem}
+              onClick={() => void addMeetingChecklistItem()}
+            >
+              {addingMeetingItem ? "Adding..." : "Add"}
+            </Button>
+          </div>
           <div className="mt-3 space-y-3">
-            {meetingChecklist.map((item) => (
-              <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
-                <div className="flex-1 space-y-2">
-                  <div className="text-sm font-semibold text-slate-700">{item.content}</div>
-                  <Input
-                    value={item.answer}
-                    onChange={(e) => updateMeetingChecklistItem(item.id, e.target.value)}
-                    placeholder="Write notes..."
-                  />
-                </div>
-                <Checkbox
-                  checked={item.isChecked}
-                  onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
-                />
+            {meetingChecklist.length ? (
+              meetingChecklist.map((item) => {
+                const isEditing = editingMeetingItemId === item.id
+                return (
+                  <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <Checkbox
+                      checked={item.isChecked}
+                      onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
+                    />
+                    <div className="flex-1 space-y-2">
+                      {isEditing ? (
+                        <Input
+                          value={editingMeetingItemContent}
+                          onChange={(e) => setEditingMeetingItemContent(e.target.value)}
+                          placeholder="Checklist item"
+                        />
+                      ) : (
+                        <div className="text-sm font-semibold text-slate-700">{item.content}</div>
+                      )}
+                      {isEditing ? (
+                        <Input
+                          value={editingMeetingItemAnswer}
+                          onChange={(e) => setEditingMeetingItemAnswer(e.target.value)}
+                          placeholder="Notes (optional)"
+                        />
+                      ) : item.answer ? (
+                        <div className="text-sm text-muted-foreground">{item.answer}</div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No notes</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => void saveMeetingChecklistItem()}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={cancelEditMeetingChecklistItem}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => startEditMeetingChecklistItem(item.id)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => void deleteMeetingChecklistItem(item.id)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                No meeting checklist items yet.
               </div>
-            ))}
+            )}
           </div>
         </Card>
       ) : null}
@@ -1110,17 +1374,6 @@ export default function ProjectPage() {
                 </Button>
               </div>
             </>
-          ) : activePhase === "TESTING" ? (
-            <>
-              <div className="text-lg font-semibold">Testing Questions</div>
-              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-                <div>What should we test and why?</div>
-                <div>Who owns each test area?</div>
-                <div>What environments or data are required?</div>
-                <div>How will issues be tracked and fixed?</div>
-                <div>What is the acceptance checklist to approve?</div>
-              </div>
-            </>
           ) : (
             <>
               <div className="text-lg font-semibold">Project Description</div>
@@ -1137,6 +1390,19 @@ export default function ProjectPage() {
               </div>
             </>
           )}
+        </Card>
+      ) : null}
+
+      {activeTab === "testing" ? (
+        <Card className="p-6">
+          <div className="text-lg font-semibold">Testing Questions</div>
+          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+            <div>What should we test and why?</div>
+            <div>Who owns each test area?</div>
+            <div>What environments or data are required?</div>
+            <div>How will issues be tracked and fixed?</div>
+            <div>What is the acceptance checklist to approve?</div>
+          </div>
         </Card>
       ) : null}
 
@@ -1356,8 +1622,8 @@ export default function ProjectPage() {
                   {addingChecklist ? "Adding..." : "Add"}
                 </Button>
               </div>
-              {checklistItems.length ? (
-                checklistItems.map((item) => (
+              {visibleChecklistItems.length ? (
+                visibleChecklistItems.map((item) => (
                   <Card
                     key={item.id}
                     className="cursor-pointer px-6 py-5"

@@ -98,7 +98,7 @@ class ChecklistItemCreateWithProject(BaseModel):
     checklist_id: uuid.UUID | None = None
     group_key: str | None = None
     checklist_title: str | None = None
-    item_type: ChecklistItemType
+    item_type: ChecklistItemType | None = None
     position: int | None = None
     path: str | None = None
     keyword: str | None = None
@@ -108,6 +108,7 @@ class ChecklistItemCreateWithProject(BaseModel):
     owner: str | None = None
     time: str | None = None
     title: str | None = None
+    content: str | None = None
     comment: str | None = None
     is_checked: bool | None = None
     assignee_user_ids: list[uuid.UUID] = []
@@ -123,9 +124,16 @@ async def create_checklist_item(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or checklist_id required")
 
     # Validate using the schema validator
+    resolved_item_type = payload.item_type
+    resolved_title = payload.title or payload.content
+    if resolved_item_type is None and (resolved_title or payload.comment):
+        resolved_item_type = ChecklistItemType.CHECKBOX
+    if resolved_item_type is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="item_type is required")
+
     create_payload = ChecklistItemCreate(
         checklist_id=payload.checklist_id,
-        item_type=payload.item_type,
+        item_type=resolved_item_type,
         position=payload.position,
         path=payload.path,
         keyword=payload.keyword,
@@ -188,8 +196,6 @@ async def create_checklist_item(
         ).scalar_one_or_none()
         if checklist is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
-        if checklist.group_key is not None and user.role != "ADMIN":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
@@ -280,11 +286,6 @@ async def update_checklist_item(
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
-        if checklist and checklist.group_key is not None and user.role != "ADMIN":
-            allowed_fields = {"is_checked"}
-            fields_set = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
-            if any(field not in allowed_fields for field in fields_set):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
@@ -389,8 +390,6 @@ async def delete_checklist_item(
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
-        if checklist and checklist.group_key is not None and user.role != "ADMIN":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))

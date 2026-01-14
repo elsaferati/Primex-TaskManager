@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +29,7 @@ class Project(Base):
     progress_percentage: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0"
     )
+    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

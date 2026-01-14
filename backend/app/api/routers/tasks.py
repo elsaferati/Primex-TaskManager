@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, insert, select, cast, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -636,3 +636,36 @@ async def deactivate_task(
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     return _task_to_out(task, assignee_map.get(task.id, []))
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> Response:
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if task.department_id is not None:
+        ensure_department_access(user, task.department_id)
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER) and task.created_by != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="task",
+        entity_id=task.id,
+        action="deleted",
+        before={
+            "title": task.title,
+            "status": _enum_value(task.status),
+            "assigned_to": str(task.assigned_to) if task.assigned_to else None,
+        },
+    )
+
+    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+    await db.delete(task)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

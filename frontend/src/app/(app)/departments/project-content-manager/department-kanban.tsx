@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { ChecklistItem, Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 const TABS = [
   { id: "all", label: "All (Today)", tone: "neutral" },
@@ -125,7 +125,7 @@ const PROJECT_TEMPLATES = [
   },
   {
     id: "VS/VL",
-    label: "VS/VL",
+    label: "VS/VL PROJEKT I MADH",
     title: "VS/VL",
     description: "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot.",
     status: "IN_PROGRESS",
@@ -186,6 +186,8 @@ const INTERNAL_MEETING = {
     },
   },
 } as const
+
+const INTERNAL_MEETING_GROUP_KEY = "pcm_internal_meetings"
 
 const VS_VL_META_PREFIX = "VS_VL_META:"
 
@@ -511,6 +513,7 @@ export default function DepartmentKanban() {
   const returnToTasks = `${pathname}?tab=no-project`
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [showTemplates, setShowTemplates] = React.useState(false)
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
@@ -560,6 +563,12 @@ export default function DepartmentKanban() {
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
   const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
+  const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
+  const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
+  const [newInternalMeetingItem, setNewInternalMeetingItem] = React.useState("")
+  const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
+  const [editingInternalMeetingItemId, setEditingInternalMeetingItemId] = React.useState<string | null>(null)
+  const [editingInternalMeetingItem, setEditingInternalMeetingItem] = React.useState("")
   const [noProjectOpen, setNoProjectOpen] = React.useState(false)
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
@@ -607,7 +616,7 @@ export default function DepartmentKanban() {
         if (!dep) return
 
         const [projRes, sysRes, tasksRes, gaRes, meetingsRes] = await Promise.all([
-          apiFetch(`/projects?department_id=${dep.id}`),
+          apiFetch(`/projects?department_id=${dep.id}${showTemplates ? "&include_templates=true" : ""}`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?department_id=${dep.id}&include_done=false`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
@@ -636,7 +645,86 @@ export default function DepartmentKanban() {
       }
     }
     void load()
-  }, [apiFetch, departmentLookupName, user?.role])
+  }, [apiFetch, departmentLookupName, user?.role, showTemplates])
+
+  React.useEffect(() => {
+    if (!department) return
+    let cancelled = false
+    const loadInternalMeetingChecklist = async () => {
+      try {
+        const res = await apiFetch(
+          `/checklists?group_key=${INTERNAL_MEETING_GROUP_KEY}&include_items=true`
+        )
+        if (!res.ok) return
+        let checklist = (await res.json()) as {
+          id: string
+          items?: ChecklistItem[]
+        }[]
+        let selected = checklist[0]
+        if (!selected) {
+          const createRes = await apiFetch("/checklists", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: INTERNAL_MEETING.title,
+              note: INTERNAL_MEETING.title,
+              group_key: INTERNAL_MEETING_GROUP_KEY,
+            }),
+          })
+          if (!createRes.ok) return
+          selected = (await createRes.json()) as { id: string }
+        }
+        if (cancelled) return
+        setInternalMeetingChecklistId(selected.id)
+        let items = selected.items || []
+        const existingKeys = new Set(
+          items.map((item) => `${item.day || ""}|${(item.title || "").trim().toLowerCase()}`)
+        )
+        const slotOrder = Object.keys(INTERNAL_MEETING.slots) as Array<
+          keyof typeof INTERNAL_MEETING.slots
+        >
+        let position = 0
+        const seedPromises: Promise<Response>[] = []
+        for (const slot of slotOrder) {
+          for (const title of INTERNAL_MEETING.slots[slot].items) {
+            position += 1
+            const key = `${slot}|${title.trim().toLowerCase()}`
+            if (existingKeys.has(key)) continue
+            seedPromises.push(
+              apiFetch("/checklist-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  checklist_id: selected.id,
+                  item_type: "CHECKBOX",
+                  path: "INTERNAL_MEETINGS",
+                  day: slot,
+                  title,
+                  is_checked: false,
+                  position,
+                }),
+              })
+            )
+          }
+        }
+        if (seedPromises.length) {
+          await Promise.all(seedPromises)
+          const reloadRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
+          if (reloadRes.ok) {
+            items = (await reloadRes.json()) as ChecklistItem[]
+          }
+        }
+        if (cancelled) return
+        setInternalMeetingItems(items)
+      } catch (error) {
+        console.error("Failed to load internal meetings checklist", error)
+      }
+    }
+    void loadInternalMeetingChecklist()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, department])
 
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
@@ -1185,128 +1273,6 @@ export default function DepartmentKanban() {
     }
   }
 
-  const seedVsVlTasks = async (createdProject: Project) => {
-    const targetDepartmentId = createdProject.department_id || department?.id
-    if (!targetDepartmentId) return
-
-    const templateProject = projects.find((project) => {
-      const title = (project.title || project.name || "").trim().toUpperCase()
-      return title === "VS/VL"
-    })
-
-    let templateTasks: Task[] = []
-    if (templateProject?.id) {
-      const tasksRes = await apiFetch(`/tasks?project_id=${templateProject.id}&include_done=true`)
-      if (tasksRes.ok) {
-        templateTasks = (await tasksRes.json()) as Task[]
-      }
-    }
-
-    const filteredTemplateTasks = templateTasks.filter((task) => {
-      if (task.internal_notes?.startsWith(VS_VL_META_PREFIX)) return true
-      return VS_VL_TEMPLATE_TITLE_KEYS.has(normalizeTaskTitle(task.title))
-    })
-
-    if (!filteredTemplateTasks.length) {
-      const createdMap = new Map<string, Task>()
-      for (const task of VS_VL_TEMPLATE_TASKS) {
-        const meta: VsVlTaskMeta = { vs_vl_phase: task.phase }
-        const res = await apiFetch("/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: task.title,
-            description: null,
-            project_id: createdProject.id,
-            department_id: targetDepartmentId,
-            status: "TODO",
-            priority: "NORMAL",
-            internal_notes: serializeVsVlMeta(meta),
-          }),
-        })
-        if (!res.ok) {
-          toast.error("Failed to seed VS/VL tasks")
-          return
-        }
-        const createdTask = (await res.json()) as Task
-        createdMap.set(task.key, createdTask)
-      }
-
-      const dependencyUpdates = VS_VL_TEMPLATE_TASKS.filter((task) => task.dependencyKey)
-      for (const task of dependencyUpdates) {
-        const createdTask = createdMap.get(task.key)
-        const dependencyTask = task.dependencyKey ? createdMap.get(task.dependencyKey) : null
-        if (!createdTask || !dependencyTask) continue
-        await apiFetch(`/tasks/${createdTask.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dependency_task_id: dependencyTask.id }),
-        })
-      }
-      toast.success("VS/VL tasks created")
-      return
-    }
-
-    const createdMap = new Map<string, Task>()
-    const dependencyPairs: Array<{ taskId: string; dependencyId: string }> = []
-
-    for (const task of filteredTemplateTasks) {
-      const meta = parseVsVlMeta(task.internal_notes)
-      const phase = meta?.vs_vl_phase || VS_VL_PHASE_BY_TITLE.get(normalizeTaskTitle(task.title))
-      const normalizedMeta = phase
-        ? {
-          ...meta,
-          vs_vl_phase: phase,
-          dependency_task_id: undefined,
-        }
-        : meta
-      const internalNotes = normalizedMeta ? serializeVsVlMeta(normalizedMeta) : null
-      const assigneeIds =
-        task.assignees && task.assignees.length
-          ? task.assignees.map((assignee) => assignee.id)
-          : task.assigned_to
-            ? [task.assigned_to]
-            : []
-      const res = await apiFetch("/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: task.title,
-          description: task.description || null,
-          project_id: createdProject.id,
-          department_id: targetDepartmentId,
-          status: "TODO",
-          priority: normalizePriority(task.priority ?? null),
-          internal_notes: internalNotes,
-          assignees: assigneeIds.length ? assigneeIds : undefined,
-        }),
-      })
-      if (!res.ok) {
-        toast.error("Failed to seed VS/VL tasks")
-        return
-      }
-      const createdTask = (await res.json()) as Task
-      createdMap.set(task.id, createdTask)
-
-      const dependencyId = task.dependency_task_id || meta?.dependency_task_id
-      if (dependencyId) {
-        dependencyPairs.push({ taskId: createdTask.id, dependencyId })
-      }
-    }
-
-    for (const pair of dependencyPairs) {
-      const dependencyTask = createdMap.get(pair.dependencyId)
-      if (!dependencyTask) continue
-      await apiFetch(`/tasks/${pair.taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dependency_task_id: dependencyTask.id }),
-      })
-    }
-
-    toast.success("VS/VL tasks created")
-  }
-
   const submitProject = async () => {
     if (!department) return
     const template = PROJECT_TEMPLATES.find((item) => item.id === projectTemplateId)
@@ -1353,9 +1319,7 @@ export default function DepartmentKanban() {
       setCreateProjectOpen(false)
       resetProjectForm()
       toast.success("Project created")
-      if (template?.id === "VS/VL") {
-        await seedVsVlTasks(created)
-      }
+      // Tasks are now automatically copied from template by the backend
     } finally {
       setCreatingProject(false)
     }
@@ -1586,6 +1550,96 @@ export default function DepartmentKanban() {
     }
     setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
     toast.success("Meeting deleted")
+  }
+
+  const toggleInternalMeetingItem = async (itemId: string, next: boolean) => {
+    const previous = internalMeetingItems.find((item) => item.id === itemId)?.is_checked ?? false
+    setInternalMeetingItems((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, is_checked: next } : item))
+    )
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_checked: next }),
+    })
+    if (!res.ok) {
+      setInternalMeetingItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, is_checked: previous } : item))
+      )
+      toast.error("Failed to update internal meeting item")
+    }
+  }
+
+  const addInternalMeetingItem = async () => {
+    if (!internalMeetingChecklistId) return
+    const title = newInternalMeetingItem.trim()
+    if (!title) return
+    setAddingInternalMeetingItem(true)
+    try {
+      const nextPosition =
+        internalMeetingItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checklist_id: internalMeetingChecklistId,
+          item_type: "CHECKBOX",
+          path: "INTERNAL_MEETINGS",
+          day: internalSlot,
+          title,
+          is_checked: false,
+          position: nextPosition,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add internal meeting item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setInternalMeetingItems((prev) => [...prev, created])
+      setNewInternalMeetingItem("")
+      toast.success("Internal meeting item added")
+    } finally {
+      setAddingInternalMeetingItem(false)
+    }
+  }
+
+  const startEditInternalMeetingItem = (item: ChecklistItem) => {
+    setEditingInternalMeetingItemId(item.id)
+    setEditingInternalMeetingItem(item.title || "")
+  }
+
+  const cancelEditInternalMeetingItem = () => {
+    setEditingInternalMeetingItemId(null)
+    setEditingInternalMeetingItem("")
+  }
+
+  const saveInternalMeetingItem = async () => {
+    if (!editingInternalMeetingItemId) return
+    const title = editingInternalMeetingItem.trim()
+    if (!title) return
+    const res = await apiFetch(`/checklist-items/${editingInternalMeetingItemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    })
+    if (!res.ok) {
+      toast.error("Failed to update internal meeting item")
+      return
+    }
+    const updated = (await res.json()) as ChecklistItem
+    setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    cancelEditInternalMeetingItem()
+  }
+
+  const deleteInternalMeetingItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete internal meeting item")
+      return
+    }
+    setInternalMeetingItems((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Internal meeting item deleted")
   }
 
   const submitGaNote = async () => {
@@ -1834,7 +1888,18 @@ export default function DepartmentKanban() {
           {activeTab === "projects" ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-lg font-semibold">Active Projects</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-lg font-semibold">Active Projects</div>
+                  {user?.role === "ADMIN" && (
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={showTemplates}
+                        onCheckedChange={(checked) => setShowTemplates(checked === true)}
+                      />
+                      <span className="text-muted-foreground">Show Templates</span>
+                    </label>
+                  )}
+                </div>
                 {canManage ? (
                   <Dialog open={createProjectOpen} onOpenChange={handleProjectDialogOpen}>
                     <DialogTrigger asChild>
@@ -1942,7 +2007,12 @@ export default function DepartmentKanban() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-sm font-semibold leading-tight">{project.title || project.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold leading-tight">{project.title || project.name}</span>
+                            {project.is_template && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
+                            )}
+                          </div>
                           <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
                             {project.description || "-"}
                           </div>
@@ -3342,15 +3412,78 @@ export default function DepartmentKanban() {
                   </div>
                   <div className="space-y-3">
                     <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        value={newInternalMeetingItem}
+                        onChange={(e) => setNewInternalMeetingItem(e.target.value)}
+                        placeholder="Add checklist item..."
+                        className="min-w-[220px] flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={!newInternalMeetingItem.trim() || addingInternalMeetingItem}
+                        onClick={() => void addInternalMeetingItem()}
+                      >
+                        {addingInternalMeetingItem ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
                     <div className="space-y-2">
-                      {INTERNAL_MEETING.slots[internalSlot].items.map((item, idx) => (
-                        <div key={item} className="flex items-start gap-3 rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 dark:border-stone-800/70 dark:bg-stone-900/70">
-                          <Checkbox checked={false} disabled />
-                          <div className="text-sm text-muted-foreground">
-                            {idx + 1}. {item}
-                          </div>
-                        </div>
-                      ))}
+                      {internalMeetingItems
+                        .filter((item) => (item.day || internalSlot) === internalSlot)
+                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                        .map((item, idx) => {
+                          const isEditing = editingInternalMeetingItemId === item.id
+                          return (
+                            <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 dark:border-stone-800/70 dark:bg-stone-900/70">
+                              <Checkbox
+                                checked={Boolean(item.is_checked)}
+                                onCheckedChange={(checked) => toggleInternalMeetingItem(item.id, Boolean(checked))}
+                              />
+                              <div className="flex-1">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingInternalMeetingItem}
+                                    onChange={(e) => setEditingInternalMeetingItem(e.target.value)}
+                                    placeholder="Checklist item"
+                                  />
+                                ) : (
+                                  <div className="text-sm text-muted-foreground">
+                                    {idx + 1}. {item.title || ""}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <Button size="sm" variant="outline" onClick={() => void saveInternalMeetingItem()}>
+                                      Save
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={cancelEditInternalMeetingItem}>
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button size="sm" variant="outline" onClick={() => startEditInternalMeetingItem(item)}>
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => void deleteInternalMeetingItem(item.id)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      {!internalMeetingItems.some((item) => (item.day || internalSlot) === internalSlot) ? (
+                        <div className="text-sm text-muted-foreground">No checklist items yet.</div>
+                      ) : null}
                     </div>
                   </div>
                 </Card>

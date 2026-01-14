@@ -339,7 +339,9 @@ export default function DevelopmentProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: project.id,
-          content: newChecklistContent.trim(),
+          item_type: "CHECKBOX",
+          title: newChecklistContent.trim(),
+          is_checked: false,
         }),
       })
       if (!res.ok) {
@@ -559,7 +561,7 @@ export default function DevelopmentProjectPage() {
     if (phaseValue === "PLANIFIKIMI") {
       return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
     }
-    if (phaseValue === "ZHVILLIMI") {
+    if (phaseValue === "ZHVILLIMI" || phaseValue === "DEVELOPMENT") {
       return [
         ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
         ...TABS.filter((tab) => tab.id === "ga"),

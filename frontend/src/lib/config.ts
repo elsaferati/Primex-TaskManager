@@ -3,6 +3,7 @@ export const API_BASE_URL =
   "http://localhost:8000"
 
 export const API_HTTP_URL = `${API_BASE_URL}/api`
+export const API_HTTP_FALLBACK_URL = "http://localhost:8000/api"
 
 export const API_WS_URL = API_BASE_URL.startsWith("https://")
   ? API_BASE_URL.replace("https://", "wss://")

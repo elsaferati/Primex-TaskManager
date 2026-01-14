@@ -21,15 +21,17 @@ interface WorkflowItem {
 interface VsWorkflowProps {
     projectId: string
     apiFetch: (url: string, init?: RequestInit) => Promise<Response>
+    phase?: string
 }
 
-export function VsWorkflow({ projectId, apiFetch }: VsWorkflowProps) {
+export function VsWorkflow({ projectId, apiFetch, phase }: VsWorkflowProps) {
     const [items, setItems] = React.useState<WorkflowItem[]>([])
     const [loading, setLoading] = React.useState(true)
 
     const loadItems = React.useCallback(async () => {
         try {
-            const res = await apiFetch(`/projects/${projectId}/workflow-items`)
+            const qs = phase ? `?phase=${encodeURIComponent(phase)}` : ""
+            const res = await apiFetch(`/projects/${projectId}/workflow-items${qs}`)
             if (res.ok) {
                 setItems((await res.json()) as WorkflowItem[])
             }
@@ -38,7 +40,7 @@ export function VsWorkflow({ projectId, apiFetch }: VsWorkflowProps) {
         } finally {
             setLoading(false)
         }
-    }, [apiFetch, projectId])
+    }, [apiFetch, projectId, phase])
 
     React.useEffect(() => {
         void loadItems()

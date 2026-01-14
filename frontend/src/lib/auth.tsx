@@ -3,7 +3,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 
-import { API_HTTP_URL, API_WS_URL } from "@/lib/config"
+import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import type { User } from "@/lib/types"
 
 type AuthContextValue = {
@@ -129,24 +129,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const apiFetch = React.useCallback(
     async (path: string, init: RequestInit = {}) => {
-      const url = path.startsWith("http") ? path : `${API_HTTP_URL}${path.startsWith("/") ? "" : "/"}${path}`
+      const makeUrl = (base: string) =>
+        path.startsWith("http") ? path : `${base}${path.startsWith("/") ? "" : "/"}${path}`
+      const url = makeUrl(API_HTTP_URL)
       const headers = new Headers(init.headers)
       if (token) headers.set("Authorization", `Bearer ${token}`)
 
-      const doFetch = (overrideToken?: string | null) => {
+      const doFetch = (overrideToken?: string | null, overrideUrl?: string) => {
         const h = new Headers(headers)
         if (overrideToken) h.set("Authorization", `Bearer ${overrideToken}`)
-        return fetch(url, { ...init, headers: h, credentials: "include" })
+        return fetch(overrideUrl || url, { ...init, headers: h, credentials: "include" })
       }
 
       let res: Response
       try {
         res = await doFetch()
       } catch {
-        toast("Network error", {
-          description: "Unable to reach the server. Check the API URL or backend status.",
-        })
-        return new Response(null, { status: 503, statusText: "Network error" })
+        if (!path.startsWith("http") && API_HTTP_FALLBACK_URL !== API_HTTP_URL) {
+          try {
+            res = await doFetch(undefined, makeUrl(API_HTTP_FALLBACK_URL))
+          } catch {
+            toast("Network error", {
+              description: "Unable to reach the server. Check the API URL or backend status.",
+            })
+            return new Response(null, { status: 503, statusText: "Network error" })
+          }
+        } else {
+          toast("Network error", {
+            description: "Unable to reach the server. Check the API URL or backend status.",
+          })
+          return new Response(null, { status: 503, statusText: "Network error" })
+        }
       }
       if (res.status !== 401) return res
 

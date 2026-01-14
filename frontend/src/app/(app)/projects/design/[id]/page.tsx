@@ -419,6 +419,9 @@ export default function DesignProjectPage() {
           item_type: "CHECKBOX",
           title: newChecklistContent.trim(),
           is_checked: false,
+          item_type: "CHECKBOX",
+          title: newChecklistContent.trim(),
+          is_checked: false,
         }),
       })
       if (!res.ok) {
@@ -735,13 +738,22 @@ export default function DesignProjectPage() {
             const isActive = tab.id === activeTab
             return (
               <button
+               
                 key={tab.id}
+               
                 type="button"
+               
                 onClick={() => setActiveTab(tab.id)}
+               
                 className={[
+                  
                   "relative pb-3 text-sm font-medium",
+                  tab.id === "ga" ? "ml-auto" : "",
+                 
                   isActive ? "text-purple-600" : "text-muted-foreground",
+                ,
                 ].join(" ")}
+              
               >
                 {tab.label}
                 {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" /> : null}

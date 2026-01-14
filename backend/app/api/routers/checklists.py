@@ -13,7 +13,7 @@ from app.db import get_db
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.project import Project
-from app.schemas.checklist import ChecklistWithItemsOut
+from app.schemas.checklist import ChecklistCreate, ChecklistOut, ChecklistWithItemsOut
 from app.schemas.checklist_item import ChecklistItemAssigneeOut, ChecklistItemOut
 
 
@@ -106,3 +106,57 @@ async def list_checklists(
         )
 
     return results
+
+
+@router.post("", response_model=ChecklistOut, status_code=201)
+async def create_checklist(
+    payload: ChecklistCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> ChecklistOut:
+    if payload.group_key:
+        existing = (
+            await db.execute(select(Checklist).where(Checklist.group_key == payload.group_key))
+        ).scalar_one_or_none()
+        if existing is not None:
+            return ChecklistOut(
+                id=existing.id,
+                title=existing.title,
+                task_id=existing.task_id,
+                project_id=existing.project_id,
+                note=existing.note,
+                default_owner=existing.default_owner,
+                default_time=existing.default_time,
+                group_key=existing.group_key,
+                columns=existing.columns,
+                position=existing.position,
+                created_at=existing.created_at,
+            )
+
+    checklist = Checklist(
+        title=payload.title,
+        task_id=payload.task_id,
+        project_id=payload.project_id,
+        note=payload.note,
+        default_owner=payload.default_owner,
+        default_time=payload.default_time,
+        group_key=payload.group_key,
+        columns=payload.columns,
+        position=payload.position,
+    )
+    db.add(checklist)
+    await db.commit()
+    await db.refresh(checklist)
+    return ChecklistOut(
+        id=checklist.id,
+        title=checklist.title,
+        task_id=checklist.task_id,
+        project_id=checklist.project_id,
+        note=checklist.note,
+        default_owner=checklist.default_owner,
+        default_time=checklist.default_time,
+        group_key=checklist.group_key,
+        columns=checklist.columns,
+        position=checklist.position,
+        created_at=checklist.created_at,
+    )
