@@ -236,12 +236,23 @@ export default function DevelopmentProjectPage() {
       if (mRes.ok) setMembers((await mRes.json()) as User[])
       if (cRes.ok) {
         const items = (await cRes.json()) as ChecklistItem[]
+        console.log("Initial checklist items loaded:", items.length)
+        const filePathItemsInitial = items.filter(
+          (item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH"
+        )
+        console.log("File path items in initial load:", filePathItemsInitial)
         setChecklistItems(items)
         try {
           await initializeDocumentationChecklistItems(p.id, items, apiFetch)
           const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
           if (reloadRes.ok) {
-            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+            const reloadedItems = (await reloadRes.json()) as ChecklistItem[]
+            console.log("Reloaded checklist items after init:", reloadedItems.length)
+            const filePathItemsAfterReload = reloadedItems.filter(
+              (item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH"
+            )
+            console.log("File path items after reload:", filePathItemsAfterReload)
+            setChecklistItems(reloadedItems)
           }
         } catch (error) {
           console.error("Failed to initialize documentation checklist items:", error)
@@ -466,6 +477,17 @@ export default function DevelopmentProjectPage() {
     )
   }, [checklistItems])
 
+  // Load documentation file paths from checklist items
+  React.useEffect(() => {
+    const filePathItems = checklistItems
+      .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    const paths = filePathItems.map((item) => item.comment || "").filter(Boolean)
+    console.log("Loading file paths:", { filePathItems, paths, checklistItemsCount: checklistItems.length })
+    setDocumentationFilePaths(paths)
+  }, [checklistItems])
+
   const toggleDocumentationChecklistItemDb = async (itemId: string, next: boolean) => {
     const previous = checklistItems.find((item) => item.id === itemId)?.is_checked ?? false
     setChecklistItems((prev) =>
@@ -569,11 +591,90 @@ export default function DevelopmentProjectPage() {
     }
   }
 
-  const addDocumentationFilePath = () => {
+  const addDocumentationFilePath = async () => {
+    if (!project) return
     const value = documentationFilePath.trim()
     if (!value) return
-    setDocumentationFilePaths((prev) => [value, ...prev])
-    setDocumentationFilePath("")
+    
+    try {
+      const existingFilePaths = checklistItems
+        .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH")
+      const position = existingFilePaths.length > 0
+        ? Math.max(...existingFilePaths.map((item) => item.position ?? 0)) + 1
+        : 1
+      
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "COMMENT",
+          path: "DOCUMENTATION",
+          category: "FILE_PATH",
+          comment: value,
+          position,
+        }),
+      })
+      
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error("Failed to add file path:", errorText)
+        toast.error("Failed to add file path")
+        return
+      }
+      
+      // Read the created item first
+      const created = (await res.json()) as ChecklistItem
+      console.log("Created file path item:", created)
+      
+      // Reload checklist items to ensure we have the latest data from server
+      const reloadRes = await apiFetch(`/checklist-items?project_id=${project.id}`)
+      if (reloadRes.ok) {
+        const updatedItems = (await reloadRes.json()) as ChecklistItem[]
+        console.log("Reloaded checklist items:", updatedItems.length, "items")
+        const filePathItems = updatedItems.filter(
+          (item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH"
+        )
+        console.log("File path items found:", filePathItems)
+        setChecklistItems(updatedItems)
+      } else {
+        // Fallback: add the created item to state
+        console.log("Reload failed, using created item:", created)
+        setChecklistItems((prev) => [...prev, created])
+      }
+      
+      setDocumentationFilePath("")
+      toast.success("File path added")
+    } catch (err) {
+      console.error("Error adding file path:", err)
+      toast.error("Failed to add file path")
+    }
+  }
+
+  const deleteDocumentationFilePath = async (filePath: string) => {
+    if (!project) return
+    const item = checklistItems.find(
+      (item) => item.path === "DOCUMENTATION" && item.item_type === "COMMENT" && item.category === "FILE_PATH" && item.comment === filePath
+    )
+    if (!item) return
+    
+    const res = await apiFetch(`/checklist-items/${item.id}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete file path")
+      return
+    }
+    
+    // Reload checklist items to ensure we have the latest data
+    const reloadRes = await apiFetch(`/checklist-items?project_id=${project.id}`)
+    if (reloadRes.ok) {
+      const updatedItems = (await reloadRes.json()) as ChecklistItem[]
+      setChecklistItems(updatedItems)
+    } else {
+      // Fallback: remove from state
+      setChecklistItems((prev) => prev.filter((i) => i.id !== item.id))
+    }
+    
+    toast.success("File path deleted")
   }
 
   const toggleMemberSelect = (userId: string) => {
@@ -1312,8 +1413,16 @@ export default function DevelopmentProjectPage() {
                       {documentationFilePaths.length ? (
                         <div className="mt-4 space-y-2">
                           {documentationFilePaths.map((path, idx) => (
-                            <div key={`${path}-${idx}`} className="rounded-xl border border-sky-100 bg-sky-50/50 px-4 py-2 text-sm text-slate-700">
-                              {path}
+                            <div key={`${path}-${idx}`} className="flex items-center justify-between rounded-xl border border-sky-100 bg-sky-50/50 px-4 py-2 text-sm text-slate-700">
+                              <span className="flex-1">{path}</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => void deleteDocumentationFilePath(path)}
+                                className="ml-2 h-6 w-6 p-0 text-slate-400 hover:text-red-600"
+                              >
+                                ×
+                              </Button>
                             </div>
                           ))}
                         </div>
