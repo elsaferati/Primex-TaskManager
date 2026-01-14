@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ class CommonEntryOut(BaseModel):
     category: CommonCategory
     title: str
     description: str | None = None
+    entry_date: date | None = None
     created_by_user_id: uuid.UUID
     assigned_to_user_id: uuid.UUID | None = None
     approval_status: CommonApprovalStatus
@@ -30,6 +31,7 @@ class CommonEntryCreate(BaseModel):
     category: CommonCategory
     title: str = Field(min_length=2, max_length=300)
     description: str | None = Field(default=None, max_length=8000)
+    entry_date: date | None = None
 
 
 class CommonEntryAssign(BaseModel):
