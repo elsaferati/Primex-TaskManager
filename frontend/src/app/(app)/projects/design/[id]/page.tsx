@@ -40,9 +40,10 @@ const PLANNING_TABS = [
 
 // Tabs for Product phase
 const PRODUCT_TABS = [
-  { id: "description", label: "Description" },
-  { id: "tasks", label: "Tasks" },
-  { id: "checklist", label: "Checklist" },
+  { id: "propozim-ko1-ko2", label: "PROPOZIM KO1/KO2" },
+  { id: "punimi", label: "PUNIMI" },
+  { id: "produkte-sa-jane-kryer", label: "PRODUKTE SA JANE KRYER" },
+  { id: "ko1-ko2", label: "KO1/KO2" },
   { id: "members", label: "Members" },
   { id: "ga-notes", label: "GA Notes" },
 ] as const
@@ -65,7 +66,11 @@ const FINAL_TABS = [
   { id: "ga-notes", label: "GA Notes" },
 ] as const
 
-type TabId = (typeof PLANNING_TABS)[number]["id"] | (typeof PRODUCT_TABS)[number]["id"] | (typeof CONTROL_TABS)[number]["id"] | (typeof FINAL_TABS)[number]["id"]
+type TabId =
+  | (typeof PLANNING_TABS)[number]["id"]
+  | (typeof PRODUCT_TABS)[number]["id"]
+  | (typeof CONTROL_TABS)[number]["id"]
+  | (typeof FINAL_TABS)[number]["id"]
 
 // Task statuses and priorities
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
@@ -171,6 +176,20 @@ export default function DesignProjectPage() {
   const [gaMeetingNewText, setGaMeetingNewText] = React.useState("")
   const [gaMeetingNewNumber, setGaMeetingNewNumber] = React.useState("")
   const [gaMeetingSaving, setGaMeetingSaving] = React.useState(false)
+  
+  // Admin controls for PROPOZIM KO1/KO2 checklist
+  const [propozimEditingId, setPropozimEditingId] = React.useState<string | null>(null)
+  const [propozimEditingText, setPropozimEditingText] = React.useState("")
+  const [propozimNewText, setPropozimNewText] = React.useState("")
+  const [propozimNewNumber, setPropozimNewNumber] = React.useState("")
+  const [propozimSaving, setPropozimSaving] = React.useState(false)
+  
+  // Admin controls for PUNIMI checklist
+  const [punimiEditingId, setPunimiEditingId] = React.useState<string | null>(null)
+  const [punimiEditingText, setPunimiEditingText] = React.useState("")
+  const [punimiNewText, setPunimiNewText] = React.useState("")
+  const [punimiNewNumber, setPunimiNewNumber] = React.useState("")
+  const [punimiSaving, setPunimiSaving] = React.useState(false)
   
   const isAdmin = user?.role === "ADMIN"
 
@@ -528,6 +547,162 @@ export default function DesignProjectPage() {
     }
   }
 
+  // PROPOZIM KO1/KO2 admin functions
+  const addPropozimItem = async () => {
+    if (!project) return
+    const text = propozimNewText.trim()
+    if (!text) return
+    const rawNumber = propozimNewNumber.trim()
+    const position = rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setPropozimSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "propozim ko1/ko2",
+          title: text,
+          position,
+          is_checked: false,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setPropozimNewText("")
+      setPropozimNewNumber("")
+      await reloadChecklistItems()
+      toast.success("Item added")
+    } finally {
+      setPropozimSaving(false)
+    }
+  }
+
+  const startEditPropozimItem = (item: ChecklistItem) => {
+    setPropozimEditingId(item.id)
+    setPropozimEditingText(item.title || "")
+  }
+
+  const saveEditPropozimItem = async () => {
+    if (!propozimEditingId) return
+    const text = propozimEditingText.trim()
+    if (!text) return
+    setPropozimSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${propozimEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setPropozimEditingId(null)
+      setPropozimEditingText("")
+      await reloadChecklistItems()
+      toast.success("Item updated")
+    } finally {
+      setPropozimSaving(false)
+    }
+  }
+
+  const deletePropozimItem = async (itemId: string) => {
+    setPropozimSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadChecklistItems()
+      toast.success("Item deleted")
+    } finally {
+      setPropozimSaving(false)
+    }
+  }
+
+  // PUNIMI admin functions
+  const addPunimiItem = async () => {
+    if (!project) return
+    const text = punimiNewText.trim()
+    if (!text) return
+    const rawNumber = punimiNewNumber.trim()
+    const position = rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setPunimiSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "punimi",
+          title: text,
+          position,
+          is_checked: false,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setPunimiNewText("")
+      setPunimiNewNumber("")
+      await reloadChecklistItems()
+      toast.success("Item added")
+    } finally {
+      setPunimiSaving(false)
+    }
+  }
+
+  const startEditPunimiItem = (item: ChecklistItem) => {
+    setPunimiEditingId(item.id)
+    setPunimiEditingText(item.title || "")
+  }
+
+  const saveEditPunimiItem = async () => {
+    if (!punimiEditingId) return
+    const text = punimiEditingText.trim()
+    if (!text) return
+    setPunimiSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${punimiEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setPunimiEditingId(null)
+      setPunimiEditingText("")
+      await reloadChecklistItems()
+      toast.success("Item updated")
+    } finally {
+      setPunimiSaving(false)
+    }
+  }
+
+  const deletePunimiItem = async (itemId: string) => {
+    setPunimiSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadChecklistItems()
+      toast.success("Item deleted")
+    } finally {
+      setPunimiSaving(false)
+    }
+  }
+
   // Member management
   const toggleMemberSelect = (userId: string) => {
     setSelectedMemberIds((prev) =>
@@ -718,9 +893,28 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
 
-  // Filter general checklist items (not project acceptance or GA meeting)
+  // Filter PROPOZIM KO1/KO2 checklist items
+  const propozimItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === "propozim ko1/ko2"),
+    [checklistItems]
+  )
+
+  // Filter PUNIMI checklist items
+  const punimiItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === "punimi"),
+    [checklistItems]
+  )
+
+  // Filter general checklist items (not project acceptance, GA meeting, propozim, or punimi)
   const generalChecklistItems = React.useMemo(
-    () => checklistItems.filter((item) => item.path !== "project acceptance" && item.path !== "ga/dv meeting"),
+    () =>
+      checklistItems.filter(
+        (item) =>
+          item.path !== "project acceptance" &&
+          item.path !== "ga/dv meeting" &&
+          item.path !== "propozim ko1/ko2" &&
+          item.path !== "punimi"
+      ),
     [checklistItems]
   )
 
@@ -1201,6 +1395,214 @@ export default function DesignProjectPage() {
                 ))
               )}
             </div>
+          </Card>
+        )}
+
+        {/* PROPOZIM KO1/KO2 Tab */}
+        {activeTab === "propozim-ko1-ko2" && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">PROPOZIM KO1/KO2</h3>
+            {isAdmin ? (
+              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={propozimNewNumber}
+                    onChange={(e) => setPropozimNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={propozimNewText}
+                    onChange={(e) => setPropozimNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!propozimNewText.trim() || propozimSaving}
+                    onClick={() => void addPropozimItem()}
+                  >
+                    {propozimSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {propozimItems.length === 0 ? (
+              <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
+            ) : (
+              <div className="space-y-3">
+                {propozimItems.map((item, idx) => (
+                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
+                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                    <Checkbox
+                      checked={item.is_checked || false}
+                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      {isAdmin && propozimEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={propozimEditingText}
+                            onChange={(e) => setPropozimEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!propozimEditingText.trim() || propozimSaving}
+                            onClick={() => void saveEditPropozimItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setPropozimEditingId(null)
+                              setPropozimEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                          {item.title}
+                        </span>
+                      )}
+                    </div>
+                    {isAdmin && propozimEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditPropozimItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={propozimSaving}
+                          onClick={() => void deletePropozimItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* PUNIMI Tab */}
+        {activeTab === "punimi" && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">PUNIMI</h3>
+            {isAdmin ? (
+              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={punimiNewNumber}
+                    onChange={(e) => setPunimiNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={punimiNewText}
+                    onChange={(e) => setPunimiNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!punimiNewText.trim() || punimiSaving}
+                    onClick={() => void addPunimiItem()}
+                  >
+                    {punimiSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {punimiItems.length === 0 ? (
+              <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
+            ) : (
+              <div className="space-y-3">
+                {punimiItems.map((item, idx) => (
+                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
+                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                    <Checkbox
+                      checked={item.is_checked || false}
+                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      {isAdmin && punimiEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={punimiEditingText}
+                            onChange={(e) => setPunimiEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!punimiEditingText.trim() || punimiSaving}
+                            onClick={() => void saveEditPunimiItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setPunimiEditingId(null)
+                              setPunimiEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                          {item.title}
+                        </span>
+                      )}
+                    </div>
+                    {isAdmin && punimiEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditPunimiItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={punimiSaving}
+                          onClick={() => void deletePunimiItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* PRODUKTE SA JANE KRYER Tab */}
+        {activeTab === "produkte-sa-jane-kryer" && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">PRODUKTE SA JANE KRYER</h3>
+            <p className="text-muted-foreground">Content coming soon...</p>
+          </Card>
+        )}
+
+        {/* KO1/KO2 Tab */}
+        {activeTab === "ko1-ko2" && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">KO1/KO2</h3>
+            <p className="text-muted-foreground">Content coming soon...</p>
           </Card>
         )}
 

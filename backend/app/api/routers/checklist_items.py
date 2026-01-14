@@ -29,6 +29,8 @@ router = APIRouter()
 
 PROJECT_ACCEPTANCE_PATH = "project acceptance"
 GA_DV_MEETING_PATH = "ga/dv meeting"
+PROPOZIM_KO1_KO2_PATH = "propozim ko1/ko2"
+PUNIMI_PATH = "punimi"
 
 # Graphic Design (GD) - "Pranimi i Projektit" checklist items
 GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
@@ -50,6 +52,19 @@ GD_GA_DV_MEETING_TEMPLATE: list[str] = [
     "A është diskutuar me GA për propozimin?",
     "Çfarë është vendosur për të vazhduar?",
     "A ka pasur pika shtesë nga takimi?",
+]
+
+# Graphic Design (GD) - "PROPOZIM KO1/KO2" checklist items
+GD_PROPOZIM_KO1_KO2_TEMPLATE: list[str] = [
+    "Cila është kategoria?",
+    "A eshte hulumtuar ne Otto.de, amazon.de dhe portale te tjera per top produkte te kategorise qe e kemi?",
+    "Vendos linget ku je bazuar?",
+]
+
+# Graphic Design (GD) - "PUNIMI" checklist items
+GD_PUNIMI_TEMPLATE: list[str] = [
+    "Me dhan mundsi me shtu per kategorit qe vazhdojm psh mujn me 3 kategori ose 4 ose 1 nvaret prej klientit",
+    "A janë dërguar të gjitha fotot për bz 1n1?",
 ]
 
 
@@ -181,6 +196,132 @@ async def _ensure_gd_ga_dv_meeting_items(db: AsyncSession, project: Project) -> 
     await db.commit()
 
 
+async def _ensure_gd_propozim_ko1_ko2_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "PROPOZIM KO1/KO2" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "propozim ko1/ko2" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == PROPOZIM_KO1_KO2_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_PROPOZIM_KO1_KO2_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_PROPOZIM_KO1_KO2_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=PROPOZIM_KO1_KO2_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
+async def _ensure_gd_punimi_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "PUNIMI" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "punimi" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == PUNIMI_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_PUNIMI_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_PUNIMI_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=PUNIMI_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
 def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
     """Convert ChecklistItem model to ChecklistItemOut schema."""
     assignees = [
@@ -232,6 +373,10 @@ async def list_checklist_items(
         await _ensure_gd_project_acceptance_items(db, project)
         # Auto-seed GD "Takim me GA/DV" checklist (no deletes, only inserts missing items).
         await _ensure_gd_ga_dv_meeting_items(db, project)
+        # Auto-seed GD "PROPOZIM KO1/KO2" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_propozim_ko1_ko2_items(db, project)
+        # Auto-seed GD "PUNIMI" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_punimi_items(db, project)
 
         stmt = (
             select(ChecklistItem)

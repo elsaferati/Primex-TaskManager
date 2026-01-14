@@ -101,8 +101,23 @@ GD_GA_DV_MEETING_TEMPLATE: list[str] = [
     "A ka pasur pika shtesë nga takimi?",
 ]
 
+# Graphic Design (GD) - "PROPOZIM KO1/KO2" checklist items
+GD_PROPOZIM_KO1_KO2_TEMPLATE: list[str] = [
+    "Cila është kategoria?",
+    "A eshte hulumtuar ne Otto.de, amazon.de dhe portale te tjera per top produkte te kategorise qe e kemi?",
+    "Vendos linget ku je bazuar?",
+]
+
+# Graphic Design (GD) - "PUNIMI" checklist items
+GD_PUNIMI_TEMPLATE: list[str] = [
+    "Me dhan mundsi me shtu per kategorit qe vazhdojm psh mujn me 3 kategori ose 4 ose 1 nvaret prej klientit",
+    "A janë dërguar të gjitha fotot për bz 1n1?",
+]
+
 PROJECT_ACCEPTANCE_PATH = "project acceptance"
 GA_DV_MEETING_PATH = "ga/dv meeting"
+PROPOZIM_KO1_KO2_PATH = "propozim ko1/ko2"
+PUNIMI_PATH = "punimi"
 
 
 async def seed() -> None:
@@ -296,6 +311,58 @@ async def seed() -> None:
                                 item_type=ChecklistItemType.CHECKBOX,
                                 position=position,
                                 path=GA_DV_MEETING_PATH,
+                                title=title,
+                                is_checked=False,
+                            )
+                        )
+
+                # Check existing PROPOZIM KO1/KO2 items
+                existing_propozim = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == checklist.id,
+                            ChecklistItem.path == PROPOZIM_KO1_KO2_PATH,
+                        )
+                    )
+                ).scalars().all()
+                existing_propozim_titles = {item.title for item in existing_propozim if item.title}
+
+                # Add PROPOZIM KO1/KO2 items
+                for position, title in enumerate(GD_PROPOZIM_KO1_KO2_TEMPLATE):
+                    if title not in existing_propozim_titles:
+                        db.add(
+                            ChecklistItem(
+                                checklist_id=checklist.id,
+                                item_type=ChecklistItemType.CHECKBOX,
+                                position=position,
+                                path=PROPOZIM_KO1_KO2_PATH,
+                                title=title,
+                                is_checked=False,
+                            )
+                        )
+
+                # Check existing PUNIMI items
+                existing_punimi = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == checklist.id,
+                            ChecklistItem.path == PUNIMI_PATH,
+                        )
+                    )
+                ).scalars().all()
+                existing_punimi_titles = {item.title for item in existing_punimi if item.title}
+
+                # Add PUNIMI items
+                for position, title in enumerate(GD_PUNIMI_TEMPLATE):
+                    if title not in existing_punimi_titles:
+                        db.add(
+                            ChecklistItem(
+                                checklist_id=checklist.id,
+                                item_type=ChecklistItemType.CHECKBOX,
+                                position=position,
+                                path=PUNIMI_PATH,
                                 title=title,
                                 is_checked=False,
                             )
