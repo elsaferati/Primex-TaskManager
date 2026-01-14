@@ -376,6 +376,8 @@ export default function DepartmentKanban() {
   const returnToTasks = `${pathname}?tab=no-project`
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
+  const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
@@ -521,6 +523,39 @@ export default function DepartmentKanban() {
     }
     void load()
   }, [apiFetch, departmentName, user?.role])
+
+  React.useEffect(() => {
+    projectMembersRef.current = projectMembers
+  }, [projectMembers])
+
+  React.useEffect(() => {
+    if (!projects.length) return
+    let cancelled = false
+    const loadMembers = async () => {
+      const missing = projects.filter((project) => !projectMembersRef.current[project.id])
+      if (!missing.length) return
+      const results = await Promise.all(
+        missing.map(async (project) => {
+          const res = await apiFetch(`/project-members?project_id=${project.id}`)
+          if (!res.ok) return { id: project.id, members: [] as UserLookup[] }
+          const members = (await res.json()) as UserLookup[]
+          return { id: project.id, members }
+        })
+      )
+      if (cancelled) return
+      setProjectMembers((prev) => {
+        const next = { ...prev }
+        for (const result of results) {
+          next[result.id] = result.members
+        }
+        return next
+      })
+    }
+    void loadMembers()
+    return () => {
+      cancelled = true
+    }
+  }, [projects, apiFetch])
 
   React.useEffect(() => {
     if (!department) return
@@ -1199,8 +1234,7 @@ export default function DepartmentKanban() {
           if (memberRes.ok) {
             // Reload members for the newly created project
             const members = (await memberRes.json()) as UserLookup[]
-            // If projectMembers state exists, update it
-            // Otherwise, the useEffect will load them automatically
+            setProjectMembers((prev) => ({ ...prev, [created.id]: members }))
           } else {
             console.error("Failed to add project members")
           }
@@ -2001,6 +2035,11 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                const membersForProject = projectMembers[project.id] || []
+                const combinedMembers = manager ? [...membersForProject, manager] : membersForProject
+                const uniqueMembers = Array.from(new Map(combinedMembers.map((m) => [m.id, m])).values())
+                const visibleMembers = uniqueMembers.slice(0, 4)
+                const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
@@ -2049,9 +2088,22 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="mt-4 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          {manager ? (
-                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm">
-                              {initials(manager.full_name || manager.username || "-")}
+                          {visibleMembers.length ? (
+                            <div className="flex -space-x-2">
+                              {visibleMembers.map((member) => (
+                                <div
+                                  key={member.id}
+                                  title={member.full_name || member.username || "-"}
+                                  className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
+                                >
+                                  {initials(member.full_name || member.username || "-")}
+                                </div>
+                              ))}
+                              {remainingMembers > 0 ? (
+                                <div className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                                  +{remainingMembers}
+                                </div>
+                              ) : null}
                             </div>
                           ) : (
                             <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
@@ -3351,6 +3403,7 @@ export default function DepartmentKanban() {
                   <div className="space-y-2">
                     {internalMeetingItems
                       .filter((item) => (item.day || internalSlot) === internalSlot)
+                      .filter((item) => (internalSlot === "M1" ? !/[a-z]/.test(item.title || "") : true))
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id

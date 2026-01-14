@@ -1788,6 +1788,17 @@ export default function CommonViewPage() {
         }
         .swimlane-avatar {
           display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 10px;
+          letter-spacing: 0.02em;
+          border: 1px solid #cbd5e1;
         }
         
         /* Week Table View - Shows when all days are selected */
@@ -1845,6 +1856,25 @@ export default function CommonViewPage() {
         .week-table-entry {
           font-size: 10px;
           line-height: 1.4;
+        }
+        .week-table-avatars {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+          margin-top: 2px;
+        }
+        .week-table-avatar {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 9px;
+          border: 1px solid #cbd5e1;
         }
         .week-table-empty {
           color: #adb5bd;
@@ -2839,7 +2869,14 @@ export default function CommonViewPage() {
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {e.project}: {e.assignees.map((a) => initials(a)).join(", ")}
+                            <div>{e.project}</div>
+                            <div className="week-table-avatars">
+                              {e.assignees.map((name) => (
+                                <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         ))
                       }

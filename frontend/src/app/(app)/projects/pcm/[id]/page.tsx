@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, Eye, ChevronRight } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -4037,7 +4037,7 @@ export default function PcmProjectPage() {
                           return (
                             <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
                               <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
-                              <div className="col-span-2 truncate" title={row.path}>
+                              <div className="col-span-2" title={row.path}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.path}
@@ -4045,8 +4045,24 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="truncate flex-1">{row.path}</span>
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.path) {
+                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.path) {
+                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.path}
+                                    </span>
                                     {row.path && row.path.length > 20 && (
                                       <Button
                                         size="icon"
@@ -4055,13 +4071,13 @@ export default function PcmProjectPage() {
                                         onClick={() => setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })}
                                         title="View full text"
                                       >
-                                        <Eye className="h-3 w-3" />
+                                        <FileText className="h-3 w-3" />
                                       </Button>
                                     )}
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2 font-semibold truncate" title={row.detyrat}>
+                              <div className="col-span-2 font-semibold" title={row.detyrat}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.detyrat}
@@ -4070,7 +4086,7 @@ export default function PcmProjectPage() {
                                   />
                                 ) : (
                                   <div className="flex items-center gap-1">
-                                    <span className="truncate flex-1">{row.detyrat}</span>
+                                    <span className="flex-1 whitespace-normal break-words">{row.detyrat}</span>
                                     {row.detyrat && row.detyrat.length > 20 && (
                                       <Button
                                         size="icon"
@@ -4079,13 +4095,13 @@ export default function PcmProjectPage() {
                                         onClick={() => setViewingChecklistField({ key, field: "detyrat", value: row.detyrat, label: "Task" })}
                                         title="View full text"
                                       >
-                                        <Eye className="h-3 w-3" />
+                                        <FileText className="h-3 w-3" />
                                       </Button>
                                     )}
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2 truncate" title={row.keywords}>
+                              <div className="col-span-2" title={row.keywords}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.keywords}
@@ -4093,8 +4109,24 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="truncate flex-1">{row.keywords}</span>
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.keywords) {
+                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.keywords) {
+                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.keywords}
+                                    </span>
                                     {row.keywords && row.keywords.length > 20 && (
                                       <Button
                                         size="icon"
@@ -4103,13 +4135,13 @@ export default function PcmProjectPage() {
                                         onClick={() => setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })}
                                         title="View full text"
                                       >
-                                        <Eye className="h-3 w-3" />
+                                        <FileText className="h-3 w-3" />
                                       </Button>
                                     )}
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2 truncate" title={row.pershkrimi}>
+                              <div className="col-span-2" title={row.pershkrimi}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.pershkrimi}
@@ -4117,8 +4149,24 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="truncate flex-1">{row.pershkrimi}</span>
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.pershkrimi) {
+                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.pershkrimi) {
+                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.pershkrimi}
+                                    </span>
                                     {row.pershkrimi && row.pershkrimi.length > 20 && (
                                       <Button
                                         size="icon"
@@ -4127,13 +4175,13 @@ export default function PcmProjectPage() {
                                         onClick={() => setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })}
                                         title="View full text"
                                       >
-                                        <Eye className="h-3 w-3" />
+                                        <FileText className="h-3 w-3" />
                                       </Button>
                                     )}
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-1 truncate" title={row.kategoria}>
+                              <div className="col-span-1" title={row.kategoria}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.kategoria}
@@ -4141,19 +4189,8 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="truncate flex-1">{row.kategoria}</span>
-                                    {row.kategoria && row.kategoria.length > 15 && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-5 w-5 shrink-0"
-                                        onClick={() => setViewingChecklistField({ key, field: "kategoria", value: row.kategoria, label: "Category" })}
-                                        title="View full text"
-                                      >
-                                        <Eye className="h-3 w-3" />
-                                      </Button>
-                                    )}
+                                  <div className="flex items-start gap-1">
+                                    <span className="flex-1 whitespace-normal break-words">{row.kategoria}</span>
                                   </div>
                                 )}
                               </div>
@@ -4243,6 +4280,19 @@ export default function PcmProjectPage() {
                           <div className="mt-4">
                             <div className="rounded-lg border bg-slate-50 p-4">
                               <p className="whitespace-pre-wrap text-sm">{viewingChecklistField?.value || ""}</p>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  const value = viewingChecklistField?.value || ""
+                                  if (!value) return
+                                  void navigator.clipboard.writeText(value)
+                                  toast.success("Copied to clipboard")
+                                }}
+                              >
+                                Copy
+                              </Button>
                             </div>
                           </div>
                         </DialogContent>

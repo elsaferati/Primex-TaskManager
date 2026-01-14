@@ -429,6 +429,7 @@ async def advance_project_phase(
             .where(
                 Checklist.project_id == project.id,
                 ChecklistItem.is_checked.is_(False),
+                ChecklistItem.path == project.current_phase,
             )
         )
     ).scalar_one()

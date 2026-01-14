@@ -55,7 +55,7 @@ type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
-const MEETING_POINTS = [
+const MEETING_FOCUS_POINTS = [
   "Confirm scope and goals with the client.",
   "Align on timeline, milestones, and communication.",
   "Define roles, owners, and next steps.",
@@ -75,6 +75,13 @@ const DOCUMENTATION_CHECKLIST_QUESTIONS = [
   "Does the documentation have a clear ending?",
   "Did you follow the documentation template?",
   "Did you save it as files?",
+]
+const TESTING_CHECKLIST_QUESTIONS = [
+  "What should we test and why?",
+  "Who owns each test area?",
+  "What environments or data are required?",
+  "How will issues be tracked and fixed?",
+  "What is the acceptance checklist to approve?",
 ]
 
 const MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
@@ -163,6 +170,40 @@ async function initializeMeetingChecklistItems(
   }
 }
 
+async function initializeMeetingFocusItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingComments = new Set(
+    existingItems
+      .filter((item) => item.path === "MEETING_FOCUS" && item.item_type === "COMMENT")
+      .map((item) => (item.comment || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = MEETING_FOCUS_POINTS.filter(
+    (text) => !existingComments.has(text.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const text of missing) {
+    const position = MEETING_FOCUS_POINTS.indexOf(text)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "COMMENT",
+        path: "MEETING_FOCUS",
+        comment: text,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create meeting focus item", text)
+    }
+  }
+}
+
 async function initializeDocumentationChecklistItems(
   projectId: string,
   existingItems: ChecklistItem[],
@@ -194,6 +235,41 @@ async function initializeDocumentationChecklistItems(
     })
     if (!res.ok) {
       console.error("Failed to create documentation checklist item", title)
+    }
+  }
+}
+
+async function initializeTestingChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.path === "TESTING" && item.item_type === "CHECKBOX")
+      .map((item) => (item.title || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = TESTING_CHECKLIST_QUESTIONS.filter(
+    (title) => !existingTitles.has(title.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const title of missing) {
+    const position = TESTING_CHECKLIST_QUESTIONS.indexOf(title)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        path: "TESTING",
+        title,
+        is_checked: false,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create testing checklist item", title)
     }
   }
 }
@@ -263,6 +339,13 @@ export default function ProjectPage() {
   const [editingMeetingItemId, setEditingMeetingItemId] = React.useState<string | null>(null)
   const [editingMeetingItemContent, setEditingMeetingItemContent] = React.useState("")
   const [editingMeetingItemAnswer, setEditingMeetingItemAnswer] = React.useState("")
+  const [meetingFocusItems, setMeetingFocusItems] = React.useState<
+    { id: string; text: string; position?: number }[]
+  >([])
+  const [newMeetingFocusText, setNewMeetingFocusText] = React.useState("")
+  const [meetingFocusEditingId, setMeetingFocusEditingId] = React.useState<string | null>(null)
+  const [meetingFocusEditingText, setMeetingFocusEditingText] = React.useState("")
+  const [savingMeetingFocusItem, setSavingMeetingFocusItem] = React.useState(false)
   const [mstAcceptanceChecklist, setMstAcceptanceChecklist] = React.useState<ChecklistItem[]>([])
   const [mstGaMeetingChecklist, setMstGaMeetingChecklist] = React.useState<ChecklistItem[]>([])
   const [mstAcceptanceNewText, setMstAcceptanceNewText] = React.useState("")
@@ -279,6 +362,13 @@ export default function ProjectPage() {
   const [mstAcceptanceCommentText, setMstAcceptanceCommentText] = React.useState("")
   const [mstGaMeetingCommentEditingId, setMstGaMeetingCommentEditingId] = React.useState<string | null>(null)
   const [mstGaMeetingCommentText, setMstGaMeetingCommentText] = React.useState("")
+  const [testingChecklist, setTestingChecklist] = React.useState<
+    { id: string; question: string; isChecked: boolean; position?: number }[]
+  >([])
+  const [testingEditingId, setTestingEditingId] = React.useState<string | null>(null)
+  const [testingEditingText, setTestingEditingText] = React.useState("")
+  const [newTestingText, setNewTestingText] = React.useState("")
+  const [savingTestingItem, setSavingTestingItem] = React.useState(false)
   const [documentationChecklist, setDocumentationChecklist] = React.useState<
     { id: string; question: string; isChecked: boolean; position?: number }[]
   >(
@@ -326,7 +416,9 @@ export default function ProjectPage() {
         setChecklistItems(items)
         try {
           await initializeMeetingChecklistItems(p.id, items, apiFetch)
+          await initializeMeetingFocusItems(p.id, items, apiFetch)
           await initializeDocumentationChecklistItems(p.id, items, apiFetch)
+          await initializeTestingChecklistItems(p.id, items, apiFetch)
           const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
           if (reloadRes.ok) {
             setChecklistItems((await reloadRes.json()) as ChecklistItem[])
@@ -371,12 +463,38 @@ export default function ProjectPage() {
     const sorted = meetingItems
       .slice()
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    const seenTitles = new Set<string>()
+    const deduped = sorted.filter((item) => {
+      const key = (item.title || "").trim().toLowerCase()
+      if (!key) return true
+      if (seenTitles.has(key)) return false
+      seenTitles.add(key)
+      return true
+    })
     setMeetingChecklist(
-      sorted.map((item, index) => ({
+      deduped.map((item, index) => ({
         id: item.id,
         content: item.title || "",
         answer: item.comment || "",
         isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
+
+  React.useEffect(() => {
+    const focusItems = checklistItems
+      .filter((item) => item.path === "MEETING_FOCUS" && item.item_type === "COMMENT")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    if (!focusItems.length) {
+      setMeetingFocusItems([])
+      return
+    }
+    setMeetingFocusItems(
+      focusItems.map((item, index) => ({
+        id: item.id,
+        text: item.comment || "",
         position: item.position ?? index + 1,
       }))
     )
@@ -389,6 +507,22 @@ export default function ProjectPage() {
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
     if (!items.length) return
     setDocumentationChecklist(
+      items.map((item, index) => ({
+        id: item.id,
+        question: item.title || "",
+        isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
+
+  React.useEffect(() => {
+    const items = checklistItems
+      .filter((item) => item.path === "TESTING" && item.item_type === "CHECKBOX")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    if (!items.length) return
+    setTestingChecklist(
       items.map((item, index) => ({
         id: item.id,
         question: item.title || "",
@@ -582,18 +716,53 @@ export default function ProjectPage() {
     return updated
   }
 
-  const toggleMeetingChecklistItem = (itemId: string, next: boolean) => {
+  const toggleMeetingChecklistItem = async (itemId: string, next: boolean) => {
     const previous = meetingChecklist.find((item) => item.id === itemId)?.isChecked ?? false
+    const source = checklistItems.find((item) => item.id === itemId)
+    const normalizedTitle = (source?.title || "").trim().toLowerCase()
+    const targetIds = checklistItems
+      .filter(
+        (item) =>
+          item.item_type === "CHECKBOX" &&
+          item.path === "MEETINGS" &&
+          (item.title || "").trim().toLowerCase() === normalizedTitle
+      )
+      .map((item) => item.id)
+    const idsToUpdate = targetIds.length ? targetIds : [itemId]
+    const previousStates = new Map(
+      checklistItems
+        .filter((item) => idsToUpdate.includes(item.id))
+        .map((item) => [item.id, item.is_checked ?? false])
+    )
     setMeetingChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
-    void patchMeetingChecklistItem(itemId, { is_checked: next }).then((saved) => {
-      if (!saved) {
-        setMeetingChecklist((prev) =>
-          prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+    setChecklistItems((prev) =>
+      prev.map((item) => (idsToUpdate.includes(item.id) ? { ...item, is_checked: next } : item))
+    )
+    const results = await Promise.all(
+      idsToUpdate.map(async (id) => {
+        const res = await apiFetch(`/checklist-items/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: next }),
+        })
+        return res.ok
+      })
+    )
+    if (results.some((ok) => !ok)) {
+      setMeetingChecklist((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+      )
+      setChecklistItems((prev) =>
+        prev.map((item) =>
+          idsToUpdate.includes(item.id)
+            ? { ...item, is_checked: previousStates.get(item.id) ?? false }
+            : item
         )
-      }
-    })
+      )
+      toast.error("Failed to update meeting checklist")
+    }
   }
 
   const startEditMeetingChecklistItem = (itemId: string) => {
@@ -608,6 +777,83 @@ export default function ProjectPage() {
     setEditingMeetingItemId(null)
     setEditingMeetingItemContent("")
     setEditingMeetingItemAnswer("")
+  }
+
+  const startEditMeetingFocusItem = (itemId: string) => {
+    const item = meetingFocusItems.find((entry) => entry.id === itemId)
+    if (!item) return
+    setMeetingFocusEditingId(itemId)
+    setMeetingFocusEditingText(item.text)
+  }
+
+  const cancelEditMeetingFocusItem = () => {
+    setMeetingFocusEditingId(null)
+    setMeetingFocusEditingText("")
+  }
+
+  const saveMeetingFocusItem = async () => {
+    if (!meetingFocusEditingId) return
+    const text = meetingFocusEditingText.trim()
+    if (!text) return
+    setSavingMeetingFocusItem(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${meetingFocusEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update meeting focus item")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditMeetingFocusItem()
+    } finally {
+      setSavingMeetingFocusItem(false)
+    }
+  }
+
+  const deleteMeetingFocusItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete meeting focus item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    setMeetingFocusItems((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Meeting focus item deleted")
+  }
+
+  const addMeetingFocusItem = async () => {
+    if (!project) return
+    const text = newMeetingFocusText.trim()
+    if (!text) return
+    setSavingMeetingFocusItem(true)
+    try {
+      const position = meetingFocusItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "COMMENT",
+          path: "MEETING_FOCUS",
+          comment: text,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add meeting focus item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewMeetingFocusText("")
+      toast.success("Meeting focus item added")
+    } finally {
+      setSavingMeetingFocusItem(false)
+    }
   }
 
   const saveMeetingChecklistItem = async () => {
@@ -682,6 +928,108 @@ export default function ProjectPage() {
     const updated = (await res.json()) as ChecklistItem
     setMstAcceptanceChecklist((prev) => prev.map((it) => (it.id === updated.id ? updated : it)))
     setMstGaMeetingChecklist((prev) => prev.map((it) => (it.id === updated.id ? updated : it)))
+  }
+
+  const toggleTestingChecklistItemDb = async (itemId: string, next: boolean) => {
+    const previous = checklistItems.find((item) => item.id === itemId)?.is_checked ?? false
+    setChecklistItems((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, is_checked: next } : item))
+    )
+    setTestingChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
+    )
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_checked: next }),
+    })
+    if (!res.ok) {
+      setChecklistItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, is_checked: previous } : item))
+      )
+      setTestingChecklist((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+      )
+      toast.error("Failed to update testing checklist")
+    }
+  }
+
+  const startEditTestingItem = (itemId: string) => {
+    const item = testingChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    setTestingEditingId(itemId)
+    setTestingEditingText(item.question)
+  }
+
+  const cancelEditTestingItem = () => {
+    setTestingEditingId(null)
+    setTestingEditingText("")
+  }
+
+  const saveTestingItem = async () => {
+    if (!testingEditingId) return
+    const text = testingEditingText.trim()
+    if (!text) return
+    setSavingTestingItem(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${testingEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update testing checklist item")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditTestingItem()
+    } finally {
+      setSavingTestingItem(false)
+    }
+  }
+
+  const deleteTestingItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete testing checklist item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    setTestingChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Testing checklist item deleted")
+  }
+
+  const addTestingChecklistItem = async () => {
+    if (!project) return
+    const text = newTestingText.trim()
+    if (!text) return
+    setSavingTestingItem(true)
+    try {
+      const position = testingChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "TESTING",
+          title: text,
+          is_checked: false,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add testing checklist item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewTestingText("")
+      toast.success("Testing checklist item added")
+    } finally {
+      setSavingTestingItem(false)
+    }
   }
 
   const toggleDocumentationChecklistItemDb = async (itemId: string, next: boolean) => {
@@ -848,7 +1196,14 @@ export default function ProjectPage() {
         task.status !== "DONE" &&
         (task.phase || currentPhase) === currentPhase
     )
-    const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
+    const phaseChecklistItems = checklistItems.filter(
+      (item) =>
+        item.item_type === "CHECKBOX" &&
+        (item.path || "").toUpperCase() === currentPhase &&
+        !item.is_checked
+    )
+    const uncheckedItems =
+      isMeetingPhase || (isMst && currentPhase === "PLANNING") ? [] : phaseChecklistItems
     const uncheckedMeeting = isMeetingPhase ? meetingChecklist.filter((item) => !item.isChecked) : []
     const uncheckedMstPlanning =
       isMst && currentPhase === "PLANNING"
@@ -958,6 +1313,7 @@ export default function ProjectPage() {
         ...MEETING_TABS.filter((tab) => tab.id === "meeting-focus"),
         ...TABS.filter((tab) => tab.id === "description"),
         ...MEETING_TABS.filter((tab) => tab.id === "meeting-checklist"),
+        ...TABS.filter((tab) => tab.id === "members"),
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
@@ -1432,15 +1788,79 @@ export default function ProjectPage() {
 
       {activeTab === "meeting-focus" ? (
         <Card className="p-6">
-          <div className="text-lg font-semibold">Meeting focus</div>
-          <div className="mt-2 text-sm text-muted-foreground">Main points to discuss in the meeting.</div>
-          <div className="mt-4 space-y-2">
-            {MEETING_POINTS.map((point) => (
-              <div key={point} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-1 h-2 w-2 rounded-full bg-blue-500" aria-hidden />
-                <span>{point}</span>
-              </div>
-            ))}
+          <div className="text-lg font-semibold text-slate-900">Meeting focus</div>
+          <div className="mt-2 text-sm text-slate-700">Main points to discuss in the meeting.</div>
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={newMeetingFocusText}
+                onChange={(e) => setNewMeetingFocusText(e.target.value)}
+                placeholder="Add meeting focus item..."
+                className="flex-1 min-w-[220px]"
+              />
+              <Button
+                variant="outline"
+                disabled={!newMeetingFocusText.trim() || savingMeetingFocusItem}
+                onClick={() => void addMeetingFocusItem()}
+              >
+                {savingMeetingFocusItem ? "Saving..." : "Add"}
+              </Button>
+            </div>
+            {meetingFocusItems.length ? (
+              meetingFocusItems.map((item, index) => {
+                const isEditing = meetingFocusEditingId === item.id
+                return (
+                  <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                      {(item.position ?? index + 1)}.
+                    </div>
+                    <div className="flex-1">
+                      {isEditing ? (
+                        <Input
+                          value={meetingFocusEditingText}
+                          onChange={(e) => setMeetingFocusEditingText(e.target.value)}
+                        />
+                      ) : (
+                        <div className="text-sm font-semibold text-slate-900">{item.text}</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void saveMeetingFocusItem()}
+                            disabled={savingMeetingFocusItem}
+                          >
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={cancelEditMeetingFocusItem}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => startEditMeetingFocusItem(item.id)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => void deleteMeetingFocusItem(item.id)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="text-sm text-muted-foreground">No meeting focus items yet.</div>
+            )}
           </div>
         </Card>
       ) : null}
@@ -1578,12 +1998,80 @@ export default function ProjectPage() {
       {activeTab === "testing" ? (
         <Card className="p-6">
           <div className="text-lg font-semibold">Testing Questions</div>
-          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-            <div>What should we test and why?</div>
-            <div>Who owns each test area?</div>
-            <div>What environments or data are required?</div>
-            <div>How will issues be tracked and fixed?</div>
-            <div>What is the acceptance checklist to approve?</div>
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={newTestingText}
+                onChange={(e) => setNewTestingText(e.target.value)}
+                placeholder="Add testing checklist item..."
+                className="flex-1 min-w-[220px]"
+              />
+              <Button
+                variant="outline"
+                disabled={!newTestingText.trim() || savingTestingItem}
+                onClick={() => void addTestingChecklistItem()}
+              >
+                {savingTestingItem ? "Saving..." : "Add"}
+              </Button>
+            </div>
+            {testingChecklist.length ? (
+              testingChecklist.map((item) => {
+                const isEditing = testingEditingId === item.id
+                return (
+                  <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <Checkbox
+                      checked={item.isChecked}
+                      onCheckedChange={(checked) => toggleTestingChecklistItemDb(item.id, Boolean(checked))}
+                    />
+                    <div className="flex-1">
+                      {isEditing ? (
+                        <Input
+                          value={testingEditingText}
+                          onChange={(e) => setTestingEditingText(e.target.value)}
+                        />
+                      ) : (
+                        <div className={item.isChecked ? "text-muted-foreground line-through" : ""}>
+                          {item.question}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void saveTestingItem()}
+                            disabled={savingTestingItem}
+                          >
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={cancelEditTestingItem}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => startEditTestingItem(item.id)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => void deleteTestingItem(item.id)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="text-sm text-muted-foreground">No testing checklist items yet.</div>
+            )}
           </div>
         </Card>
       ) : null}
