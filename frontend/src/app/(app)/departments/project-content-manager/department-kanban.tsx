@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
+import { Pencil, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -2769,7 +2770,7 @@ export default function DepartmentKanban() {
               <div className="grid gap-4 md:grid-cols-4">
                 <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
                   <div className="text-sm font-semibold">Normal</div>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
                     {noProjectBuckets.normal.length ? (
                       noProjectBuckets.normal.map((t) => (
                         <Link
@@ -2803,7 +2804,7 @@ export default function DepartmentKanban() {
 
                 <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
                   <div className="text-sm font-semibold">GA</div>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
                     {noProjectBuckets.ga.length ? (
                       noProjectBuckets.ga.map((t) => (
                         <Link
@@ -2840,7 +2841,7 @@ export default function DepartmentKanban() {
                     <span className="h-5 w-5 rounded-full bg-rose-500" />
                     <span>BLOCKED</span>
                   </div>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
                     {noProjectBuckets.blocked.length ? (
                       noProjectBuckets.blocked.map((t) => (
                         <Link
@@ -2875,7 +2876,7 @@ export default function DepartmentKanban() {
                     <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
                     <span>1H Report</span>
                   </div>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
                     {noProjectBuckets.oneHour.length ? (
                       noProjectBuckets.oneHour.map((t) => (
                         <Link
@@ -3464,16 +3465,24 @@ export default function DepartmentKanban() {
                                   </>
                                 ) : (
                                   <>
-                                    <Button size="sm" variant="outline" onClick={() => startEditInternalMeetingItem(item)}>
-                                      Edit
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      onClick={() => startEditInternalMeetingItem(item)}
+                                      aria-label="Edit internal meeting item"
+                                      title="Edit"
+                                    >
+                                      <Pencil className="h-4 w-4" />
                                     </Button>
                                     <Button
-                                      size="sm"
+                                      size="icon"
                                       variant="outline"
                                       className="text-red-600 border-red-200 hover:bg-red-50"
                                       onClick={() => void deleteInternalMeetingItem(item.id)}
+                                      aria-label="Delete internal meeting item"
+                                      title="Delete"
                                     >
-                                      Delete
+                                      <Trash2 className="h-4 w-4" />
                                     </Button>
                                   </>
                                 )}
@@ -3631,4 +3640,3 @@ export default function DepartmentKanban() {
     </div>
   )
 }
-

@@ -115,6 +115,41 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+async function initializeDocumentationChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "CHECKBOX")
+      .map((item) => (item.title || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = DOCUMENTATION_CHECKLIST_QUESTIONS.filter(
+    (title) => !existingTitles.has(title.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const title of missing) {
+    const position = DOCUMENTATION_CHECKLIST_QUESTIONS.indexOf(title)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        path: "DOCUMENTATION",
+        title,
+        is_checked: false,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create documentation checklist item", title)
+    }
+  }
+}
+
 export default function DevelopmentProjectPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
@@ -168,6 +203,10 @@ export default function DevelopmentProjectPage() {
       isChecked: false,
     }))
   )
+  const [documentationEditingId, setDocumentationEditingId] = React.useState<string | null>(null)
+  const [documentationEditingText, setDocumentationEditingText] = React.useState("")
+  const [newDocumentationText, setNewDocumentationText] = React.useState("")
+  const [savingDocumentationItem, setSavingDocumentationItem] = React.useState(false)
   const [documentationFilePath, setDocumentationFilePath] = React.useState("")
   const [documentationFilePaths, setDocumentationFilePaths] = React.useState<string[]>([])
   const [gaPromptContent, setGaPromptContent] = React.useState("")
@@ -195,7 +234,19 @@ export default function DevelopmentProjectPage() {
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
       if (mRes.ok) setMembers((await mRes.json()) as User[])
-      if (cRes.ok) setChecklistItems((await cRes.json()) as ChecklistItem[])
+      if (cRes.ok) {
+        const items = (await cRes.json()) as ChecklistItem[]
+        setChecklistItems(items)
+        try {
+          await initializeDocumentationChecklistItems(p.id, items, apiFetch)
+          const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+          if (reloadRes.ok) {
+            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+          }
+        } catch (error) {
+          console.error("Failed to initialize documentation checklist items:", error)
+        }
+      }
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
       if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -397,6 +448,125 @@ export default function DevelopmentProjectPage() {
     setDocumentationChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
+  }
+
+  React.useEffect(() => {
+    const items = checklistItems
+      .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "CHECKBOX")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    if (!items.length) return
+    setDocumentationChecklist(
+      items.map((item, index) => ({
+        id: item.id,
+        question: item.title || "",
+        isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
+
+  const toggleDocumentationChecklistItemDb = async (itemId: string, next: boolean) => {
+    const previous = checklistItems.find((item) => item.id === itemId)?.is_checked ?? false
+    setChecklistItems((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, is_checked: next } : item))
+    )
+    setDocumentationChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
+    )
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_checked: next }),
+    })
+    if (!res.ok) {
+      setChecklistItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, is_checked: previous } : item))
+      )
+      setDocumentationChecklist((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+      )
+      toast.error("Failed to update documentation checklist")
+    }
+  }
+
+  const startEditDocumentationItem = (itemId: string) => {
+    const item = documentationChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    setDocumentationEditingId(itemId)
+    setDocumentationEditingText(item.question)
+  }
+
+  const cancelEditDocumentationItem = () => {
+    setDocumentationEditingId(null)
+    setDocumentationEditingText("")
+  }
+
+  const saveDocumentationItem = async () => {
+    if (!documentationEditingId) return
+    const text = documentationEditingText.trim()
+    if (!text) return
+    setSavingDocumentationItem(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${documentationEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update documentation checklist item")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditDocumentationItem()
+    } finally {
+      setSavingDocumentationItem(false)
+    }
+  }
+
+  const deleteDocumentationItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete documentation checklist item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    setDocumentationChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Documentation checklist item deleted")
+  }
+
+  const addDocumentationChecklistItem = async () => {
+    if (!project) return
+    const text = newDocumentationText.trim()
+    if (!text) return
+    setSavingDocumentationItem(true)
+    try {
+      const position =
+        documentationChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "DOCUMENTATION",
+          title: text,
+          is_checked: false,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add documentation checklist item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewDocumentationText("")
+      toast.success("Documentation checklist item added")
+    } finally {
+      setSavingDocumentationItem(false)
+    }
   }
 
   const addDocumentationFilePath = () => {
@@ -1027,18 +1197,94 @@ export default function DevelopmentProjectPage() {
                   <div className="p-6">
                     <div className="text-xl font-semibold text-slate-800 mb-6">Documentation Checklist</div>
                     <div className="space-y-3">
-                      {documentationChecklist.map((item) => (
-                        <div key={item.id} className="flex items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
-                          <Checkbox
-                            checked={item.isChecked}
-                            onCheckedChange={(checked) => toggleDocumentationChecklistItem(item.id, Boolean(checked))}
-                            className="mt-1"
-                          />
-                          <div className={item.isChecked ? "text-slate-400 line-through" : "text-slate-700"}>
-                            {item.question}
-                          </div>
-                        </div>
-                      ))}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={newDocumentationText}
+                          onChange={(e) => setNewDocumentationText(e.target.value)}
+                          placeholder="Add documentation checklist item..."
+                          className="flex-1 min-w-[220px] border-sky-200 focus:border-sky-400 rounded-xl"
+                        />
+                        <Button
+                          variant="outline"
+                          disabled={!newDocumentationText.trim() || savingDocumentationItem}
+                          onClick={() => void addDocumentationChecklistItem()}
+                          className="rounded-xl border-sky-200"
+                        >
+                          {savingDocumentationItem ? "Saving..." : "Add"}
+                        </Button>
+                      </div>
+                      {documentationChecklist.length ? (
+                        documentationChecklist.map((item) => {
+                          const isEditing = documentationEditingId === item.id
+                          return (
+                            <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                              <Checkbox
+                                checked={item.isChecked}
+                                onCheckedChange={(checked) =>
+                                  toggleDocumentationChecklistItemDb(item.id, Boolean(checked))
+                                }
+                                className="mt-1"
+                              />
+                              <div className="flex-1">
+                                {isEditing ? (
+                                  <Input
+                                    value={documentationEditingText}
+                                    onChange={(e) => setDocumentationEditingText(e.target.value)}
+                                    className="border-sky-200 focus:border-sky-400 rounded-xl"
+                                  />
+                                ) : (
+                                  <div className={item.isChecked ? "text-slate-400 line-through" : "text-slate-700"}>
+                                    {item.question}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void saveDocumentationItem()}
+                                      disabled={savingDocumentationItem}
+                                      className="rounded-xl border-sky-200"
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={cancelEditDocumentationItem}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => startEditDocumentationItem(item.id)}
+                                      className="rounded-xl border-sky-200"
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                                      onClick={() => void deleteDocumentationItem(item.id)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-sm text-slate-500">No documentation checklist items yet.</div>
+                      )}
                     </div>
                     <div className="mt-6">
                       <div className="text-sm font-semibold text-slate-800 mb-3">Documentation File Paths</div>

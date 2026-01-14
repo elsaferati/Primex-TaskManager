@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
+import type { ChecklistItem, Department, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
 
 const GENERAL_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
@@ -163,6 +163,41 @@ async function initializeMeetingChecklistItems(
   }
 }
 
+async function initializeDocumentationChecklistItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "CHECKBOX")
+      .map((item) => (item.title || "").trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = DOCUMENTATION_CHECKLIST_QUESTIONS.filter(
+    (title) => !existingTitles.has(title.trim().toLowerCase())
+  )
+  if (!missing.length) return
+  for (const title of missing) {
+    const position = DOCUMENTATION_CHECKLIST_QUESTIONS.indexOf(title)
+    const res = await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        path: "DOCUMENTATION",
+        title,
+        is_checked: false,
+        position: position >= 0 ? position + 1 : null,
+      }),
+    })
+    if (!res.ok) {
+      console.error("Failed to create documentation checklist item", title)
+    }
+  }
+}
+
 function formatMeetingLabel(meeting: Meeting) {
   const platformLabel = meeting.platform ? ` (${meeting.platform})` : ""
   if (!meeting.starts_at) return `${meeting.title}${platformLabel}`
@@ -189,6 +224,7 @@ export default function ProjectPage() {
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [departmentUsers, setDepartmentUsers] = React.useState<User[]>([])
   const [allUsers, setAllUsers] = React.useState<User[]>([])
+  const [projectDepartmentName, setProjectDepartmentName] = React.useState<string | null>(null)
   const [members, setMembers] = React.useState<User[]>([])
   const [checklistItems, setChecklistItems] = React.useState<ChecklistItem[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
@@ -243,13 +279,20 @@ export default function ProjectPage() {
   const [mstAcceptanceCommentText, setMstAcceptanceCommentText] = React.useState("")
   const [mstGaMeetingCommentEditingId, setMstGaMeetingCommentEditingId] = React.useState<string | null>(null)
   const [mstGaMeetingCommentText, setMstGaMeetingCommentText] = React.useState("")
-  const [documentationChecklist, setDocumentationChecklist] = React.useState(() =>
+  const [documentationChecklist, setDocumentationChecklist] = React.useState<
+    { id: string; question: string; isChecked: boolean; position?: number }[]
+  >(
     DOCUMENTATION_CHECKLIST_QUESTIONS.map((question, index) => ({
       id: `doc-${index}`,
       question,
       isChecked: false,
+      position: index + 1,
     }))
   )
+  const [documentationEditingId, setDocumentationEditingId] = React.useState<string | null>(null)
+  const [documentationEditingText, setDocumentationEditingText] = React.useState("")
+  const [newDocumentationText, setNewDocumentationText] = React.useState("")
+  const [savingDocumentationItem, setSavingDocumentationItem] = React.useState(false)
   const [documentationFilePath, setDocumentationFilePath] = React.useState("")
   const [documentationFilePaths, setDocumentationFilePaths] = React.useState<string[]>([])
   const [gaPromptContent, setGaPromptContent] = React.useState("")
@@ -265,7 +308,7 @@ export default function ProjectPage() {
       setProject(p)
       setEditingDescription(p.description || "")
 
-      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes] = await Promise.all([
+      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes, depsRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
         apiFetch(`/project-members?project_id=${p.id}`),
         apiFetch(`/checklist-items?project_id=${p.id}`),
@@ -273,6 +316,7 @@ export default function ProjectPage() {
         apiFetch(`/project-prompts?project_id=${p.id}`),
         apiFetch("/users?include_all_departments=true"),
         apiFetch(`/meetings?project_id=${p.id}`),
+        apiFetch("/departments"),
       ])
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
@@ -282,6 +326,7 @@ export default function ProjectPage() {
         setChecklistItems(items)
         try {
           await initializeMeetingChecklistItems(p.id, items, apiFetch)
+          await initializeDocumentationChecklistItems(p.id, items, apiFetch)
           const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
           if (reloadRes.ok) {
             setChecklistItems((await reloadRes.json()) as ChecklistItem[])
@@ -293,6 +338,11 @@ export default function ProjectPage() {
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
       if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
+      if (depsRes.ok) {
+        const deps = (await depsRes.json()) as Department[]
+        const dep = deps.find((d) => d.id === p.department_id) || null
+        setProjectDepartmentName(dep?.name ?? null)
+      }
       if (usersRes.ok) {
         const users = (await usersRes.json()) as User[]
         setAllUsers(users)
@@ -326,6 +376,22 @@ export default function ProjectPage() {
         id: item.id,
         content: item.title || "",
         answer: item.comment || "",
+        isChecked: Boolean(item.is_checked),
+        position: item.position ?? index + 1,
+      }))
+    )
+  }, [checklistItems])
+
+  React.useEffect(() => {
+    const items = checklistItems
+      .filter((item) => item.path === "DOCUMENTATION" && item.item_type === "CHECKBOX")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    if (!items.length) return
+    setDocumentationChecklist(
+      items.map((item, index) => ({
+        id: item.id,
+        question: item.title || "",
         isChecked: Boolean(item.is_checked),
         position: item.position ?? index + 1,
       }))
@@ -618,10 +684,107 @@ export default function ProjectPage() {
     setMstGaMeetingChecklist((prev) => prev.map((it) => (it.id === updated.id ? updated : it)))
   }
 
-  const toggleDocumentationChecklistItem = (itemId: string, next: boolean) => {
+  const toggleDocumentationChecklistItemDb = async (itemId: string, next: boolean) => {
+    const previous = checklistItems.find((item) => item.id === itemId)?.is_checked ?? false
+    setChecklistItems((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, is_checked: next } : item))
+    )
     setDocumentationChecklist((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, isChecked: next } : item))
     )
+    const res = await apiFetch(`/checklist-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_checked: next }),
+    })
+    if (!res.ok) {
+      setChecklistItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, is_checked: previous } : item))
+      )
+      setDocumentationChecklist((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isChecked: previous } : item))
+      )
+      toast.error("Failed to update documentation checklist")
+    }
+  }
+
+  const startEditDocumentationItem = (itemId: string) => {
+    const item = documentationChecklist.find((entry) => entry.id === itemId)
+    if (!item) return
+    setDocumentationEditingId(itemId)
+    setDocumentationEditingText(item.question)
+  }
+
+  const cancelEditDocumentationItem = () => {
+    setDocumentationEditingId(null)
+    setDocumentationEditingText("")
+  }
+
+  const saveDocumentationItem = async () => {
+    if (!documentationEditingId) return
+    const text = documentationEditingText.trim()
+    if (!text) return
+    setSavingDocumentationItem(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${documentationEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update documentation checklist item")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditDocumentationItem()
+    } finally {
+      setSavingDocumentationItem(false)
+    }
+  }
+
+  const deleteDocumentationItem = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete documentation checklist item")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    setDocumentationChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Documentation checklist item deleted")
+  }
+
+  const addDocumentationChecklistItem = async () => {
+    if (!project) return
+    const text = newDocumentationText.trim()
+    if (!text) return
+    setSavingDocumentationItem(true)
+    try {
+      const position =
+        documentationChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "DOCUMENTATION",
+          title: text,
+          is_checked: false,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add documentation checklist item")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setNewDocumentationText("")
+      toast.success("Documentation checklist item added")
+    } finally {
+      setSavingDocumentationItem(false)
+    }
   }
 
   const addDocumentationFilePath = () => {
@@ -788,6 +951,7 @@ export default function ProjectPage() {
   const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const titleUpper = (project?.title || project?.name || "").toUpperCase()
   const isMstProject = project?.project_type === "MST" || titleUpper.includes("MST")
+  const isDevelopmentProject = (projectDepartmentName || "").toLowerCase() === "development"
   const visibleTabs = React.useMemo(() => {
     if (phaseValue === "MEETINGS") {
       return [
@@ -814,7 +978,9 @@ export default function ProjectPage() {
           tab.id !== "checklists" &&
           tab.id !== "members" &&
           tab.id !== "prompts" &&
-          tab.id !== "testing"
+          tab.id !== "testing" &&
+          tab.id !== "mst-acceptance" &&
+          tab.id !== "mst-ga-meeting"
       )
     }
     if (phaseValue === "ZHVILLIMI" || phaseValue === "DEVELOPMENT") {
@@ -827,13 +993,23 @@ export default function ProjectPage() {
       return TABS.filter((tab) => tab.id === "testing" || tab.id === "tasks" || tab.id === "ga")
     }
     if (phaseValue === "DOKUMENTIMI" || phaseValue === "DOCUMENTATION") {
-      return TABS.filter(
-        (tab) =>
-          tab.id !== "description" &&
-          tab.id !== "tasks" &&
-          tab.id !== "members" &&
-          tab.id !== "prompts"
-      )
+      return TABS.filter((tab) => {
+        if (
+          tab.id === "description" ||
+          tab.id === "tasks" ||
+          tab.id === "members" ||
+          tab.id === "prompts"
+        ) {
+          return false
+        }
+        if (
+          isDevelopmentProject &&
+          (tab.id === "testing" || tab.id === "mst-acceptance" || tab.id === "mst-ga-meeting")
+        ) {
+          return false
+        }
+        return true
+      })
     }
     const baseTabs = TABS.filter((tab) => tab.id !== "testing")
     if (isMstProject) {
@@ -841,7 +1017,7 @@ export default function ProjectPage() {
       return baseTabs.filter((tab) => tab.id !== "mst-acceptance" && tab.id !== "mst-ga-meeting")
     }
     return baseTabs
-  }, [phaseValue])
+  }, [phaseValue, isDevelopmentProject])
 
   React.useEffect(() => {
     if (!visibleTabs.length) return
@@ -1109,7 +1285,13 @@ export default function ProjectPage() {
   const title = project.title || project.name || "Project"
   const phase = project.current_phase || "MEETINGS"
 
-  const phaseSteps: string[] = isMstProject ? [...MST_PHASES, "CLOSED"] : [...GENERAL_PHASES, "CLOSED"]
+  const phaseSteps: string[] = isDevelopmentProject
+    ? isMstProject
+      ? [...MST_PHASES]
+      : [...GENERAL_PHASES]
+    : isMstProject
+      ? [...MST_PHASES, "CLOSED"]
+      : [...GENERAL_PHASES, "CLOSED"]
   const phaseIndex = phaseSteps.indexOf(phase)
   const canClosePhase = phase !== "CLOSED"
   const userMap = new Map(
@@ -1556,19 +1738,85 @@ export default function ProjectPage() {
             <Card className="p-6">
               <div className="text-lg font-semibold">Documentation checklist</div>
               <div className="mt-4 space-y-3">
-                {documentationChecklist.map((item) => (
-                  <div key={item.id} className="flex items-start gap-3 rounded-lg border px-4 py-3">
-                    <Checkbox
-                      checked={item.isChecked}
-                      onCheckedChange={(checked) =>
-                        toggleDocumentationChecklistItem(item.id, Boolean(checked))
-                      }
-                    />
-                    <div className={item.isChecked ? "text-muted-foreground line-through" : ""}>
-                      {item.question}
-                    </div>
-                  </div>
-                ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={newDocumentationText}
+                    onChange={(e) => setNewDocumentationText(e.target.value)}
+                    placeholder="Add documentation checklist item..."
+                    className="flex-1 min-w-[220px]"
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={!newDocumentationText.trim() || savingDocumentationItem}
+                    onClick={() => void addDocumentationChecklistItem()}
+                  >
+                    {savingDocumentationItem ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+                {documentationChecklist.length ? (
+                  documentationChecklist.map((item) => {
+                    const isEditing = documentationEditingId === item.id
+                    return (
+                      <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                        <Checkbox
+                          checked={item.isChecked}
+                          onCheckedChange={(checked) =>
+                            toggleDocumentationChecklistItemDb(item.id, Boolean(checked))
+                          }
+                        />
+                        <div className="flex-1">
+                          {isEditing ? (
+                            <Input
+                              value={documentationEditingText}
+                              onChange={(e) => setDocumentationEditingText(e.target.value)}
+                            />
+                          ) : (
+                            <div className={item.isChecked ? "text-muted-foreground line-through" : ""}>
+                              {item.question}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isEditing ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void saveDocumentationItem()}
+                                disabled={savingDocumentationItem}
+                              >
+                                Save
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={cancelEditDocumentationItem}>
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => startEditDocumentationItem(item.id)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => void deleteDocumentationItem(item.id)}
+                              >
+                                Delete
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="text-sm text-muted-foreground">No documentation checklist items yet.</div>
+                )}
               </div>
               <div className="mt-6">
                 <div className="text-sm font-semibold">Documentation file paths</div>
