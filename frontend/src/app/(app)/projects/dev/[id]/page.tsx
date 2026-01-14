@@ -955,8 +955,9 @@ export default function DevelopmentProjectPage() {
               <div className="p-6">
                 <div className="text-xl font-semibold text-slate-800 mb-6">Meeting Checklist</div>
                 <div className="space-y-3">
-                  {meetingChecklist.map((item) => (
+                  {meetingChecklist.map((item, index) => (
                     <div key={item.id} className="flex items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                      <div className="mt-1 text-xs font-semibold text-slate-400">{index + 1}.</div>
                       <Checkbox
                         checked={item.isChecked}
                         onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
@@ -1151,12 +1152,15 @@ export default function DevelopmentProjectPage() {
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-0">
                 <div className="divide-y divide-sky-100">
                   {visibleTasks.length ? (
-                    visibleTasks.map((task) => {
+                    visibleTasks.map((task, index) => {
                       const assignedId = task.assigned_to || task.assigned_to_user_id || null
                       const assigned = assignedId ? userMap.get(assignedId) : null
                       return (
                         <div key={task.id} className="grid grid-cols-4 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors">
-                          <div className="font-medium text-slate-800">{task.title}</div>
+                          <div className="font-medium text-slate-800">
+                            <span className="mr-2 text-xs font-semibold text-slate-400">{index + 1}.</span>
+                            {task.title}
+                          </div>
                           <div className="text-slate-600">
                             {assigned?.full_name || assigned?.username || "-"}
                           </div>
@@ -1214,10 +1218,11 @@ export default function DevelopmentProjectPage() {
                         </Button>
                       </div>
                       {documentationChecklist.length ? (
-                        documentationChecklist.map((item) => {
+                        documentationChecklist.map((item, index) => {
                           const isEditing = documentationEditingId === item.id
                           return (
                             <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                              <div className="mt-1 text-xs font-semibold text-slate-400">{index + 1}.</div>
                               <Checkbox
                                 checked={item.isChecked}
                                 onCheckedChange={(checked) =>
@@ -1337,7 +1342,7 @@ export default function DevelopmentProjectPage() {
                     </Button>
                   </div>
                   {checklistItems.length ? (
-                    checklistItems.map((item) => (
+                    checklistItems.map((item, index) => (
                       <Card
                         key={item.id}
                         className="cursor-pointer px-6 py-5 bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl hover:bg-sky-50/30 transition-all"
@@ -1346,6 +1351,7 @@ export default function DevelopmentProjectPage() {
                         <div className="flex items-center gap-3">
                           <Checkbox checked={item.is_checked ?? false} />
                           <div className={item.is_checked ? "text-slate-400 line-through" : "text-slate-700"}>
+                            <span className="mr-2 text-xs font-semibold text-slate-400">{index + 1}.</span>
                             {(item as any).content || item.title}
                           </div>
                         </div>

@@ -127,6 +127,10 @@ export default function CommonViewPage() {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     return days[d.getDay()]
   }
+  const getDayCode = (d: Date) => {
+    const codes = ["H", "M", "MR", "E", "P", "S", "D"] // H=Monday, M=Tuesday, MR=Wednesday, E=Thursday, P=Friday
+    return codes[d.getDay() === 0 ? 6 : d.getDay() - 1] || ""
+  }
 
   // State
   const [users, setUsers] = React.useState<User[]>([])
@@ -183,6 +187,10 @@ export default function CommonViewPage() {
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
+  const allDaysSelected = React.useMemo(() => {
+    if (selectedDates.size !== weekISOs.length) return false
+    return weekISOs.every((iso) => selectedDates.has(iso))
+  }, [selectedDates, weekISOs])
   const activeMeeting = React.useMemo(
     () => meetingTemplates.find((template) => template.id === activeMeetingId) || null,
     [activeMeetingId, meetingTemplates]
@@ -333,7 +341,18 @@ export default function CommonViewPage() {
               user = loadedUsers.find((u) => u.id === e.created_by_user_id)
             }
             const personName = user?.full_name || user?.username || e.title || "Unknown"
-            const date = toISODate(new Date(e.created_at))
+            
+            // Use entry_date if available, otherwise parse from description or fallback to created_at
+            let date = e.entry_date || null
+            if (!date) {
+              // Try to parse date from description
+              const descDateMatch = (e.description || "").match(/Date:\s*(\d{4}-\d{2}-\d{2})/i)
+              if (descDateMatch) {
+                date = descDateMatch[1]
+              } else {
+                date = toISODate(new Date(e.created_at))
+              }
+            }
 
             if (e.category === "Delays") {
               // Parse until time from description
@@ -754,6 +773,7 @@ export default function CommonViewPage() {
           category,
           title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
           description: description || null,
+          entry_date: formDate || null,
         }),
       })
 
@@ -939,6 +959,41 @@ export default function CommonViewPage() {
       },
     ]
   }, [filtered])
+
+  // Organize data by day for table view
+  const tableDataByDay = React.useMemo(() => {
+    if (!allDaysSelected) return null
+    
+    const dataByDay: Record<string, {
+      late: LateItem[]
+      absent: AbsentItem[]
+      leave: LeaveItem[]
+      blocked: BlockedItem[]
+      oneH: OneHItem[]
+      external: ExternalItem[]
+      r1: R1Item[]
+      problems: ProblemItem[]
+      feedback: FeedbackItem[]
+      priority: PriorityItem[]
+    }> = {}
+    
+    weekISOs.forEach((iso) => {
+      dataByDay[iso] = {
+        late: filtered.late.filter((x) => x.date === iso),
+        absent: filtered.absent.filter((x) => x.date === iso),
+        leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
+        blocked: filtered.blocked.filter((x) => x.date === iso),
+        oneH: filtered.oneH.filter((x) => x.date === iso),
+        external: filtered.external.filter((x) => x.date === iso),
+        r1: filtered.r1.filter((x) => x.date === iso),
+        problems: filtered.problems.filter((x) => x.date === iso),
+        feedback: filtered.feedback.filter((x) => x.date === iso),
+        priority: filtered.priority.filter((x) => x.date === iso),
+      }
+    })
+    
+    return dataByDay
+  }, [allDaysSelected, weekISOs, filtered])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -1340,14 +1395,18 @@ export default function CommonViewPage() {
         }
 
         .no-print { display: inline-flex; }
+        .hide-in-print { display: none !important; }
+        .hide-when-all-days { display: none !important; }
         @media print {
           .no-print { display: none !important; }
+          .hide-in-print { display: none !important; }
           aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
             display: none !important;
           }
           body, html { background: white; }
           main { padding: 0 !important; }
           .view-container { padding: 0; background: white; }
+          .week-table-view { display: block !important; }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
           .swimlane-row-nav { display: none !important; }
@@ -1697,6 +1756,71 @@ export default function CommonViewPage() {
         }
         .swimlane-avatar {
           display: inline-flex;
+        }
+        
+        /* Week Table View - Shows when all days are selected */
+        .week-table-view {
+          display: block;
+          width: 100%;
+          margin-bottom: 20px;
+        }
+        .week-table {
+          width: 100%;
+          border-collapse: collapse;
+          border: 2px solid #111827;
+          font-size: 11px;
+        }
+        .week-table th {
+          border: 1px solid #111827;
+          background: #f8f9fa;
+          padding: 8px 6px;
+          text-align: center;
+          font-weight: 700;
+          vertical-align: middle;
+        }
+        .week-table-date-header {
+          background: #e9ecef !important;
+          font-size: 10px;
+        }
+        .week-table-subheader {
+          background: #f8f9fa !important;
+          font-size: 9px;
+          font-weight: 600;
+        }
+        .week-table td {
+          border: 1px solid #dee2e6;
+          padding: 6px 8px;
+          vertical-align: top;
+          font-size: 10px;
+        }
+        .week-table-number {
+          text-align: center;
+          font-weight: 700;
+          background: #f8f9fa;
+        }
+        .week-table-label {
+          font-weight: 700;
+          background: #f8f9fa;
+        }
+        .week-table-cell {
+          min-height: 30px;
+        }
+        .week-table-empty {
+          color: #adb5bd;
+          font-style: italic;
+        }
+        @media print {
+          .week-table-view {
+            display: block !important;
+          }
+          .week-table {
+            page-break-inside: avoid;
+          }
+          .week-table th,
+          .week-table td {
+            border: 1px solid #111827 !important;
+          }
+        }
           align-items: center;
           justify-content: center;
           width: 24px;
@@ -1792,6 +1916,38 @@ export default function CommonViewPage() {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white; 
           box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        /* Week Navigation Buttons - Different style from day chips */
+        .week-nav-buttons {
+          display: inline-flex;
+          gap: 6px;
+          margin-right: 12px;
+          align-items: center;
+        }
+        .week-nav-btn {
+          border: 2px solid #cbd5e1;
+          padding: 6px 14px;
+          font-size: 12px;
+          font-weight: 700;
+          border-radius: 8px;
+          cursor: pointer;
+          background: white;
+          color: #475569;
+          transition: all 0.2s ease;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .week-nav-btn:hover {
+          background: #f1f5f9;
+          border-color: #94a3b8;
+          color: #334155;
+        }
+        .week-nav-btn.active {
+          background: #3b82f6;
+          border-color: #3b82f6;
+          color: white;
+          box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
         }
         
         /* Input & Switch */
@@ -2134,6 +2290,30 @@ export default function CommonViewPage() {
                 </button>
               )
             })}
+            </div>
+            <div className="week-nav-buttons">
+              <button
+                className={`week-nav-btn ${toISODate(weekStart) === toISODate(getMonday(new Date())) ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  const thisWeekMonday = getMonday(new Date())
+                  setWeekStart(thisWeekMonday)
+                  setSelectedDates(new Set([toISODate(thisWeekMonday)]))
+                }}
+              >
+                This Week
+              </button>
+              <button
+                className={`week-nav-btn ${toISODate(weekStart) === toISODate(addDays(getMonday(new Date()), 7)) ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  const nextWeekMonday = addDays(getMonday(new Date()), 7)
+                  setWeekStart(nextWeekMonday)
+                  setSelectedDates(new Set([toISODate(nextWeekMonday)]))
+                }}
+              >
+                Next Week
+              </button>
             </div>
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
               <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
@@ -2527,7 +2707,98 @@ export default function CommonViewPage() {
       ) : null}
 
       <div className="view-container">
-        <div className="swimlane-board">
+        {allDaysSelected ? (
+          <div className="week-table-view">
+            <table className="week-table">
+              <thead>
+                <tr>
+                  <th rowSpan={2} style={{ width: "60px" }}>NO</th>
+                  <th rowSpan={2} style={{ width: "150px" }}>LL</th>
+                  {weekISOs.map((iso) => {
+                    const d = fromISODate(iso)
+                    const dayCode = getDayCode(d)
+                    return (
+                      <th key={iso} colSpan={1} className="week-table-date-header">
+                        <div>{dayCode} = {formatDateHuman(iso)}</div>
+                      </th>
+                    )
+                  })}
+                </tr>
+                <tr>
+                  {weekISOs.map((iso) => (
+                    <th key={`sub-${iso}`} className="week-table-subheader">
+                      KUSH/BZ ME/DET/SI/KUR/KUJT
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {swimlaneRows
+                  .filter((row) => showCard(row.id))
+                  .map((row, rowIndex) => {
+                    const rowData = tableDataByDay?.[weekISOs[0]] || {}
+                    let dayEntries: Record<string, any[]> = {}
+                    weekISOs.forEach((iso) => {
+                      const dayData = tableDataByDay?.[iso] || {}
+                      if (row.id === "late") dayEntries[iso] = dayData.late || []
+                      else if (row.id === "absent") dayEntries[iso] = dayData.absent || []
+                      else if (row.id === "leave") dayEntries[iso] = dayData.leave || []
+                      else if (row.id === "blocked") dayEntries[iso] = dayData.blocked || []
+                      else if (row.id === "oneH") dayEntries[iso] = dayData.oneH || []
+                      else if (row.id === "external") dayEntries[iso] = dayData.external || []
+                      else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
+                      else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
+                      else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
+                      else if (row.id === "priority") dayEntries[iso] = dayData.priority || []
+                    })
+                    
+                    const getCellContent = (iso: string) => {
+                      const entries = dayEntries[iso] || []
+                      if (entries.length === 0) return null
+                      
+                      if (row.id === "late") {
+                        return entries.map((e: LateItem) => `${e.person} ${e.start || "08:00"}-${e.until}`).join(", ")
+                      } else if (row.id === "absent") {
+                        return entries.map((e: AbsentItem) => `${e.person} ${e.from} - ${e.to}`).join(", ")
+                      } else if (row.id === "leave") {
+                        return entries.map((e: LeaveItem) => {
+                          const range = e.endDate !== e.startDate ? `${formatDateHuman(e.startDate)}-${formatDateHuman(e.endDate)}` : formatDateHuman(e.startDate)
+                          return `${e.person} ${e.fullDay ? "Full day" : `${e.from}-${e.to}`} ${range}`
+                        }).join(", ")
+                      } else if (row.id === "blocked" || row.id === "problem" || row.id === "feedback") {
+                        return entries.map((e: any) => `${e.person || e.title}: ${e.note || ""}`).join(", ")
+                      } else if (row.id === "oneH" || row.id === "r1") {
+                        return entries.map((e: any) => `${e.title} (${e.person || e.owner})`).join(", ")
+                      } else if (row.id === "external") {
+                        return entries.map((e: ExternalItem) => `${e.title} ${e.time} (${e.owner})`).join(", ")
+                      } else if (row.id === "priority") {
+                        return entries.map((e: PriorityItem) => `${e.project}: ${e.assignees.join(", ")}`).join(", ")
+                      }
+                      return null
+                    }
+                    
+                    const rowLabel = row.label.toUpperCase()
+                    
+                    return (
+                      <tr key={row.id}>
+                        <td className="week-table-number">{rowIndex + 1}</td>
+                        <td className="week-table-label">{rowLabel}</td>
+                        {weekISOs.map((iso) => {
+                          const content = getCellContent(iso)
+                          return (
+                            <td key={iso} className="week-table-cell">
+                              {content || <span className="week-table-empty">—</span>}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
           {swimlaneRows
             .filter((row) => showCard(row.id))
             .map((row) => {

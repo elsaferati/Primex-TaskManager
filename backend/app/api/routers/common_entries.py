@@ -37,6 +37,7 @@ def _to_out(e: CommonEntry) -> CommonEntryOut:
         category=e.category,
         title=e.title,
         description=e.description,
+        entry_date=e.entry_date,
         created_by_user_id=e.created_by_user_id,
         assigned_to_user_id=e.assigned_to_user_id,
         approval_status=e.approval_status,
@@ -70,6 +71,7 @@ async def create_entry(
         category=payload.category,
         title=payload.title,
         description=payload.description,
+        entry_date=payload.entry_date,
         created_by_user_id=user.id,
         approval_status=CommonApprovalStatus.pending,
     )

@@ -1919,8 +1919,9 @@ export default function PcmProjectPage() {
             <div className="p-4 space-y-4">
               <div className="text-lg font-semibold">Planning</div>
               <div className="grid gap-3">
-                {VS_VL_ACCEPTANCE_QUESTIONS.map((q) => (
+                {VS_VL_ACCEPTANCE_QUESTIONS.map((q, index) => (
                   <div key={q} className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-slate-400">{index + 1}.</span>
                     <Checkbox
                       checked={Boolean(vsVlAcceptanceChecks[q])}
                       onCheckedChange={() => void toggleVsVlAcceptance(q)}
@@ -2031,7 +2032,7 @@ export default function PcmProjectPage() {
               
               <div className="space-y-2">
                 {orderedVsVlTasks.length ? (
-                  orderedVsVlTasks.map((task) => {
+                  orderedVsVlTasks.map((task, index) => {
                     const meta = parseVsVlMeta(task.internal_notes)
                     const titleKey = normalizeTaskTitle(task.title)
                     const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
@@ -2130,6 +2131,7 @@ export default function PcmProjectPage() {
                               )}
                             </div>
                           )}
+                          <span className="text-xs font-semibold text-slate-400 flex-shrink-0">{index + 1}.</span>
                           <div className="flex-1 min-w-0">
                             <Input
                               key={`title-${task.id}-${task.updated_at}`}
@@ -3345,11 +3347,11 @@ export default function PcmProjectPage() {
                   </div>
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
-                    {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task) => {
+                    {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-4 font-medium text-slate-700">{task.title}</div>
+                          <div className="col-span-4 font-medium text-slate-700">{index + 1}. {task.title}</div>
                           <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
                           <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
                           <div className="col-span-2">
@@ -3936,14 +3938,14 @@ export default function PcmProjectPage() {
                   </div>
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
-                    {tasks.filter((task) => task.phase === "CONTROL").map((task) => {
+                    {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
                       const assignedName = assignedUser?.full_name?.toLowerCase() || ""
                       const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-3 font-medium text-slate-700">{task.title}</div>
+                          <div className="col-span-3 font-medium text-slate-700">{index + 1}. {task.title}</div>
                           <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
                           <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
                           <div className="col-span-2">
@@ -4257,10 +4259,11 @@ export default function PcmProjectPage() {
           </div>
           <div className="mt-3 space-y-3">
             {meetingChecklist.length ? (
-              meetingChecklist.map((item) => {
+              meetingChecklist.map((item, index) => {
                 const isEditing = editingMeetingItemId === item.id
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-1 text-xs font-semibold text-slate-400">{index + 1}.</div>
                     <Checkbox
                       checked={item.isChecked}
                       onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}

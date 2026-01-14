@@ -234,6 +234,7 @@ export interface CommonEntry {
   category: CommonCategory
   title: string
   description?: string | null
+  entry_date?: string | null
   created_by_user_id: string
   assigned_to_user_id?: string | null
   approval_status: CommonApprovalStatus
