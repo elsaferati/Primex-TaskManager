@@ -200,7 +200,7 @@ export default function CommonViewPage() {
     [meetingTemplates]
   )
   const staffMeetingIds = React.useMemo(
-    () => meetingTemplates.filter((m) => m.groupKey !== "board").map((m) => m.id),
+    () => meetingTemplates.filter((m) => m.groupKey === "staff").map((m) => m.id),
     [meetingTemplates]
   )
   const mergeOwnerColumn = React.useMemo(() => {
@@ -214,9 +214,17 @@ export default function CommonViewPage() {
     let mounted = true
     async function loadMeetings() {
       try {
-        const res = await apiFetch("/checklists?meeting_only=true&include_items=true")
-        if (!res?.ok) return
-        const data = (await res.json()) as MeetingChecklist[]
+        // Common view should only show the official meeting templates:
+        // - group_key=board (BORD/GA)
+        // - group_key=staff (STAFF/GA)
+        const [boardRes, staffRes] = await Promise.all([
+          apiFetch("/checklists?group_key=board&include_items=true"),
+          apiFetch("/checklists?group_key=staff&include_items=true"),
+        ])
+        if (!boardRes?.ok && !staffRes?.ok) return
+        const boardData = boardRes?.ok ? ((await boardRes.json()) as MeetingChecklist[]) : []
+        const staffData = staffRes?.ok ? ((await staffRes.json()) as MeetingChecklist[]) : []
+        const data = [...boardData, ...staffData]
         const templates = data
           .slice()
           .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))

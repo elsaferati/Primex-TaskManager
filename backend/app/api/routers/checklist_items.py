@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -510,6 +510,31 @@ async def create_checklist_item(
 
     if checklist is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Checklist resolution failed")
+
+    # Idempotency guard: prevent duplicate inserts when multiple clients/tabs seed the same template at the same time.
+    # We treat an item as duplicate if it matches (checklist_id, item_type, path, day, title case-insensitively).
+    if create_payload.item_type == ChecklistItemType.CHECKBOX and create_payload.title:
+        normalized_title = create_payload.title.strip().lower()
+        if normalized_title:
+            existing = (
+                await db.execute(
+                    select(ChecklistItem)
+                    .options(
+                        selectinload(ChecklistItem.assignees).selectinload(ChecklistItemAssignee.user)
+                    )
+                    .where(
+                        ChecklistItem.checklist_id == checklist.id,
+                        ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+                        ChecklistItem.path == create_payload.path,
+                        ChecklistItem.day == create_payload.day,
+                        ChecklistItem.title.isnot(None),
+                        func.lower(func.trim(ChecklistItem.title)) == normalized_title,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return _item_to_out(existing)
 
     position = create_payload.position
     if position is None:
