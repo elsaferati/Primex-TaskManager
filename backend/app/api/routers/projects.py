@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update, cast, String as SQLString
+from sqlalchemy import func, select, update, cast, String as SQLString, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -339,7 +339,7 @@ async def update_project(
         next_idx = phase_index(payload.current_phase)
         if current_idx == -1 or next_idx == -1:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project phase")
-        if next_idx < current_idx: # Allow moving backward, but not skipping forward
+        if next_idx > current_idx:  # Allow moving backward, but not skipping forward
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot skip phases forward. Use advance-phase endpoint to move to the next phase.",
@@ -422,16 +422,28 @@ async def advance_project_phase(
             )
         )
     ).scalar_one()
-    unchecked_items = (
-        await db.execute(
-            select(func.count(ChecklistItem.id))
-            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
-            .where(
-                Checklist.project_id == project.id,
-                ChecklistItem.is_checked.is_(False),
-            )
+    unchecked_items = 0
+    checklist_query = (
+        select(func.count(ChecklistItem.id))
+        .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+        .where(
+            Checklist.project_id == project.id,
+            ChecklistItem.is_checked.is_(False),
         )
-    ).scalar_one()
+    )
+    checklist_filter = None
+    if sequence == MST_PHASES:
+        if project.current_phase == ProjectPhaseStatus.PLANNING:
+            checklist_filter = or_(
+                ChecklistItem.path.is_(None),
+                ChecklistItem.path.notin_(["propozim ko1/ko2", "punimi"]),
+            )
+        elif project.current_phase == ProjectPhaseStatus.PRODUCT:
+            checklist_filter = ChecklistItem.path.in_(["propozim ko1/ko2", "punimi"])
+    if checklist_filter is not None:
+        unchecked_items = (await db.execute(checklist_query.where(checklist_filter))).scalar_one()
+    else:
+        unchecked_items = (await db.execute(checklist_query)).scalar_one()
     if open_tasks or unchecked_items:
         detail = "Complete all tasks and checklist items before advancing the phase."
         if open_tasks and unchecked_items:
