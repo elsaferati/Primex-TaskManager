@@ -71,27 +71,6 @@ type TabId = (typeof PLANNING_TABS)[number]["id"] | (typeof PRODUCT_TABS)[number
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
-// Project Acceptance questions (PRANIMI I PROJEKTIT) - connected to database
-const PROJECT_ACCEPTANCE_QUESTIONS = [
-  "A është pranuar projekti?",
-  "A është krijuar folderi për projektin?",
-  "A janë ruajtur të gjitha dokumentet?",
-  "A janë eksportuar të gjitha fotot në dosjen 01_ALL_PHOTO?",
-  "A është kryer organizimi i fotove në foldera?",
-  "A është shikuar sa foto janë mungesë nese po a është dërguar email tek klienti?",
-  "A janë analizuar dokumentet që i ka dërguar klienti?",
-  "A janë identifikuar karakteristikat e produktit? p.sh (glass, soft close)...",
-  "A janë gjetur variacionet? (fusse, farbe)",
-  "A është përgatitur lista e produkteve e ndarë me kategori?",
-  "A është rast i ri, apo është kategori ekzistuese?",
-]
-
-// GA Meeting questions (TAKIM ME GA/DV)
-const GA_MEETING_QUESTIONS = [
-  "A është diskutuar me GA për propozimin?",
-  "Çfarë është vendosur për të vazhduar?",
-  "A ka pasur pika shtesë nga takimi?",
-]
 
 function initials(src: string) {
   return src
@@ -139,89 +118,6 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
-// Helper function to initialize checklist items in database (Project Acceptance + GA Meeting)
-async function initializePlanningChecklistItems(
-  projectId: string,
-  existingItems: ChecklistItem[],
-  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
-) {
-  const existingMap = new Map<string, ChecklistItem>()
-  existingItems.forEach((item) => {
-    if (item.path && item.title) {
-      const key = `${item.path}|${item.title}`
-      existingMap.set(key, item)
-    }
-  })
-
-  // Project Acceptance items
-  const acceptanceItemsToCreate = PROJECT_ACCEPTANCE_QUESTIONS.filter((question) => {
-    const key = `PROJECT_ACCEPTANCE|${question}`
-    return !existingMap.has(key)
-  })
-
-  // GA Meeting items
-  const gaMeetingItemsToCreate = GA_MEETING_QUESTIONS.filter((question) => {
-    const key = `GA_MEETING|${question}`
-    return !existingMap.has(key)
-  })
-
-  const createPromises = [
-    ...acceptanceItemsToCreate.map(async (question) => {
-      try {
-        const res = await apiFetch("/checklist-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: projectId,
-            item_type: "CHECKBOX",
-            path: "PROJECT_ACCEPTANCE",
-            title: question,
-            keyword: "PRANIMI_PROJEKTIT",
-            description: question,
-            category: "PROJECT_ACCEPTANCE",
-            is_checked: false,
-          }),
-        })
-        if (!res.ok) {
-          console.error(`Failed to create acceptance item "${question}"`)
-          return false
-        }
-        return true
-      } catch (error) {
-        console.error(`Failed to create acceptance item "${question}":`, error)
-        return false
-      }
-    }),
-    ...gaMeetingItemsToCreate.map(async (question) => {
-      try {
-        const res = await apiFetch("/checklist-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: projectId,
-            item_type: "CHECKBOX",
-            path: "GA_MEETING",
-            title: question,
-            keyword: "TAKIM_GA_DV",
-            description: question,
-            category: "GA_MEETING",
-            is_checked: false,
-          }),
-        })
-        if (!res.ok) {
-          console.error(`Failed to create GA meeting item "${question}"`)
-          return false
-        }
-        return true
-      } catch (error) {
-        console.error(`Failed to create GA meeting item "${question}":`, error)
-        return false
-      }
-    }),
-  ]
-
-  await Promise.all(createPromises)
-}
 
 export default function DesignProjectPage() {
   const params = useParams<{ id: string }>()
@@ -261,7 +157,22 @@ export default function DesignProjectPage() {
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
   const [addingGaNote, setAddingGaNote] = React.useState(false)
-  const [acceptanceItemsInitialized, setAcceptanceItemsInitialized] = React.useState(false)
+  
+  // Admin controls for Project Acceptance checklist
+  const [acceptanceEditingId, setAcceptanceEditingId] = React.useState<string | null>(null)
+  const [acceptanceEditingText, setAcceptanceEditingText] = React.useState("")
+  const [acceptanceNewText, setAcceptanceNewText] = React.useState("")
+  const [acceptanceNewNumber, setAcceptanceNewNumber] = React.useState("")
+  const [acceptanceSaving, setAcceptanceSaving] = React.useState(false)
+  
+  // Admin controls for GA/DV Meeting checklist
+  const [gaMeetingEditingId, setGaMeetingEditingId] = React.useState<string | null>(null)
+  const [gaMeetingEditingText, setGaMeetingEditingText] = React.useState("")
+  const [gaMeetingNewText, setGaMeetingNewText] = React.useState("")
+  const [gaMeetingNewNumber, setGaMeetingNewNumber] = React.useState("")
+  const [gaMeetingSaving, setGaMeetingSaving] = React.useState(false)
+  
+  const isAdmin = user?.role === "ADMIN"
 
   // Load project data
   React.useEffect(() => {
@@ -287,17 +198,6 @@ export default function DesignProjectPage() {
       if (cRes.ok) {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
-        
-        // Initialize planning checklist items (Project Acceptance + GA Meeting) if not already done
-        if (!acceptanceItemsInitialized) {
-          await initializePlanningChecklistItems(p.id, items, apiFetch)
-          // Reload checklist items after initialization
-          const refreshRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
-          if (refreshRes.ok) {
-            setChecklistItems((await refreshRes.json()) as ChecklistItem[])
-          }
-          setAcceptanceItemsInitialized(true)
-        }
       }
       if (gRes.ok) setGaNotes((await gRes.json()) as GaNote[])
       if (prRes.ok) setPrompts((await prRes.json()) as ProjectPrompt[])
@@ -309,7 +209,7 @@ export default function DesignProjectPage() {
       }
     }
     void load()
-  }, [apiFetch, projectId, acceptanceItemsInitialized])
+  }, [apiFetch, projectId])
 
   React.useEffect(() => {
     if (project?.current_phase) setViewedPhase(project.current_phase)
@@ -459,6 +359,172 @@ export default function DesignProjectPage() {
         prev.map((item) => (item.id === itemId ? { ...item, is_checked: !next } : item))
       )
       toast.error("Failed to update checklist")
+    }
+  }
+
+  // Reload checklist items
+  const reloadChecklistItems = async () => {
+    if (!project) return
+    const res = await apiFetch(`/checklist-items?project_id=${project.id}`)
+    if (res.ok) {
+      const items = (await res.json()) as ChecklistItem[]
+      setChecklistItems(items)
+    }
+  }
+
+  // Project Acceptance admin functions
+  const addAcceptanceItem = async () => {
+    if (!project) return
+    const text = acceptanceNewText.trim()
+    if (!text) return
+    const rawNumber = acceptanceNewNumber.trim()
+    const position = rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setAcceptanceSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "project acceptance",
+          title: text,
+          position,
+          is_checked: false,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setAcceptanceNewText("")
+      setAcceptanceNewNumber("")
+      await reloadChecklistItems()
+      toast.success("Item added")
+    } finally {
+      setAcceptanceSaving(false)
+    }
+  }
+
+  const startEditAcceptanceItem = (item: ChecklistItem) => {
+    setAcceptanceEditingId(item.id)
+    setAcceptanceEditingText(item.title || "")
+  }
+
+  const saveEditAcceptanceItem = async () => {
+    if (!acceptanceEditingId) return
+    const text = acceptanceEditingText.trim()
+    if (!text) return
+    setAcceptanceSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${acceptanceEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setAcceptanceEditingId(null)
+      setAcceptanceEditingText("")
+      await reloadChecklistItems()
+      toast.success("Item updated")
+    } finally {
+      setAcceptanceSaving(false)
+    }
+  }
+
+  const deleteAcceptanceItem = async (itemId: string) => {
+    setAcceptanceSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadChecklistItems()
+      toast.success("Item deleted")
+    } finally {
+      setAcceptanceSaving(false)
+    }
+  }
+
+  // GA/DV Meeting admin functions
+  const addGaMeetingItem = async () => {
+    if (!project) return
+    const text = gaMeetingNewText.trim()
+    if (!text) return
+    const rawNumber = gaMeetingNewNumber.trim()
+    const position = rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setGaMeetingSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: "ga/dv meeting",
+          title: text,
+          position,
+          is_checked: false,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setGaMeetingNewText("")
+      setGaMeetingNewNumber("")
+      await reloadChecklistItems()
+      toast.success("Item added")
+    } finally {
+      setGaMeetingSaving(false)
+    }
+  }
+
+  const startEditGaMeetingItem = (item: ChecklistItem) => {
+    setGaMeetingEditingId(item.id)
+    setGaMeetingEditingText(item.title || "")
+  }
+
+  const saveEditGaMeetingItem = async () => {
+    if (!gaMeetingEditingId) return
+    const text = gaMeetingEditingText.trim()
+    if (!text) return
+    setGaMeetingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${gaMeetingEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setGaMeetingEditingId(null)
+      setGaMeetingEditingText("")
+      await reloadChecklistItems()
+      toast.success("Item updated")
+    } finally {
+      setGaMeetingSaving(false)
+    }
+  }
+
+  const deleteGaMeetingItem = async (itemId: string) => {
+    setGaMeetingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadChecklistItems()
+      toast.success("Item deleted")
+    } finally {
+      setGaMeetingSaving(false)
     }
   }
 
@@ -642,19 +708,19 @@ export default function DesignProjectPage() {
 
   // Filter acceptance checklist items (PRANIMI I PROJEKTIT)
   const acceptanceItems = React.useMemo(
-    () => checklistItems.filter((item) => item.path === "PROJECT_ACCEPTANCE"),
+    () => checklistItems.filter((item) => item.path === "project acceptance"),
     [checklistItems]
   )
 
   // Filter GA Meeting checklist items (TAKIM ME GA/DV)
   const gaMeetingItems = React.useMemo(
-    () => checklistItems.filter((item) => item.path === "GA_MEETING"),
+    () => checklistItems.filter((item) => item.path === "ga/dv meeting"),
     [checklistItems]
   )
 
   // Filter general checklist items (not project acceptance or GA meeting)
   const generalChecklistItems = React.useMemo(
-    () => checklistItems.filter((item) => item.path !== "PROJECT_ACCEPTANCE" && item.path !== "GA_MEETING"),
+    () => checklistItems.filter((item) => item.path !== "project acceptance" && item.path !== "ga/dv meeting"),
     [checklistItems]
   )
 
@@ -947,20 +1013,91 @@ export default function DesignProjectPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Plotësoni këto pika për të konfirmuar pranimin e projektit.
             </p>
+            {isAdmin ? (
+              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={acceptanceNewNumber}
+                    onChange={(e) => setAcceptanceNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={acceptanceNewText}
+                    onChange={(e) => setAcceptanceNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!acceptanceNewText.trim() || acceptanceSaving}
+                    onClick={() => void addAcceptanceItem()}
+                  >
+                    {acceptanceSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             {acceptanceItems.length === 0 ? (
               <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
             ) : (
               <div className="space-y-3">
                 {acceptanceItems.map((item, idx) => (
-                  <div key={item.id} className="flex items-center gap-3 p-3 border rounded-lg">
-                    <span className="text-purple-600 font-medium min-w-[24px]">{idx + 1}.</span>
+                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
+                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
                     <Checkbox
                       checked={item.is_checked || false}
                       onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      className="mt-0.5"
                     />
-                    <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                      {item.title}
-                    </span>
+                    <div className="flex-1">
+                      {isAdmin && acceptanceEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={acceptanceEditingText}
+                            onChange={(e) => setAcceptanceEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!acceptanceEditingText.trim() || acceptanceSaving}
+                            onClick={() => void saveEditAcceptanceItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setAcceptanceEditingId(null)
+                              setAcceptanceEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                          {item.title}
+                        </span>
+                      )}
+                    </div>
+                    {isAdmin && acceptanceEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditAcceptanceItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={acceptanceSaving}
+                          onClick={() => void deleteAcceptanceItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -973,44 +1110,95 @@ export default function DesignProjectPage() {
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Takim me GA/DV</h3>
             
-            {/* GA Meeting Questions */}
-            <div className="mb-6">
-              <div className="space-y-3">
-                {gaMeetingItems.length === 0 ? (
-                  <p className="text-muted-foreground">Duke ngarkuar checklistën e takimit...</p>
-                ) : (
-                  gaMeetingItems.map((item, idx) => (
-                    <div key={item.id} className="flex items-center gap-3 p-3 border rounded-lg">
-                      <span className="text-purple-600 font-medium min-w-[24px]">{idx + 1}.</span>
-                      <Checkbox
-                        checked={item.is_checked || false}
-                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      />
-                      <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                        {item.title}
-                      </span>
-                    </div>
-                  ))
-                )}
+            {isAdmin ? (
+              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={gaMeetingNewNumber}
+                    onChange={(e) => setGaMeetingNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={gaMeetingNewText}
+                    onChange={(e) => setGaMeetingNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!gaMeetingNewText.trim() || gaMeetingSaving}
+                    onClick={() => void addGaMeetingItem()}
+                  >
+                    {gaMeetingSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
               </div>
-            </div>
-
-            {/* Scheduled Meetings */}
-            <div>
-              <h4 className="font-medium mb-3">Takimet e planifikuara</h4>
-              {meetings.length === 0 ? (
-                <p className="text-muted-foreground">Nuk ka takime të planifikuara për këtë projekt.</p>
+            ) : null}
+            
+            {/* GA Meeting Questions */}
+            <div className="space-y-3">
+              {gaMeetingItems.length === 0 ? (
+                <p className="text-muted-foreground">Duke ngarkuar checklistën e takimit...</p>
               ) : (
-                <div className="space-y-2">
-                  {meetings.map((meeting) => (
-                    <div key={meeting.id} className="p-3 border rounded-lg">
-                      <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                      {meeting.platform && (
-                        <div className="text-sm text-muted-foreground">Platforma: {meeting.platform}</div>
+                gaMeetingItems.map((item, idx) => (
+                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
+                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                    <Checkbox
+                      checked={item.is_checked || false}
+                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      {isAdmin && gaMeetingEditingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={gaMeetingEditingText}
+                            onChange={(e) => setGaMeetingEditingText(e.target.value)}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={!gaMeetingEditingText.trim() || gaMeetingSaving}
+                            onClick={() => void saveEditGaMeetingItem()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setGaMeetingEditingId(null)
+                              setGaMeetingEditingText("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                          {item.title}
+                        </span>
                       )}
                     </div>
-                  ))}
-                </div>
+                    {isAdmin && gaMeetingEditingId !== item.id ? (
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => startEditGaMeetingItem(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={gaMeetingSaving}
+                          onClick={() => void deleteGaMeetingItem(item.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))
               )}
             </div>
           </Card>

@@ -79,6 +79,31 @@ GD_PROJECTS = [
 MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
 MST_PLANNING_GA_MEETING_GROUP_KEY = "MST_PLANNING_GA_MEETING"
 
+# Graphic Design (GD) - "Pranimi i Projektit" checklist items
+GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
+    "A është pranuar projekti?",
+    "A është krijuar folderi për projektin?",
+    "A janë ruajtur të gjitha dokumentet?",
+    "A janë eksportuar të gjitha fotot në dosjen 01_ALL_PHOTO?",
+    "A është kryer organizimi i fotove në foldera?",
+    "A është shqyrtuar sa foto janë mungesë nese po është dergu email tek klienti?",
+    "A janë analizuar dokumentet që i ka dërguar klienti?",
+    "A jane identifikuar karakteristikat e produktit? p.sh (glass, soft close).",
+    "A janë gjetur variancat? (fusse, farbe)",
+    "A eshte pergatitur lista e produkteve e ndare me kategori?",
+    "A eshte rast i ri, apo eshte kategori ekzistuese?",
+]
+
+# Graphic Design (GD) - "Takim me GA/DV" checklist items
+GD_GA_DV_MEETING_TEMPLATE: list[str] = [
+    "A është diskutuar me GA për propozimin?",
+    "Çfarë është vendosur për të vazhduar?",
+    "A ka pasur pika shtesë nga takimi?",
+]
+
+PROJECT_ACCEPTANCE_PATH = "project acceptance"
+GA_DV_MEETING_PATH = "ga/dv meeting"
+
 
 async def seed() -> None:
     print("Starting seed process...")
@@ -203,6 +228,81 @@ async def seed() -> None:
 
         await db.commit()
         print("MST project checklist instances ensured.")
+
+        # --- Seed GD checklist items for Graphic Design projects ---
+        gd_department = next((dept for dept in departments if dept.name == "Graphic Design"), None)
+        if gd_department:
+            gd_projects = (
+                await db.execute(select(Project).where(Project.department_id == gd_department.id))
+            ).scalars().all()
+
+            for project in gd_projects:
+                # Get or create default checklist for the project
+                checklist = (
+                    await db.execute(
+                        select(Checklist)
+                        .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+                        .order_by(Checklist.created_at)
+                    )
+                ).scalars().first()
+                if checklist is None:
+                    checklist = Checklist(project_id=project.id, title="Checklist")
+                    db.add(checklist)
+                    await db.flush()
+
+                # Check existing items to avoid duplicates
+                existing_acceptance = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == checklist.id,
+                            ChecklistItem.path == PROJECT_ACCEPTANCE_PATH,
+                        )
+                    )
+                ).scalars().all()
+                existing_acceptance_titles = {item.title for item in existing_acceptance if item.title}
+
+                existing_ga_meeting = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == checklist.id,
+                            ChecklistItem.path == GA_DV_MEETING_PATH,
+                        )
+                    )
+                ).scalars().all()
+                existing_ga_meeting_titles = {item.title for item in existing_ga_meeting if item.title}
+
+                # Add Project Acceptance items
+                for position, title in enumerate(GD_PROJECT_ACCEPTANCE_TEMPLATE):
+                    if title not in existing_acceptance_titles:
+                        db.add(
+                            ChecklistItem(
+                                checklist_id=checklist.id,
+                                item_type=ChecklistItemType.CHECKBOX,
+                                position=position,
+                                path=PROJECT_ACCEPTANCE_PATH,
+                                title=title,
+                                is_checked=False,
+                            )
+                        )
+
+                # Add GA/DV Meeting items
+                for position, title in enumerate(GD_GA_DV_MEETING_TEMPLATE):
+                    if title not in existing_ga_meeting_titles:
+                        db.add(
+                            ChecklistItem(
+                                checklist_id=checklist.id,
+                                item_type=ChecklistItemType.CHECKBOX,
+                                position=position,
+                                path=GA_DV_MEETING_PATH,
+                                title=title,
+                                is_checked=False,
+                            )
+                        )
+
+            await db.commit()
+            print("GD checklist items seeded for Graphic Design projects.")
 
         # --- Seed Admin User ---
         admin_email = os.getenv("ADMIN_EMAIL")

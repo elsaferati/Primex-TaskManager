@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.models.department import Department
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.project import Project
@@ -25,6 +26,159 @@ from app.schemas.checklist_item import (
 
 
 router = APIRouter()
+
+PROJECT_ACCEPTANCE_PATH = "project acceptance"
+GA_DV_MEETING_PATH = "ga/dv meeting"
+
+# Graphic Design (GD) - "Pranimi i Projektit" checklist items
+GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
+    "A është pranuar projekti?",
+    "A është krijuar folderi për projektin?",
+    "A janë ruajtur të gjitha dokumentet?",
+    "A janë eksportuar të gjitha fotot në dosjen 01_ALL_PHOTO?",
+    "A është kryer organizimi i fotove në foldera?",
+    "A është shqyrtuar sa foto janë mungesë nese po është dergu email tek klienti?",
+    "A janë analizuar dokumentet që i ka dërguar klienti?",
+    "A jane identifikuar karakteristikat e produktit? p.sh (glass, soft close).",
+    "A janë gjetur variancat? (fusse, farbe)",
+    "A eshte pergatitur lista e produkteve e ndare me kategori?",
+    "A eshte rast i ri, apo eshte kategori ekzistuese?",
+]
+
+# Graphic Design (GD) - "Takim me GA/DV" checklist items
+GD_GA_DV_MEETING_TEMPLATE: list[str] = [
+    "A është diskutuar me GA për propozimin?",
+    "Çfarë është vendosur për të vazhduar?",
+    "A ka pasur pika shtesë nga takimi?",
+]
+
+
+async def _ensure_gd_project_acceptance_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "Pranimi i Projektit" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "project acceptance" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    # If the project already has any acceptance items with the requested path, only backfill missing titles.
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == PROJECT_ACCEPTANCE_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_PROJECT_ACCEPTANCE_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    # Use the default (group_key is NULL) project checklist so it stays consistent with existing behavior.
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_PROJECT_ACCEPTANCE_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=PROJECT_ACCEPTANCE_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
+async def _ensure_gd_ga_dv_meeting_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "Takim me GA/DV" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "ga/dv meeting" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == GA_DV_MEETING_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_GA_DV_MEETING_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_GA_DV_MEETING_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=GA_DV_MEETING_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
 
 
 def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
@@ -73,6 +227,12 @@ async def list_checklist_items(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         if project.department_id is not None:
             ensure_department_access(user, project.department_id)
+
+        # Auto-seed GD "Pranimi i Projektit" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_project_acceptance_items(db, project)
+        # Auto-seed GD "Takim me GA/DV" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_ga_dv_meeting_items(db, project)
+
         stmt = (
             select(ChecklistItem)
             .options(selectinload(ChecklistItem.assignees).selectinload(ChecklistItemAssignee.user))
