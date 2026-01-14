@@ -494,8 +494,36 @@ export default function CommonViewPage() {
         const tasksRes = await apiFetch(tasksEndpoint)
         if (tasksRes?.ok) {
           const tasks = (await tasksRes.json()) as Task[]
+          
+          // Collect all project IDs from tasks that aren't in our map yet
+          const missingProjectIds = new Set<string>()
+          for (const t of tasks) {
+            if (t.project_id && !projectNameById.has(t.project_id)) {
+              missingProjectIds.add(t.project_id)
+            }
+          }
+          
+          // Fetch missing projects individually
+          if (missingProjectIds.size > 0) {
+            const projectFetchPromises = Array.from(missingProjectIds).map(async (projectId) => {
+              try {
+                const projRes = await apiFetch(`/projects/${projectId}`)
+                if (projRes?.ok) {
+                  const project = (await projRes.json()) as Project
+                  const projectName = (project.title || project.name || "").trim()
+                  if (projectName) {
+                    projectNameById.set(projectId, projectName)
+                  }
+                }
+              } catch (err) {
+                // Project might not exist or user doesn't have access - ignore
+                console.warn(`Failed to fetch project ${projectId}`, err)
+              }
+            })
+            await Promise.all(projectFetchPromises)
+          }
+          
           const today = toISODate(new Date())
-
           const priorityMap = new Map<string, PriorityItem>()
 
           for (const t of tasks) {
@@ -544,13 +572,17 @@ export default function CommonViewPage() {
               })
             }
 
-            // Priority items
+            // Priority items - only include if we have a project name
             if (t.project_id) {
-              const projectLabel = projectNameById.get(t.project_id) || `Project ${t.project_id?.slice(0, 8)}`
+              const projectName = projectNameById.get(t.project_id)
+              // Skip if project name is not found (project might be deleted or inaccessible)
+              if (!projectName) {
+                continue
+              }
               const key = `${t.project_id}-${taskDate}`
               if (!priorityMap.has(key)) {
                 priorityMap.set(key, {
-                  project: projectLabel,
+                  project: projectName,
                   date: taskDate,
                   assignees: [],
                 })
@@ -1315,8 +1347,8 @@ export default function CommonViewPage() {
           --leave-accent: #22c55e;
           --blocked-bg: #ffe7ea;
           --blocked-accent: #be123c;
-          --oneh-bg: #efe7ff;
-          --oneh-accent: #7c3aed;
+          --oneh-bg: #e0f2fe;
+          --oneh-accent: #0ea5e9;
           --external-bg: #e0f2fe;
           --external-accent: #0284c7;
           --r1-bg: #dcfce7;
@@ -1339,7 +1371,7 @@ export default function CommonViewPage() {
           background: #ffffff;
         }
         .top-header { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
           padding: 12px 24px; 
           display: flex; 
           justify-content: space-between; 
@@ -1363,7 +1395,7 @@ export default function CommonViewPage() {
         /* Modern Buttons */
         .btn-primary { 
           background: white; 
-          color: #667eea; 
+          color: #475569; 
           border: none; 
           padding: 6px 14px; 
           border-radius: 6px; 
@@ -1756,6 +1788,17 @@ export default function CommonViewPage() {
         }
         .swimlane-avatar {
           display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 10px;
+          letter-spacing: 0.02em;
+          border: 1px solid #cbd5e1;
         }
         
         /* Week Table View - Shows when all days are selected */
@@ -1805,6 +1848,34 @@ export default function CommonViewPage() {
         .week-table-cell {
           min-height: 30px;
         }
+        .week-table-entries {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .week-table-entry {
+          font-size: 10px;
+          line-height: 1.4;
+        }
+        .week-table-avatars {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+          margin-top: 2px;
+        }
+        .week-table-avatar {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 9px;
+          border: 1px solid #cbd5e1;
+        }
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
@@ -1837,7 +1908,7 @@ export default function CommonViewPage() {
         .swimlane-header.absence { background: var(--absence-bg); color: #b91c1c; }
         .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
-        .swimlane-header.oneh { background: var(--oneh-bg); color: #6d28d9; }
+        .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
@@ -1847,7 +1918,7 @@ export default function CommonViewPage() {
         .swimlane-badge.absence { border-color: var(--absence-accent); color: #b91c1c; }
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
-        .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #6d28d9; }
+        .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
@@ -1913,9 +1984,9 @@ export default function CommonViewPage() {
           color: #475569;
         }
         .chip.active { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
           color: white; 
-          box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
         }
         
         /* Week Navigation Buttons - Different style from day chips */
@@ -1961,8 +2032,8 @@ export default function CommonViewPage() {
         }
         .input:focus {
           outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+          border-color: #64748b;
+          box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.1);
         }
         .switch { 
           display: inline-flex; 
@@ -1976,7 +2047,7 @@ export default function CommonViewPage() {
         .switch input { 
           width: 18px; 
           height: 18px; 
-          accent-color: #667eea; 
+          accent-color: #64748b; 
         }
         
         /* Modern Badges */
@@ -1992,7 +2063,7 @@ export default function CommonViewPage() {
         .bg-gray { background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); color: #475569; }
         .bg-blue { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; }
         .bg-red-light { background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); color: #991b1b; }
-        .bg-purple { background: linear-gradient(135deg, #e9d5ff 0%, #ddd6fe 100%); color: #6b21a8; }
+        .bg-purple { background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%); color: #0369a1; }
         .bg-orange { background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); color: #9a3412; }
         .bg-green { background: linear-gradient(135deg, #bbf7d0 0%, #86efac 100%); color: #166534; }
         
@@ -2757,22 +2828,57 @@ export default function CommonViewPage() {
                       if (entries.length === 0) return null
                       
                       if (row.id === "late") {
-                        return entries.map((e: LateItem) => `${e.person} ${e.start || "08:00"}-${e.until}`).join(", ")
+                        return entries.map((e: LateItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {initials(e.person)} {e.start || "08:00"}-{e.until}
+                          </div>
+                        ))
                       } else if (row.id === "absent") {
-                        return entries.map((e: AbsentItem) => `${e.person} ${e.from} - ${e.to}`).join(", ")
+                        return entries.map((e: AbsentItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {initials(e.person)} {e.from} - {e.to}
+                          </div>
+                        ))
                       } else if (row.id === "leave") {
-                        return entries.map((e: LeaveItem) => {
+                        return entries.map((e: LeaveItem, idx: number) => {
                           const range = e.endDate !== e.startDate ? `${formatDateHuman(e.startDate)}-${formatDateHuman(e.endDate)}` : formatDateHuman(e.startDate)
-                          return `${e.person} ${e.fullDay ? "Full day" : `${e.from}-${e.to}`} ${range}`
-                        }).join(", ")
+                          return (
+                            <div key={idx} className="week-table-entry">
+                              {initials(e.person)} {e.fullDay ? "Full day" : `${e.from}-${e.to}`} {range}
+                            </div>
+                          )
+                        })
                       } else if (row.id === "blocked" || row.id === "problem" || row.id === "feedback") {
-                        return entries.map((e: any) => `${e.person || e.title}: ${e.note || ""}`).join(", ")
+                        return entries.map((e: any, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {initials(e.person || e.title || "")}: {e.note || ""}
+                          </div>
+                        ))
                       } else if (row.id === "oneH" || row.id === "r1") {
-                        return entries.map((e: any) => `${e.title} (${e.person || e.owner})`).join(", ")
+                        return entries.map((e: any, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {e.title} ({initials(e.person || e.owner || "")})
+                          </div>
+                        ))
                       } else if (row.id === "external") {
-                        return entries.map((e: ExternalItem) => `${e.title} ${e.time} (${e.owner})`).join(", ")
+                        return entries.map((e: ExternalItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {e.title} {e.time} ({initials(e.owner || "")})
+                          </div>
+                        ))
                       } else if (row.id === "priority") {
-                        return entries.map((e: PriorityItem) => `${e.project}: ${e.assignees.join(", ")}`).join(", ")
+                        return entries.map((e: PriorityItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <div>{e.project}</div>
+                            <div className="week-table-avatars">
+                              {e.assignees.map((name) => (
+                                <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))
                       }
                       return null
                     }
@@ -2787,7 +2893,13 @@ export default function CommonViewPage() {
                           const content = getCellContent(iso)
                           return (
                             <td key={iso} className="week-table-cell">
-                              {content || <span className="week-table-empty">—</span>}
+                              {content ? (
+                                <div className="week-table-entries">
+                                  {content}
+                                </div>
+                              ) : (
+                                <span className="week-table-empty">—</span>
+                              )}
                             </td>
                           )
                         })}

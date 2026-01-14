@@ -376,6 +376,8 @@ export default function DepartmentKanban() {
   const returnToTasks = `${pathname}?tab=no-project`
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
+  const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
@@ -410,6 +412,8 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
+  const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
+  const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
@@ -519,6 +523,39 @@ export default function DepartmentKanban() {
     }
     void load()
   }, [apiFetch, departmentName, user?.role])
+
+  React.useEffect(() => {
+    projectMembersRef.current = projectMembers
+  }, [projectMembers])
+
+  React.useEffect(() => {
+    if (!projects.length) return
+    let cancelled = false
+    const loadMembers = async () => {
+      const missing = projects.filter((project) => !projectMembersRef.current[project.id])
+      if (!missing.length) return
+      const results = await Promise.all(
+        missing.map(async (project) => {
+          const res = await apiFetch(`/project-members?project_id=${project.id}`)
+          if (!res.ok) return { id: project.id, members: [] as UserLookup[] }
+          const members = (await res.json()) as UserLookup[]
+          return { id: project.id, members }
+        })
+      )
+      if (cancelled) return
+      setProjectMembers((prev) => {
+        const next = { ...prev }
+        for (const result of results) {
+          next[result.id] = result.members
+        }
+        return next
+      })
+    }
+    void loadMembers()
+    return () => {
+      cancelled = true
+    }
+  }, [projects, apiFetch])
 
   React.useEffect(() => {
     if (!department) return
@@ -1157,7 +1194,7 @@ export default function DepartmentKanban() {
         title: projectTitle.trim(),
         description: projectDescription.trim() || null,
         department_id: department.id,
-        manager_id: projectManagerId === "__unassigned__" ? null : projectManagerId,
+        manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         current_phase: projectPhase,
         status: projectStatus,
       }
@@ -1182,11 +1219,37 @@ export default function DepartmentKanban() {
         return
       }
       const created = (await res.json()) as Project
+      
+      // Add project members if any were selected
+      if (projectMemberIds.length > 0) {
+        try {
+          const memberRes = await apiFetch("/project-members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: created.id,
+              user_ids: projectMemberIds.filter((id) => id !== "__unassigned__"),
+            }),
+          })
+          if (memberRes.ok) {
+            // Reload members for the newly created project
+            const members = (await memberRes.json()) as UserLookup[]
+            setProjectMembers((prev) => ({ ...prev, [created.id]: members }))
+          } else {
+            console.error("Failed to add project members")
+          }
+        } catch (error) {
+          console.error("Error adding project members:", error)
+        }
+      }
+      
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       setProjectTitle("")
       setProjectDescription("")
       setProjectManagerId("__unassigned__")
+      setProjectMemberIds([])
+      setProjectMemberIds([])
       setProjectPhase("MEETINGS")
       setProjectStatus("TODO")
       toast.success("Project created")
@@ -1879,20 +1942,67 @@ export default function DepartmentKanban() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Manager</Label>
-                        <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="Select manager" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            {departmentUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || "-"}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-slate-700">Members</Label>
+                        <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>
+                          <DialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                            >
+                              {projectMemberIds.length === 0
+                                ? "Select members..."
+                                : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                              <DialogTitle>Select Project Members</DialogTitle>
+                            </DialogHeader>
+                            <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                              {departmentUsers.map((u) => {
+                                const isSelected = projectMemberIds.includes(u.id)
+                                return (
+                                  <div
+                                    key={u.id}
+                                    className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setProjectMemberIds((prev) => prev.filter((id) => id !== u.id))
+                                      } else {
+                                        setProjectMemberIds((prev) => [...prev, u.id])
+                                      }
+                                    }}
+                                  >
+                                    <Checkbox checked={isSelected} />
+                                    <Label className="cursor-pointer flex-1">
+                                      {u.full_name || u.username || "-"}
+                                    </Label>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <div className="mt-4 flex justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setProjectMemberIds([])
+                                  setSelectMembersOpen(false)
+                                }}
+                              >
+                                Clear
+                              </Button>
+                              <Button onClick={() => setSelectMembersOpen(false)}>
+                                Done
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                        {projectMemberIds.length > 0 && (
+                          <div className="text-xs text-slate-600">
+                            {projectMemberIds.length} member{projectMemberIds.length === 1 ? "" : "s"} selected
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Phase</Label>
@@ -1925,6 +2035,11 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                const membersForProject = projectMembers[project.id] || []
+                const combinedMembers = manager ? [...membersForProject, manager] : membersForProject
+                const uniqueMembers = Array.from(new Map(combinedMembers.map((m) => [m.id, m])).values())
+                const visibleMembers = uniqueMembers.slice(0, 4)
+                const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
@@ -1973,9 +2088,22 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="mt-4 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          {manager ? (
-                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm">
-                              {initials(manager.full_name || manager.username || "-")}
+                          {visibleMembers.length ? (
+                            <div className="flex -space-x-2">
+                              {visibleMembers.map((member) => (
+                                <div
+                                  key={member.id}
+                                  title={member.full_name || member.username || "-"}
+                                  className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
+                                >
+                                  {initials(member.full_name || member.username || "-")}
+                                </div>
+                              ))}
+                              {remainingMembers > 0 ? (
+                                <div className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                                  +{remainingMembers}
+                                </div>
+                              ) : null}
                             </div>
                           ) : (
                             <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
@@ -2066,7 +2194,7 @@ export default function DepartmentKanban() {
               ))}
             </div>
             <div className="space-y-4">
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                   <div className="text-sm font-semibold">PROJECT TASKS</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2074,7 +2202,7 @@ export default function DepartmentKanban() {
                   </span>
                   <div className="mt-2 text-xs text-slate-500">Due today</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                   {todayProjectTaskGroups.length ? (
                     <div className="space-y-3">
                       {todayProjectTaskGroups.map((group) => (
@@ -2115,7 +2243,7 @@ export default function DepartmentKanban() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                   <div className="text-sm font-semibold">NO PROJECT</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2123,7 +2251,7 @@ export default function DepartmentKanban() {
                   </span>
                   <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                   {todayNoProjectTasks.length ? (
                     <div className="space-y-2">
                       {todayNoProjectTasks.map((task) => {
@@ -2164,7 +2292,7 @@ export default function DepartmentKanban() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                   <div className="text-sm font-semibold">NOTES (OPEN)</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2172,7 +2300,7 @@ export default function DepartmentKanban() {
                   </span>
                   <div className="mt-2 text-xs text-slate-500">Quick notes</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                   {todayOpenNotes.length ? (
                     <div className="space-y-2">
                       {todayOpenNotes.map((note) => (
@@ -2195,7 +2323,7 @@ export default function DepartmentKanban() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                   <div className="text-sm font-semibold">SYSTEM</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2203,7 +2331,7 @@ export default function DepartmentKanban() {
                   </span>
                   <div className="mt-2 text-xs text-slate-500">Scheduled</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                   {todaySystemTasks.length ? (
                     <div className="space-y-2">
                       {todaySystemTasks.map((task) => (
@@ -2222,7 +2350,7 @@ export default function DepartmentKanban() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                   <div className="text-sm font-semibold">MEETINGS</div>
                   <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
@@ -2230,7 +2358,7 @@ export default function DepartmentKanban() {
                   </span>
                   <div className="mt-2 text-xs text-slate-500">Today</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                   {todayMeetings.length ? (
                     <div className="space-y-2">
                       {todayMeetings.map((meeting) => (
@@ -2655,7 +2783,7 @@ export default function DepartmentKanban() {
                       {row.items.length ? "Active items" : "No items"}
                     </div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[520px] overflow-y-auto">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
                         {row.items.map((t) => (
@@ -2665,14 +2793,14 @@ export default function DepartmentKanban() {
                             className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <div className="font-medium text-slate-800">{t.title}</div>
+                              <div className="font-medium text-slate-800 text-xs">{t.title}</div>
                               <div className="flex items-center gap-2">
                                 <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
                                   {row.itemBadge}
                                 </Badge>
                                 {t.assigned_to ? (
                                   <div
-                                    className="h-7 w-7 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center"
+                                    className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
                                     title={assigneeLabel(userMap.get(t.assigned_to) || null)}
                                   >
                                     {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
@@ -2681,7 +2809,7 @@ export default function DepartmentKanban() {
                               </div>
                             </div>
                             {t.description ? (
-                              <div className="mt-1 text-xs text-slate-500">{t.description}</div>
+                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
                             ) : null}
                           </Link>
                         ))}
@@ -3275,6 +3403,7 @@ export default function DepartmentKanban() {
                   <div className="space-y-2">
                     {internalMeetingItems
                       .filter((item) => (item.day || internalSlot) === internalSlot)
+                      .filter((item) => (internalSlot === "M1" ? !/[a-z]/.test(item.title || "") : true))
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id

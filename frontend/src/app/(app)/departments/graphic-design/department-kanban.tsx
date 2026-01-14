@@ -337,6 +337,8 @@ export default function DepartmentKanban() {
   // --- STATES ---
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
+  const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
@@ -372,6 +374,8 @@ export default function DepartmentKanban() {
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
+  const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
+  const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
   const [projectType, setProjectType] = React.useState<(typeof PROJECT_TYPES)[number]["id"]>("GENERAL")
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
@@ -461,6 +465,39 @@ export default function DepartmentKanban() {
     }
     void load()
   }, [apiFetch, departmentName, user?.role])
+
+  React.useEffect(() => {
+    projectMembersRef.current = projectMembers
+  }, [projectMembers])
+
+  React.useEffect(() => {
+    if (!projects.length) return
+    let cancelled = false
+    const loadMembers = async () => {
+      const missing = projects.filter((project) => !projectMembersRef.current[project.id])
+      if (!missing.length) return
+      const results = await Promise.all(
+        missing.map(async (project) => {
+          const res = await apiFetch(`/project-members?project_id=${project.id}`)
+          if (!res.ok) return { id: project.id, members: [] as UserLookup[] }
+          const members = (await res.json()) as UserLookup[]
+          return { id: project.id, members }
+        })
+      )
+      if (cancelled) return
+      setProjectMembers((prev) => {
+        const next = { ...prev }
+        for (const result of results) {
+          next[result.id] = result.members
+        }
+        return next
+      })
+    }
+    void loadMembers()
+    return () => {
+      cancelled = true
+    }
+  }, [projects, apiFetch])
 
   React.useEffect(() => {
     if (isTabId) {
@@ -883,7 +920,7 @@ export default function DepartmentKanban() {
         title: projectTitle.trim(),
         description: projectDescription.trim() || null,
         department_id: department.id,
-        manager_id: projectManagerId === "__unassigned__" ? null : projectManagerId,
+        manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         project_type: projectType,
         current_phase: projectPhase,
         status: projectStatus,
@@ -891,9 +928,37 @@ export default function DepartmentKanban() {
       const res = await apiFetch("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) { toast.error("Failed to create project"); return }
       const created = (await res.json()) as Project
+      
+      // Add project members if any were selected
+      if (projectMemberIds.length > 0) {
+        try {
+          const memberRes = await apiFetch("/project-members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: created.id,
+              user_ids: projectMemberIds.filter((id) => id !== "__unassigned__"),
+            }),
+          })
+          if (memberRes.ok) {
+            // Reload members for the newly created project
+            const members = (await memberRes.json()) as UserLookup[]
+            setProjectMembers((prev) => ({
+              ...prev,
+              [created.id]: members,
+            }))
+          } else {
+            console.error("Failed to add project members")
+          }
+        } catch (error) {
+          console.error("Error adding project members:", error)
+        }
+      }
+      
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       setProjectTitle("")
+      setProjectMemberIds([])
       setProjectDescription("")
       setProjectType("GENERAL")
       setProjectPhase("MEETINGS")
@@ -1224,7 +1289,69 @@ export default function DepartmentKanban() {
                           <div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
                           <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
                           <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2"><Label>Manager</Label><Select value={projectManagerId} onValueChange={setProjectManagerId}><SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem>{departmentUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div>
+                            <div className="space-y-2">
+                              <Label>Members</Label>
+                              <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full justify-start rounded-xl"
+                                  >
+                                    {projectMemberIds.length === 0
+                                      ? "Select members..."
+                                      : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="sm:max-w-md">
+                                  <DialogHeader>
+                                    <DialogTitle>Select Project Members</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                    {departmentUsers.map((u) => {
+                                      const isSelected = projectMemberIds.includes(u.id)
+                                      return (
+                                        <div
+                                          key={u.id}
+                                          className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                          onClick={() => {
+                                            if (isSelected) {
+                                              setProjectMemberIds((prev) => prev.filter((id) => id !== u.id))
+                                            } else {
+                                              setProjectMemberIds((prev) => [...prev, u.id])
+                                            }
+                                          }}
+                                        >
+                                          <Checkbox checked={isSelected} />
+                                          <Label className="cursor-pointer flex-1">
+                                            {u.full_name || u.username || "-"}
+                                          </Label>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                  <div className="mt-4 flex justify-end gap-2">
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        setProjectMemberIds([])
+                                        setSelectMembersOpen(false)
+                                      }}
+                                    >
+                                      Clear
+                                    </Button>
+                                    <Button onClick={() => setSelectMembersOpen(false)}>
+                                      Done
+                                    </Button>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                              {projectMemberIds.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  {projectMemberIds.length} member{projectMemberIds.length === 1 ? "" : "s"} selected
+                                </div>
+                              )}
+                            </div>
                             <div className="space-y-2">
                               <Label>Project Type</Label>
                               <Select
@@ -1267,9 +1394,15 @@ export default function DepartmentKanban() {
                     const phase = project.current_phase || "MEETINGS";
                     const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
 
-                    // Calculate members from tasks assignees + manager
-                    const memberIds = new Set(tasks.map(t => t.assigned_to).filter(Boolean));
+                    // Get members from project-members API first, then add manager and task assignees
+                    const apiMembers = projectMembers[project.id] || [];
+                    const memberIds = new Set<string>();
+                    // Add API members
+                    apiMembers.forEach(m => memberIds.add(m.id));
+                    // Add manager
                     if (project.manager_id) memberIds.add(project.manager_id);
+                    // Add task assignees
+                    tasks.forEach(t => { if (t.assigned_to) memberIds.add(t.assigned_to); });
                     const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
 
                     return (

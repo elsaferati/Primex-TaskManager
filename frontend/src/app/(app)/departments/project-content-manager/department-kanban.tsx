@@ -552,6 +552,8 @@ export default function DepartmentKanban() {
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
+  const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
+  const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
@@ -1102,6 +1104,69 @@ export default function DepartmentKanban() {
     return { normal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
 
+  const statusRows = [
+    {
+      id: "blocked",
+      title: "BLOCKED",
+      count: noProjectBuckets.blocked.length,
+      items: noProjectBuckets.blocked,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-red-600 border border-red-200",
+      borderClass: "border-red-500",
+      itemBadge: "Blocked",
+      itemBadgeClass: "bg-white text-red-600 border-red-200",
+    },
+    {
+      id: "one-hour",
+      title: "1H TASKS",
+      count: noProjectBuckets.oneHour.length,
+      items: noProjectBuckets.oneHour,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-indigo-600 border border-indigo-200",
+      borderClass: "border-indigo-500",
+      itemBadge: "1H",
+      itemBadgeClass: "bg-white text-indigo-600 border-indigo-200",
+    },
+    {
+      id: "r1",
+      title: "R1",
+      count: noProjectBuckets.r1.length,
+      items: noProjectBuckets.r1,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-emerald-600 border border-emerald-200",
+      borderClass: "border-emerald-500",
+      itemBadge: "R1",
+      itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
+    },
+    {
+      id: "ga",
+      title: "GA TASKS",
+      count: noProjectBuckets.ga.length,
+      items: noProjectBuckets.ga,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-sky-600 border border-slate-200",
+      borderClass: "border-sky-500",
+      itemBadge: "GA",
+      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
+    },
+    {
+      id: "normal",
+      title: "NORMAL",
+      count: noProjectBuckets.normal.length,
+      items: noProjectBuckets.normal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-blue-600 border border-slate-200",
+      borderClass: "border-blue-500",
+      itemBadge: "Normal",
+      itemBadgeClass: "bg-white text-blue-600 border-slate-200",
+    },
+  ] as const
+
   const gaNoteTaskMap = React.useMemo(() => {
     const map = new Map<string, Task>()
     for (const task of departmentTasks) {
@@ -1262,6 +1327,7 @@ export default function DepartmentKanban() {
     setProjectTitle("")
     setProjectDescription("")
     setProjectManagerId("__unassigned__")
+    setProjectMemberIds([])
     setProjectStatus("TODO")
   }, [])
 
@@ -1286,7 +1352,7 @@ export default function DepartmentKanban() {
         title: resolvedTitle,
         description: resolvedDescription,
         department_id: department.id,
-        manager_id: projectManagerId === "__unassigned__" ? null : projectManagerId,
+        manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         status: projectStatus,
       }
       if (template?.current_phase) {
@@ -1316,6 +1382,33 @@ export default function DepartmentKanban() {
         return
       }
       const created = (await res.json()) as Project
+      
+      // Add project members if any were selected
+      if (projectMemberIds.length > 0) {
+        try {
+          const memberRes = await apiFetch("/project-members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: created.id,
+              user_ids: projectMemberIds.filter((id) => id !== "__unassigned__"),
+            }),
+          })
+          if (memberRes.ok) {
+            // Reload members for the newly created project
+            const members = (await memberRes.json()) as UserLookup[]
+            setProjectMembers((prev) => ({
+              ...prev,
+              [created.id]: members,
+            }))
+          } else {
+            console.error("Failed to add project members")
+          }
+        } catch (error) {
+          console.error("Error adding project members:", error)
+        }
+      }
+      
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       resetProjectForm()
@@ -1948,20 +2041,67 @@ export default function DepartmentKanban() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Manager</Label>
-                          <Select value={projectManagerId} onValueChange={setProjectManagerId}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select manager" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                              {departmentUsers.map((u) => (
-                                <SelectItem key={u.id} value={u.id}>
-                                  {u.full_name || u.username || "-"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Label>Members</Label>
+                          <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>
+                            <DialogTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full justify-start"
+                              >
+                                {projectMemberIds.length === 0
+                                  ? "Select members..."
+                                  : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-md">
+                              <DialogHeader>
+                                <DialogTitle>Select Project Members</DialogTitle>
+                              </DialogHeader>
+                              <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                {departmentUsers.map((u) => {
+                                  const isSelected = projectMemberIds.includes(u.id)
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          setProjectMemberIds((prev) => prev.filter((id) => id !== u.id))
+                                        } else {
+                                          setProjectMemberIds((prev) => [...prev, u.id])
+                                        }
+                                      }}
+                                    >
+                                      <Checkbox checked={isSelected} />
+                                      <Label className="cursor-pointer flex-1">
+                                        {u.full_name || u.username || "-"}
+                                      </Label>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              <div className="mt-4 flex justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    setProjectMemberIds([])
+                                    setSelectMembersOpen(false)
+                                  }}
+                                >
+                                  Clear
+                                </Button>
+                                <Button onClick={() => setSelectMembersOpen(false)}>
+                                  Done
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          {projectMemberIds.length > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {projectMemberIds.length} member{projectMemberIds.length === 1 ? "" : "s"} selected
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label>Status</Label>
@@ -2052,18 +2192,20 @@ export default function DepartmentKanban() {
                         <div className="text-[10px] uppercase tracking-wide text-stone-500">Members</div>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           {membersForProject.length ? (
-                            membersForProject.slice(0, 6).map((member, idx) => (
-                              <div
-                                key={member.id}
-                                className={[
-                                  "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
-                                  memberColors[idx % memberColors.length],
-                                ].join(" ")}
-                                title={member.full_name || member.username || "-"}
-                              >
-                                {initials(member.full_name || member.username || "-")}
-                              </div>
-                            ))
+                            <>
+                              {membersForProject.map((member, idx) => (
+                                <div
+                                  key={member.id}
+                                  className={[
+                                    "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
+                                    memberColors[idx % memberColors.length],
+                                  ].join(" ")}
+                                  title={member.full_name || member.username || "-"}
+                                >
+                                  {initials(member.full_name || member.username || "-")}
+                                </div>
+                              ))}
+                            </>
                           ) : (
                             <div className="text-[11px] text-muted-foreground">No members yet.</div>
                           )}
@@ -2166,7 +2308,7 @@ export default function DepartmentKanban() {
                 ))}
               </div>
               <div className="space-y-4">
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                   <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                     <div className="text-sm font-semibold">PROJECT TASKS</div>
                     <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2174,7 +2316,7 @@ export default function DepartmentKanban() {
                     </span>
                     <div className="mt-2 text-xs text-slate-500">Due today</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todayProjectTaskGroups.length ? (
                       <div className="space-y-3">
                         {todayProjectTaskGroups.map((group) => (
@@ -2215,7 +2357,7 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                   <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                     <div className="text-sm font-semibold">NO PROJECT</div>
                     <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2223,7 +2365,7 @@ export default function DepartmentKanban() {
                     </span>
                     <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todayNoProjectTasks.length ? (
                       <div className="space-y-2">
                         {todayNoProjectTasks.map((task) => {
@@ -2264,7 +2406,7 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                   <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                     <div className="text-sm font-semibold">NOTES (OPEN)</div>
                     <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2272,7 +2414,7 @@ export default function DepartmentKanban() {
                     </span>
                     <div className="mt-2 text-xs text-slate-500">Quick notes</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todayOpenNotes.length ? (
                       <div className="space-y-2">
                         {todayOpenNotes.map((note) => (
@@ -2295,7 +2437,7 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                   <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                     <div className="text-sm font-semibold">SYSTEM</div>
                     <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
@@ -2303,7 +2445,7 @@ export default function DepartmentKanban() {
                     </span>
                     <div className="mt-2 text-xs text-slate-500">Scheduled</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todaySystemTasks.length ? (
                       <div className="space-y-2">
                         {todaySystemTasks.map((task) => {
@@ -2339,7 +2481,7 @@ export default function DepartmentKanban() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                   <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                     <div className="text-sm font-semibold">MEETINGS</div>
                     <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
@@ -2347,7 +2489,7 @@ export default function DepartmentKanban() {
                     </span>
                     <div className="mt-2 text-xs text-slate-500">Today</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todayMeetings.length ? (
                       <div className="space-y-2">
                         {todayMeetings.map((meeting) => (
@@ -2658,25 +2800,27 @@ export default function DepartmentKanban() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-xl font-semibold">Tasks (No Project)</div>
-                  <div className="text-sm text-muted-foreground">
+                  <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                  <div className="text-sm text-slate-600">
                     Use these buckets to track non-project tasks and special cases.
                   </div>
                 </div>
                 {!isReadOnly ? (
                   <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                     <DialogTrigger asChild>
-                      <Button variant="outline">+ Add Task</Button>
+                      <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                        + Add Task
+                      </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-lg">
+                    <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
                       <DialogHeader>
-                        <DialogTitle>New Task</DialogTitle>
+                        <DialogTitle className="text-slate-800">New Task</DialogTitle>
                       </DialogHeader>
-                      <div className="space-y-3">
+                      <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Type</Label>
+                          <Label className="text-slate-700">Type</Label>
                           <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
-                            <SelectTrigger>
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                               <SelectValue placeholder="Select type" />
                             </SelectTrigger>
                             <SelectContent>
@@ -2687,27 +2831,28 @@ export default function DepartmentKanban() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-slate-500">
                             {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
                           </div>
                         </div>
                         <div className="space-y-2">
-                          <Label>Title</Label>
-                          <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                          <Label className="text-slate-700">Title</Label>
+                          <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                         </div>
                         <div className="space-y-2">
-                          <Label>Description</Label>
+                          <Label className="text-slate-700">Description</Label>
                           <Textarea
                             value={noProjectDescription}
                             onChange={(e) => setNoProjectDescription(e.target.value)}
                             rows={4}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl"
                           />
                         </div>
-                        <div className="grid gap-3 md:grid-cols-3">
+                        <div className="grid gap-4 md:grid-cols-3">
                           <div className="space-y-2">
-                            <Label>Assign to</Label>
+                            <Label className="text-slate-700">Assign to</Label>
                             <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                              <SelectTrigger>
+                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                                 <SelectValue placeholder="Select assignee" />
                               </SelectTrigger>
                               <SelectContent>
@@ -2722,14 +2867,14 @@ export default function DepartmentKanban() {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label>Finish by (optional)</Label>
+                            <Label className="text-slate-700">Finish by (optional)</Label>
                             <Select
                               value={noProjectFinishPeriod}
                               onValueChange={(value) =>
                                 setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                               }
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                                 <SelectValue placeholder="Select period" />
                               </SelectTrigger>
                               <SelectContent>
@@ -2743,21 +2888,23 @@ export default function DepartmentKanban() {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label>Due date</Label>
+                            <Label className="text-slate-700">Due date</Label>
                             <Input
                               type="date"
                               value={noProjectDueDate}
                               onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                              className="border-slate-200 focus:border-slate-400 rounded-xl"
                             />
                           </div>
                         </div>
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" onClick={() => setNoProjectOpen(false)}>
+                          <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
                             Cancel
                           </Button>
                           <Button
                             disabled={!noProjectTitle.trim() || creatingNoProject}
                             onClick={() => void submitNoProjectTask()}
+                            className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                           >
                             {creatingNoProject ? "Creating..." : "Create"}
                           </Button>
@@ -2767,180 +2914,63 @@ export default function DepartmentKanban() {
                   </Dialog>
                 ) : null}
               </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                  <div className="text-sm font-semibold">Normal</div>
-                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
-                    {noProjectBuckets.normal.length ? (
-                      noProjectBuckets.normal.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{t.title}</div>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                Normal
-                              </Badge>
-                              {t.assigned_to ? (
-                                <div
-                                  className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200"
-                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                                >
-                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                                </div>
-                              ) : null}
+            <div className="space-y-4">
+              {statusRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+                >
+                  <div
+                    className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
+                  >
+                    <div className="text-sm font-semibold">{row.title}</div>
+                    <span
+                      className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
+                    >
+                      {row.count}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {row.items.length ? "Active items" : "No items"}
+                    </div>
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                    {row.items.length ? (
+                      <div className="flex flex-col gap-2">
+                        {row.items.map((t) => (
+                          <Link
+                            key={t.id}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium text-slate-800 text-xs">{t.title}</div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                  {row.itemBadge}
+                                </Badge>
+                                {t.assigned_to ? (
+                                  <div
+                                    className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                    title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                  >
+                                    {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        </Link>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No tasks</div>
-                    )}
-                  </div>
-                </Card>
-
-                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-4 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
-                  <div className="text-sm font-semibold">GA</div>
-                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
-                    {noProjectBuckets.ga.length ? (
-                      noProjectBuckets.ga.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className="block rounded-xl border border-stone-200/70 bg-white/80 px-4 py-3 transition hover:border-stone-300 hover:bg-white/90 hover:shadow-sm dark:border-stone-800/70 dark:bg-stone-900/60 dark:hover:border-stone-700"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{t.title}</div>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                GA
-                              </Badge>
-                              {t.assigned_to ? (
-                                <div
-                                  className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center dark:bg-rose-900/40 dark:text-rose-200"
-                                  title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                                >
-                                  {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        </Link>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No tasks</div>
-                    )}
-                  </div>
-                </Card>
-
-                <Card className="rounded-2xl border-rose-100 bg-rose-50/60 p-4 shadow-sm dark:border-rose-900/50 dark:bg-rose-950/30">
-                  <div className="flex items-center gap-2 text-rose-700 font-semibold">
-                    <span className="h-5 w-5 rounded-full bg-rose-500" />
-                    <span>BLOCKED</span>
-                  </div>
-                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
-                    {noProjectBuckets.blocked.length ? (
-                      noProjectBuckets.blocked.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className="block rounded-xl border border-rose-100/80 bg-white/80 px-4 py-3 transition hover:bg-rose-50 hover:shadow-sm dark:border-rose-900/50 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{t.title}</div>
-                            {t.assigned_to ? (
-                              <div
-                                className="h-7 w-7 rounded-full bg-rose-100 text-[10px] font-semibold text-rose-700 flex items-center justify-center"
-                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                              >
-                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                              </div>
+                            {t.description ? (
+                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
                             ) : null}
-                          </div>
-                          <Badge variant="outline" className="mt-2 text-xs border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-200">
-                            BLOCKED
-                          </Badge>
-                        </Link>
-                      ))
+                          </Link>
+                        ))}
+                      </div>
                     ) : (
-                      <div className="text-sm text-muted-foreground">No tasks</div>
+                      <div className="text-sm text-slate-500">No tasks in this category.</div>
                     )}
                   </div>
-                </Card>
-
-                <Card className="rounded-2xl border-amber-100 bg-amber-50/60 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/25">
-                  <div className="flex items-center gap-2 text-amber-700 font-semibold">
-                    <span className="h-5 w-5 rounded-full border-2 border-amber-500" />
-                    <span>1H Report</span>
-                  </div>
-                  <div className="mt-3 max-h-[520px] overflow-y-auto pr-1 space-y-3">
-                    {noProjectBuckets.oneHour.length ? (
-                      noProjectBuckets.oneHour.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className="block rounded-xl border border-amber-100/80 bg-white/80 px-4 py-3 transition hover:bg-amber-50 hover:shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{t.title}</div>
-                            {t.assigned_to ? (
-                              <div
-                                className="h-7 w-7 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-700 flex items-center justify-center"
-                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                              >
-                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                              </div>
-                            ) : null}
-                          </div>
-                          <Badge variant="outline" className="mt-2 text-xs border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-200">
-                            1H
-                          </Badge>
-                        </Link>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No tasks</div>
-                    )}
-                  </div>
-                </Card>
-
-                <Card className="rounded-2xl border-emerald-100 bg-emerald-50/60 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
-                  <div className="text-emerald-700 font-semibold">R1</div>
-                  <div className="mt-2 text-sm text-emerald-700/80">
-                    New project (first case) is handled with the manager.
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    {noProjectBuckets.r1.length ? (
-                      noProjectBuckets.r1.map((t) => (
-                        <Link
-                          key={t.id}
-                          href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                          className="block rounded-xl border border-emerald-100/80 bg-white/80 px-4 py-3 transition hover:bg-emerald-50 hover:shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{t.title}</div>
-                            {t.assigned_to ? (
-                              <div
-                                className="h-7 w-7 rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 flex items-center justify-center"
-                                title={assigneeLabel(userMap.get(t.assigned_to) || null)}
-                              >
-                                {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
-                              </div>
-                            ) : null}
-                          </div>
-                          <Badge variant="outline" className="mt-2 text-xs border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
-                            R1
-                          </Badge>
-                        </Link>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No tasks</div>
-                    )}
-                  </div>
-                </Card>
-              </div>
+                </div>
+              ))}
+            </div>
             </div>
           ) : null}
 

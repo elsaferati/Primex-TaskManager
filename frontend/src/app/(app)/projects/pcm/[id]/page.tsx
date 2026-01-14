@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -652,10 +652,16 @@ export default function PcmProjectPage() {
     kategoria: "",
   })
   const [savingMstChecklistRow, setSavingMstChecklistRow] = React.useState(false)
+  const [viewingChecklistField, setViewingChecklistField] = React.useState<{ key: string; field: string; value: string; label: string } | null>(null)
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
   const [planningComments, setPlanningComments] = React.useState<Record<string, string>>({})
   const [vsVlAcceptanceChecks, setVsVlAcceptanceChecks] = React.useState<Record<string, boolean>>({})
+  const [vsVlPlanningItems, setVsVlPlanningItems] = React.useState<ChecklistItem[]>([])
+  const [editingVsVlPlanningId, setEditingVsVlPlanningId] = React.useState<string | null>(null)
+  const [editingVsVlPlanningText, setEditingVsVlPlanningText] = React.useState("")
+  const [newVsVlPlanningText, setNewVsVlPlanningText] = React.useState("")
+  const [savingVsVlPlanning, setSavingVsVlPlanning] = React.useState(false)
   const [vsVlTaskTitle, setVsVlTaskTitle] = React.useState("")
   const [vsVlTaskDetail, setVsVlTaskDetail] = React.useState("")
   const [vsVlTaskDate, setVsVlTaskDate] = React.useState("")
@@ -686,6 +692,11 @@ export default function PcmProjectPage() {
   const [creatingInlineTask, setCreatingInlineTask] = React.useState(false)
   // Finalizimi checklist state
   const [finalizationChecks, setFinalizationChecks] = React.useState<Record<string, boolean>>({})
+  const [finalizationItems, setFinalizationItems] = React.useState<ChecklistItem[]>([])
+  const [editingFinalizationId, setEditingFinalizationId] = React.useState<string | null>(null)
+  const [editingFinalizationText, setEditingFinalizationText] = React.useState("")
+  const [newFinalizationText, setNewFinalizationText] = React.useState("")
+  const [savingFinalization, setSavingFinalization] = React.useState(false)
   const [controlEdits, setControlEdits] = React.useState<
     Record<
       string,
@@ -697,6 +708,11 @@ export default function PcmProjectPage() {
       }
     >
   >({})
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
+  const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
+  const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
+  const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
   const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
   const mstChecklistDragRef = React.useRef({
     active: false,
@@ -832,15 +848,16 @@ export default function PcmProjectPage() {
     setDescriptionChecks(descriptionChecked)
     setPlanningComments(planningCommentsData)
 
-    const finalizationItems = checklistItems.filter((item) => {
-      if (item.item_type !== "CHECKBOX") return false
-      return item.path === FINALIZATION_PATH && FINALIZATION_CHECKLIST.some((entry) => entry.question === item.title)
+    const finalizationItemsFromDb = checklistItems.filter((item) => {
+      return item.item_type === "CHECKBOX" && item.path === FINALIZATION_PATH
     })
-    if (finalizationItems.length) {
+    setFinalizationItems(finalizationItemsFromDb)
+    
+    if (finalizationItemsFromDb.length) {
       const finalizationData: Record<string, boolean> = {}
-      finalizationItems.forEach((item) => {
-        const entry = FINALIZATION_CHECKLIST.find((q) => q.question === item.title)
-        if (entry) finalizationData[entry.id] = item.is_checked || false
+      finalizationItemsFromDb.forEach((item) => {
+        // Use item ID as key for dynamic items
+        finalizationData[item.id] = item.is_checked || false
       })
       setFinalizationChecks(finalizationData)
     }
@@ -852,9 +869,9 @@ export default function PcmProjectPage() {
     if (!isVsVlForEffect || !project) return
 
     const vsVlAcceptanceItems = checklistItems.filter((item) => {
-      if (item.item_type !== "CHECKBOX") return false
-      return item.path === "VS_VL_PLANNING" && VS_VL_ACCEPTANCE_QUESTIONS.includes(item.title || "")
+      return item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING"
     })
+    setVsVlPlanningItems(vsVlAcceptanceItems)
     const vsVlChecked: Record<string, boolean> = {}
     vsVlAcceptanceItems.forEach((item) => {
       if (item.title) {
@@ -1798,6 +1815,146 @@ export default function PcmProjectPage() {
       }
     }
 
+    const toggleVsVlAcceptanceById = async (itemId: string, nextChecked: boolean) => {
+      const item = vsVlPlanningItems.find((i) => i.id === itemId)
+      if (!item) return
+
+      const previousValue = item.is_checked || false
+      setVsVlAcceptanceChecks((prev) => ({ ...prev, [item.title || ""]: nextChecked }))
+      setVsVlPlanningItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
+      setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
+      
+      try {
+        const res = await apiFetch(`/checklist-items/${itemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: nextChecked }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to save checklist")
+          setVsVlAcceptanceChecks((prev) => ({ ...prev, [item.title || ""]: previousValue }))
+          setVsVlPlanningItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+          setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+        } else {
+          const updated = (await res.json()) as ChecklistItem
+          setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+          setVsVlPlanningItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        }
+      } catch {
+        toast.error("Failed to save checklist")
+        setVsVlAcceptanceChecks((prev) => ({ ...prev, [item.title || ""]: previousValue }))
+        setVsVlPlanningItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+        setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+      }
+    }
+
+    const addVsVlPlanningItem = async () => {
+      if (!project || !newVsVlPlanningText.trim()) return
+      setSavingVsVlPlanning(true)
+      try {
+        const position = vsVlPlanningItems.length > 0
+          ? Math.max(...vsVlPlanningItems.map((item) => item.position ?? 0)) + 1
+          : 1
+        
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: "VS_VL_PLANNING",
+            title: newVsVlPlanningText.trim(),
+            keyword: "VS_VL_PLANNING",
+            description: newVsVlPlanningText.trim(),
+            category: "VS_VL_PLANNING",
+            is_checked: false,
+            position,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to add checklist item")
+          return
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => [...prev, created])
+        setVsVlPlanningItems((prev) => [...prev, created])
+        setVsVlAcceptanceChecks((prev) => ({ ...prev, [created.title || ""]: false }))
+        setNewVsVlPlanningText("")
+        toast.success("Checklist item added")
+      } catch {
+        toast.error("Failed to add checklist item")
+      } finally {
+        setSavingVsVlPlanning(false)
+      }
+    }
+
+    const startEditVsVlPlanningItem = (itemId: string) => {
+      const item = vsVlPlanningItems.find((i) => i.id === itemId)
+      if (!item) return
+      setEditingVsVlPlanningId(itemId)
+      setEditingVsVlPlanningText(item.title || "")
+    }
+
+    const cancelEditVsVlPlanningItem = () => {
+      setEditingVsVlPlanningId(null)
+      setEditingVsVlPlanningText("")
+    }
+
+    const saveVsVlPlanningItem = async () => {
+      if (!editingVsVlPlanningId || !editingVsVlPlanningText.trim()) return
+      setSavingVsVlPlanning(true)
+      try {
+        const res = await apiFetch(`/checklist-items/${editingVsVlPlanningId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: editingVsVlPlanningText.trim() }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to update checklist item")
+          return
+        }
+        const updated = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        setVsVlPlanningItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        const oldTitle = vsVlPlanningItems.find((i) => i.id === editingVsVlPlanningId)?.title || ""
+        if (oldTitle && oldTitle !== updated.title) {
+          setVsVlAcceptanceChecks((prev) => {
+            const next = { ...prev }
+            delete next[oldTitle]
+            if (updated.title) next[updated.title] = updated.is_checked || false
+            return next
+          })
+        }
+        cancelEditVsVlPlanningItem()
+        toast.success("Checklist item updated")
+      } catch {
+        toast.error("Failed to update checklist item")
+      } finally {
+        setSavingVsVlPlanning(false)
+      }
+    }
+
+    const deleteVsVlPlanningItem = async (itemId: string) => {
+      const item = vsVlPlanningItems.find((i) => i.id === itemId)
+      if (!item) return
+      
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete checklist item")
+        return
+      }
+      setChecklistItems((prev) => prev.filter((i) => i.id !== itemId))
+      setVsVlPlanningItems((prev) => prev.filter((i) => i.id !== itemId))
+      if (item.title) {
+        setVsVlAcceptanceChecks((prev) => {
+          const next = { ...prev }
+          delete next[item.title!]
+          return next
+        })
+      }
+      toast.success("Checklist item deleted")
+    }
+
     return (
       <div className="space-y-5 max-w-6xl mx-auto px-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1918,18 +2075,111 @@ export default function PcmProjectPage() {
           <Card>
             <div className="p-4 space-y-4">
               <div className="text-lg font-semibold">Planning</div>
+              
+              {/* Add new item */}
+              <div className="flex items-center gap-2 mb-4">
+                <Input
+                  placeholder="Add checklist item..."
+                  value={newVsVlPlanningText}
+                  onChange={(e) => setNewVsVlPlanningText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !savingVsVlPlanning) {
+                      void addVsVlPlanningItem()
+                    }
+                  }}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={() => void addVsVlPlanningItem()}
+                  disabled={!newVsVlPlanningText.trim() || savingVsVlPlanning}
+                  size="sm"
+                >
+                  {savingVsVlPlanning ? "Adding..." : "Add"}
+                </Button>
+              </div>
+
               <div className="grid gap-3">
-                {VS_VL_ACCEPTANCE_QUESTIONS.map((q, index) => (
-                  <div key={q} className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-slate-400">{index + 1}.</span>
-                    <Checkbox
-                      checked={Boolean(vsVlAcceptanceChecks[q])}
-                      onCheckedChange={() => void toggleVsVlAcceptance(q)}
-                      className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                    />
-                    <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
+                {vsVlPlanningItems
+                  .slice()
+                  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                  .map((item, index) => {
+                    const isEditing = editingVsVlPlanningId === item.id
+                    return (
+                      <div key={item.id} className="flex items-center gap-3 group">
+                        <span className="text-xs font-semibold text-slate-400">{index + 1}.</span>
+                        <Checkbox
+                          checked={Boolean(vsVlAcceptanceChecks[item.title || ""])}
+                          onCheckedChange={(checked) =>
+                            void toggleVsVlAcceptanceById(item.id, Boolean(checked))
+                          }
+                          className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                        />
+                        <div className="flex-1">
+                          {isEditing ? (
+                            <Input
+                              value={editingVsVlPlanningText}
+                              onChange={(e) => setEditingVsVlPlanningText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !savingVsVlPlanning) {
+                                  void saveVsVlPlanningItem()
+                                } else if (e.key === "Escape") {
+                                  cancelEditVsVlPlanningItem()
+                                }
+                              }}
+                              className="border-blue-500"
+                              autoFocus
+                            />
+                          ) : (
+                            <span className="text-sm font-semibold uppercase tracking-wide">{item.title}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {isEditing ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void saveVsVlPlanningItem()}
+                                disabled={savingVsVlPlanning}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={cancelEditVsVlPlanningItem}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startEditVsVlPlanningItem(item.id)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => void deleteVsVlPlanningItem(item.id)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                Delete
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                {vsVlPlanningItems.length === 0 && (
+                  <div className="text-sm text-muted-foreground text-center py-8">
+                    No checklist items yet. Add one above.
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </Card>
@@ -2804,73 +3054,194 @@ export default function PcmProjectPage() {
         setSavingMstChecklistRow(false)
       }
     }
-    const updateFinalizationChecklist = async (entry: { id: string; question: string }, nextChecked: boolean) => {
+    const toggleFinalizationChecklist = async (itemId: string, nextChecked: boolean) => {
       if (!project) return
-      const existing = checklistItems.find(
-        (item) =>
-          item.item_type === "CHECKBOX" &&
-          item.path === FINALIZATION_PATH &&
-          item.title === entry.question
-      )
+      const item = finalizationItems.find((i) => i.id === itemId)
+      if (!item) return
 
-      if (!existing) {
-        try {
-          const createRes = await apiFetch("/checklist-items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: project.id,
-              item_type: "CHECKBOX",
-              path: FINALIZATION_PATH,
-              title: entry.question,
-              keyword: FINALIZATION_PATH,
-              description: entry.question,
-              category: FINALIZATION_PATH,
-              is_checked: nextChecked,
-            }),
-          })
-          if (!createRes.ok) {
-            toast.error("Failed to save checklist")
-            return
-          }
-          const created = (await createRes.json()) as ChecklistItem
-          setChecklistItems((prev) => [...prev, created])
-          setFinalizationChecks((prev) => ({ ...prev, [entry.id]: created.is_checked || false }))
-        } catch {
-          toast.error("Failed to save checklist")
-        }
-        return
-      }
-
-      const previousValue = existing.is_checked || false
-      setFinalizationChecks((prev) => ({ ...prev, [entry.id]: nextChecked }))
-      setChecklistItems((prev) =>
-        prev.map((i) => (i.id === existing.id ? { ...i, is_checked: nextChecked } : i))
-      )
+      const previousValue = item.is_checked || false
+      setFinalizationChecks((prev) => ({ ...prev, [itemId]: nextChecked }))
+      setFinalizationItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
+      setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
+      
       try {
-        const res = await apiFetch(`/checklist-items/${existing.id}`, {
+        const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_checked: nextChecked }),
         })
         if (!res.ok) {
           toast.error("Failed to save checklist")
-          setFinalizationChecks((prev) => ({ ...prev, [entry.id]: previousValue }))
-          setChecklistItems((prev) =>
-            prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
-          )
+          setFinalizationChecks((prev) => ({ ...prev, [itemId]: previousValue }))
+          setFinalizationItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+          setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
         } else {
           const updated = (await res.json()) as ChecklistItem
           setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+          setFinalizationItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
         }
       } catch {
         toast.error("Failed to save checklist")
-        setFinalizationChecks((prev) => ({ ...prev, [entry.id]: previousValue }))
-        setChecklistItems((prev) =>
-          prev.map((i) => (i.id === existing.id ? { ...i, is_checked: previousValue } : i))
-        )
+        setFinalizationChecks((prev) => ({ ...prev, [itemId]: previousValue }))
+        setFinalizationItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
+        setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: previousValue } : i)))
       }
     }
+
+    const addFinalizationItem = async () => {
+      if (!project || !newFinalizationText.trim()) return
+      setSavingFinalization(true)
+      try {
+        const position = finalizationItems.length > 0
+          ? Math.max(...finalizationItems.map((item) => item.position ?? 0)) + 1
+          : 1
+        
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: FINALIZATION_PATH,
+            title: newFinalizationText.trim(),
+            keyword: FINALIZATION_PATH,
+            description: newFinalizationText.trim(),
+            category: FINALIZATION_PATH,
+            is_checked: false,
+            position,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to add checklist item")
+          return
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => [...prev, created])
+        setFinalizationItems((prev) => [...prev, created])
+        setFinalizationChecks((prev) => ({ ...prev, [created.id]: false }))
+        setNewFinalizationText("")
+        toast.success("Checklist item added")
+      } catch {
+        toast.error("Failed to add checklist item")
+      } finally {
+        setSavingFinalization(false)
+      }
+    }
+
+    const startEditFinalizationItem = (itemId: string) => {
+      const item = finalizationItems.find((i) => i.id === itemId)
+      if (!item) return
+      setEditingFinalizationId(itemId)
+      setEditingFinalizationText(item.title || "")
+    }
+
+    const cancelEditFinalizationItem = () => {
+      setEditingFinalizationId(null)
+      setEditingFinalizationText("")
+    }
+
+    const saveFinalizationItem = async () => {
+      if (!editingFinalizationId || !editingFinalizationText.trim()) return
+      setSavingFinalization(true)
+      try {
+        const res = await apiFetch(`/checklist-items/${editingFinalizationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: editingFinalizationText.trim() }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to update checklist item")
+          return
+        }
+        const updated = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        setFinalizationItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+        cancelEditFinalizationItem()
+        toast.success("Checklist item updated")
+      } catch {
+        toast.error("Failed to update checklist item")
+      } finally {
+        setSavingFinalization(false)
+      }
+    }
+
+    const deleteFinalizationItem = async (itemId: string) => {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete checklist item")
+        return
+      }
+      setChecklistItems((prev) => prev.filter((i) => i.id !== itemId))
+      setFinalizationItems((prev) => prev.filter((i) => i.id !== itemId))
+      setFinalizationChecks((prev) => {
+        const next = { ...prev }
+        delete next[itemId]
+        return next
+      })
+      toast.success("Checklist item deleted")
+    }
+
+    const startEditTask = (task: Task) => {
+      // Find the latest task from state to ensure we have the most recent data
+      const latestTask = tasks.find((t) => t.id === task.id) || task
+      setEditingTaskId(latestTask.id)
+      setEditingTaskTitle(latestTask.title || "")
+      setEditingTaskAssignee(latestTask.assigned_to || "__unassigned__")
+      const notes = latestTask.internal_notes || ""
+      const totalMatch = notes.match(/total_products=(\d+)/)
+      setEditingTaskTotal(totalMatch ? totalMatch[1] : controlEdits[latestTask.id]?.total || "0")
+    }
+
+    const cancelEditTask = () => {
+      setEditingTaskId(null)
+      setEditingTaskTitle("")
+      setEditingTaskAssignee("__unassigned__")
+      setEditingTaskTotal("")
+    }
+
+    const saveTaskEdit = async () => {
+      if (!editingTaskId || !editingTaskTitle.trim() || !project) return
+      setSavingTaskEdit(true)
+      try {
+        const task = tasks.find((t) => t.id === editingTaskId)
+        if (!task) return
+
+        const currentNotes = task.internal_notes || ""
+        const completedMatch = currentNotes.match(/completed_products=(\d+)/)
+        const completed = completedMatch ? completedMatch[1] : controlEdits[task.id]?.completed || "0"
+        
+        const res = await apiFetch(`/tasks/${editingTaskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: editingTaskTitle.trim(),
+            assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+            internal_notes: `total_products=${editingTaskTotal || 0}; completed_products=${completed}`,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to update task")
+          return
+        }
+        const updated = (await res.json()) as Task
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        setControlEdits((prev) => ({
+          ...prev,
+          [updated.id]: {
+            ...prev[updated.id],
+            total: editingTaskTotal || "0",
+            assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+          },
+        }))
+        cancelEditTask()
+        toast.success("Task updated")
+      } catch {
+        toast.error("Failed to update task")
+      } finally {
+        setSavingTaskEdit(false)
+      }
+    }
+
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
@@ -3349,12 +3720,55 @@ export default function PcmProjectPage() {
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
+                      const isEditing = editingTaskId === task.id
                       return (
-                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-4 font-medium text-slate-700">{index + 1}. {task.title}</div>
-                          <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
-                          <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
-                          <div className="col-span-2">
+                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div className="col-span-4 pr-2">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editingTaskTitle}
+                                onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                autoFocus
+                              />
+                            ) : (
+                              <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
+                            )}
+                          </div>
+                          <div className="col-span-1 px-2 min-w-[140px]">
+                            {isEditing ? (
+                              <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
+                                <SelectTrigger className="h-8 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">-</SelectItem>
+                                  {assignableUsers.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name || u.username || u.email}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-slate-500">{memberLabel(task.assigned_to)}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2 px-2">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={editingTaskTotal}
+                                onChange={(e) => setEditingTaskTotal(e.target.value)}
+                                placeholder="0"
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                              />
+                            ) : (
+                              <span className="text-slate-500">{controlEdits[task.id]?.total || "-"}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2 px-2">
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 type="button"
@@ -3413,7 +3827,7 @@ export default function PcmProjectPage() {
                               </button>
                             </div>
                           </div>
-                          <div className="col-span-2">
+                          <div className="col-span-2 px-2">
                             <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}
                               className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
@@ -3421,27 +3835,59 @@ export default function PcmProjectPage() {
                               {statusLabel(controlEdits[task.id]?.status || task.status)}
                             </Badge>
                           </div>
-                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                              onClick={async () => {
-                                const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                                if (!res?.ok) {
-                                  if (res?.status == 405) {
-                                    toast.error("Delete endpoint not active. Restart backend.")
-                                  } else {
-                                    toast.error("Failed to delete task")
-                                  }
-                                  return
-                                }
-                                setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                                toast.success("Task deleted")
-                              }}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
-                            </Button>
+                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1">
+                            {isEditing ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-slate-400 hover:text-blue-600"
+                                  onClick={() => void saveTaskEdit()}
+                                  disabled={savingTaskEdit}
+                                >
+                                  {savingTaskEdit ? "Saving..." : "Save"}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-slate-400 hover:text-slate-600"
+                                  onClick={cancelEditTask}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                  onClick={() => startEditTask(task)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                  onClick={async () => {
+                                    const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                    if (!res?.ok) {
+                                      if (res?.status == 405) {
+                                        toast.error("Delete endpoint not active. Restart backend.")
+                                      } else {
+                                        toast.error("Failed to delete task")
+                                      }
+                                      return
+                                    }
+                                    setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                    toast.success("Task deleted")
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       )
@@ -3591,7 +4037,7 @@ export default function PcmProjectPage() {
                           return (
                             <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
                               <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
-                              <div className="col-span-2 truncate" title={row.path}>
+                              <div className="col-span-2" title={row.path}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.path}
@@ -3599,10 +4045,39 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  row.path
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.path) {
+                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.path) {
+                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.path}
+                                    </span>
+                                    {row.path && row.path.length > 20 && (
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 shrink-0"
+                                        onClick={() => setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })}
+                                        title="View full text"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                              <div className="col-span-2 font-semibold truncate" title={row.detyrat}>
+                              <div className="col-span-2 font-semibold" title={row.detyrat}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.detyrat}
@@ -3610,10 +4085,23 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  row.detyrat
+                                  <div className="flex items-center gap-1">
+                                    <span className="flex-1 whitespace-normal break-words">{row.detyrat}</span>
+                                    {row.detyrat && row.detyrat.length > 20 && (
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 shrink-0"
+                                        onClick={() => setViewingChecklistField({ key, field: "detyrat", value: row.detyrat, label: "Task" })}
+                                        title="View full text"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                              <div className="col-span-2 truncate" title={row.keywords}>
+                              <div className="col-span-2" title={row.keywords}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.keywords}
@@ -3621,10 +4109,39 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  row.keywords
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.keywords) {
+                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.keywords) {
+                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.keywords}
+                                    </span>
+                                    {row.keywords && row.keywords.length > 20 && (
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 shrink-0"
+                                        onClick={() => setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })}
+                                        title="View full text"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                              <div className="col-span-2 truncate" title={row.pershkrimi}>
+                              <div className="col-span-2" title={row.pershkrimi}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.pershkrimi}
@@ -3632,10 +4149,39 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  row.pershkrimi
+                                  <div
+                                    className="flex items-start gap-1"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (row.pershkrimi) {
+                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if ((event.key === "Enter" || event.key === " ") && row.pershkrimi) {
+                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                      }
+                                    }}
+                                  >
+                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.pershkrimi}
+                                    </span>
+                                    {row.pershkrimi && row.pershkrimi.length > 20 && (
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 shrink-0"
+                                        onClick={() => setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })}
+                                        title="View full text"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                              <div className="col-span-1 truncate" title={row.kategoria}>
+                              <div className="col-span-1" title={row.kategoria}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.kategoria}
@@ -3643,7 +4189,9 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  row.kategoria
+                                  <div className="flex items-start gap-1">
+                                    <span className="flex-1 whitespace-normal break-words">{row.kategoria}</span>
+                                  </div>
                                 )}
                               </div>
                               <div className="col-span-1 flex justify-center">
@@ -3722,6 +4270,33 @@ export default function PcmProjectPage() {
                           </div>
                         ) : null}
                       </div>
+
+                      {/* View Full Text Modal */}
+                      <Dialog open={viewingChecklistField !== null} onOpenChange={(open) => !open && setViewingChecklistField(null)}>
+                        <DialogContent className="sm:max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle>{viewingChecklistField?.label || "Full Text"}</DialogTitle>
+                          </DialogHeader>
+                          <div className="mt-4">
+                            <div className="rounded-lg border bg-slate-50 p-4">
+                              <p className="whitespace-pre-wrap text-sm">{viewingChecklistField?.value || ""}</p>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  const value = viewingChecklistField?.value || ""
+                                  if (!value) return
+                                  void navigator.clipboard.writeText(value)
+                                  toast.success("Copied to clipboard")
+                                }}
+                              >
+                                Copy
+                              </Button>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                     </div>
                   </div>
                 </div>
@@ -3943,12 +4518,55 @@ export default function PcmProjectPage() {
                       const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
                       const assignedName = assignedUser?.full_name?.toLowerCase() || ""
                       const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
+                      const isEditing = editingTaskId === task.id
                       return (
-                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-3 font-medium text-slate-700">{index + 1}. {task.title}</div>
-                          <div className="col-span-1 text-slate-500">{memberLabel(task.assigned_to)}</div>
-                          <div className="col-span-2 text-slate-500">{controlEdits[task.id]?.total || "-"}</div>
-                          <div className="col-span-2">
+                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div className="col-span-3 pr-2">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editingTaskTitle}
+                                onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm font-medium"
+                                autoFocus
+                              />
+                            ) : (
+                              <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
+                            )}
+                          </div>
+                          <div className="col-span-1 px-2 min-w-[140px]">
+                            {isEditing ? (
+                              <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
+                                <SelectTrigger className="h-8 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">-</SelectItem>
+                                  {assignableUsers.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name || u.username || u.email}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-slate-500">{memberLabel(task.assigned_to)}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2 px-2">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={editingTaskTotal}
+                                onChange={(e) => setEditingTaskTotal(e.target.value)}
+                                placeholder="0"
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                              />
+                            ) : (
+                              <span className="text-slate-500">{controlEdits[task.id]?.total || "-"}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2 px-2">
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 type="button"
@@ -4008,7 +4626,7 @@ export default function PcmProjectPage() {
                             </div>
                           </div>
                           <div className="col-span-1 text-slate-500">{koName}</div>
-                          <div className="col-span-2">
+                          <div className="col-span-2 px-2">
                             <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}
                               className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
@@ -4016,27 +4634,59 @@ export default function PcmProjectPage() {
                               {statusLabel(controlEdits[task.id]?.status || task.status)}
                             </Badge>
                           </div>
-                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                              onClick={async () => {
-                                const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                                if (!res?.ok) {
-                                  if (res?.status == 405) {
-                                    toast.error("Delete endpoint not active. Restart backend.")
-                                  } else {
-                                    toast.error("Failed to delete task")
-                                  }
-                                  return
-                                }
-                                setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                                toast.success("Task deleted")
-                              }}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
-                            </Button>
+                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1 px-2">
+                            {isEditing ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-slate-400 hover:text-blue-600"
+                                  onClick={() => void saveTaskEdit()}
+                                  disabled={savingTaskEdit}
+                                >
+                                  {savingTaskEdit ? "Saving..." : "Save"}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-slate-400 hover:text-slate-600"
+                                  onClick={cancelEditTask}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                  onClick={() => startEditTask(task)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                  onClick={async () => {
+                                    const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                    if (!res?.ok) {
+                                      if (res?.status == 405) {
+                                        toast.error("Delete endpoint not active. Restart backend.")
+                                      } else {
+                                        toast.error("Failed to delete task")
+                                      }
+                                      return
+                                    }
+                                    setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                    toast.success("Task deleted")
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       )
@@ -4082,29 +4732,120 @@ export default function PcmProjectPage() {
               <Card className="border-0 shadow-sm">
                 <div className="p-6 space-y-6">
                   <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
-                  <div className="space-y-4">
-                  {FINALIZATION_CHECKLIST.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
-                      >
-                        <Checkbox
-                          id={item.id}
-                          checked={Boolean(finalizationChecks[item.id])}
-                          onCheckedChange={(checked) =>
-                            updateFinalizationChecklist(item, Boolean(checked))
-                          }
-                        />
-                        <label
-                          htmlFor={item.id}
-                          className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
-                        >
-                          {item.question}
-                        </label>
-                      </div>
-                    ))}
+                  
+                  {/* Add new item */}
+                  <div className="flex items-center gap-2 mb-4">
+                    <Input
+                      placeholder="Add checklist item..."
+                      value={newFinalizationText}
+                      onChange={(e) => setNewFinalizationText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !savingFinalization) {
+                          void addFinalizationItem()
+                        }
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={() => void addFinalizationItem()}
+                      disabled={!newFinalizationText.trim() || savingFinalization}
+                      size="sm"
+                    >
+                      {savingFinalization ? "Adding..." : "Add"}
+                    </Button>
                   </div>
-                  {Object.values(finalizationChecks).filter(Boolean).length === 2 && (
+
+                  <div className="space-y-4">
+                    {finalizationItems
+                      .slice()
+                      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                      .map((item) => {
+                        const isEditing = editingFinalizationId === item.id
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
+                          >
+                            <Checkbox
+                              id={item.id}
+                              checked={Boolean(finalizationChecks[item.id])}
+                              onCheckedChange={(checked) =>
+                                void toggleFinalizationChecklist(item.id, Boolean(checked))
+                              }
+                            />
+                            <div className="flex-1">
+                              {isEditing ? (
+                                <Input
+                                  value={editingFinalizationText}
+                                  onChange={(e) => setEditingFinalizationText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !savingFinalization) {
+                                      void saveFinalizationItem()
+                                    } else if (e.key === "Escape") {
+                                      cancelEditFinalizationItem()
+                                    }
+                                  }}
+                                  className="border-slate-200"
+                                  autoFocus
+                                />
+                              ) : (
+                                <label
+                                  htmlFor={item.id}
+                                  className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
+                                >
+                                  {item.title}
+                                </label>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => void saveFinalizationItem()}
+                                    disabled={savingFinalization}
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={cancelEditFinalizationItem}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => startEditFinalizationItem(item.id)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => void deleteFinalizationItem(item.id)}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    {finalizationItems.length === 0 && (
+                      <div className="text-sm text-muted-foreground text-center py-8">
+                        No checklist items yet. Add one above.
+                      </div>
+                    )}
+                  </div>
+                  {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
                     <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
                       <div className="flex items-center gap-2 text-emerald-700 font-medium">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
