@@ -191,6 +191,11 @@ export default function DesignProjectPage() {
   const [punimiNewNumber, setPunimiNewNumber] = React.useState("")
   const [punimiSaving, setPunimiSaving] = React.useState(false)
   
+  // Comment editing state (for all checklist items)
+  const [commentEditingId, setCommentEditingId] = React.useState<string | null>(null)
+  const [commentEditingText, setCommentEditingText] = React.useState("")
+  const [commentSaving, setCommentSaving] = React.useState(false)
+  
   const isAdmin = user?.role === "ADMIN"
 
   // Load project data
@@ -388,6 +393,38 @@ export default function DesignProjectPage() {
     if (res.ok) {
       const items = (await res.json()) as ChecklistItem[]
       setChecklistItems(items)
+    }
+  }
+
+  // Comment management functions
+  const startEditComment = (item: ChecklistItem) => {
+    setCommentEditingId(item.id)
+    setCommentEditingText(item.comment || "")
+  }
+
+  const cancelEditComment = () => {
+    setCommentEditingId(null)
+    setCommentEditingText("")
+  }
+
+  const saveComment = async (itemId: string) => {
+    setCommentSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: commentEditingText.trim() || null }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to save comment")
+        return
+      }
+      await reloadChecklistItems()
+      setCommentEditingId(null)
+      setCommentEditingText("")
+      toast.success("Comment saved")
+    } finally {
+      setCommentSaving(false)
     }
   }
 
@@ -1185,14 +1222,57 @@ export default function DesignProjectPage() {
             ) : (
               <div className="space-y-2">
                 {generalChecklistItems.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
-                    <Checkbox
-                      checked={item.is_checked || false}
-                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                    />
-                    <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                      {item.title || item.content}
-                    </span>
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      />
+                      <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                        {item.title || item.content}
+                      </span>
+                    </div>
+                    {/* Comment section */}
+                    <div className="ml-7 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1241,57 +1321,100 @@ export default function DesignProjectPage() {
             ) : (
               <div className="space-y-3">
                 {acceptanceItems.map((item, idx) => (
-                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                    <Checkbox
-                      checked={item.is_checked || false}
-                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      {isAdmin && acceptanceEditingId === item.id ? (
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        {isAdmin && acceptanceEditingId === item.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={acceptanceEditingText}
+                              onChange={(e) => setAcceptanceEditingText(e.target.value)}
+                            />
+                            <Button
+                              variant="outline"
+                              disabled={!acceptanceEditingText.trim() || acceptanceSaving}
+                              onClick={() => void saveEditAcceptanceItem()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setAcceptanceEditingId(null)
+                                setAcceptanceEditingText("")
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                            {item.title}
+                          </span>
+                        )}
+                      </div>
+                      {isAdmin && acceptanceEditingId !== item.id ? (
                         <div className="flex items-center gap-2">
-                          <Input
-                            value={acceptanceEditingText}
-                            onChange={(e) => setAcceptanceEditingText(e.target.value)}
-                          />
-                          <Button
-                            variant="outline"
-                            disabled={!acceptanceEditingText.trim() || acceptanceSaving}
-                            onClick={() => void saveEditAcceptanceItem()}
-                          >
-                            Save
+                          <Button variant="ghost" onClick={() => startEditAcceptanceItem(item)}>
+                            Edit
                           </Button>
                           <Button
                             variant="ghost"
-                            onClick={() => {
-                              setAcceptanceEditingId(null)
-                              setAcceptanceEditingText("")
-                            }}
+                            disabled={acceptanceSaving}
+                            onClick={() => void deleteAcceptanceItem(item.id)}
                           >
-                            Cancel
+                            Delete
                           </Button>
                         </div>
+                      ) : null}
+                    </div>
+                    {/* Comment section */}
+                    <div className="ml-9 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                          {item.title}
-                        </span>
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
                       )}
                     </div>
-                    {isAdmin && acceptanceEditingId !== item.id ? (
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" onClick={() => startEditAcceptanceItem(item)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={acceptanceSaving}
-                          onClick={() => void deleteAcceptanceItem(item.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1340,57 +1463,100 @@ export default function DesignProjectPage() {
                 <p className="text-muted-foreground">Duke ngarkuar checklistën e takimit...</p>
               ) : (
                 gaMeetingItems.map((item, idx) => (
-                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                    <Checkbox
-                      checked={item.is_checked || false}
-                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      {isAdmin && gaMeetingEditingId === item.id ? (
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        {isAdmin && gaMeetingEditingId === item.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={gaMeetingEditingText}
+                              onChange={(e) => setGaMeetingEditingText(e.target.value)}
+                            />
+                            <Button
+                              variant="outline"
+                              disabled={!gaMeetingEditingText.trim() || gaMeetingSaving}
+                              onClick={() => void saveEditGaMeetingItem()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setGaMeetingEditingId(null)
+                                setGaMeetingEditingText("")
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                            {item.title}
+                          </span>
+                        )}
+                      </div>
+                      {isAdmin && gaMeetingEditingId !== item.id ? (
                         <div className="flex items-center gap-2">
-                          <Input
-                            value={gaMeetingEditingText}
-                            onChange={(e) => setGaMeetingEditingText(e.target.value)}
-                          />
-                          <Button
-                            variant="outline"
-                            disabled={!gaMeetingEditingText.trim() || gaMeetingSaving}
-                            onClick={() => void saveEditGaMeetingItem()}
-                          >
-                            Save
+                          <Button variant="ghost" onClick={() => startEditGaMeetingItem(item)}>
+                            Edit
                           </Button>
                           <Button
                             variant="ghost"
-                            onClick={() => {
-                              setGaMeetingEditingId(null)
-                              setGaMeetingEditingText("")
-                            }}
+                            disabled={gaMeetingSaving}
+                            onClick={() => void deleteGaMeetingItem(item.id)}
                           >
-                            Cancel
+                            Delete
                           </Button>
                         </div>
+                      ) : null}
+                    </div>
+                    {/* Comment section */}
+                    <div className="ml-9 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                          {item.title}
-                        </span>
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
                       )}
                     </div>
-                    {isAdmin && gaMeetingEditingId !== item.id ? (
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" onClick={() => startEditGaMeetingItem(item)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={gaMeetingSaving}
-                          onClick={() => void deleteGaMeetingItem(item.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    ) : null}
                   </div>
                 ))
               )}
@@ -1436,57 +1602,100 @@ export default function DesignProjectPage() {
             ) : (
               <div className="space-y-3">
                 {propozimItems.map((item, idx) => (
-                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                    <Checkbox
-                      checked={item.is_checked || false}
-                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      {isAdmin && propozimEditingId === item.id ? (
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        {isAdmin && propozimEditingId === item.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={propozimEditingText}
+                              onChange={(e) => setPropozimEditingText(e.target.value)}
+                            />
+                            <Button
+                              variant="outline"
+                              disabled={!propozimEditingText.trim() || propozimSaving}
+                              onClick={() => void saveEditPropozimItem()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setPropozimEditingId(null)
+                                setPropozimEditingText("")
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                            {item.title}
+                          </span>
+                        )}
+                      </div>
+                      {isAdmin && propozimEditingId !== item.id ? (
                         <div className="flex items-center gap-2">
-                          <Input
-                            value={propozimEditingText}
-                            onChange={(e) => setPropozimEditingText(e.target.value)}
-                          />
-                          <Button
-                            variant="outline"
-                            disabled={!propozimEditingText.trim() || propozimSaving}
-                            onClick={() => void saveEditPropozimItem()}
-                          >
-                            Save
+                          <Button variant="ghost" onClick={() => startEditPropozimItem(item)}>
+                            Edit
                           </Button>
                           <Button
                             variant="ghost"
-                            onClick={() => {
-                              setPropozimEditingId(null)
-                              setPropozimEditingText("")
-                            }}
+                            disabled={propozimSaving}
+                            onClick={() => void deletePropozimItem(item.id)}
                           >
-                            Cancel
+                            Delete
                           </Button>
                         </div>
+                      ) : null}
+                    </div>
+                    {/* Comment section */}
+                    <div className="ml-9 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                          {item.title}
-                        </span>
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
                       )}
                     </div>
-                    {isAdmin && propozimEditingId !== item.id ? (
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" onClick={() => startEditPropozimItem(item)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={propozimSaving}
-                          onClick={() => void deletePropozimItem(item.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1532,57 +1741,100 @@ export default function DesignProjectPage() {
             ) : (
               <div className="space-y-3">
                 {punimiItems.map((item, idx) => (
-                  <div key={item.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                    <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                    <Checkbox
-                      checked={item.is_checked || false}
-                      onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      {isAdmin && punimiEditingId === item.id ? (
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        {isAdmin && punimiEditingId === item.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={punimiEditingText}
+                              onChange={(e) => setPunimiEditingText(e.target.value)}
+                            />
+                            <Button
+                              variant="outline"
+                              disabled={!punimiEditingText.trim() || punimiSaving}
+                              onClick={() => void saveEditPunimiItem()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setPunimiEditingId(null)
+                                setPunimiEditingText("")
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                            {item.title}
+                          </span>
+                        )}
+                      </div>
+                      {isAdmin && punimiEditingId !== item.id ? (
                         <div className="flex items-center gap-2">
-                          <Input
-                            value={punimiEditingText}
-                            onChange={(e) => setPunimiEditingText(e.target.value)}
-                          />
-                          <Button
-                            variant="outline"
-                            disabled={!punimiEditingText.trim() || punimiSaving}
-                            onClick={() => void saveEditPunimiItem()}
-                          >
-                            Save
+                          <Button variant="ghost" onClick={() => startEditPunimiItem(item)}>
+                            Edit
                           </Button>
                           <Button
                             variant="ghost"
-                            onClick={() => {
-                              setPunimiEditingId(null)
-                              setPunimiEditingText("")
-                            }}
+                            disabled={punimiSaving}
+                            onClick={() => void deletePunimiItem(item.id)}
                           >
-                            Cancel
+                            Delete
                           </Button>
                         </div>
+                      ) : null}
+                    </div>
+                    {/* Comment section */}
+                    <div className="ml-9 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                          {item.title}
-                        </span>
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
                       )}
                     </div>
-                    {isAdmin && punimiEditingId !== item.id ? (
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" onClick={() => startEditPunimiItem(item)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={punimiSaving}
-                          onClick={() => void deletePunimiItem(item.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </div>
