@@ -65,6 +65,7 @@ const MST_PLANNING_QUESTIONS = [
 ]
 const MST_PROGRAM_QUESTION_LEGACY = "A eshte hapur projekti ne chat GPT?"
 const FINALIZATION_PATH = "FINALIZATION"
+const MST_EXCLUDED_PATHS = new Set(["PLANNING", FINALIZATION_PATH, "MEETINGS", "VS_VL_PLANNING"])
 const FINALIZATION_CHECKLIST = [
   { id: "kontrollat", question: "A jane kryer kontrollat?" },
   { id: "files", question: "A eshte ruajtur projekti tek files?" },
@@ -111,13 +112,14 @@ async function initializeMstChecklistItems(
 
   // Combine all items to create
   const itemsToCreate = [
-    ...finalItemsToCreate.map((row) => ({
+    ...finalItemsToCreate.map((row, index) => ({
       type: "final" as const,
       path: row.path,
       title: row.detyrat,
       keyword: row.keywords,
       description: row.pershkrimi,
       category: row.kategoria,
+      position: index + 1,
     })),
     ...finalizationItemsToCreate.map((entry) => ({
       type: "finalization" as const,
@@ -152,6 +154,7 @@ async function initializeMstChecklistItems(
           description: item.description,
           category: item.category,
           is_checked: false,
+          position: item.position,
         }),
       })
       if (!res.ok) {
@@ -633,6 +636,22 @@ export default function PcmProjectPage() {
   const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "workflow" | "ga">("description")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
+  const [editingMstChecklistKey, setEditingMstChecklistKey] = React.useState<string | null>(null)
+  const [editingMstChecklistRow, setEditingMstChecklistRow] = React.useState({
+    path: "",
+    detyrat: "",
+    keywords: "",
+    pershkrimi: "",
+    kategoria: "",
+  })
+  const [newMstChecklistRow, setNewMstChecklistRow] = React.useState({
+    path: "",
+    detyrat: "",
+    keywords: "",
+    pershkrimi: "",
+    kategoria: "",
+  })
+  const [savingMstChecklistRow, setSavingMstChecklistRow] = React.useState(false)
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
   const [planningComments, setPlanningComments] = React.useState<Record<string, string>>({})
@@ -678,6 +697,12 @@ export default function PcmProjectPage() {
       }
     >
   >({})
+  const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const mstChecklistDragRef = React.useRef({
+    active: false,
+    startX: 0,
+    startScrollLeft: 0,
+  })
 
   React.useEffect(() => {
     const load = async () => {
@@ -704,34 +729,18 @@ export default function PcmProjectPage() {
         setChecklistItems(items)
 
         try {
-          // Initialize MST checklist items if this is an MST project
+          // Initialize MST checklist items only if none exist yet
           if (isMstProject(p)) {
-            await initializeMstChecklistItems(p.id, items, apiFetch)
-            // Reload checklist items after initialization to get all created items
-            const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
-            if (reloadRes.ok) {
-              const reloadedItems = (await reloadRes.json()) as ChecklistItem[]
-              setChecklistItems(reloadedItems)
-
-              // Verify all items were created - if not, try again
-              const mstItems = reloadedItems.filter((item) => {
-                if (item.item_type !== "CHECKBOX") return false
-                return MST_FINAL_CHECKLIST.some(
-                  (row) => item.path === row.path && item.title === row.detyrat
-                )
-              })
-
-              if (mstItems.length < MST_FINAL_CHECKLIST.length) {
-                console.warn(
-                  `Only ${mstItems.length} out of ${MST_FINAL_CHECKLIST.length} MST checklist items found. Retrying...`
-                )
-                // Try to create missing items again
-                await initializeMstChecklistItems(p.id, reloadedItems, apiFetch)
-                // Reload one more time
-                const finalReloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
-                if (finalReloadRes.ok) {
-                  setChecklistItems((await finalReloadRes.json()) as ChecklistItem[])
-                }
+            const hasMstItems = items.some((item) => {
+              if (item.item_type !== "CHECKBOX") return false
+              if (!item.path || !item.title) return false
+              return !MST_EXCLUDED_PATHS.has(item.path)
+            })
+            if (!hasMstItems) {
+              await initializeMstChecklistItems(p.id, items, apiFetch)
+              const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+              if (reloadRes.ok) {
+                setChecklistItems((await reloadRes.json()) as ChecklistItem[])
               }
             }
           }
@@ -775,9 +784,8 @@ export default function PcmProjectPage() {
 
     const mstChecklistItems = checklistItems.filter((item) => {
       if (item.item_type !== "CHECKBOX") return false
-      return MST_FINAL_CHECKLIST.some(
-        (row) => item.path === row.path && item.title === row.detyrat
-      )
+      if (!item.path || !item.title) return false
+      return !MST_EXCLUDED_PATHS.has(item.path)
     })
 
     const checked: Record<string, boolean> = {}
@@ -2511,189 +2519,93 @@ export default function PcmProjectPage() {
         }
       }
     }
-    // Get MST checklist items from database (filtered by path matching template)
+    const templateOrderMap = new Map(
+      MST_FINAL_CHECKLIST.map((row, index) => [`${row.path}|${row.detyrat}`, index])
+    )
+
+    // Get MST checklist items from database (exclude planning/meeting/finalization)
     const mstChecklistItems = checklistItems.filter((item) => {
       if (item.item_type !== "CHECKBOX") return false
-      return MST_FINAL_CHECKLIST.some(
-        (row) => item.path === row.path && item.title === row.detyrat
-      )
+      if (!item.path || !item.title) return false
+      return !MST_EXCLUDED_PATHS.has(item.path)
     })
 
-    // Create a map for quick lookup
-    const mstItemMap = new Map<string, ChecklistItem>()
-    mstChecklistItems.forEach((item) => {
-      if (item.path && item.title) {
+    const mstChecklistRows = mstChecklistItems
+      .map((item) => {
         const key = `${item.path}|${item.title}`
-        mstItemMap.set(key, item)
-      }
-    })
+        const templateRow = templateOrderMap.has(key)
+          ? MST_FINAL_CHECKLIST[templateOrderMap.get(key) as number]
+          : null
+        const order = templateOrderMap.has(key)
+          ? (templateOrderMap.get(key) as number)
+          : templateOrderMap.size + (item.position ?? 0)
+        return {
+          key,
+          order,
+          item,
+          path: item.path || "",
+          detyrat: item.title || "",
+          keywords: item.keyword || "",
+          pershkrimi: item.description || "",
+          kategoria: item.category || "",
+          incl: templateRow?.incl || "",
+        }
+      })
+      .sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order
+        return a.detyrat.localeCompare(b.detyrat)
+      })
 
     // Initialize checked state from database (moved outside to avoid hook issues)
 
-    const toggleFinalChecklist = async (path: string, title: string) => {
-      const key = `${path}|${title}`
-      let item = mstItemMap.get(key)
-
-      // If item doesn't exist in database, create it first
-      if (!item) {
-        // Find the template row
-        const templateRow = MST_FINAL_CHECKLIST.find(
-          (row) => row.path === path && row.detyrat === title
-        )
-        if (!templateRow || !project) return
-
-        try {
-          // Create the item
-          const createRes = await apiFetch("/checklist-items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: project.id,
-              item_type: "CHECKBOX",
-              path: templateRow.path,
-              title: templateRow.detyrat,
-              keyword: templateRow.keywords,
-              description: templateRow.pershkrimi,
-              category: templateRow.kategoria,
-              is_checked: true, // Set to checked since user is checking it
-            }),
-          })
-
-          if (!createRes.ok) {
-            toast.error("Failed to create checklist item")
-            return
-          }
-
-          const created = (await createRes.json()) as ChecklistItem
-          item = created
-
-          // Add to local state
-          setChecklistItems((prev) => [...prev, created])
-          mstItemMap.set(key, created)
-        } catch (error) {
-          toast.error("Failed to create checklist item")
-          return
-        }
-      }
-
-      if (!item) return
-
+    const toggleFinalChecklist = async (item: ChecklistItem) => {
+      if (!item.id || !item.path || !item.title) return
+      const key = `${item.path}|${item.title}`
       const newChecked = !mstChecklistChecked[key]
-      // Optimistically update UI immediately
       setMstChecklistChecked((prev) => ({ ...prev, [key]: newChecked }))
       setChecklistItems((prev) =>
-        prev.map((i) =>
-          i.id === item.id
-            ? { ...i, is_checked: newChecked }
-            : i
-        )
+        prev.map((i) => (i.id === item.id ? { ...i, is_checked: newChecked } : i))
       )
-      const updatedItem = { ...item, is_checked: newChecked }
-      mstItemMap.set(key, updatedItem)
-
-      // Update in background - don't block UI
       try {
         const res = await apiFetch(`/checklist-items/${item.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_checked: newChecked }),
         })
-
-        if (!res.ok) {
-          // Only show error if it's a real error (not 503 timeout)
-          // Don't revert UI - the backend might have processed it
-          if (res.status !== 503) {
-            let errorMessage = "Failed to update checklist"
-            try {
-              const errorData = await res.json()
-              if (errorData.detail) {
-                if (typeof errorData.detail === "string") {
-                  errorMessage = errorData.detail
-                } else if (Array.isArray(errorData.detail)) {
-                  errorMessage = errorData.detail.map((e: any) => e.msg || String(e)).join(", ")
-                } else {
-                  errorMessage = String(errorData.detail)
-                }
-              } else if (errorData.message) {
-                errorMessage = typeof errorData.message === "string" ? errorData.message : String(errorData.message)
-              }
-            } catch {
-              errorMessage = `${errorMessage} (${res.status})`
-            }
-            toast.error(errorMessage)
-          }
-          // For 503, silently continue - the update might have succeeded
-        } else {
-          // Success - update with server response
+        if (!res.ok && res.status !== 503) {
+          let errorMessage = "Failed to update checklist"
           try {
-            const updated = (await res.json()) as ChecklistItem
-            setChecklistItems((prev) =>
-              prev.map((i) => (i.id === item.id ? updated : i))
-            )
-            mstItemMap.set(key, updated)
+            const errorData = await res.json()
+            if (errorData.detail) {
+              if (typeof errorData.detail === "string") {
+                errorMessage = errorData.detail
+              } else if (Array.isArray(errorData.detail)) {
+                errorMessage = errorData.detail.map((e: any) => e.msg || String(e)).join(", ")
+              } else {
+                errorMessage = String(errorData.detail)
+              }
+            }
           } catch {
-            // Response parsing failed, but update already applied optimistically
+            errorMessage = `${errorMessage} (${res.status})`
           }
+          toast.error(errorMessage)
+        } else if (res.ok) {
+          const updated = (await res.json()) as ChecklistItem
+          setChecklistItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
         }
       } catch (error) {
-        // Network error - don't show message if it's just a timeout
-        // The update might still succeed, and we don't want to spam the user
-        // Only log for debugging
         console.error("Error updating checklist (may still succeed):", error)
       }
     }
 
-    const updateMstChecklistComment = async (path: string, title: string, comment: string) => {
-      const key = `${path}|${title}`
-      let item = mstItemMap.get(key)
-
-      // If item doesn't exist in database, create it first
-      if (!item) {
-        const templateRow = MST_FINAL_CHECKLIST.find(
-          (row) => row.path === path && row.detyrat === title
-        )
-        if (!templateRow || !project) return
-
-        try {
-          const createRes = await apiFetch("/checklist-items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: project.id,
-              item_type: "CHECKBOX",
-              path: templateRow.path,
-              title: templateRow.detyrat,
-              keyword: templateRow.keywords,
-              description: templateRow.pershkrimi,
-              category: templateRow.kategoria,
-              is_checked: false,
-              comment: comment || null,
-            }),
-          })
-
-          if (!createRes.ok) {
-            toast.error("Failed to create checklist item")
-            return
-          }
-
-          const created = (await createRes.json()) as ChecklistItem
-          item = created
-          setChecklistItems((prev) => [...prev, created])
-          mstItemMap.set(key, created)
-        } catch (error) {
-          toast.error("Failed to create checklist item")
-          return
-        }
-      }
-
-      if (!item) return
-
+    const updateMstChecklistComment = async (item: ChecklistItem, comment: string) => {
+      if (!item.id || !item.path || !item.title) return
+      const key = `${item.path}|${item.title}`
       const previousComment = item.comment || ""
       setMstChecklistComments((prev) => ({ ...prev, [key]: comment }))
       setChecklistItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, comment } : i))
       )
-      mstItemMap.set(key, { ...item, comment })
 
       try {
         const res = await apiFetch(`/checklist-items/${item.id}`, {
@@ -2724,15 +2636,171 @@ export default function PcmProjectPage() {
       }
     }
 
-    const queueMstCommentSave = (path: string, title: string, comment: string) => {
-      const key = `${path}|${title}`
+    const queueMstCommentSave = (item: ChecklistItem, comment: string) => {
+      if (!item.path || !item.title) return
+      const key = `${item.path}|${item.title}`
       const timers = mstCommentTimersRef.current
       if (timers[key]) {
         clearTimeout(timers[key])
       }
       timers[key] = setTimeout(() => {
-        void updateMstChecklistComment(path, title, comment)
+        void updateMstChecklistComment(item, comment)
       }, 600)
+    }
+
+    const startEditMstChecklistRow = (row: {
+      key: string
+      path: string
+      detyrat: string
+      keywords: string
+      pershkrimi: string
+      kategoria: string
+    }) => {
+      setEditingMstChecklistKey(row.key)
+      setEditingMstChecklistRow({
+        path: row.path,
+        detyrat: row.detyrat,
+        keywords: row.keywords,
+        pershkrimi: row.pershkrimi,
+        kategoria: row.kategoria,
+      })
+    }
+
+    const cancelEditMstChecklistRow = () => {
+      setEditingMstChecklistKey(null)
+      setEditingMstChecklistRow({
+        path: "",
+        detyrat: "",
+        keywords: "",
+        pershkrimi: "",
+        kategoria: "",
+      })
+    }
+
+    const saveMstChecklistRow = async (row: { key: string; item: ChecklistItem }) => {
+      if (!project) return
+      const path = editingMstChecklistRow.path.trim()
+      const title = editingMstChecklistRow.detyrat.trim()
+      if (!path || !title) {
+        toast.error("Path and detyrat are required.")
+        return
+      }
+      setSavingMstChecklistRow(true)
+      try {
+        const payload = {
+          path,
+          title,
+          keyword: editingMstChecklistRow.keywords.trim() || null,
+          description: editingMstChecklistRow.pershkrimi.trim() || null,
+          category: editingMstChecklistRow.kategoria.trim() || null,
+        }
+        if (row.item?.id) {
+          const res = await apiFetch(`/checklist-items/${row.item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+          if (!res.ok) {
+            toast.error("Failed to update checklist row")
+            return
+          }
+          const updated = (await res.json()) as ChecklistItem
+          setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+          const oldKey = row.key
+          const newKey = `${updated.path}|${updated.title}`
+          if (oldKey !== newKey) {
+            setMstChecklistChecked((prev) => {
+              if (!(oldKey in prev)) return prev
+              const next = { ...prev }
+              next[newKey] = next[oldKey]
+              delete next[oldKey]
+              return next
+            })
+            setMstChecklistComments((prev) => {
+              if (!(oldKey in prev)) return prev
+              const next = { ...prev }
+              next[newKey] = next[oldKey]
+              delete next[oldKey]
+              return next
+            })
+          }
+        }
+        cancelEditMstChecklistRow()
+        toast.success("Checklist row saved")
+      } finally {
+        setSavingMstChecklistRow(false)
+      }
+    }
+
+    const deleteMstChecklistRow = async (row: { key: string; item: ChecklistItem }) => {
+      if (!row.item?.id) return
+      const res = await apiFetch(`/checklist-items/${row.item.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete checklist row")
+        return
+      }
+      setChecklistItems((prev) => prev.filter((i) => i.id !== row.item.id))
+      setMstChecklistChecked((prev) => {
+        if (!(row.key in prev)) return prev
+        const next = { ...prev }
+        delete next[row.key]
+        return next
+      })
+      setMstChecklistComments((prev) => {
+        if (!(row.key in prev)) return prev
+        const next = { ...prev }
+        delete next[row.key]
+        return next
+      })
+      toast.success("Checklist row deleted")
+    }
+
+    const addMstChecklistRow = async () => {
+      if (!project) return
+      const path = newMstChecklistRow.path.trim()
+      const title = newMstChecklistRow.detyrat.trim()
+      if (!path || !title) {
+        toast.error("Path and detyrat are required.")
+        return
+      }
+      setSavingMstChecklistRow(true)
+      try {
+        const maxPosition = mstChecklistItems.reduce(
+          (max, item) => Math.max(max, item.position ?? 0),
+          templateOrderMap.size
+        )
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path,
+            title,
+            keyword: newMstChecklistRow.keywords.trim() || null,
+            description: newMstChecklistRow.pershkrimi.trim() || null,
+            category: newMstChecklistRow.kategoria.trim() || null,
+            is_checked: false,
+            position: maxPosition + 1,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to add checklist row")
+          return
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => [...prev, created])
+        setNewMstChecklistRow({
+          path: "",
+          detyrat: "",
+          keywords: "",
+          pershkrimi: "",
+          kategoria: "",
+        })
+        toast.success("Checklist row added")
+      } finally {
+        setSavingMstChecklistRow(false)
+      }
     }
     const updateFinalizationChecklist = async (entry: { id: string; question: string }, nextChecked: boolean) => {
       if (!project) return
@@ -3398,65 +3466,261 @@ export default function PcmProjectPage() {
                     <div>!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)</div>
                     <div>!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.</div>
                   </div>
-                  <div className="grid grid-cols-12 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
-                    <div className="col-span-2">PATH</div>
-                    <div className="col-span-2">DETYRAT</div>
-                    <div className="col-span-2">KEYWORDS</div>
-                    <div className="col-span-2">PERSHKRIMI</div>
-                    <div className="col-span-1">KATEGORIA</div>
-                    <div className="col-span-1">CHECK</div>
-                    <div className="col-span-1">INCL</div>
-                    <div className="col-span-1">KOMENT</div>
-                  </div>
-                  <div className="divide-y">
-                    {MST_FINAL_CHECKLIST.map((row) => {
-                      const key = `${row.path}|${row.detyrat}`
-                      const dbItem = mstItemMap.get(key)
-                      const isChecked = mstChecklistChecked[key] || false
-                      const comment = mstChecklistComments[key] || ""
-                      const assignees = dbItem?.assignees || []
-                      const assigneeInitials = assignees
-                        .map((a) => {
-                          const user = allUsers.find((u) => u.id === a.user_id)
-                          if (user?.full_name) {
-                            const names = user.full_name.split(" ")
-                            return names.map((n) => n[0]).join("").toUpperCase()
-                          }
-                          return user?.username?.substring(0, 2).toUpperCase() || ""
-                        })
-                        .filter(Boolean)
-                        .join(", ") || row.incl
-
-                      return (
-                        <div key={key} className="grid grid-cols-12 gap-3 py-3 text-sm items-center">
-                          <div className="col-span-2 truncate" title={row.path}>{row.path}</div>
-                          <div className="col-span-2 font-semibold truncate" title={row.detyrat}>{row.detyrat}</div>
-                          <div className="col-span-2 truncate" title={row.keywords}>{row.keywords}</div>
-                          <div className="col-span-2 truncate" title={row.pershkrimi}>{row.pershkrimi}</div>
-                          <div className="col-span-1 truncate" title={row.kategoria}>{row.kategoria}</div>
-                          <div className="col-span-1 flex justify-center">
-                            <Checkbox
-                              checked={isChecked}
-                              onCheckedChange={() => toggleFinalChecklist(row.path, row.detyrat)}
-                            />
-                          </div>
-                          <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
-                          <div className="col-span-1">
-                            <Input
-                              placeholder="Koment"
-                              className="h-8 text-xs w-full"
-                              value={comment}
-                              onChange={(e) => {
-                                const newComment = e.target.value
-                                setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
-                                queueMstCommentSave(row.path, row.detyrat, newComment)
-                              }}
-                              onBlur={(e) => updateMstChecklistComment(row.path, row.detyrat, e.target.value)}
-                            />
-                          </div>
+                  <div
+                    ref={mstChecklistScrollRef}
+                    className="overflow-x-auto scrollbar-hide cursor-grab active:cursor-grabbing"
+                    style={{ WebkitOverflowScrolling: "touch" }}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      const target = event.target as HTMLElement
+                      if (target.closest("input, textarea, button, select, [role=\"checkbox\"]")) {
+                        return
+                      }
+                      const container = mstChecklistScrollRef.current
+                      if (!container) return
+                      mstChecklistDragRef.current.active = true
+                      mstChecklistDragRef.current.startX = event.pageX - container.offsetLeft
+                      mstChecklistDragRef.current.startScrollLeft = container.scrollLeft
+                    }}
+                    onMouseUp={() => {
+                      mstChecklistDragRef.current.active = false
+                    }}
+                    onMouseLeave={() => {
+                      mstChecklistDragRef.current.active = false
+                    }}
+                    onMouseMove={(event) => {
+                      if (!mstChecklistDragRef.current.active) return
+                      event.preventDefault()
+                      const container = mstChecklistScrollRef.current
+                      if (!container) return
+                      const x = event.pageX - container.offsetLeft
+                      const walk = (x - mstChecklistDragRef.current.startX) * 1.2
+                      container.scrollLeft = mstChecklistDragRef.current.startScrollLeft - walk
+                    }}
+                  >
+                    <div className="min-w-[1200px]">
+                      <div className="grid grid-cols-15 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                        <div className="col-span-1">NO</div>
+                        <div className="col-span-2">PATH</div>
+                        <div className="col-span-2">DETYRAT</div>
+                        <div className="col-span-2">KEYWORDS</div>
+                        <div className="col-span-2">PERSHKRIMI</div>
+                        <div className="col-span-1">KATEGORIA</div>
+                        <div className="col-span-1">CHECK</div>
+                        <div className="col-span-1">INCL</div>
+                        <div className="col-span-2">KOMENT</div>
+                        <div className="col-span-1 text-right">ACTIONS</div>
+                      </div>
+                      <div className="grid grid-cols-15 gap-3 py-3 text-sm items-center border-b">
+                        <div className="col-span-1 text-xs font-semibold text-slate-400">+</div>
+                        <div className="col-span-2">
+                          <Input
+                            value={newMstChecklistRow.path}
+                            onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
+                          placeholder="Path"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          value={newMstChecklistRow.detyrat}
+                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
+                          placeholder="Detyrat"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          value={newMstChecklistRow.keywords}
+                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
+                          placeholder="Keywords"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          value={newMstChecklistRow.pershkrimi}
+                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
+                          placeholder="Pershkrimi"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                        <div className="col-span-1">
+                          <Input
+                            value={newMstChecklistRow.kategoria}
+                            onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
+                            placeholder="Kategoria"
+                            className="h-8 text-xs"
+                          />
                         </div>
-                      )
-                    })}
+                        <div className="col-span-1" />
+                        <div className="col-span-1" />
+                        <div className="col-span-2" />
+                        <div className="col-span-1 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addMstChecklistRow()}
+                          disabled={savingMstChecklistRow || !newMstChecklistRow.path.trim() || !newMstChecklistRow.detyrat.trim()}
+                        >
+                          {savingMstChecklistRow ? "Saving..." : "Add"}
+                        </Button>
+                      </div>
+                      </div>
+                      <div className="divide-y">
+                        {mstChecklistRows.map((row, index) => {
+                          const key = row.key
+                          const isChecked = mstChecklistChecked[key] || false
+                          const comment = mstChecklistComments[key] ?? row.item.comment ?? ""
+                          const assignees = row.item.assignees || []
+                          const assigneeInitials = assignees
+                            .map((a) => {
+                              const user = allUsers.find((u) => u.id === a.user_id)
+                              if (user?.full_name) {
+                                const names = user.full_name.split(" ")
+                                return names.map((n) => n[0]).join("").toUpperCase()
+                              }
+                              return user?.username?.substring(0, 2).toUpperCase() || ""
+                            })
+                            .filter(Boolean)
+                            .join(", ") || row.incl || "-"
+                          const isEditing = editingMstChecklistKey === key
+
+                          return (
+                            <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
+                              <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
+                              <div className="col-span-2 truncate" title={row.path}>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingMstChecklistRow.path}
+                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
+                                    className="h-8 text-xs"
+                                  />
+                                ) : (
+                                  row.path
+                                )}
+                              </div>
+                              <div className="col-span-2 font-semibold truncate" title={row.detyrat}>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingMstChecklistRow.detyrat}
+                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
+                                    className="h-8 text-xs"
+                                  />
+                                ) : (
+                                  row.detyrat
+                                )}
+                              </div>
+                              <div className="col-span-2 truncate" title={row.keywords}>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingMstChecklistRow.keywords}
+                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
+                                    className="h-8 text-xs"
+                                  />
+                                ) : (
+                                  row.keywords
+                                )}
+                              </div>
+                              <div className="col-span-2 truncate" title={row.pershkrimi}>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingMstChecklistRow.pershkrimi}
+                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
+                                    className="h-8 text-xs"
+                                  />
+                                ) : (
+                                  row.pershkrimi
+                                )}
+                              </div>
+                              <div className="col-span-1 truncate" title={row.kategoria}>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingMstChecklistRow.kategoria}
+                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
+                                    className="h-8 text-xs"
+                                  />
+                                ) : (
+                                  row.kategoria
+                                )}
+                              </div>
+                              <div className="col-span-1 flex justify-center">
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={() => toggleFinalChecklist(row.item)}
+                                />
+                              </div>
+                              <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
+                              <div className="col-span-2 pr-3">
+                                <Input
+                                  placeholder="Koment"
+                                  className="h-8 text-xs w-full"
+                                  value={comment}
+                                  onChange={(e) => {
+                                    const newComment = e.target.value
+                                    setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
+                                    queueMstCommentSave(row.item, newComment)
+                                  }}
+                                  onBlur={(e) => updateMstChecklistComment(row.item, e.target.value)}
+                                />
+                              </div>
+                              <div className="col-span-1 flex items-center justify-end gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      onClick={() => void saveMstChecklistRow(row)}
+                                      aria-label="Save checklist row"
+                                      title="Save"
+                                      disabled={savingMstChecklistRow}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      onClick={cancelEditMstChecklistRow}
+                                      aria-label="Cancel editing"
+                                      title="Cancel"
+                                    >
+                                      <span className="text-xs">X</span>
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      onClick={() => startEditMstChecklistRow(row)}
+                                      aria-label="Edit checklist row"
+                                      title="Edit"
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      className="text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => void deleteMstChecklistRow(row)}
+                                      aria-label="Delete checklist row"
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                        {!mstChecklistRows.length ? (
+                          <div className="py-8 text-center text-sm text-muted-foreground">
+                            No checklist rows yet. Add one above to get started.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
