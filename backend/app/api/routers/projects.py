@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus, UserRole
+from app.models.enums import ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
 from app.models.department import Department
@@ -87,6 +87,75 @@ async def _copy_tasks_from_template_project(
         old_to_new_task_id[template_task.id] = new_task.id
     
     # Second pass: set dependencies using the mapping
+    for template_task in template_tasks:
+        if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
+            new_task_id = old_to_new_task_id[template_task.id]
+            new_dependency_id = old_to_new_task_id[template_task.dependency_task_id]
+            await db.execute(
+                update(Task).where(Task.id == new_task_id).values(dependency_task_id=new_dependency_id)
+            )
+
+
+async def _copy_tasks_from_mst_template_project(
+    db: AsyncSession,
+    project: Project,
+    created_by_id: uuid.UUID,
+    template_project: Project | None = None,
+) -> None:
+    if project.is_template:
+        return
+    selected_template = template_project
+    if selected_template is None:
+        stmt = select(Project).where(Project.is_template == True)
+        if project.department_id is not None:
+            stmt = stmt.where(Project.department_id == project.department_id)
+        template_projects = (await db.execute(stmt.order_by(Project.created_at))).scalars().all()
+        if not template_projects:
+            return
+
+        selected_template = next(
+            (tp for tp in template_projects if tp.project_type == ProjectType.MST.value),
+            None,
+        )
+        if not selected_template:
+            for tp in template_projects:
+                title_upper = (tp.title or "").upper()
+                if "MST" in title_upper:
+                    selected_template = tp
+                    break
+    if not selected_template or selected_template.id == project.id:
+        return
+
+    template_tasks = (await db.execute(
+        select(Task).where(Task.project_id == selected_template.id).order_by(Task.created_at)
+    )).scalars().all()
+    if not template_tasks:
+        return
+
+    old_to_new_task_id: dict[uuid.UUID, uuid.UUID] = {}
+    for template_task in template_tasks:
+        new_task = Task(
+            title=template_task.title,
+            description=template_task.description,
+            internal_notes=template_task.internal_notes,
+            priority=template_task.priority or TaskPriority.NORMAL,
+            status=TaskStatus.TODO,
+            phase=template_task.phase or project.current_phase or ProjectPhaseStatus.PLANNING,
+            project_id=project.id,
+            department_id=project.department_id,
+            created_by=created_by_id,
+            finish_period=template_task.finish_period,
+            progress_percentage=template_task.progress_percentage or 0,
+            is_bllok=template_task.is_bllok,
+            is_1h_report=template_task.is_1h_report,
+            is_r1=template_task.is_r1,
+            is_personal=template_task.is_personal,
+            is_active=template_task.is_active,
+        )
+        db.add(new_task)
+        await db.flush()
+        old_to_new_task_id[template_task.id] = new_task.id
+
     for template_task in template_tasks:
         if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
             new_task_id = old_to_new_task_id[template_task.id]
@@ -230,12 +299,33 @@ async def create_project(
 
     current_phase = payload.current_phase or ProjectPhaseStatus.MEETINGS
     status_value = payload.status or TaskStatus.TODO
+    project_type_value = payload.project_type.value if payload.project_type else None
+    template_project: Project | None = None
+    if payload.template_project_id is not None:
+        template_project = (
+            await db.execute(select(Project).where(Project.id == payload.template_project_id))
+        ).scalar_one_or_none()
+        if template_project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template project not found")
+        if template_project.department_id is not None and template_project.department_id != payload.department_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project department mismatch")
+        if not template_project.is_template:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected project is not a template")
+        if project_type_value is None:
+            project_type_value = ProjectType.MST.value
+        elif project_type_value != ProjectType.MST.value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project requires MST type")
+        template_title = (template_project.title or "").upper()
+        if template_project.project_type is not None and template_project.project_type != ProjectType.MST.value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
+        if template_project.project_type is None and "MST" not in template_title:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
     project = Project(
         title=payload.title,
         description=payload.description,
         department_id=payload.department_id,
         manager_id=payload.manager_id,
-        project_type=payload.project_type.value if payload.project_type else None,
+        project_type=project_type_value,
         current_phase=current_phase,
         status=status_value,
         progress_percentage=payload.progress_percentage or 0,
@@ -255,6 +345,9 @@ async def create_project(
     is_vs_vl_project = "VS" in title_upper or "VL" in title_upper
     if is_vs_vl_project:
         await _copy_tasks_from_template_project(db, project, user.id)
+    # Copy tasks from MST template project if this is an MST project
+    if project.project_type == ProjectType.MST.value:
+        await _copy_tasks_from_mst_template_project(db, project, user.id, template_project)
     
     await db.commit()
     await db.refresh(project)

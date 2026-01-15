@@ -1378,7 +1378,7 @@ export default function DesignProjectPage() {
             </Button>
           ) : null}
           <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
-          {advancingPhase ? "Advancing..." : activePhase === "FINAL" ? "Finalize" : "Advance to Next Phase"}
+          {advancingPhase ? "Advancing..." : activePhase === "FINAL" ? "Finalize" : "Next Phase"}
           </Button>
         </div>
       </div>

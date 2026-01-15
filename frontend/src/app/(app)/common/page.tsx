@@ -34,6 +34,7 @@ type SwimlaneCell = {
   assignees?: string[]
   placeholder?: boolean
   entryId?: string
+  number?: number
 }
 type SwimlaneRow = {
   id: CommonType
@@ -534,6 +535,16 @@ export default function CommonViewPage() {
           const priorityMap = new Map<string, PriorityItem>()
 
           for (const t of tasks) {
+            // Only show tasks that are in progress (not completed)
+            // Skip tasks that are done (have completed_at set or status is "Done")
+            if (t.completed_at) {
+              continue
+            }
+            // Also skip if status is explicitly "Done"
+            if (t.status && (t.status.toLowerCase() === "done" || t.status.toLowerCase() === "completed")) {
+              continue
+            }
+            
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
             const ownerName = assignee?.full_name || assignee?.username || null
@@ -937,10 +948,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent feedback",
       entryId: x.entryId,
     }))
-    const priorityItems: SwimlaneCell[] = filtered.priority.map((p) => ({
+    const priorityItems: SwimlaneCell[] = filtered.priority.map((p, idx) => ({
       title: p.project,
       assignees: p.assignees,
       accentClass: "swimlane-accent priority",
+      number: idx + 1,
     }))
 
     return [
@@ -3054,7 +3066,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <div>{e.project}</div>
+                            <div>{idx + 1}. {e.project}</div>
                             <div className="week-table-avatars">
                               {e.assignees.map((name) => (
                                 <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
@@ -3141,7 +3153,10 @@ export default function CommonViewPage() {
                                   ×
                                 </button>
                               ) : null}
-                              <div className="swimlane-title">{cell.title}</div>
+                              <div className="swimlane-title">
+                                {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                {cell.title}
+                              </div>
                               {!cell.placeholder && cell.assignees?.length ? (
                                 <div className="swimlane-assignees">
                                   {cell.assignees.map((name) => (

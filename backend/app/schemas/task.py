@@ -41,6 +41,7 @@ class TaskOut(BaseModel):
     is_r1: bool
     is_personal: bool
     is_active: bool
+    user_comment: str | None = None
     created_at: datetime
     updated_at: datetime
 
