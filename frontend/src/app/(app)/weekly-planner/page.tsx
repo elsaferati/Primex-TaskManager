@@ -5,14 +5,15 @@ import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { Save } from "lucide-react"
+import { Plus, Save } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import type { Department, Project, Task, User } from "@/lib/types"
+import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectEntry = {
   project_id: string
@@ -68,12 +69,20 @@ export default function WeeklyPlannerPage() {
   const { apiFetch, user } = useAuth()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
   const [isThisWeek, setIsThisWeek] = React.useState(false)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
+  const [manualTaskTitle, setManualTaskTitle] = React.useState("")
+  const [manualTaskDay, setManualTaskDay] = React.useState("")
+  const [manualTaskUserId, setManualTaskUserId] = React.useState("")
+  const [manualTaskPeriod, setManualTaskPeriod] = React.useState<"AM" | "PM">("AM")
+  const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
+  const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
 
   React.useEffect(() => {
     const boot = async () => {
@@ -94,42 +103,153 @@ export default function WeeklyPlannerPage() {
         const projs = (await projRes.json()) as Project[]
         setProjects(projs)
       }
+      const usersRes = await apiFetch("/users/lookup")
+      if (usersRes.ok) {
+        const list = (await usersRes.json()) as UserLookup[]
+        setUsers(list.filter((u) => u.is_active))
+      }
     }
     void boot()
   }, [apiFetch, user])
 
-  React.useEffect(() => {
-    const load = async () => {
-      setIsLoading(true)
-      setError(null)
-      try {
+  const loadPlanner = React.useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
       const qs = new URLSearchParams()
-        qs.set("is_this_week", isThisWeek.toString())
-        if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-          qs.set("department_id", departmentId)
-        }
-        const res = await apiFetch(`/planners/weekly-table?${qs.toString()}`)
-        if (!res.ok) {
-          const errorText = await res.text()
-          console.error("Failed to load weekly planner:", res.status, res.statusText, errorText)
-          setError(`Failed to load planner: ${res.status} ${res.statusText}`)
-          setData(null)
-          setIsLoading(false)
-          return
-        }
-        const payload = (await res.json()) as WeeklyTableResponse
-        console.log("Weekly planner data:", payload)
-      setData(payload)
-      } catch (error) {
-        console.error("Error loading weekly planner:", error)
-        setError(error instanceof Error ? error.message : "Unknown error occurred")
-        setData(null)
-      } finally {
-        setIsLoading(false)
+      qs.set("is_this_week", isThisWeek.toString())
+      if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+        qs.set("department_id", departmentId)
       }
+      const res = await apiFetch(`/planners/weekly-table?${qs.toString()}`)
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error("Failed to load weekly planner:", res.status, res.statusText, errorText)
+        setError(`Failed to load planner: ${res.status} ${res.statusText}`)
+        setData(null)
+        return
+      }
+      const payload = (await res.json()) as WeeklyTableResponse
+      console.log("Weekly planner data:", payload)
+      setData(payload)
+    } catch (error) {
+      console.error("Error loading weekly planner:", error)
+      setError(error instanceof Error ? error.message : "Unknown error occurred")
+      setData(null)
+    } finally {
+      setIsLoading(false)
     }
-    void load()
   }, [apiFetch, departmentId, isThisWeek])
+
+  React.useEffect(() => {
+    void loadPlanner()
+  }, [loadPlanner])
+
+  React.useEffect(() => {
+    if (!manualTaskOpen) return
+    if (departmentId !== ALL_DEPARTMENTS_VALUE) {
+      setManualTaskDepartmentId(departmentId)
+    }
+  }, [manualTaskOpen, departmentId])
+
+  React.useEffect(() => {
+    if (!manualTaskDepartmentId) return
+    setManualTaskUserId("")
+  }, [manualTaskDepartmentId])
+
+  const availableDays = React.useMemo(() => {
+    if (!data?.departments?.length) return []
+    const firstDept = data.departments[0]
+    return firstDept.days.map((day, index) => ({
+      value: day.date,
+      label: DAY_NAMES[index] || formatDate(day.date),
+    }))
+  }, [data])
+
+  const availableUsers = React.useMemo(() => {
+    const filtered = manualTaskDepartmentId
+      ? users.filter((u) => u.department_id === manualTaskDepartmentId)
+      : users
+    return filtered
+      .map((u) => ({
+        id: u.id,
+        name: u.full_name || u.username || "",
+      }))
+      .filter((u) => u.name.trim().length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [manualTaskDepartmentId, users])
+
+  const availableDepartments = React.useMemo(() => {
+    return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
+  }, [departments])
+
+  const manualTaskDepartmentValue =
+    departmentId !== ALL_DEPARTMENTS_VALUE ? departmentId : manualTaskDepartmentId
+
+  const handleCreateManualTask = async () => {
+    if (!manualTaskTitle.trim()) {
+      toast.error("Task title is required.")
+      return
+    }
+    if (!manualTaskDepartmentValue) {
+      toast.error("Select a department.")
+      return
+    }
+    if (!manualTaskDay) {
+      toast.error("Select a day.")
+      return
+    }
+    if (!manualTaskUserId) {
+      toast.error("Select a member.")
+      return
+    }
+    const userEntry = users.find((u) => u.id === manualTaskUserId)
+    const departmentValue = manualTaskDepartmentValue || userEntry?.department_id || null
+    if (!departmentValue) {
+      toast.error("Department is required for this task.")
+      return
+    }
+
+    setIsCreatingManualTask(true)
+    try {
+      const dueDateIso = new Date(manualTaskDay).toISOString()
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: manualTaskTitle.trim(),
+          project_id: null,
+          department_id: departmentValue,
+          assigned_to: manualTaskUserId,
+          status: "TODO",
+          priority: "NORMAL",
+          finish_period: manualTaskPeriod,
+          due_date: dueDateIso,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task"
+        try {
+          const data = await res.json()
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      toast.success("Task added to weekly planner.")
+      setManualTaskOpen(false)
+      setManualTaskTitle("")
+      setManualTaskDay("")
+      setManualTaskUserId("")
+      setManualTaskPeriod("AM")
+      setManualTaskDepartmentId("")
+      await loadPlanner()
+    } finally {
+      setIsCreatingManualTask(false)
+    }
+  }
 
   // Edit/delete handlers removed - now showing projects instead of individual tasks
 
@@ -191,10 +311,16 @@ export default function WeeklyPlannerPage() {
       <div className="flex items-center justify-between">
       <div className="text-lg font-semibold">Weekly Planner</div>
         {data && (
-          <Button onClick={handleSavePlan} disabled={isSaving}>
-            <Save className="mr-2 h-4 w-4" />
-            {isSaving ? "Saving..." : "Save Plan"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setManualTaskOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Task
+            </Button>
+            <Button onClick={handleSavePlan} disabled={isSaving}>
+              <Save className="mr-2 h-4 w-4" />
+              {isSaving ? "Saving..." : "Save Plan"}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -238,6 +364,93 @@ export default function WeeklyPlannerPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={manualTaskOpen} onOpenChange={setManualTaskOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Add Task to Weekly Planner</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {departmentId === ALL_DEPARTMENTS_VALUE ? (
+              <div className="space-y-2">
+                <Label>Department</Label>
+                <Select value={manualTaskDepartmentId} onValueChange={setManualTaskDepartmentId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableDepartments.map((dept) => (
+                      <SelectItem key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <Label>Task title</Label>
+              <Input
+                value={manualTaskTitle}
+                onChange={(e) => setManualTaskTitle(e.target.value)}
+                placeholder="Write the task..."
+              />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Day</Label>
+                <Select value={manualTaskDay} onValueChange={setManualTaskDay}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableDays.map((day) => (
+                      <SelectItem key={day.value} value={day.value}>
+                        {day.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>AM / PM</Label>
+                <Select value={manualTaskPeriod} onValueChange={(v) => setManualTaskPeriod(v as "AM" | "PM")}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="AM/PM" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Member</Label>
+              <Select value={manualTaskUserId} onValueChange={setManualTaskUserId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableUsers.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setManualTaskOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateManualTask} disabled={isCreatingManualTask}>
+                {isCreatingManualTask ? "Adding..." : "Add Task"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {error ? (
         <div className="text-center py-8 text-destructive">
