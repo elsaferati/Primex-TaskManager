@@ -54,6 +54,15 @@ const PROJECT_TYPES = [
   { id: "MST", label: "MST Project" },
 ] as const
 
+const formatProjectTitle = (title: string, type: (typeof PROJECT_TYPES)[number]["id"]) => {
+  const trimmed = title.trim()
+  if (!trimmed) return ""
+  if (type !== "MST") return trimmed
+  const normalized = trimmed.toUpperCase()
+  if (normalized.includes("MST")) return trimmed
+  return `MST - ${trimmed}`
+}
+
 const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   DAILY: "Daily",
   WEEKLY: "Weekly",
@@ -339,6 +348,7 @@ export default function DepartmentKanban() {
   // --- STATES ---
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [templateProjects, setTemplateProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
@@ -381,6 +391,7 @@ export default function DepartmentKanban() {
   const [projectType, setProjectType] = React.useState<(typeof PROJECT_TYPES)[number]["id"]>("GENERAL")
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  const [mstTemplateId, setMstTemplateId] = React.useState("__auto__")
 
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
@@ -437,17 +448,26 @@ export default function DepartmentKanban() {
         if (!dep) return
 
         const [projRes, sysRes, tasksRes, gaRes, meetingsRes] = await Promise.all([
-          apiFetch(`/projects?department_id=${dep.id}`),
+          apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?department_id=${dep.id}&include_done=false`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
-        if (projRes.ok) setProjects((await projRes.json()) as Project[])
+        let templateProjectIds = new Set<string>()
+        if (projRes.ok) {
+          const allProjects = (await projRes.json()) as Project[]
+          const templateProjects = allProjects.filter((p) => p.is_template)
+          templateProjectIds = new Set(templateProjects.map((p) => p.id))
+          setTemplateProjects(templateProjects)
+          setProjects(allProjects.filter((p) => !p.is_template))
+        }
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
-          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+          const nonSystemTasks = taskRows.filter(
+            (t) => !t.system_template_origin_id && (!t.project_id || !templateProjectIds.has(t.project_id))
+          )
           setDepartmentTasks(nonSystemTasks)
           setNoProjectTasks(
             nonSystemTasks.filter((t) => !t.project_id && !t.system_template_origin_id)
@@ -516,6 +536,13 @@ export default function DepartmentKanban() {
     [department, users]
   )
   const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
+  const mstTemplateOptions = React.useMemo(() => {
+    return templateProjects.filter((p) => {
+      if (p.project_type) return p.project_type === "MST"
+      const title = (p.title || p.name || "").toUpperCase()
+      return title.includes("MST")
+    })
+  }, [templateProjects])
   const todayDate = React.useMemo(() => new Date(), [])
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
@@ -920,17 +947,22 @@ export default function DepartmentKanban() {
   }
 
   const submitProject = async () => {
-    if (!projectTitle.trim() || !department) return
+    if (!department) return
+    const resolvedTitle = formatProjectTitle(projectTitle, projectType)
+    if (!resolvedTitle) return
     setCreatingProject(true)
     try {
-      const payload = {
-        title: projectTitle.trim(),
+      const payload: Record<string, unknown> = {
+        title: resolvedTitle,
         description: projectDescription.trim() || null,
         department_id: department.id,
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         project_type: projectType,
         current_phase: projectPhase,
         status: projectStatus,
+      }
+      if (projectType === "MST" && mstTemplateId !== "__auto__") {
+        payload.template_project_id = mstTemplateId
       }
       const res = await apiFetch("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) { toast.error("Failed to create project"); return }
@@ -969,6 +1001,7 @@ export default function DepartmentKanban() {
       setProjectDescription("")
       setProjectType("GENERAL")
       setProjectPhase("MEETINGS")
+      setMstTemplateId("__auto__")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -1373,6 +1406,9 @@ export default function DepartmentKanban() {
                                 onValueChange={(value) => {
                                   setProjectType(value as (typeof PROJECT_TYPES)[number]["id"])
                                   setProjectPhase(value === "MST" ? "PLANNING" : "MEETINGS")
+                                  if (value !== "MST") {
+                                    setMstTemplateId("__auto__")
+                                  }
                                 }}
                               >
                                 <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
@@ -1384,6 +1420,25 @@ export default function DepartmentKanban() {
                               </Select>
                             </div>
                           </div>
+                          {projectType === "MST" && (
+                            <div className="space-y-2">
+                              <Label>MST Template</Label>
+                              <Select value={mstTemplateId} onValueChange={setMstTemplateId}>
+                                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__auto__">Auto (first MST template)</SelectItem>
+                                  {mstTemplateOptions.map((project) => (
+                                    <SelectItem key={project.id} value={project.id}>
+                                      {project.title || project.name || "MST Template"}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!mstTemplateOptions.length && (
+                                <div className="text-xs text-muted-foreground">No MST templates found.</div>
+                              )}
+                            </div>
+                          )}
                           <div className="space-y-2">
                             <Label>Phase</Label>
                             <Select value={projectPhase} onValueChange={setProjectPhase}>

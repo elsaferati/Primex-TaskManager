@@ -33,6 +33,7 @@ class ProjectCreate(BaseModel):
     department_id: uuid.UUID
     manager_id: uuid.UUID | None = None
     project_type: ProjectType | None = None
+    template_project_id: uuid.UUID | None = None
     current_phase: ProjectPhaseStatus | None = None
     status: TaskStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
