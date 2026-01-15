@@ -135,6 +135,15 @@ const PROJECT_TEMPLATES = [
     progress_percentage: 0,
   },
   {
+    id: "VS/VL PROJEKT I VOGEL TEMPLATE 2",
+    label: "VS/VL PROJEKT I VOGEL TEMPLATE 2",
+    title: "VS/VL PROJEKT I VOGEL TEMPLATE 2",
+    description: "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot.",
+    status: "IN_PROGRESS",
+    current_phase: "PLANNING",
+    progress_percentage: 0,
+  },
+  {
     id: "TT",
     label: "TT",
     title: "TT",
@@ -154,6 +163,20 @@ function applyProjectTemplateTitle(templateId: ProjectTemplateId, rawTitle: stri
   if (!trimmed) return templateId
   if (normalized.includes(templateId.toUpperCase())) return trimmed
   return `${templateId} ${trimmed}`.trim()
+}
+
+function isFastNormalTask(task: Task) {
+  return (
+    !task.project_id &&
+    !task.system_template_origin_id &&
+    !task.ga_note_origin_id &&
+    !task.is_bllok &&
+    !task.is_1h_report &&
+    !task.is_r1 &&
+    !task.is_personal &&
+    task.priority === "NORMAL" &&
+    task.department_id !== null
+  )
 }
 
 const INTERNAL_MEETING = {
@@ -633,9 +656,7 @@ export default function DepartmentKanban() {
           const taskRows = (await tasksRes.json()) as Task[]
           const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(
-            nonSystemTasks.filter((t) => !t.project_id && !t.system_template_origin_id)
-          )
+          setNoProjectTasks(nonSystemTasks.filter(isFastNormalTask))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -1104,7 +1125,7 @@ export default function DepartmentKanban() {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
         ga.push(t)
-      } else if (!t.project_id && !t.system_template_origin_id) {
+      } else if (isFastNormalTask(t)) {
         normal.push(t)
       }
     }
@@ -1551,7 +1572,11 @@ export default function DepartmentKanban() {
         createdTasks.push(created)
       }
       if (createdTasks.length) {
-        setNoProjectTasks((prev) => [...createdTasks, ...prev])
+        // Only add to noProjectTasks if they meet fast task criteria
+        const fastTasks = createdTasks.filter(isFastNormalTask)
+        if (fastTasks.length) {
+          setNoProjectTasks((prev) => [...fastTasks, ...prev])
+        }
         setDepartmentTasks((prev) => [...createdTasks, ...prev])
       }
       setNoProjectOpen(false)
@@ -1827,7 +1852,8 @@ export default function DepartmentKanban() {
         } else {
           const createdTask = (await taskRes.json()) as Task
           setDepartmentTasks((prev) => [createdTask, ...prev])
-          if (!createdTask.project_id) {
+          // Only add to noProjectTasks if it meets fast task criteria
+          if (isFastNormalTask(createdTask)) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
         }
@@ -1886,7 +1912,8 @@ export default function DepartmentKanban() {
       }
       const createdTask = (await res.json()) as Task
       setDepartmentTasks((prev) => [createdTask, ...prev])
-      if (!createdTask.project_id) {
+      // Only add to noProjectTasks if it meets fast task criteria
+      if (isFastNormalTask(createdTask)) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)

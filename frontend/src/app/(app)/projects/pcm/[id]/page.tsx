@@ -181,6 +181,37 @@ async function initializeMstChecklistItems(
   }
 }
 
+async function initializeVsVlPlanningItems(
+  projectId: string,
+  existingItems: ChecklistItem[],
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  const existingTitles = new Set(
+    existingItems
+      .filter((item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING")
+      .map((item) => item.title || "")
+      .filter(Boolean)
+  )
+  const itemsToCreate = VS_VL_ACCEPTANCE_QUESTIONS.filter((title) => !existingTitles.has(title))
+  for (const [index, title] of itemsToCreate.entries()) {
+    await apiFetch("/checklist-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        item_type: "CHECKBOX",
+        position: index + 1,
+        path: "VS_VL_PLANNING",
+        keyword: "VS_VL_PLANNING",
+        description: title,
+        category: "VS_VL_PLANNING",
+        title,
+        is_checked: false,
+      }),
+    })
+  }
+}
+
 type MstChecklistRow = {
   path: string
   detyrat: string
@@ -760,6 +791,19 @@ export default function PcmProjectPage() {
         setChecklistItems(items)
 
         try {
+          if (isVsVlProject(p)) {
+            const hasVsVlItems = items.some(
+              (item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING"
+            )
+            if (!hasVsVlItems) {
+              await initializeVsVlPlanningItems(p.id, items, apiFetch)
+              const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
+              if (reloadRes.ok) {
+                setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+              }
+            }
+          }
+
           // Initialize MST checklist items only if none exist yet
           if (isMstProject(p)) {
             const hasMstItems = items.some((item) => {
@@ -1973,51 +2017,12 @@ export default function PcmProjectPage() {
 
     return (
       <div className="space-y-5 max-w-6xl mx-auto px-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
               &larr; Back to Projects
             </button>
             <div className="flex items-center gap-3">
-              <span className="text-3xl font-semibold">{title}</span>
-              {project?.is_template && (
-                <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {VS_VL_PHASES.map((p) => {
-                const isActive = p === vsVlPhase
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setVsVlPhase(p)}
-                    className={[
-                      "rounded-full border px-3 py-1 transition-colors",
-                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {VS_VL_PHASE_LABELS[p]}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {VS_VL_PHASES.map((p, idx) => (
-                <span key={p}>
-                  <button
-                    type="button"
-                    onClick={() => setVsVlPhase(p)}
-                    className={p === vsVlPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
-                  >
-                    {VS_VL_PHASE_LABELS[p]}
-                  </button>
-                  {idx < VS_VL_PHASES.length - 1 ? " -> " : ""}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
             {project?.start_date ? (
               <div className="text-xs text-slate-500">
                 Started: {new Date(project.start_date).toLocaleDateString()}
@@ -2058,6 +2063,47 @@ export default function PcmProjectPage() {
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
               VS/VL
             </Badge>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-semibold">{title}</span>
+              {project?.is_template && (
+                <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {VS_VL_PHASES.map((p) => {
+                const isActive = p === vsVlPhase
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setVsVlPhase(p)}
+                    className={[
+                      "rounded-full border px-3 py-1 transition-colors",
+                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {VS_VL_PHASE_LABELS[p]}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {VS_VL_PHASES.map((p, idx) => (
+                <span key={p}>
+                  <button
+                    type="button"
+                    onClick={() => setVsVlPhase(p)}
+                    className={p === vsVlPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
+                  >
+                    {VS_VL_PHASE_LABELS[p]}
+                  </button>
+                  {idx < VS_VL_PHASES.length - 1 ? " -> " : ""}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 

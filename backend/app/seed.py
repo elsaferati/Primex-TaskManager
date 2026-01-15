@@ -29,8 +29,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _vs_vl_meta(phase: str) -> str:
-    return f"{VS_VL_META_PREFIX}{json.dumps({'vs_vl_phase': phase})}"
+def _vs_vl_meta(phase: str, unlock_after_days: int | None = None) -> str:
+    meta = {"vs_vl_phase": phase}
+    if unlock_after_days is not None:
+        meta["unlock_after_days"] = unlock_after_days
+    return f"{VS_VL_META_PREFIX}{json.dumps(meta)}"
 
 
 DEPARTMENTS = [
@@ -70,6 +73,19 @@ GD_PROJECTS = [
 
 VS_VL_TEMPLATE_TITLE = "VS/VL PROJEKT I MADH TEMPLATE"
 VS_VL_TEMPLATE_DESCRIPTION = "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot."
+VS_VL_SMALL_TEMPLATE_TITLE = "VS/VL PROJEKT I VOGEL TEMPLATE 2"
+VS_VL_SMALL_TEMPLATE_OFFSETS = {
+    "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE": 0,
+    "PLOTESIMI I TEMPLATE-IT TE AMAZONIT": 2,
+    "KALKULIMI I CMIMEVE": 3,
+    "GJENERIMI I FOTOVE": 3,
+    "KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON": 4,
+    "KO1 E PROJEKTIT VS": 4,
+    "KO2 E PROJEKTIT VS": 4,
+    "DREAM ROBOT VS": 5,
+    "DREAM ROBOT VL": 5,
+    "KALKULIMI I PESHAVE": 5,
+}
 VS_VL_META_PREFIX = "VS_VL_META:"
 VS_VL_ACCEPTANCE_QUESTIONS = [
     "IS TEAMS GROUP OPENED?",
@@ -573,31 +589,35 @@ async def seed() -> None:
             await db.commit()
             print("PCM projects seeded.")
 
-            template_project = next(
-                (p for p in existing_pcm if p.title == VS_VL_TEMPLATE_TITLE),
-                None,
-            )
-            if template_project is None:
-                template_project = Project(
-                    title=VS_VL_TEMPLATE_TITLE,
-                    description=VS_VL_TEMPLATE_DESCRIPTION,
-                    department_id=pcm_department.id,
-                    status=TaskStatus.IN_PROGRESS,
-                    current_phase=ProjectPhaseStatus.PLANNING,
-                    progress_percentage=0,
-                    is_template=True,
-                )
-                db.add(template_project)
-                await db.flush()
-            else:
-                if not template_project.is_template:
-                    template_project.is_template = True
-                if not template_project.description:
-                    template_project.description = VS_VL_TEMPLATE_DESCRIPTION
-                if not template_project.current_phase:
-                    template_project.current_phase = ProjectPhaseStatus.PLANNING
+            async def ensure_vs_vl_template(title: str, offsets: dict[str, int] | None) -> None:
+                template_project = (
+                    await db.execute(
+                        select(Project).where(
+                            Project.department_id == pcm_department.id,
+                            Project.title == title,
+                        )
+                    )
+                ).scalars().first()
+                if template_project is None:
+                    template_project = Project(
+                        title=title,
+                        description=VS_VL_TEMPLATE_DESCRIPTION,
+                        department_id=pcm_department.id,
+                        status=TaskStatus.IN_PROGRESS,
+                        current_phase=ProjectPhaseStatus.PLANNING,
+                        progress_percentage=0,
+                        is_template=True,
+                    )
+                    db.add(template_project)
+                    await db.flush()
+                else:
+                    if not template_project.is_template:
+                        template_project.is_template = True
+                    if not template_project.description:
+                        template_project.description = VS_VL_TEMPLATE_DESCRIPTION
+                    if not template_project.current_phase:
+                        template_project.current_phase = ProjectPhaseStatus.PLANNING
 
-            if template_project is not None:
                 existing_tasks = (
                     await db.execute(select(Task).where(Task.project_id == template_project.id))
                 ).scalars().all()
@@ -605,13 +625,14 @@ async def seed() -> None:
                 task_by_key: dict[str, Task] = {}
 
                 for task_def in VS_VL_TEMPLATE_TASKS:
-                    title = task_def["title"]
+                    task_title = task_def["title"]
                     phase = task_def["phase"]
-                    task = task_by_title.get(title)
+                    unlock_after_days = offsets.get(task_title) if offsets else None
+                    task = task_by_title.get(task_title)
                     if task is None:
                         task = Task(
-                            title=title,
-                            internal_notes=_vs_vl_meta(phase),
+                            title=task_title,
+                            internal_notes=_vs_vl_meta(phase, unlock_after_days),
                             priority="NORMAL",
                             status=TaskStatus.TODO,
                             phase=phase,
@@ -620,10 +641,20 @@ async def seed() -> None:
                         )
                         db.add(task)
                         await db.flush()
-                        task_by_title[title] = task
+                        task_by_title[task_title] = task
                     else:
                         if not task.internal_notes or not task.internal_notes.startswith(VS_VL_META_PREFIX):
-                            task.internal_notes = _vs_vl_meta(phase)
+                            task.internal_notes = _vs_vl_meta(phase, unlock_after_days)
+                        else:
+                            try:
+                                meta = json.loads(task.internal_notes[len(VS_VL_META_PREFIX):])
+                            except Exception:
+                                meta = {}
+                            if meta.get("vs_vl_phase") != phase:
+                                meta["vs_vl_phase"] = phase
+                            if unlock_after_days is not None and meta.get("unlock_after_days") is None:
+                                meta["unlock_after_days"] = unlock_after_days
+                            task.internal_notes = f"{VS_VL_META_PREFIX}{json.dumps(meta)}"
                         if not task.phase:
                             task.phase = phase
                     task_by_key[task_def["key"]] = task
@@ -663,8 +694,8 @@ async def seed() -> None:
                 ).scalars().all()
                 existing_vs_vl_titles = {item.title for item in existing_vs_vl_items if item.title}
 
-                for position, title in enumerate(VS_VL_ACCEPTANCE_QUESTIONS, start=1):
-                    if title in existing_vs_vl_titles:
+                for position, q_title in enumerate(VS_VL_ACCEPTANCE_QUESTIONS, start=1):
+                    if q_title in existing_vs_vl_titles:
                         continue
                     db.add(
                         ChecklistItem(
@@ -673,15 +704,18 @@ async def seed() -> None:
                             position=position,
                             path="VS_VL_PLANNING",
                             keyword="VS_VL_PLANNING",
-                            description=title,
+                            description=q_title,
                             category="VS_VL_PLANNING",
-                            title=title,
+                            title=q_title,
                             is_checked=False,
                         )
                     )
 
                 await db.commit()
-                print("VS/VL template project seeded.")
+                print(f"VS/VL template project seeded: {title}")
+
+            await ensure_vs_vl_template(VS_VL_TEMPLATE_TITLE, None)
+            await ensure_vs_vl_template(VS_VL_SMALL_TEMPLATE_TITLE, VS_VL_SMALL_TEMPLATE_OFFSETS)
 
         gd_department = next((dept for dept in departments if dept.name == "Graphic Design"), None)
         if gd_department:

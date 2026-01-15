@@ -17,10 +17,14 @@ export default function ReportsPage() {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [statuses, setStatuses] = React.useState<TaskStatus[]>([])
 
-  const [departmentId, setDepartmentId] = React.useState("")
-  const [userId, setUserId] = React.useState("")
-  const [projectId, setProjectId] = React.useState("")
-  const [statusId, setStatusId] = React.useState("")
+  const ALL_DEPARTMENTS_VALUE = "__all__"
+  const ALL_USERS_VALUE = "__all_users__"
+  const ALL_PROJECTS_VALUE = "__all_projects__"
+  const ALL_STATUSES_VALUE = "__all_statuses__"
+  const [departmentId, setDepartmentId] = React.useState(ALL_DEPARTMENTS_VALUE)
+  const [userId, setUserId] = React.useState(ALL_USERS_VALUE)
+  const [projectId, setProjectId] = React.useState(ALL_PROJECTS_VALUE)
+  const [statusId, setStatusId] = React.useState(ALL_STATUSES_VALUE)
   const [plannedFrom, setPlannedFrom] = React.useState("")
   const [plannedTo, setPlannedTo] = React.useState("")
 
@@ -35,7 +39,7 @@ export default function ReportsPage() {
       if (dRes.ok) {
         const deps = (await dRes.json()) as Department[]
         setDepartments(deps)
-        setDepartmentId(user?.department_id || deps[0]?.id || "")
+        setDepartmentId(user?.department_id || deps[0]?.id || ALL_DEPARTMENTS_VALUE)
       }
       if (uRes.ok) setUsers((await uRes.json()) as User[])
       if (pRes.ok) setProjects((await pRes.json()) as Project[])
@@ -46,10 +50,12 @@ export default function ReportsPage() {
 
   const download = async (ext: "csv" | "xlsx" | "pdf") => {
     const qs = new URLSearchParams()
-    if (user?.role === "ADMIN" && departmentId) qs.set("department_id", departmentId)
-    if (userId) qs.set("user_id", userId)
-    if (projectId) qs.set("project_id", projectId)
-    if (statusId) qs.set("status_id", statusId)
+    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+      qs.set("department_id", departmentId)
+    }
+    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+    if (projectId && projectId !== ALL_PROJECTS_VALUE) qs.set("project_id", projectId)
+    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
     if (plannedFrom) qs.set("planned_from", plannedFrom)
     if (plannedTo) qs.set("planned_to", plannedTo)
 
@@ -87,7 +93,7 @@ export default function ReportsPage() {
                     <SelectValue placeholder="Department" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All</SelectItem>
+                    <SelectItem value={ALL_DEPARTMENTS_VALUE}>All</SelectItem>
                     {departments.map((d) => (
                       <SelectItem key={d.id} value={d.id}>
                         {d.name}
@@ -104,7 +110,7 @@ export default function ReportsPage() {
                   <SelectValue placeholder="All users" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All users</SelectItem>
+                  <SelectItem value={ALL_USERS_VALUE}>All users</SelectItem>
                   {users
                     .filter((u) => (user.role === "ADMIN" ? true : u.department_id === user.department_id))
                     .map((u) => (
@@ -122,10 +128,10 @@ export default function ReportsPage() {
                   <SelectValue placeholder="All projects" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All projects</SelectItem>
+                  <SelectItem value={ALL_PROJECTS_VALUE}>All projects</SelectItem>
                   {projects.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.name}
+                      {p.name || p.title}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -138,9 +144,9 @@ export default function ReportsPage() {
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All statuses</SelectItem>
+                  <SelectItem value={ALL_STATUSES_VALUE}>All statuses</SelectItem>
                   {statuses
-                    .filter((s) => (user.role === "ADMIN" && departmentId ? s.department_id === departmentId : true))
+                    .filter((s) => (user.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE ? s.department_id === departmentId : true))
                     .map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
