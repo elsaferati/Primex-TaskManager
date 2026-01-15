@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 # 1. Import load_dotenv to read the .env file
@@ -14,6 +15,7 @@ from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus, UserRo
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
 from app.models.project import Project
+from app.models.task import Task
 from app.models.user import User
 from app.models.enums import ChecklistItemType
 
@@ -25,6 +27,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _vs_vl_meta(phase: str) -> str:
+    return f"{VS_VL_META_PREFIX}{json.dumps({'vs_vl_phase': phase})}"
 
 
 DEPARTMENTS = [
@@ -43,32 +49,11 @@ PCM_PROJECTS = [
         "project_type": ProjectType.MST.value,
     },
     {
-        "title": "VS/VL",
-        "description": "VS/VL project phases: Project Acceptance, Amazone, Control, Dreamrobot.",
-        "status": TaskStatus.IN_PROGRESS,
-        "current_phase": ProjectPhaseStatus.PLANNING,
-        "progress_percentage": 0,
-    },
-    {
-        "title": "VS/VL PRJK I VOGEL",
-        "description": "VS/VL project phases: Project Acceptance, Amazone, Control, Dreamrobot.",
-        "status": TaskStatus.IN_PROGRESS,
-        "current_phase": ProjectPhaseStatus.PLANNING,
-        "progress_percentage": 0,
-    },
-    {
         "title": "TT",
         "description": "Menaxhimi i programit dhe checklistes se produkteve.",
         "status": TaskStatus.IN_PROGRESS,
         "current_phase": ProjectPhaseStatus.PLANNING,
         "progress_percentage": 48,
-    },
-    {
-        "title": "Set One",
-        "description": "Programi i perfunduar javen e kaluar.",
-        "status": TaskStatus.DONE,
-        "current_phase": ProjectPhaseStatus.CLOSED,
-        "progress_percentage": 100,
     },
 ]
 
@@ -81,6 +66,32 @@ GD_PROJECTS = [
         "progress_percentage": 0,
         "project_type": ProjectType.MST.value,
     }
+]
+
+VS_VL_TEMPLATE_TITLE = "VS/VL PROJEKT I MADH TEMPLATE"
+VS_VL_TEMPLATE_DESCRIPTION = "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot."
+VS_VL_META_PREFIX = "VS_VL_META:"
+VS_VL_ACCEPTANCE_QUESTIONS = [
+    "IS TEAMS GROUP OPENED?",
+    "ARE TRELLO POINTS ADDED?",
+    "IS CHATGPT PROJECT OPENED?",
+]
+VS_VL_TEMPLATE_TASKS = [
+    {"key": "base", "title": "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE", "phase": "AMAZON"},
+    {"key": "template", "title": "PLOTESIMI I TEMPLATE-IT TE AMAZONIT", "phase": "AMAZON", "dependency_key": "base"},
+    {"key": "prices", "title": "KALKULIMI I CMIMEVE", "phase": "AMAZON"},
+    {"key": "photos", "title": "GJENERIMI I FOTOVE", "phase": "AMAZON"},
+    {
+        "key": "kontrol",
+        "title": "KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON",
+        "phase": "AMAZON",
+        "dependency_key": "ko2",
+    },
+    {"key": "ko1", "title": "KO1 E PROJEKTIT VS", "phase": "CHECK", "dependency_key": "base"},
+    {"key": "ko2", "title": "KO2 E PROJEKTIT VS", "phase": "CHECK", "dependency_key": "ko1"},
+    {"key": "dreamVs", "title": "DREAM ROBOT VS", "phase": "DREAMROBOT", "dependency_key": "kontrol"},
+    {"key": "dreamVl", "title": "DREAM ROBOT VL", "phase": "DREAMROBOT", "dependency_key": "kontrol"},
+    {"key": "dreamWeights", "title": "KALKULIMI I PESHAVE", "phase": "DREAMROBOT"},
 ]
 
 MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
@@ -542,6 +553,116 @@ async def seed() -> None:
                 )
             await db.commit()
             print("PCM projects seeded.")
+
+            template_project = next(
+                (p for p in existing_pcm if p.title == VS_VL_TEMPLATE_TITLE),
+                None,
+            )
+            if template_project is None:
+                template_project = Project(
+                    title=VS_VL_TEMPLATE_TITLE,
+                    description=VS_VL_TEMPLATE_DESCRIPTION,
+                    department_id=pcm_department.id,
+                    status=TaskStatus.IN_PROGRESS,
+                    current_phase=ProjectPhaseStatus.PLANNING,
+                    progress_percentage=0,
+                    is_template=True,
+                )
+                db.add(template_project)
+                await db.flush()
+            else:
+                if not template_project.is_template:
+                    template_project.is_template = True
+                if not template_project.description:
+                    template_project.description = VS_VL_TEMPLATE_DESCRIPTION
+                if not template_project.current_phase:
+                    template_project.current_phase = ProjectPhaseStatus.PLANNING
+
+            if template_project is not None:
+                existing_tasks = (
+                    await db.execute(select(Task).where(Task.project_id == template_project.id))
+                ).scalars().all()
+                task_by_title = {t.title: t for t in existing_tasks}
+                task_by_key: dict[str, Task] = {}
+
+                for task_def in VS_VL_TEMPLATE_TASKS:
+                    title = task_def["title"]
+                    phase = task_def["phase"]
+                    task = task_by_title.get(title)
+                    if task is None:
+                        task = Task(
+                            title=title,
+                            internal_notes=_vs_vl_meta(phase),
+                            priority="NORMAL",
+                            status=TaskStatus.TODO,
+                            phase=phase,
+                            project_id=template_project.id,
+                            department_id=template_project.department_id,
+                        )
+                        db.add(task)
+                        await db.flush()
+                        task_by_title[title] = task
+                    else:
+                        if not task.internal_notes or not task.internal_notes.startswith(VS_VL_META_PREFIX):
+                            task.internal_notes = _vs_vl_meta(phase)
+                        if not task.phase:
+                            task.phase = phase
+                    task_by_key[task_def["key"]] = task
+
+                for task_def in VS_VL_TEMPLATE_TASKS:
+                    dependency_key = task_def.get("dependency_key")
+                    if not dependency_key:
+                        continue
+                    task = task_by_key.get(task_def["key"])
+                    dependency_task = task_by_key.get(dependency_key)
+                    if task and dependency_task and task.dependency_task_id is None:
+                        task.dependency_task_id = dependency_task.id
+
+                checklist = (
+                    await db.execute(
+                        select(Checklist)
+                        .where(
+                            Checklist.project_id == template_project.id,
+                            Checklist.group_key.is_(None),
+                        )
+                        .order_by(Checklist.created_at)
+                    )
+                ).scalars().first()
+                if checklist is None:
+                    checklist = Checklist(project_id=template_project.id, title="Checklist")
+                    db.add(checklist)
+                    await db.flush()
+
+                existing_vs_vl_items = (
+                    await db.execute(
+                        select(ChecklistItem).where(
+                            ChecklistItem.checklist_id == checklist.id,
+                            ChecklistItem.path == "VS_VL_PLANNING",
+                            ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+                        )
+                    )
+                ).scalars().all()
+                existing_vs_vl_titles = {item.title for item in existing_vs_vl_items if item.title}
+
+                for position, title in enumerate(VS_VL_ACCEPTANCE_QUESTIONS, start=1):
+                    if title in existing_vs_vl_titles:
+                        continue
+                    db.add(
+                        ChecklistItem(
+                            checklist_id=checklist.id,
+                            item_type=ChecklistItemType.CHECKBOX,
+                            position=position,
+                            path="VS_VL_PLANNING",
+                            keyword="VS_VL_PLANNING",
+                            description=title,
+                            category="VS_VL_PLANNING",
+                            title=title,
+                            is_checked=False,
+                        )
+                    )
+
+                await db.commit()
+                print("VS/VL template project seeded.")
 
         gd_department = next((dept for dept in departments if dept.name == "Graphic Design"), None)
         if gd_department:
