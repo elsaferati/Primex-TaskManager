@@ -104,7 +104,7 @@ const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
   { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
-  { id: "blocked", label: "Blocked", description: "Blocked all day by a single task." },
+  { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
   { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
@@ -351,7 +351,7 @@ function formatPrintDay(date: Date) {
 }
 
 function noProjectTypeLabel(task: Task) {
-  if (task.is_bllok) return "Blocked"
+  if (task.is_bllok) return "BLLOK"
   if (task.is_1h_report) return "1H"
   if (task.is_r1) return "R1"
   if (task.is_personal) return "Personal"
@@ -969,7 +969,7 @@ export default function DepartmentKanban() {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
         ga.push(t)
-      } else {
+      } else if (!t.project_id && !t.system_template_origin_id) {
         normal.push(t)
       }
     }
@@ -979,14 +979,14 @@ export default function DepartmentKanban() {
   const statusRows = [
     {
       id: "blocked",
-      title: "BLOCKED",
+      title: "BLLOK",
       count: noProjectBuckets.blocked.length,
       items: noProjectBuckets.blocked,
       headerBg: "bg-white",
       headerText: "text-slate-700",
       badgeClass: "bg-white text-red-600 border border-red-200",
       borderClass: "border-red-500",
-      itemBadge: "Blocked",
+      itemBadge: "BLLOK",
       itemBadgeClass: "bg-white text-red-600 border-red-200",
     },
     {
@@ -2282,7 +2282,7 @@ export default function DepartmentKanban() {
                         const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                         const typeLabel = task.is_bllok
-                          ? "Blocked"
+                          ? "BLLOK"
                           : task.is_1h_report
                             ? "1H"
                             : task.is_r1
