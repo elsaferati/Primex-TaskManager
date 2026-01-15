@@ -20,6 +20,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
+from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
@@ -49,6 +50,7 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskStatus",
+    "TaskUserComment",
     "TaskTemplate",
     "TaskTemplateRun",
     "User",

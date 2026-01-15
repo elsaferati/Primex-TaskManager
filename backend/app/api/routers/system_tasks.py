@@ -14,6 +14,7 @@ from app.models.department import Department
 from app.models.enums import SystemTaskScope, TaskPriority, TaskStatus, UserRole
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_user_comment import TaskUserComment
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
@@ -126,6 +127,7 @@ def _task_row_to_out(
     task: Task,
     template: SystemTaskTemplate,
     assignees: list[TaskAssigneeOut],
+    user_comment: str | None = None,
 ) -> SystemTaskOut:
     priority_value = task.priority or TaskPriority.NORMAL
     return SystemTaskOut(
@@ -147,6 +149,7 @@ def _task_row_to_out(
         finish_period=task.finish_period,
         status=task.status,
         is_active=task.is_active,
+        user_comment=user_comment,
         created_at=task.created_at,
     )
 
@@ -226,8 +229,20 @@ async def list_system_tasks(
             if task.assigned_to in fallback_map:
                 assignee_map[task.id] = [_user_to_assignee(fallback_map[task.assigned_to])]
 
+    # Fetch user comments for all tasks
+    user_comment_map: dict[uuid.UUID, str | None] = {}
+    if user.id:
+        comment_rows = (
+            await db.execute(
+                select(TaskUserComment.task_id, TaskUserComment.comment)
+                .where(TaskUserComment.task_id.in_(task_ids))
+                .where(TaskUserComment.user_id == user.id)
+            )
+        ).all()
+        user_comment_map = {task_id: comment for task_id, comment in comment_rows}
+    
     return [
-        _task_row_to_out(task, template, assignee_map.get(task.id, []))
+        _task_row_to_out(task, template, assignee_map.get(task.id, []), user_comment_map.get(task.id))
         for task, template in rows
     ]
 

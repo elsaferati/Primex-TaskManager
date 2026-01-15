@@ -28,4 +28,5 @@ class SystemTaskOut(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     status: TaskStatus
     is_active: bool
+    user_comment: str | None = None
     created_at: datetime

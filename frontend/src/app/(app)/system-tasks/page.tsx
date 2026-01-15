@@ -2417,10 +2417,14 @@ export function SystemTasksView({
 
               {/* TABLE BODY */}
               <div className="p-4 space-y-2 bg-slate-50">
-                {sections.map((section) => (
-                  <React.Fragment key={section.id}>
-                    {section.templates.length ? (
-                      section.templates.map((template, index) => {
+                {(() => {
+                  let globalIndex = 0
+                  return sections.map((section) => (
+                    <React.Fragment key={section.id}>
+                      {section.templates.length ? (
+                        section.templates.map((template, index) => {
+                          const taskNumber = globalIndex + 1
+                          globalIndex++
                         const priorityValue = normalizePriority(template.priority)
                         const department = template.department_id ? departmentMap.get(template.department_id) : null
                         const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
@@ -2485,7 +2489,7 @@ export function SystemTasksView({
                               )}
                             >
                               <div className="text-sm font-semibold text-slate-600">
-                                {index + 1}
+                                {taskNumber}
                               </div>
                               {/* Title Only (Description removed from list view) */}
                               <div className="min-w-0 pr-4">
@@ -2550,7 +2554,8 @@ export function SystemTasksView({
                       </div>
                     )}
                   </React.Fragment>
-                ))}
+                  ))
+                })()}
               </div>
             </div>
           </div>

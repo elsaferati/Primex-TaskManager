@@ -38,6 +38,7 @@ export interface SystemTaskTemplate {
   finish_period?: TaskFinishPeriod | null
   status?: string | null
   is_active: boolean
+  user_comment?: string | null
   created_at: string
 }
 

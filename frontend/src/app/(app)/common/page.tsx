@@ -34,6 +34,7 @@ type SwimlaneCell = {
   assignees?: string[]
   placeholder?: boolean
   entryId?: string
+  number?: number
 }
 type SwimlaneRow = {
   id: CommonType
@@ -315,7 +316,6 @@ export default function CommonViewPage() {
         const uRes = await apiFetch(usersEndpoint)
         let loadedUsers: User[] = []
         let projectNameById = new Map<string, string>()
-        let templateProjectIds = new Set<string>()
         if (uRes?.ok) {
           loadedUsers = (await uRes.json()) as User[]
           if (mounted) setUsers(loadedUsers)
@@ -327,12 +327,8 @@ export default function CommonViewPage() {
         const projectsRes = await apiFetch(projectsEndpoint)
         if (projectsRes?.ok) {
           const projects = (await projectsRes.json()) as Project[]
-          templateProjectIds = new Set(projects.filter((p) => p.is_template).map((p) => p.id))
           projectNameById = new Map(
-            projects
-              .filter((p) => !p.is_template)
-              .map((p) => [p.id, (p.title || p.name || "").trim()])
-              .filter(([, label]) => label)
+            projects.map((p) => [p.id, (p.title || p.name || "").trim()]).filter(([, label]) => label)
           )
         }
 
@@ -510,7 +506,7 @@ export default function CommonViewPage() {
           // Collect all project IDs from tasks that aren't in our map yet
           const missingProjectIds = new Set<string>()
           for (const t of tasks) {
-            if (t.project_id && !projectNameById.has(t.project_id) && !templateProjectIds.has(t.project_id)) {
+            if (t.project_id && !projectNameById.has(t.project_id)) {
               missingProjectIds.add(t.project_id)
             }
           }
@@ -522,13 +518,9 @@ export default function CommonViewPage() {
                 const projRes = await apiFetch(`/projects/${projectId}`)
                 if (projRes?.ok) {
                   const project = (await projRes.json()) as Project
-                  if (project.is_template) {
-                    templateProjectIds.add(projectId)
-                  } else {
-                    const projectName = (project.title || project.name || "").trim()
-                    if (projectName) {
-                      projectNameById.set(projectId, projectName)
-                    }
+                  const projectName = (project.title || project.name || "").trim()
+                  if (projectName) {
+                    projectNameById.set(projectId, projectName)
                   }
                 }
               } catch (err) {
@@ -541,45 +533,15 @@ export default function CommonViewPage() {
           
           const today = toISODate(new Date())
           const priorityMap = new Map<string, PriorityItem>()
-          const isInProgressTask = (task: Task) => {
-            if (task.status) return task.status !== "DONE"
-            return !task.completed_at
-          }
-          
-          // Debug logging
-          console.log("🔍 [Common View Debug] Total tasks loaded:", tasks.length)
-          const inProgressTasks = tasks.filter(isInProgressTask)
-          console.log("🔍 [Common View Debug] In-progress tasks (not completed):", inProgressTasks.length)
-          const tasksWithProjects = inProgressTasks.filter(t => t.project_id)
-          console.log("🔍 [Common View Debug] In-progress tasks with project_id:", tasksWithProjects.length)
-          
-          if (tasksWithProjects.length > 0) {
-            console.log("🔍 [Common View Debug] Tasks contributing to Projects section:")
-            tasksWithProjects.forEach((t, idx) => {
-              const projectName = projectNameById.get(t.project_id || "")
-              const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
-              const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
-              const ownerName = assignee?.full_name || assignee?.username || "Unknown"
-              const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
-              const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
-              
-              console.log(`  ${idx + 1}. Task: "${t.title}"`, {
-                project_id: t.project_id,
-                project_name: projectName || "NOT FOUND",
-                assignee: ownerName,
-                date: taskDate,
-                task_type: t.task_type,
-                is_bllok: t.is_bllok,
-                is_1h_report: t.is_1h_report,
-                is_r1: t.is_r1,
-                completed_at: t.completed_at
-              })
-            })
-          }
 
           for (const t of tasks) {
-            // Only show tasks that are not done
-            if (!isInProgressTask(t)) {
+            // Only show tasks that are in progress (not completed)
+            // Skip tasks that are done (have completed_at set or status is "Done")
+            if (t.completed_at) {
+              continue
+            }
+            // Also skip if status is explicitly "Done"
+            if (t.status && (t.status.toLowerCase() === "done" || t.status.toLowerCase() === "completed")) {
               continue
             }
             
@@ -593,7 +555,6 @@ export default function CommonViewPage() {
               : []
             const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
             const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
-            const isInProgress = isInProgressTask(t)
 
             if (t.is_bllok) {
               allData.blocked.push({
@@ -630,16 +591,14 @@ export default function CommonViewPage() {
             }
 
             // Priority items - only include if we have a project name
-            if (t.project_id && isInProgress && !templateProjectIds.has(t.project_id)) {
+            if (t.project_id) {
               const projectName = projectNameById.get(t.project_id)
               // Skip if project name is not found (project might be deleted or inaccessible)
               if (!projectName) {
-                console.log(`⚠️ [Common View Debug] Task "${t.title}" has project_id ${t.project_id} but project name not found in map`)
                 continue
               }
               const key = `${t.project_id}-${taskDate}`
               if (!priorityMap.has(key)) {
-                console.log(`✅ [Common View Debug] Adding project "${projectName}" to priority map (key: ${key}, date: ${taskDate})`)
                 priorityMap.set(key, {
                   project: projectName,
                   date: taskDate,
@@ -650,27 +609,12 @@ export default function CommonViewPage() {
               for (const name of assigneeNames) {
                 if (!entry.assignees.includes(name)) {
                   entry.assignees.push(name)
-                  console.log(`  ➕ Added assignee "${name}" to project "${projectName}"`)
                 }
               }
             }
           }
           
           allData.priority = Array.from(priorityMap.values())
-          
-          // Debug logging for final priority items
-          if (allData.priority.length > 0) {
-            console.log("🔍 [Common View Debug] Final Projects in Priority section:", allData.priority.length)
-            allData.priority.forEach((item, idx) => {
-              console.log(`  ${idx + 1}. Project: "${item.project}"`, {
-                date: item.date,
-                assignees: item.assignees,
-                assignee_count: item.assignees.length
-              })
-            })
-          } else {
-            console.log("🔍 [Common View Debug] No projects in Priority section")
-          }
         }
 
         // Single state update with all data
@@ -1004,10 +948,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent feedback",
       entryId: x.entryId,
     }))
-    const priorityItems: SwimlaneCell[] = filtered.priority.map((p) => ({
+    const priorityItems: SwimlaneCell[] = filtered.priority.map((p, idx) => ({
       title: p.project,
       assignees: p.assignees,
       accentClass: "swimlane-accent priority",
+      number: idx + 1,
     }))
 
     return [
@@ -3121,7 +3066,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <div>{e.project}</div>
+                            <div>{idx + 1}. {e.project}</div>
                             <div className="week-table-avatars">
                               {e.assignees.map((name) => (
                                 <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
@@ -3208,7 +3153,10 @@ export default function CommonViewPage() {
                                   ×
                                 </button>
                               ) : null}
-                              <div className="swimlane-title">{cell.title}</div>
+                              <div className="swimlane-title">
+                                {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                {cell.title}
+                              </div>
                               {!cell.placeholder && cell.assignees?.length ? (
                                 <div className="swimlane-assignees">
                                   {cell.assignees.map((name) => (

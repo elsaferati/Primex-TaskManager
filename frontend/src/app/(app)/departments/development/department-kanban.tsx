@@ -381,7 +381,10 @@ export default function DepartmentKanban() {
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
-  const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
+  const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
+  const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
+  const [closeTaskComment, setCloseTaskComment] = React.useState("")
+  const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -1140,24 +1143,61 @@ export default function DepartmentKanban() {
     }
   }
 
-  const updateSystemTaskStatus = async (taskId: string, nextStatus: "TODO" | "DONE") => {
-    setSystemStatusUpdatingId(taskId)
+  const handleCloseTaskClick = (taskId: string) => {
+    setTaskToCloseId(taskId)
+    setCloseTaskComment("")
+    setCloseTaskDialogOpen(true)
+  }
+
+  const confirmCloseTask = async () => {
+    if (!taskToCloseId) return
+
+    if (!closeTaskComment.trim()) {
+      toast.error("Comment is required to close this task")
+      return
+    }
+
+    setClosingTask(true)
     try {
-      const res = await apiFetch(`/tasks/${taskId}`, {
+      const commentRes = await apiFetch(`/tasks/${taskToCloseId}/comment`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ comment: closeTaskComment.trim() }),
       })
-      if (!res.ok) {
-        toast.error("Failed to update system task status")
+      if (!commentRes.ok) {
+        const data = await commentRes.json()
+        toast.error(data.detail || "Failed to save comment")
+        setClosingTask(false)
         return
       }
-      setSystemTasks((prev) =>
-        prev.map((item) => (item.id === taskId ? { ...item, status: nextStatus } : item))
-      )
-      toast.success(nextStatus === "DONE" ? "System task closed" : "System task reopened")
+
+      // Close the task
+      const res = await apiFetch(`/tasks/${taskToCloseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "DONE" }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to close system task")
+        setClosingTask(false)
+        return
+      }
+      
+      // Reload system tasks
+      const sysRes = await apiFetch(`/system-tasks?department_id=${department?.id || ""}`)
+      if (sysRes.ok) {
+        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
+      }
+      
+      setCloseTaskDialogOpen(false)
+      setTaskToCloseId(null)
+      setCloseTaskComment("")
+      toast.success("Task closed successfully")
+    } catch (err) {
+      console.error("Failed to close task", err)
+      toast.error("Failed to close task")
     } finally {
-      setSystemStatusUpdatingId(null)
+      setClosingTask(false)
     }
   }
 
@@ -2565,58 +2605,61 @@ export default function DepartmentKanban() {
 
             <div className="space-y-4">
               {systemGroups.length ? (
-                systemGroups.map((group) => (
-                  <Card key={group.label} className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
-                    <div className="flex items-center gap-3 border-b px-4 py-3">
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                        {group.label.toUpperCase()}
-                      </span>
-                      <Badge variant="secondary">{group.items.length}</Badge>
-                    </div>
-                    <div
-                      className={[
-                        "grid gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-muted-foreground",
-                        showSystemActions
-                          ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
-                          : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
-                      ].join(" ")}
-                    >
-                      <div>Task Title</div>
-                      <div>Dept</div>
-                      <div>Owner</div>
-                      <div>Frequency</div>
-                      <div>Finish By</div>
-                      <div>Priority</div>
-                      {showSystemActions ? <div>Actions</div> : null}
-                    </div>
-                    <div className="divide-y">
-                      {group.items.map((item) => {
-                        const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
-                        const priorityValue = normalizePriority(item.priority)
-                        const priorityBadgeClass =
-                          priorityValue === "HIGH"
-                            ? "border-red-200 bg-red-50 text-red-700"
-                            : "border-amber-200 bg-amber-50 text-amber-700"
-                        const statusValue = item.status || "TODO"
-                        const isClosed = statusValue === "DONE"
-                        const isAssigned =
-                          Boolean(user?.id) &&
-                          (item.default_assignee_id === user?.id ||
-                            item.assignees?.some((assignee) => assignee.id === user?.id))
-                        return (
-                          <div
-                            key={item.id}
-                            className={[
-                              "grid gap-3 border-l-4 px-4 py-4 text-sm",
-                              PRIORITY_BORDER_STYLES[priorityValue],
-                              showSystemActions
-                                ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
-                                : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
-                            ].join(" ")}
-                          >
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="font-medium">{item.title}</div>
+                (() => {
+                  let globalTaskNumber = 0
+                  return systemGroups.map((group) => (
+                    <Card key={group.label} className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
+                      <div className="flex items-center gap-3 border-b px-4 py-3">
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                          {group.label.toUpperCase()}
+                        </span>
+                        <Badge variant="secondary">{group.items.length}</Badge>
+                      </div>
+                      <div
+                        className={[
+                          "grid gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-muted-foreground",
+                          showSystemActions
+                            ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
+                            : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
+                        ].join(" ")}
+                      >
+                        <div>Task Title</div>
+                        <div>Dept</div>
+                        <div>Owner</div>
+                        <div>Frequency</div>
+                        <div>Finish By</div>
+                        <div>Priority</div>
+                        {showSystemActions ? <div>Actions</div> : null}
+                      </div>
+                      <div className="divide-y">
+                        {group.items.map((item) => {
+                          globalTaskNumber++
+                          const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
+                          const priorityValue = normalizePriority(item.priority)
+                          const priorityBadgeClass =
+                            priorityValue === "HIGH"
+                              ? "border-red-200 bg-red-50 text-red-700"
+                              : "border-amber-200 bg-amber-50 text-amber-700"
+                          const statusValue = item.status || "TODO"
+                          const isClosed = statusValue === "DONE"
+                          const isAssigned =
+                            Boolean(user?.id) &&
+                            (item.default_assignee_id === user?.id ||
+                              item.assignees?.some((assignee) => assignee.id === user?.id))
+                          return (
+                            <div
+                              key={item.id}
+                              className={[
+                                "grid gap-3 border-l-4 px-4 py-4 text-sm",
+                                PRIORITY_BORDER_STYLES[priorityValue],
+                                showSystemActions
+                                  ? "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]"
+                                  : "grid-cols-[minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(160px,0.8fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]",
+                              ].join(" ")}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="font-medium">{globalTaskNumber}. {item.title}</div>
                                 <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
                               </div>
                               <div className="text-xs text-muted-foreground">{item.description || "-"}</div>
@@ -2636,7 +2679,7 @@ export default function DepartmentKanban() {
                               </Badge>
                             </div>
                             {showSystemActions ? (
-                              <div>
+                              <div className="flex flex-col gap-2">
                                 {isClosed ? (
                                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
                                     <span className="text-[12px]">✓</span>
@@ -2645,9 +2688,9 @@ export default function DepartmentKanban() {
                                 ) : isAssigned ? (
                                   <button
                                     type="button"
-                                    disabled={systemStatusUpdatingId === item.id}
+                                    disabled={closingTask}
                                     className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                    onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                    onClick={() => handleCloseTaskClick(item.id)}
                                   >
                                     <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
                                       ✓
@@ -2655,20 +2698,69 @@ export default function DepartmentKanban() {
                                     Mark Done
                                   </button>
                                 ) : null}
+                                {item.user_comment ? (
+                                  <div className="text-xs text-muted-foreground bg-slate-50 p-2 rounded border border-slate-200">
+                                    {item.user_comment}
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
                         )
-                      })}
-                    </div>
-                  </Card>
-                ))
+                        })}
+                      </div>
+                    </Card>
+                  ))
+                })()
               ) : (
                 <div className="text-sm text-muted-foreground">No system tasks yet.</div>
               )}
             </div>
           </div>
         ) : null}
+
+        {/* Dialog for closing task with optional comment */}
+        <Dialog open={closeTaskDialogOpen} onOpenChange={setCloseTaskDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Close System Task</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="close-task-comment">
+              Employee Comment
+            </Label>
+            <Textarea
+              id="close-task-comment"
+              value={closeTaskComment}
+              onChange={(e) => setCloseTaskComment(e.target.value)}
+              placeholder="Describe what was done in this task..."
+              className="min-h-[120px]"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+                  onClick={() => {
+                    setCloseTaskDialogOpen(false)
+                    setTaskToCloseId(null)
+                    setCloseTaskComment("")
+                  }}
+                  disabled={closingTask}
+                >
+                  Cancel
+            </Button>
+            <Button
+              onClick={() => void confirmCloseTask()}
+              disabled={closingTask || !closeTaskComment.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {closingTask ? "Closing..." : "Close Task"}
+            </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {activeTab === "no-project" ? (
           <div className="space-y-4">

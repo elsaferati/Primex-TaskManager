@@ -17,8 +17,10 @@ from app.models.notification import Notification
 from app.models.project import Project
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskUpdate
+from pydantic import BaseModel
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 
@@ -65,7 +67,22 @@ async def _replace_task_assignees(
         await db.execute(insert(TaskAssignee), values)
 
 
-def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
+async def _user_comments_for_tasks(
+    db: AsyncSession, task_ids: list[uuid.UUID], user_id: uuid.UUID
+) -> dict[uuid.UUID, str | None]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskUserComment.task_id, TaskUserComment.comment)
+            .where(TaskUserComment.task_id.in_(task_ids))
+            .where(TaskUserComment.user_id == user_id)
+        )
+    ).all()
+    return {task_id: comment for task_id, comment in rows}
+
+
+def _task_to_out(task: Task, assignees: list[TaskAssigneeOut], user_comment: str | None = None) -> TaskOut:
     return TaskOut(
         id=task.id,
         title=task.title,
@@ -92,6 +109,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         is_r1=task.is_r1,
         is_personal=task.is_personal,
         is_active=task.is_active,
+        user_comment=user_comment,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -640,6 +658,65 @@ async def deactivate_task(
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     return _task_to_out(task, assignee_map.get(task.id, []))
+
+
+class TaskCommentUpdate(BaseModel):
+    comment: str | None = None
+
+
+@router.patch("/{task_id}/comment", response_model=TaskOut)
+async def update_task_user_comment(
+    task_id: uuid.UUID,
+    payload: TaskCommentUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> TaskOut:
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    
+    # Check if user is assigned to the task
+    is_assigned = (
+        task.assigned_to == user.id
+        or (await db.execute(
+            select(TaskAssignee).where(
+                TaskAssignee.task_id == task_id,
+                TaskAssignee.user_id == user.id
+            )
+        )).scalar_one_or_none() is not None
+    )
+    if not is_assigned:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only comment on tasks assigned to you")
+    
+    # Get or create user comment
+    user_comment = (
+        await db.execute(
+            select(TaskUserComment).where(
+                TaskUserComment.task_id == task_id,
+                TaskUserComment.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    
+    if user_comment is None:
+        user_comment = TaskUserComment(
+            task_id=task_id,
+            user_id=user.id,
+            comment=payload.comment,
+        )
+        db.add(user_comment)
+    else:
+        user_comment.comment = payload.comment
+    
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
+    return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
