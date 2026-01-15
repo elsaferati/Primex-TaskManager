@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
+import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
 // MST phases for Graphic Design projects
 const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
@@ -40,6 +40,7 @@ const PLANNING_TABS = [
 
 // Tabs for Product phase
 const PRODUCT_TABS = [
+  { id: "tasks", label: "Tasks" },
   { id: "propozim-ko1-ko2", label: "PROPOZIM KO1/KO2" },
   { id: "punimi", label: "PUNIMI" },
   { id: "produkte-sa-jane-kryer", label: "PRODUKTE SA JANE KRYER" },
@@ -123,6 +124,47 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function parseProductTotals(notes?: string | null) {
+  if (!notes) return { total: "", completed: "" }
+  const totalMatch = notes.match(/total_products[:=]\s*(\d+)/i)
+  const completedMatch = notes.match(/completed_products[:=]\s*(\d+)/i)
+  return {
+    total: totalMatch ? totalMatch[1] : "",
+    completed: completedMatch ? completedMatch[1] : "",
+  }
+}
+
+function isKoTask(notes?: string | null) {
+  return /ko_tab[:=]\s*KO1KO2/i.test(notes || "")
+}
+
+function hasProductTotals(notes?: string | null) {
+  return /total_products[:=]\s*\d+/i.test(notes || "")
+}
+
+function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
+  if (phase === "PLANNING") {
+    return items.filter(
+      (item) =>
+        item.path === "project acceptance" ||
+        item.path === "ga/dv meeting" ||
+        (!item.path || (item.path !== "propozim ko1/ko2" && item.path !== "punimi"))
+    )
+  }
+  if (phase === "PRODUCT") {
+    return items.filter((item) => item.path === "propozim ko1/ko2" || item.path === "punimi")
+  }
+  return []
+}
+
+function noteToTaskTitle(content: string, noteType?: string | null) {
+  const prefix = noteType ? `${noteType}: ` : ""
+  const trimmed = content.trim().replace(/\s+/g, " ")
+  const base = `${prefix}${trimmed}`.trim()
+  if (!base) return "GA/KA Note Task"
+  return base.length > 120 ? `${base.slice(0, 117)}...` : base
+}
+
 
 export default function DesignProjectPage() {
   const params = useParams<{ id: string }>()
@@ -157,7 +199,15 @@ export default function DesignProjectPage() {
   const [selectedMemberIds, setSelectedMemberIds] = React.useState<string[]>([])
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
+  const [resettingPhase, setResettingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const [creatingNoteTaskId, setCreatingNoteTaskId] = React.useState<string | null>(null)
+  const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
+  const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
+  const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
+  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
+  const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -195,7 +245,34 @@ export default function DesignProjectPage() {
   const [commentEditingId, setCommentEditingId] = React.useState<string | null>(null)
   const [commentEditingText, setCommentEditingText] = React.useState("")
   const [commentSaving, setCommentSaving] = React.useState(false)
-  
+
+  // Inline task form state for Produkte Sa Jane Kryer
+  const [newProductTaskTitle, setNewProductTaskTitle] = React.useState("")
+  const [newProductTaskAssignee, setNewProductTaskAssignee] = React.useState<string>("__unassigned__")
+  const [newProductTaskTotal, setNewProductTaskTotal] = React.useState("")
+  const [newProductTaskCompleted, setNewProductTaskCompleted] = React.useState("")
+  const [creatingProductTask, setCreatingProductTask] = React.useState(false)
+  const [newKoTaskTitle, setNewKoTaskTitle] = React.useState("")
+  const [newKoTaskAssignee, setNewKoTaskAssignee] = React.useState<string>("__unassigned__")
+  const [newKoTaskTotal, setNewKoTaskTotal] = React.useState("")
+  const [newKoTaskCompleted, setNewKoTaskCompleted] = React.useState("")
+  const [creatingKoTask, setCreatingKoTask] = React.useState(false)
+  const [productTaskEdits, setProductTaskEdits] = React.useState<
+    Record<
+      string,
+      {
+        total: string
+        completed: string
+        assigned_to: string | null
+        status: Task["status"]
+      }
+    >
+  >({})
+  const [editingTaskIds, setEditingTaskIds] = React.useState<Record<string, boolean>>({})
+  const [editingTaskTitles, setEditingTaskTitles] = React.useState<Record<string, string>>({})
+  const [editingTaskAssignees, setEditingTaskAssignees] = React.useState<Record<string, string>>({})
+  const [editingTaskTotals, setEditingTaskTotals] = React.useState<Record<string, string>>({})
+
   const isAdmin = user?.role === "ADMIN"
 
   // Load project data
@@ -792,12 +869,28 @@ export default function DesignProjectPage() {
         task.status !== "DONE" &&
         (task.phase || currentPhase) === currentPhase
     )
-    const uncheckedItems = checklistItems.filter((item) => !item.is_checked)
+    const phaseChecklistItems = checklistItemsForPhase(currentPhase, checklistItems)
+    const uncheckedItems = phaseChecklistItems.filter((item) => !item.is_checked)
+    const productTasksForPhase =
+      currentPhase === "PRODUCT"
+        ? tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
+        : []
+    const productTotalsMissing =
+      currentPhase === "PRODUCT"
+        ? productTasksForPhase.filter((task) => {
+            const totals = parseProductTotals(task.internal_notes)
+            const total = parseInt(totals.total || "0", 10) || 0
+            const completed = parseInt(totals.completed || "0", 10) || 0
+            return total <= 0 || completed < total
+          })
+        : []
     
-    if (openTasks.length || uncheckedItems.length) {
+    if (openTasks.length || uncheckedItems.length || productTotalsMissing.length) {
       const blockers: string[] = []
       if (openTasks.length) blockers.push(`${openTasks.length} open tasks`)
       if (uncheckedItems.length) blockers.push(`${uncheckedItems.length} checklist items`)
+      if (productTotalsMissing.length)
+        blockers.push(`${productTotalsMissing.length} tasks missing total/completed`)
       toast.error(`There are ${blockers.join(" and ")} remaining.`)
       return
     }
@@ -884,6 +977,46 @@ export default function DesignProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
+  const createTaskFromNote = async (note: GaNote) => {
+    if (!project) return
+    setCreatingNoteTaskId(note.id)
+    try {
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: gaNoteTaskTitle.trim() || noteToTaskTitle(note.content, note.note_type),
+          description: gaNoteTaskDescription.trim() || note.content,
+          project_id: project.id,
+          department_id: project.department_id,
+          assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+          status: "TODO",
+          priority: gaNoteTaskPriority || note.priority || "NORMAL",
+          phase: project.current_phase || "PLANNING",
+          due_date: gaNoteTaskDueDate || null,
+          ga_note_origin_id: note.id,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task from note"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as Task
+      setTasks((prev) => [created, ...prev])
+      setGaNoteTaskOpenId(null)
+      toast.success("Task created from note")
+    } finally {
+      setCreatingNoteTaskId(null)
+    }
+  }
+
   // Determine active phase and visible tabs
   const phaseValue = viewedPhase || project?.current_phase || "PLANNING"
   const visibleTabs = React.useMemo(() => {
@@ -917,6 +1050,121 @@ export default function DesignProjectPage() {
       }),
     [activePhase, project?.current_phase, tasks]
   )
+  const taskList = React.useMemo(() => {
+    if (activePhase !== "PRODUCT") return visibleTasks
+    return visibleTasks.filter((task) => !hasProductTotals(task.internal_notes))
+  }, [activePhase, visibleTasks])
+  const productTasks = React.useMemo(
+    () =>
+      tasks.filter(
+        (task) =>
+          (task.phase ?? "PRODUCT") === "PRODUCT" &&
+          hasProductTotals(task.internal_notes) &&
+          !isKoTask(task.internal_notes)
+      ),
+    [tasks]
+  )
+  const koTasks = React.useMemo(
+    () =>
+      tasks.filter(
+        (task) =>
+          (task.phase ?? "PRODUCT") === "PRODUCT" &&
+          hasProductTotals(task.internal_notes) &&
+          isKoTask(task.internal_notes)
+      ),
+    [tasks]
+  )
+
+  React.useEffect(() => {
+    const next: Record<string, { total: string; completed: string; assigned_to: string | null; status: Task["status"] }> =
+      {}
+    for (const t of tasks) {
+      const totals = parseProductTotals(t.internal_notes)
+      next[t.id] = {
+        total: totals.total,
+        completed: totals.completed,
+        assigned_to: t.assigned_to || null,
+        status: t.status,
+      }
+    }
+    setProductTaskEdits(next)
+  }, [tasks])
+
+  const startEditTaskRow = (task: Task) => {
+    setEditingTaskIds((prev) => ({ ...prev, [task.id]: true }))
+    setEditingTaskTitles((prev) => ({ ...prev, [task.id]: task.title }))
+    setEditingTaskAssignees((prev) => ({
+      ...prev,
+      [task.id]: task.assigned_to || "__unassigned__",
+    }))
+    setEditingTaskTotals((prev) => ({
+      ...prev,
+      [task.id]: productTaskEdits[task.id]?.total || "",
+    }))
+  }
+
+  const resetToPlanning = async () => {
+    if (!project) return
+    setResettingPhase(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_phase: "PLANNING" }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to reset phase"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setViewedPhase(updated.current_phase || "PLANNING")
+      toast.success("Phase reset to Planning")
+    } finally {
+      setResettingPhase(false)
+    }
+  }
+
+  const cancelEditTaskRow = (taskId: string) => {
+    setEditingTaskIds((prev) => ({ ...prev, [taskId]: false }))
+  }
+
+  const saveTaskRowEdits = async (task: Task, isKo: boolean) => {
+    if (!project) return
+    const title = (editingTaskTitles[task.id] || "").trim()
+    if (!title) return
+    const assignedTo =
+      editingTaskAssignees[task.id] === "__unassigned__"
+        ? null
+        : editingTaskAssignees[task.id] || null
+    const totalValue = editingTaskTotals[task.id] || "0"
+    const completedValue = productTaskEdits[task.id]?.completed || "0"
+    const payload = {
+      title,
+      assigned_to: assignedTo,
+      internal_notes: `${isKo ? "ko_tab=KO1KO2; " : ""}total_products=${totalValue || 0}; completed_products=${completedValue || 0}`,
+    }
+    const res = await apiFetch(`/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      toast.error("Failed to update task")
+      return
+    }
+    const updated = (await res.json()) as Task
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)))
+    setEditingTaskIds((prev) => ({ ...prev, [task.id]: false }))
+    toast.success("Task updated")
+  }
 
   // Filter acceptance checklist items (PRANIMI I PROJEKTIT)
   const acceptanceItems = React.useMemo(
@@ -955,6 +1203,14 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
 
+  const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
+  const assignableUsers = React.useMemo(() => allUsers, [allUsers])
+  const memberLabel = (id?: string | null) => {
+    if (!id) return "-"
+    const member = userMap.get(id)
+    return member?.full_name || member?.username || member?.email || "-"
+  }
+
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
   const title = project.title || project.name || "Project"
@@ -964,7 +1220,6 @@ export default function DesignProjectPage() {
   const phaseIndex = phaseSequence.indexOf(phase as (typeof phaseSequence)[number])
   const lockedAfterIndex = phaseIndex === -1 ? 0 : phaseIndex
   const canClosePhase = phase !== "CLOSED"
-  const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
 
   return (
     <div className="space-y-6">
@@ -1023,9 +1278,20 @@ export default function DesignProjectPage() {
 
       {/* Advance Phase Button */}
       <div className="flex justify-end">
-        <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
+        <div className="flex items-center gap-2">
+          {user?.role === "ADMIN" && phase !== "PLANNING" ? (
+            <Button
+              variant="outline"
+              disabled={resettingPhase}
+              onClick={() => void resetToPlanning()}
+            >
+              {resettingPhase ? "Resetting..." : "Reset to Planning"}
+            </Button>
+          ) : null}
+          <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
           {advancingPhase ? "Advancing..." : "Advance to Next Phase"}
-        </Button>
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -1148,7 +1414,7 @@ export default function DesignProjectPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                          {departmentUsers.map((u) => (
+                          {assignableUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1169,11 +1435,11 @@ export default function DesignProjectPage() {
                 </DialogContent>
               </Dialog>
             </div>
-            {visibleTasks.length === 0 ? (
+            {taskList.length === 0 ? (
               <p className="text-muted-foreground">No tasks for this phase.</p>
             ) : (
               <div className="space-y-3">
-                {visibleTasks.map((task) => {
+                {taskList.map((task) => {
                   const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                   return (
                     <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
@@ -1846,7 +2112,287 @@ export default function DesignProjectPage() {
         {activeTab === "produkte-sa-jane-kryer" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">PRODUKTE SA JANE KRYER</h3>
-            <p className="text-muted-foreground">Content coming soon...</p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
+                <div className="col-span-4">Task</div>
+                <div className="col-span-1">Assigned</div>
+                <div className="col-span-2">Total</div>
+                <div className="col-span-2">Completed</div>
+                <div className="col-span-2">Status</div>
+                <div className="col-span-1"></div>
+              </div>
+              <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                <div className="col-span-4">
+                  <input
+                    type="text"
+                    placeholder="Enter task name..."
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newProductTaskTitle}
+                    onChange={(e) => setNewProductTaskTitle(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-1">
+                  <Select value={newProductTaskAssignee} onValueChange={setNewProductTaskAssignee}>
+                    <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-purple-500 shadow-none">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassigned__">-</SelectItem>
+                      {assignableUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name || u.username || u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newProductTaskTotal}
+                    onChange={(e) => setNewProductTaskTotal(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newProductTaskCompleted}
+                    onChange={(e) => setNewProductTaskCompleted(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Button
+                    size="sm"
+                    className="rounded-full px-5 shadow-sm"
+                    onClick={async () => {
+                      if (!project || !newProductTaskTitle.trim()) return
+                      setCreatingProductTask(true)
+                      try {
+                        const res = await apiFetch("/tasks", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: newProductTaskTitle.trim(),
+                            project_id: project.id,
+                            department_id: project.department_id,
+                            assigned_to: newProductTaskAssignee === "__unassigned__" ? null : newProductTaskAssignee,
+                            status: "TODO",
+                            priority: "NORMAL",
+                            phase: "PRODUCT",
+                            internal_notes: `total_products=${newProductTaskTotal || 0}; completed_products=${newProductTaskCompleted || 0}`,
+                          }),
+                        })
+                        if (!res?.ok) {
+                          toast.error("Failed to add task")
+                          return
+                        }
+                        const created = (await res.json()) as Task
+                        setTasks((prev) => [...prev, created])
+                        setNewProductTaskTitle("")
+                        setNewProductTaskAssignee("__unassigned__")
+                        setNewProductTaskTotal("")
+                        setNewProductTaskCompleted("")
+                        toast.success("Task added")
+                      } finally {
+                        setCreatingProductTask(false)
+                      }
+                    }}
+                    disabled={creatingProductTask || !newProductTaskTitle.trim()}
+                  >
+                    {creatingProductTask ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                <div className="col-span-1"></div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {productTasks.map((task, index) => {
+                  const totalVal = parseInt(productTaskEdits[task.id]?.total || "0", 10) || 0
+                  const isEditing = Boolean(editingTaskIds[task.id])
+                  return (
+                    <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                      <div className="col-span-4 font-medium text-slate-700">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-1 text-sm"
+                            value={editingTaskTitles[task.id] ?? task.title}
+                            onChange={(e) =>
+                              setEditingTaskTitles((prev) => ({ ...prev, [task.id]: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          `${index + 1}. ${task.title}`
+                        )}
+                      </div>
+                      <div className="col-span-1 text-slate-500">
+                        {isEditing ? (
+                          <Select
+                            value={editingTaskAssignees[task.id] ?? (task.assigned_to || "__unassigned__")}
+                            onValueChange={(value) =>
+                              setEditingTaskAssignees((prev) => ({ ...prev, [task.id]: value }))
+                            }
+                          >
+                            <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-purple-500 shadow-none">
+                              <SelectValue placeholder="-" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">-</SelectItem>
+                              {assignableUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || u.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          memberLabel(task.assigned_to)
+                        )}
+                      </div>
+                      <div className="col-span-2 text-slate-500">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-1 text-sm"
+                            value={editingTaskTotals[task.id] ?? productTaskEdits[task.id]?.total ?? ""}
+                            onChange={(e) =>
+                              setEditingTaskTotals((prev) => ({ ...prev, [task.id]: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          productTaskEdits[task.id]?.total || "-"
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                            onClick={async () => {
+                              const completedNum = Math.max(
+                                0,
+                                (parseInt(productTaskEdits[task.id]?.completed || "0", 10) || 0) - 1
+                              )
+                              const newCompleted = completedNum.toString()
+                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                              const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                              setProductTaskEdits((prev) => ({
+                                ...prev,
+                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                              }))
+                              await apiFetch(`/tasks/${task.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  internal_notes: `total_products=${productTaskEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                  status: newStatus,
+                                }),
+                              })
+                            }}
+                          >
+                            -
+                          </button>
+                          <div className="min-w-[32px] text-center text-sm text-slate-700">
+                            {productTaskEdits[task.id]?.completed || "0"}
+                          </div>
+                          <button
+                            type="button"
+                            className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                            onClick={async () => {
+                              let completedNum = (parseInt(productTaskEdits[task.id]?.completed || "0", 10) || 0) + 1
+                              if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                              const newCompleted = completedNum.toString()
+                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                              const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                              setProductTaskEdits((prev) => ({
+                                ...prev,
+                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                              }))
+                              await apiFetch(`/tasks/${task.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  internal_notes: `total_products=${productTaskEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                  status: newStatus,
+                                }),
+                              })
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <div className="col-span-2">
+                        <Badge
+                          variant={task.status === "DONE" ? "default" : "outline"}
+                          className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                        >
+                          {statusLabel(productTaskEdits[task.id]?.status || task.status)}
+                        </Badge>
+                      </div>
+                      <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-2">
+                          {isEditing ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void saveTaskRowEdits(task, false)}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelEditTaskRow(task.id)}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => startEditTaskRow(task)}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            onClick={async () => {
+                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                              if (!res?.ok) {
+                                if (res?.status == 405) {
+                                  toast.error("Delete endpoint not active. Restart backend.")
+                                } else {
+                                  toast.error("Failed to delete task")
+                                }
+                                return
+                              }
+                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                              toast.success("Task deleted")
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                {productTasks.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-slate-400">
+                    No tasks yet. Add one above to get started.
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </Card>
         )}
 
@@ -1854,7 +2400,287 @@ export default function DesignProjectPage() {
         {activeTab === "ko1-ko2" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">KO1/KO2</h3>
-            <p className="text-muted-foreground">Content coming soon...</p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
+                <div className="col-span-4">Task</div>
+                <div className="col-span-1">Assigned</div>
+                <div className="col-span-2">Total</div>
+                <div className="col-span-2">Completed</div>
+                <div className="col-span-2">Status</div>
+                <div className="col-span-1"></div>
+              </div>
+              <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                <div className="col-span-4">
+                  <input
+                    type="text"
+                    placeholder="Enter task name..."
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newKoTaskTitle}
+                    onChange={(e) => setNewKoTaskTitle(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-1">
+                  <Select value={newKoTaskAssignee} onValueChange={setNewKoTaskAssignee}>
+                    <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-purple-500 shadow-none">
+                      <SelectValue placeholder="-" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassigned__">-</SelectItem>
+                      {assignableUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name || u.username || u.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newKoTaskTotal}
+                    onChange={(e) => setNewKoTaskTotal(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                    value={newKoTaskCompleted}
+                    onChange={(e) => setNewKoTaskCompleted(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Button
+                    size="sm"
+                    className="rounded-full px-5 shadow-sm"
+                    onClick={async () => {
+                      if (!project || !newKoTaskTitle.trim()) return
+                      setCreatingKoTask(true)
+                      try {
+                        const res = await apiFetch("/tasks", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: newKoTaskTitle.trim(),
+                            project_id: project.id,
+                            department_id: project.department_id,
+                            assigned_to: newKoTaskAssignee === "__unassigned__" ? null : newKoTaskAssignee,
+                            status: "TODO",
+                            priority: "NORMAL",
+                            phase: "PRODUCT",
+                            internal_notes: `ko_tab=KO1KO2; total_products=${newKoTaskTotal || 0}; completed_products=${newKoTaskCompleted || 0}`,
+                          }),
+                        })
+                        if (!res?.ok) {
+                          toast.error("Failed to add task")
+                          return
+                        }
+                        const created = (await res.json()) as Task
+                        setTasks((prev) => [...prev, created])
+                        setNewKoTaskTitle("")
+                        setNewKoTaskAssignee("__unassigned__")
+                        setNewKoTaskTotal("")
+                        setNewKoTaskCompleted("")
+                        toast.success("Task added")
+                      } finally {
+                        setCreatingKoTask(false)
+                      }
+                    }}
+                    disabled={creatingKoTask || !newKoTaskTitle.trim()}
+                  >
+                    {creatingKoTask ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                <div className="col-span-1"></div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {koTasks.map((task, index) => {
+                  const totalVal = parseInt(productTaskEdits[task.id]?.total || "0", 10) || 0
+                  const isEditing = Boolean(editingTaskIds[task.id])
+                  return (
+                    <div key={task.id} className="grid grid-cols-12 gap-4 py-4 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                      <div className="col-span-4 font-medium text-slate-700">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-1 text-sm"
+                            value={editingTaskTitles[task.id] ?? task.title}
+                            onChange={(e) =>
+                              setEditingTaskTitles((prev) => ({ ...prev, [task.id]: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          `${index + 1}. ${task.title}`
+                        )}
+                      </div>
+                      <div className="col-span-1 text-slate-500">
+                        {isEditing ? (
+                          <Select
+                            value={editingTaskAssignees[task.id] ?? (task.assigned_to || "__unassigned__")}
+                            onValueChange={(value) =>
+                              setEditingTaskAssignees((prev) => ({ ...prev, [task.id]: value }))
+                            }
+                          >
+                            <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-purple-500 shadow-none">
+                              <SelectValue placeholder="-" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">-</SelectItem>
+                              {assignableUsers.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || u.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          memberLabel(task.assigned_to)
+                        )}
+                      </div>
+                      <div className="col-span-2 text-slate-500">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-purple-500 outline-none py-1 text-sm"
+                            value={editingTaskTotals[task.id] ?? productTaskEdits[task.id]?.total ?? ""}
+                            onChange={(e) =>
+                              setEditingTaskTotals((prev) => ({ ...prev, [task.id]: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          productTaskEdits[task.id]?.total || "-"
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                            onClick={async () => {
+                              const completedNum = Math.max(
+                                0,
+                                (parseInt(productTaskEdits[task.id]?.completed || "0", 10) || 0) - 1
+                              )
+                              const newCompleted = completedNum.toString()
+                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                              const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                              setProductTaskEdits((prev) => ({
+                                ...prev,
+                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                              }))
+                              await apiFetch(`/tasks/${task.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  internal_notes: `ko_tab=KO1KO2; total_products=${productTaskEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                  status: newStatus,
+                                }),
+                              })
+                            }}
+                          >
+                            -
+                          </button>
+                          <div className="min-w-[32px] text-center text-sm text-slate-700">
+                            {productTaskEdits[task.id]?.completed || "0"}
+                          </div>
+                          <button
+                            type="button"
+                            className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                            onClick={async () => {
+                              let completedNum = (parseInt(productTaskEdits[task.id]?.completed || "0", 10) || 0) + 1
+                              if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                              const newCompleted = completedNum.toString()
+                              const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                              const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                              setProductTaskEdits((prev) => ({
+                                ...prev,
+                                [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                              }))
+                              await apiFetch(`/tasks/${task.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  internal_notes: `ko_tab=KO1KO2; total_products=${productTaskEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                  status: newStatus,
+                                }),
+                              })
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <div className="col-span-2">
+                        <Badge
+                          variant={task.status === "DONE" ? "default" : "outline"}
+                          className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                        >
+                          {statusLabel(productTaskEdits[task.id]?.status || task.status)}
+                        </Badge>
+                      </div>
+                      <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-2">
+                          {isEditing ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void saveTaskRowEdits(task, true)}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelEditTaskRow(task.id)}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => startEditTaskRow(task)}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            onClick={async () => {
+                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                              if (!res?.ok) {
+                                if (res?.status == 405) {
+                                  toast.error("Delete endpoint not active. Restart backend.")
+                                } else {
+                                  toast.error("Failed to delete task")
+                                }
+                                return
+                              }
+                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                              toast.success("Task deleted")
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                {koTasks.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-slate-400">
+                    No tasks yet. Add one above to get started.
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </Card>
         )}
 
@@ -1963,8 +2789,90 @@ export default function DesignProjectPage() {
               <p className="text-muted-foreground">No GA/KA notes yet.</p>
             ) : (
               <div className="space-y-3">
+                <Dialog
+                  open={Boolean(gaNoteTaskOpenId)}
+                  onOpenChange={(open) => {
+                    if (!open) setGaNoteTaskOpenId(null)
+                  }}
+                >
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Create Task from Note</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="text-sm text-muted-foreground">
+                        This will create a task linked to the GA/KA note.
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          value={gaNoteTaskDescription}
+                          onChange={(e) => setGaNoteTaskDescription(e.target.value)}
+                          rows={4}
+                        />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Priority</Label>
+                          <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="NORMAL">Normal</SelectItem>
+                              <SelectItem value="HIGH">High</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Due date</Label>
+                          <Input
+                            type="date"
+                            value={gaNoteTaskDueDate}
+                            onChange={(e) => setGaNoteTaskDueDate(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Assign to</Label>
+                        <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unassigned" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                            {assignableUsers.map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.full_name || member.username || member.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={!gaNoteTaskTitle.trim() || creatingNoteTaskId === gaNoteTaskOpenId}
+                          onClick={() => {
+                            const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
+                            if (note) void createTaskFromNote(note)
+                          }}
+                        >
+                          {creatingNoteTaskId === gaNoteTaskOpenId ? "Creating..." : "Create Task"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 {gaNotes.map((note) => {
                   const creator = note.created_by ? userMap.get(note.created_by) : null
+                  const linkedTask = tasks.find((task) => task.ga_note_origin_id === note.id)
                   return (
                     <div key={note.id} className={`p-4 border rounded-lg ${note.status === "CLOSED" ? "bg-muted/30" : ""}`}>
                       <div className="flex items-start justify-between">
@@ -1986,14 +2894,34 @@ export default function DesignProjectPage() {
                             {note.content}
                           </p>
                           <div className="text-xs text-muted-foreground mt-2">
-                            {creator ? creator.full_name || creator.email : "Unknown"} • {formatDateTime(note.created_at)}
+                            {creator ? creator.full_name || creator.email : "Unknown"} ??? {formatDateTime(note.created_at)}
                           </div>
                         </div>
-                        {note.status !== "CLOSED" && (
-                          <Button variant="ghost" size="sm" onClick={() => void closeGaNote(note.id)}>
-                            Close
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {linkedTask ? (
+                            <Badge variant="outline" className="text-muted-foreground">Task Created</Badge>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setGaNoteTaskOpenId(note.id)
+                                setGaNoteTaskTitle(noteToTaskTitle(note.content, note.note_type))
+                                setGaNoteTaskDescription(note.content)
+                                setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                setGaNoteTaskAssigneeId("__unassigned__")
+                                setGaNoteTaskDueDate("")
+                              }}
+                            >
+                              Create Task
+                            </Button>
+                          )}
+                          {note.status !== "CLOSED" && (
+                            <Button variant="ghost" size="sm" onClick={() => void closeGaNote(note.id)}>
+                              Close
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )
