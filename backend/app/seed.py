@@ -131,11 +131,30 @@ GD_PUNIMI_TEMPLATE: list[str] = [
     "Me dhan mundsi me shtu per kategorit qe vazhdojm psh mujn me 3 kategori ose 4 ose 1 nvaret prej klientit",
     "A janë dërguar të gjitha fotot për bz 1n1?",
 ]
+# Graphic Design (GD) - "Përgatitja për dërgim KO1/KO2" checklist items
+GD_CONTROL_KO1_KO2_TEMPLATE: list[str] = [
+    "A janë bartur të gjitha produktet te folderi FINAL?",
+    "A janë bartur vetëm fotot e nevojshme (3 foto)?",
+    "A janë riemërtuar të gjitha fotot sipas kodit (kodi_1, kodi_2, kodi_3)?",
+    "A është kontrolluar nëse janë kryer të gjitha produktet?",
+    "A janë riemërtuar të gjitha fotot me kodin e artikullit dhe SKU-në interne?",
+    "A janë vendosur të gjitha fotot e një kategorie në një folder?",
+    "A është krijuar WeTransfer?",
+    "A është dërguar WeTransfer-i në grup?",
+]
+# Graphic Design (GD) - "Finalizimi" checklist items
+GD_FINALIZATION_TEMPLATE: list[str] = [
+    "A eshte derguar?",
+]
+
+
 
 PROJECT_ACCEPTANCE_PATH = "project acceptance"
 GA_DV_MEETING_PATH = "ga/dv meeting"
 PROPOZIM_KO1_KO2_PATH = "propozim ko1/ko2"
 PUNIMI_PATH = "punimi"
+CONTROL_KO1_KO2_PATH = "control ko1/ko2"
+FINALIZATION_PATH = "finalization"
 
 # Internal meetings (created as a global checklist by group_key, plus CHECKBOX items)
 INTERNAL_MEETINGS_PATH = "INTERNAL_MEETINGS"
@@ -861,6 +880,60 @@ async def seed() -> None:
                                     item_type=ChecklistItemType.CHECKBOX,
                                     position=position,
                                     path=PUNIMI_PATH,
+                                    title=title,
+                                    is_checked=False,
+                                )
+                            )
+
+                    # Check existing CONTROL KO1/KO2 items
+                    existing_control = (
+                        await db.execute(
+                            select(ChecklistItem)
+                            .where(
+                                ChecklistItem.checklist_id == checklist.id,
+                                ChecklistItem.path == CONTROL_KO1_KO2_PATH,
+                            )
+                        )
+                    ).scalars().all()
+                    existing_control_titles = {item.title for item in existing_control if item.title}
+
+                    # Add CONTROL KO1/KO2 items
+                    for position, title in enumerate(GD_CONTROL_KO1_KO2_TEMPLATE):
+                        if title not in existing_control_titles:
+                            db.add(
+                                ChecklistItem(
+                                    checklist_id=checklist.id,
+                                    item_type=ChecklistItemType.CHECKBOX,
+                                    position=position,
+                                    path=CONTROL_KO1_KO2_PATH,
+                                    title=title,
+                                    is_checked=False,
+                                )
+                            )
+
+                    # Check existing FINALIZATION items
+                    existing_finalization = (
+                        await db.execute(
+                            select(ChecklistItem)
+                            .where(
+                                ChecklistItem.checklist_id == checklist.id,
+                                ChecklistItem.path == FINALIZATION_PATH,
+                            )
+                        )
+                    ).scalars().all()
+                    existing_finalization_titles = {
+                        item.title for item in existing_finalization if item.title
+                    }
+
+                    # Add FINALIZATION items
+                    for position, title in enumerate(GD_FINALIZATION_TEMPLATE):
+                        if title not in existing_finalization_titles:
+                            db.add(
+                                ChecklistItem(
+                                    checklist_id=checklist.id,
+                                    item_type=ChecklistItemType.CHECKBOX,
+                                    position=position,
+                                    path=FINALIZATION_PATH,
                                     title=title,
                                     is_checked=False,
                                 )
