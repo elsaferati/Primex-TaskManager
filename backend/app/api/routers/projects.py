@@ -345,6 +345,13 @@ async def update_project(
                 detail="Cannot skip phases forward. Use advance-phase endpoint to move to the next phase.",
             )
         project.current_phase = payload.current_phase
+        if payload.current_phase == ProjectPhaseStatus.PLANNING and next_idx < current_idx:
+            checklist_ids = select(Checklist.id).where(Checklist.project_id == project.id)
+            await db.execute(
+                update(ChecklistItem)
+                .where(ChecklistItem.checklist_id.in_(checklist_ids))
+                .values(is_checked=False)
+            )
     if payload.status is not None:
         project.status = payload.status
     if payload.progress_percentage is not None:
@@ -429,22 +436,23 @@ async def advance_project_phase(
         .where(
             Checklist.project_id == project.id,
             ChecklistItem.is_checked.is_(False),
-                ChecklistItem.path == project.current_phase,
         )
     )
     checklist_filter = None
     if sequence == MST_PHASES:
         if project.current_phase == ProjectPhaseStatus.PLANNING:
             checklist_filter = or_(
-                ChecklistItem.path.is_(None),
-                ChecklistItem.path.notin_(["propozim ko1/ko2", "punimi"]),
+                ChecklistItem.path.in_(["project acceptance", "ga/dv meeting"]),
             )
         elif project.current_phase == ProjectPhaseStatus.PRODUCT:
             checklist_filter = ChecklistItem.path.in_(["propozim ko1/ko2", "punimi"])
-    if checklist_filter is not None:
-        unchecked_items = (await db.execute(checklist_query.where(checklist_filter))).scalar_one()
+        elif project.current_phase == ProjectPhaseStatus.CONTROL:
+            checklist_filter = ChecklistItem.path == "control ko1/ko2"
+        elif project.current_phase == ProjectPhaseStatus.FINAL:
+            checklist_filter = ChecklistItem.path == "finalization"
     else:
-        unchecked_items = (await db.execute(checklist_query)).scalar_one()
+        checklist_filter = ChecklistItem.path == project.current_phase
+    unchecked_items = (await db.execute(checklist_query.where(checklist_filter))).scalar_one()
     if open_tasks or unchecked_items:
         detail = "Complete all tasks and checklist items before advancing the phase."
         if open_tasks and unchecked_items:

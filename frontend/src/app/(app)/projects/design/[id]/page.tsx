@@ -26,6 +26,10 @@ const MST_PHASE_LABELS: Record<string, string> = {
   FINAL: "Final",
   CLOSED: "Closed",
 }
+const CONTROL_CHECKLIST_PATH = "control ko1/ko2"
+const CONTROL_CHECKLIST_TITLE = "PËRGATITJA PËR DËRGIM KO1/KO2"
+const FINALIZATION_PATH = "finalization"
+const FINALIZATION_TITLE = "Finalizimi"
 
 // Tabs for Planning phase
 const PLANNING_TABS = [
@@ -44,14 +48,13 @@ const PRODUCT_TABS = [
   { id: "propozim-ko1-ko2", label: "PROPOZIM KO1/KO2" },
   { id: "punimi", label: "PUNIMI" },
   { id: "produkte-sa-jane-kryer", label: "PRODUKTE SA JANE KRYER" },
-  { id: "ko1-ko2", label: "KO1/KO2" },
   { id: "members", label: "Members" },
   { id: "ga-notes", label: "GA Notes" },
 ] as const
 
 // Tabs for Control phase
 const CONTROL_TABS = [
-  { id: "description", label: "Description" },
+  { id: "ko1-ko2", label: "KO1/KO2" },
   { id: "tasks", label: "Tasks" },
   { id: "checklist", label: "Checklist" },
   { id: "members", label: "Members" },
@@ -60,10 +63,7 @@ const CONTROL_TABS = [
 
 // Tabs for Final phase
 const FINAL_TABS = [
-  { id: "description", label: "Description" },
-  { id: "tasks", label: "Tasks" },
-  { id: "checklist", label: "Checklist" },
-  { id: "members", label: "Members" },
+  { id: "finalization", label: "Finalizimi" },
   { id: "ga-notes", label: "GA Notes" },
 ] as const
 
@@ -145,14 +145,17 @@ function hasProductTotals(notes?: string | null) {
 function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
   if (phase === "PLANNING") {
     return items.filter(
-      (item) =>
-        item.path === "project acceptance" ||
-        item.path === "ga/dv meeting" ||
-        (!item.path || (item.path !== "propozim ko1/ko2" && item.path !== "punimi"))
+      (item) => item.path === "project acceptance" || item.path === "ga/dv meeting"
     )
   }
   if (phase === "PRODUCT") {
     return items.filter((item) => item.path === "propozim ko1/ko2" || item.path === "punimi")
+  }
+  if (phase === "CONTROL") {
+    return items.filter((item) => item.path === CONTROL_CHECKLIST_PATH)
+  }
+  if (phase === "FINAL") {
+    return items.filter((item) => item.path === FINALIZATION_PATH)
   }
   return []
 }
@@ -245,6 +248,10 @@ export default function DesignProjectPage() {
   const [commentEditingId, setCommentEditingId] = React.useState<string | null>(null)
   const [commentEditingText, setCommentEditingText] = React.useState("")
   const [commentSaving, setCommentSaving] = React.useState(false)
+  const [controlChecklistEditingId, setControlChecklistEditingId] = React.useState<string | null>(null)
+  const [controlChecklistEditingText, setControlChecklistEditingText] = React.useState("")
+  const [controlChecklistSaving, setControlChecklistSaving] = React.useState(false)
+  const [taskStatusSaving, setTaskStatusSaving] = React.useState<Record<string, boolean>>({})
 
   // Inline task form state for Produkte Sa Jane Kryer
   const [newProductTaskTitle, setNewProductTaskTitle] = React.useState("")
@@ -420,6 +427,7 @@ export default function DesignProjectPage() {
           item_type: "CHECKBOX",
           title: newChecklistContent.trim(),
           is_checked: false,
+          ...(activePhase === "CONTROL" ? { path: CONTROL_CHECKLIST_PATH } : {}),
           item_type: "CHECKBOX",
           title: newChecklistContent.trim(),
           is_checked: false,
@@ -1017,6 +1025,75 @@ export default function DesignProjectPage() {
     }
   }
 
+  const startEditControlChecklistItem = (item: ChecklistItem) => {
+    setControlChecklistEditingId(item.id)
+    setControlChecklistEditingText(item.title || "")
+  }
+
+  const cancelEditControlChecklistItem = () => {
+    setControlChecklistEditingId(null)
+    setControlChecklistEditingText("")
+  }
+
+  const saveControlChecklistItem = async () => {
+    if (!controlChecklistEditingId) return
+    const text = controlChecklistEditingText.trim()
+    if (!text) return
+    setControlChecklistSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${controlChecklistEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: text }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update item")
+        return
+      }
+      setControlChecklistEditingId(null)
+      setControlChecklistEditingText("")
+      await reloadChecklistItems()
+      toast.success("Item updated")
+    } finally {
+      setControlChecklistSaving(false)
+    }
+  }
+
+  const deleteControlChecklistItem = async (itemId: string) => {
+    setControlChecklistSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete item")
+        return
+      }
+      await reloadChecklistItems()
+      toast.success("Item deleted")
+    } finally {
+      setControlChecklistSaving(false)
+    }
+  }
+
+  const updateTaskStatus = async (taskId: string, status: Task["status"]) => {
+    setTaskStatusSaving((prev) => ({ ...prev, [taskId]: true }))
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update task status")
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      toast.success("Task updated")
+    } finally {
+      setTaskStatusSaving((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }
+
   // Determine active phase and visible tabs
   const phaseValue = viewedPhase || project?.current_phase || "PLANNING"
   const visibleTabs = React.useMemo(() => {
@@ -1198,10 +1275,22 @@ export default function DesignProjectPage() {
           item.path !== "project acceptance" &&
           item.path !== "ga/dv meeting" &&
           item.path !== "propozim ko1/ko2" &&
-          item.path !== "punimi"
+          item.path !== "punimi" &&
+          item.path !== FINALIZATION_PATH &&
+          item.path !== CONTROL_CHECKLIST_PATH
       ),
     [checklistItems]
   )
+  const controlChecklistItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === CONTROL_CHECKLIST_PATH),
+    [checklistItems]
+  )
+  const finalizationItems = React.useMemo(
+    () => checklistItems.filter((item) => item.path === FINALIZATION_PATH),
+    [checklistItems]
+  )
+  const checklistItemsForTab = activePhase === "CONTROL" ? controlChecklistItems : generalChecklistItems
+  const checklistTitle = activePhase === "CONTROL" ? CONTROL_CHECKLIST_TITLE : "Checklist"
 
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
   const assignableUsers = React.useMemo(() => allUsers, [allUsers])
@@ -1289,7 +1378,7 @@ export default function DesignProjectPage() {
             </Button>
           ) : null}
           <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
-          {advancingPhase ? "Advancing..." : "Advance to Next Phase"}
+          {advancingPhase ? "Advancing..." : activePhase === "FINAL" ? "Finalize" : "Advance to Next Phase"}
           </Button>
         </div>
       </div>
@@ -1441,6 +1530,9 @@ export default function DesignProjectPage() {
               <div className="space-y-3">
                 {taskList.map((task) => {
                   const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                  const savingStatus = taskStatusSaving[task.id]
+                  const taskPhase = task.phase || project?.current_phase || "PLANNING"
+                  const canMarkDone = taskPhase === activePhase
                   return (
                     <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
@@ -1454,9 +1546,22 @@ export default function DesignProjectPage() {
                         <Badge variant={task.priority === "HIGH" ? "destructive" : "secondary"}>
                           {task.priority}
                         </Badge>
-                        <Badge variant={task.status === "DONE" ? "default" : "outline"}>
-                          {statusLabel(task.status)}
-                        </Badge>
+                        <Select
+                          value={task.status}
+                          onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
+                          disabled={savingStatus}
+                        >
+                          <SelectTrigger className="w-[160px]">
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TASK_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status} disabled={status === "DONE" && !canMarkDone}>
+                                {statusLabel(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                   )
@@ -1466,10 +1571,10 @@ export default function DesignProjectPage() {
           </Card>
         )}
 
-        {/* Checklist Tab (empty for now as requested) */}
+        {/* Checklist Tab */}
         {activeTab === "checklist" && (
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Checklist</h3>
+            <h3 className="text-lg font-semibold mb-4">{checklistTitle}</h3>
             <div className="flex gap-2 mb-4">
               <Input
                 value={newChecklistContent}
@@ -1483,20 +1588,73 @@ export default function DesignProjectPage() {
                 {addingChecklist ? "Adding..." : "Add"}
               </Button>
             </div>
-            {generalChecklistItems.length === 0 ? (
+            {checklistItemsForTab.length === 0 ? (
               <p className="text-muted-foreground">No checklist items yet. Add items above.</p>
             ) : (
               <div className="space-y-2">
-                {generalChecklistItems.map((item) => (
+                {checklistItemsForTab.map((item) => (
                   <div key={item.id} className="p-3 border rounded-lg space-y-2">
                     <div className="flex items-center gap-3">
                       <Checkbox
                         checked={item.is_checked || false}
                         onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
                       />
-                      <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                        {item.title || item.content}
-                      </span>
+                      {activePhase === "CONTROL" && isAdmin ? (
+                        <div className="flex-1">
+                          {controlChecklistEditingId === item.id ? (
+                            <Input
+                              value={controlChecklistEditingText}
+                              onChange={(e) => setControlChecklistEditingText(e.target.value)}
+                            />
+                          ) : (
+                            <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                              {item.title || item.content}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                          {item.title || item.content}
+                        </span>
+                      )}
+                      {activePhase === "CONTROL" && isAdmin ? (
+                        <div className="ml-auto flex items-center gap-2">
+                          {controlChecklistEditingId === item.id ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={controlChecklistSaving || !controlChecklistEditingText.trim()}
+                                onClick={() => void saveControlChecklistItem()}
+                              >
+                                {controlChecklistSaving ? "Saving..." : "Save"}
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={cancelEditControlChecklistItem}>
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startEditControlChecklistItem(item)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-600"
+                                disabled={controlChecklistSaving}
+                                onClick={() => void deleteControlChecklistItem(item.id)}
+                              >
+                                Delete
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                     {/* Comment section */}
                     <div className="ml-7 space-y-2">
@@ -2930,6 +3088,73 @@ export default function DesignProjectPage() {
             )}
           </Card>
         )}
+
+        {/* Finalization Tab */}
+        {activeTab === "finalization" && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">{FINALIZATION_TITLE}</h3>
+            {finalizationItems.length === 0 ? (
+              <p className="text-muted-foreground">No finalization items yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {finalizationItems.map((item) => (
+                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        checked={item.is_checked || false}
+                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                      />
+                      <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                        {item.title || item.content}
+                      </span>
+                    </div>
+                    <div className="ml-7 space-y-2">
+                      {commentEditingId === item.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={commentEditingText}
+                            onChange={(e) => setCommentEditingText(e.target.value)}
+                            placeholder="Add a comment..."
+                            rows={2}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={commentSaving}
+                              onClick={() => void saveComment(item.id)}
+                            >
+                              {commentSaving ? "Saving..." : "Save Comment"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          {item.comment ? (
+                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                              {item.comment}
+                            </div>
+                          ) : (
+                            <div className="flex-1 text-sm text-muted-foreground italic">
+                              No comment
+                            </div>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                            {item.comment ? "Edit" : "Add"} Comment
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
       </div>
     </div>
   )

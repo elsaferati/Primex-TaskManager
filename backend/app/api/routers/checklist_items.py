@@ -31,6 +31,8 @@ PROJECT_ACCEPTANCE_PATH = "project acceptance"
 GA_DV_MEETING_PATH = "ga/dv meeting"
 PROPOZIM_KO1_KO2_PATH = "propozim ko1/ko2"
 PUNIMI_PATH = "punimi"
+CONTROL_KO1_KO2_PATH = "control ko1/ko2"
+FINALIZATION_PATH = "finalization"
 
 # Graphic Design (GD) - "Pranimi i Projektit" checklist items
 GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
@@ -66,6 +68,23 @@ GD_PUNIMI_TEMPLATE: list[str] = [
     "Me dhan mundsi me shtu per kategorit qe vazhdojm psh mujn me 3 kategori ose 4 ose 1 nvaret prej klientit",
     "A janë dërguar të gjitha fotot për bz 1n1?",
 ]
+# Graphic Design (GD) - "Përgatitja për dërgim KO1/KO2" checklist items
+GD_CONTROL_KO1_KO2_TEMPLATE: list[str] = [
+    "A janë bartur të gjitha produktet te folderi FINAL?",
+    "A janë bartur vetëm fotot e nevojshme (3 foto)?",
+    "A janë riemërtuar të gjitha fotot sipas kodit (kodi_1, kodi_2, kodi_3)?",
+    "A është kontrolluar nëse janë kryer të gjitha produktet?",
+    "A janë riemërtuar të gjitha fotot me kodin e artikullit dhe SKU-në interne?",
+    "A janë vendosur të gjitha fotot e një kategorie në një folder?",
+    "A është krijuar WeTransfer?",
+    "A është dërguar WeTransfer-i në grup?",
+]
+# Graphic Design (GD) - "Finalizimi" checklist items
+GD_FINALIZATION_TEMPLATE: list[str] = [
+    "A eshte derguar?",
+]
+
+
 
 
 async def _ensure_gd_project_acceptance_items(db: AsyncSession, project: Project) -> None:
@@ -322,6 +341,132 @@ async def _ensure_gd_punimi_items(db: AsyncSession, project: Project) -> None:
     await db.commit()
 
 
+async def _ensure_gd_control_ko1_ko2_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "Përgatitja për dërgim KO1/KO2" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "control ko1/ko2" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == CONTROL_KO1_KO2_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_CONTROL_KO1_KO2_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_CONTROL_KO1_KO2_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=CONTROL_KO1_KO2_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
+async def _ensure_gd_finalization_items(db: AsyncSession, project: Project) -> None:
+    """
+    Ensure the GD "Finalizimi" checklist exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with path = "finalization" as requested.
+    """
+    if project.department_id is None:
+        return
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == FINALIZATION_PATH,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in GD_FINALIZATION_TEMPLATE if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(GD_FINALIZATION_TEMPLATE):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=FINALIZATION_PATH,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
 def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
     """Convert ChecklistItem model to ChecklistItemOut schema."""
     assignees = [
@@ -377,6 +522,10 @@ async def list_checklist_items(
         await _ensure_gd_propozim_ko1_ko2_items(db, project)
         # Auto-seed GD "PUNIMI" checklist (no deletes, only inserts missing items).
         await _ensure_gd_punimi_items(db, project)
+        # Auto-seed GD "Përgatitja për dërgim KO1/KO2" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_control_ko1_ko2_items(db, project)
+        # Auto-seed GD "Finalizimi" checklist (no deletes, only inserts missing items).
+        await _ensure_gd_finalization_items(db, project)
 
         stmt = (
             select(ChecklistItem)

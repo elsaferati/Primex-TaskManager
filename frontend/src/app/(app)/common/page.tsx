@@ -16,15 +16,15 @@ type CommonType =
   | "feedback"
   | "priority"
 
-type LateItem = { person: string; date: string; until: string; start?: string; note?: string }
-type AbsentItem = { person: string; date: string; from: string; to: string; note?: string }
-type LeaveItem = { person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
+type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
+type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
+type LeaveItem = { entryId?: string; person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
 type BlockedItem = { title: string; person: string; date: string; note?: string }
 type OneHItem = { title: string; person: string; date: string; note?: string }
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string }
 type R1Item = { title: string; date: string; owner: string; note?: string }
-type ProblemItem = { title: string; person: string; date: string; note?: string }
-type FeedbackItem = { title: string; person: string; date: string; note?: string }
+type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
+type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type PriorityItem = { project: string; date: string; assignees: string[] }
 
 type SwimlaneCell = {
@@ -33,6 +33,7 @@ type SwimlaneCell = {
   accentClass?: string
   assignees?: string[]
   placeholder?: boolean
+  entryId?: string
 }
 type SwimlaneRow = {
   id: CommonType
@@ -184,6 +185,7 @@ export default function CommonViewPage() {
     owner: "",
     time: "",
   })
+  const [isSavingEntry, setIsSavingEntry] = React.useState(false)
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
@@ -373,6 +375,7 @@ export default function CommonViewPage() {
               note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
               
               allData.late.push({
+                entryId: e.id,
                 person: personName,
                 date,
                 until,
@@ -394,6 +397,7 @@ export default function CommonViewPage() {
               note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
               
               allData.absent.push({
+                entryId: e.id,
                 person: personName,
                 date,
                 from,
@@ -445,6 +449,7 @@ export default function CommonViewPage() {
               }
               
               allData.leave.push({
+                entryId: e.id,
                 person: personName,
                 startDate,
                 endDate,
@@ -470,6 +475,7 @@ export default function CommonViewPage() {
               })
             } else if (e.category === "Problems") {
               allData.problems.push({
+                entryId: e.id,
                 title: e.title,
                 person: personName,
                 date,
@@ -477,6 +483,7 @@ export default function CommonViewPage() {
               })
             } else if (e.category === "Complaints" || e.category === "Requests" || e.category === "Proposals") {
               allData.feedback.push({
+                entryId: e.id,
                 title: e.title,
                 person: personName,
                 date,
@@ -748,6 +755,8 @@ export default function CommonViewPage() {
 
   const submitForm = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSavingEntry) return
+    setIsSavingEntry(true)
 
     try {
       let category: string
@@ -829,6 +838,8 @@ export default function CommonViewPage() {
       closeModal()
     } catch (err) {
       console.error("Failed to submit form", err)
+    } finally {
+      setIsSavingEntry(false)
     }
   }
 
@@ -836,6 +847,25 @@ export default function CommonViewPage() {
     if (typeFilters.size === 0) return true
     return typeFilters.has(type)
   }
+
+  const deleteCommonEntry = React.useCallback(
+    async (entryId: string) => {
+      if (!isAdmin) return
+      const confirmed = window.confirm("Delete this common entry? This action cannot be undone.")
+      if (!confirmed) return
+      try {
+        const res = await apiFetch(`/common-entries/${entryId}`, { method: "DELETE" })
+        if (!res?.ok) {
+          console.error("Failed to delete common entry", res?.status)
+          return
+        }
+        window.location.reload()
+      } catch (err) {
+        console.error("Failed to delete common entry", err)
+      }
+    },
+    [apiFetch, isAdmin]
+  )
 
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
     const baseItems = items.length ? items : [{ title: "No data available.", placeholder: true }]
@@ -852,11 +882,13 @@ export default function CommonViewPage() {
       title: x.person,
       subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent delay",
+      entryId: x.entryId,
     }))
     const absentItems: SwimlaneCell[] = filtered.absent.map((x) => ({
       title: x.person,
       subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent absence",
+      entryId: x.entryId,
     }))
     const leaveItems: SwimlaneCell[] = filtered.leave.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
@@ -870,6 +902,7 @@ export default function CommonViewPage() {
         title: x.person,
         subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
         accentClass: "swimlane-accent leave",
+        entryId: x.entryId,
       }
     })
     const blockedItems: SwimlaneCell[] = filtered.blocked.map((x) => ({
@@ -896,11 +929,13 @@ export default function CommonViewPage() {
       title: x.title,
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent problem",
+      entryId: x.entryId,
     }))
     const feedbackItems: SwimlaneCell[] = filtered.feedback.map((x) => ({
       title: x.title,
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent feedback",
+      entryId: x.entryId,
     }))
     const priorityItems: SwimlaneCell[] = filtered.priority.map((p) => ({
       title: p.project,
@@ -1762,6 +1797,7 @@ export default function CommonViewPage() {
           gap: 4px;
           color: var(--swim-text);
           background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
+          position: relative;
         }
         .swimlane-cell:nth-child(3n) {
           border-right: 0;
@@ -1780,6 +1816,30 @@ export default function CommonViewPage() {
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
+        }
+        .swimlane-delete {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          border: 1px solid #e2e8f0;
+          background: #ffffff;
+          color: #dc2626;
+          width: 22px;
+          height: 22px;
+          border-radius: 6px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 14px;
+          line-height: 1;
+          opacity: 0.9;
+          transition: all 0.2s ease;
+        }
+        .swimlane-delete:hover {
+          background: #fee2e2;
+          border-color: #fecaca;
+          opacity: 1;
         }
         .swimlane-assignees {
           display: flex;
@@ -1856,6 +1916,31 @@ export default function CommonViewPage() {
         .week-table-entry {
           font-size: 10px;
           line-height: 1.4;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .week-table-entry span {
+          flex: 1;
+        }
+        .week-table-delete {
+          border: 1px solid #cbd5e1;
+          background: #ffffff;
+          color: #dc2626;
+          width: 18px;
+          height: 18px;
+          border-radius: 4px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 12px;
+          line-height: 1;
+          padding: 0;
+        }
+        .week-table-delete:hover {
+          background: #fee2e2;
+          border-color: #fecaca;
         }
         .week-table-avatars {
           display: flex;
@@ -2295,10 +2380,60 @@ export default function CommonViewPage() {
         .modal-footer { 
           display: flex; 
           justify-content: flex-end; 
-          gap: 12px; 
-          padding: 20px 28px; 
+          gap: 16px; 
+          padding: 24px 28px; 
           border-top: 2px solid #e2e8f0; 
           background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        }
+        .modal-footer .btn-primary {
+          background: #2563eb;
+          color: white;
+          border: none;
+          padding: 14px 32px;
+          font-size: 15px;
+          font-weight: 700;
+          border-radius: 10px;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+          min-width: 120px;
+          transition: all 0.2s ease;
+        }
+        .modal-footer .btn-primary:hover:not(:disabled) {
+          background: #1d4ed8;
+          box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+          transform: translateY(-1px);
+        }
+        .modal-footer .btn-primary:active:not(:disabled) {
+          transform: translateY(0);
+          box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+        }
+        .modal-footer .btn-outline {
+          background: white;
+          color: #475569;
+          border: 2px solid #cbd5e1;
+          padding: 14px 32px;
+          font-size: 15px;
+          font-weight: 700;
+          border-radius: 10px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          min-width: 120px;
+          transition: all 0.2s ease;
+        }
+        .modal-footer .btn-outline:hover:not(:disabled) {
+          background: #f8fafc;
+          border-color: #94a3b8;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          transform: translateY(-1px);
+        }
+        .modal-footer .btn-outline:active:not(:disabled) {
+          transform: translateY(0);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .btn-primary:disabled,
+        .btn-outline:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
         }
         .form-grid { 
           display: grid; 
@@ -2830,13 +2965,35 @@ export default function CommonViewPage() {
                       if (row.id === "late") {
                         return entries.map((e: LateItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.person)} {e.start || "08:00"}-{e.until}
+                            <span>{initials(e.person)} {e.start || "08:00"}-{e.until}</span>
+                            {isAdmin && e.entryId ? (
+                              <button
+                                type="button"
+                                className="week-table-delete"
+                                onClick={() => deleteCommonEntry(e.entryId)}
+                                aria-label="Delete entry"
+                                title="Delete"
+                              >
+                                ×
+                              </button>
+                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "absent") {
                         return entries.map((e: AbsentItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.person)} {e.from} - {e.to}
+                            <span>{initials(e.person)} {e.from} - {e.to}</span>
+                            {isAdmin && e.entryId ? (
+                              <button
+                                type="button"
+                                className="week-table-delete"
+                                onClick={() => deleteCommonEntry(e.entryId)}
+                                aria-label="Delete entry"
+                                title="Delete"
+                              >
+                                ×
+                              </button>
+                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "leave") {
@@ -2844,14 +3001,42 @@ export default function CommonViewPage() {
                           const range = e.endDate !== e.startDate ? `${formatDateHuman(e.startDate)}-${formatDateHuman(e.endDate)}` : formatDateHuman(e.startDate)
                           return (
                             <div key={idx} className="week-table-entry">
-                              {initials(e.person)} {e.fullDay ? "Full day" : `${e.from}-${e.to}`} {range}
+                              <span>{initials(e.person)} {e.fullDay ? "Full day" : `${e.from}-${e.to}`} {range}</span>
+                              {isAdmin && e.entryId ? (
+                                <button
+                                  type="button"
+                                  className="week-table-delete"
+                                  onClick={() => deleteCommonEntry(e.entryId)}
+                                  aria-label="Delete entry"
+                                  title="Delete"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
                             </div>
                           )
                         })
-                      } else if (row.id === "blocked" || row.id === "problem" || row.id === "feedback") {
-                        return entries.map((e: any, idx: number) => (
+                      } else if (row.id === "blocked") {
+                        return entries.map((e: BlockedItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.person || e.title || "")}: {e.note || ""}
+                            <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
+                          </div>
+                        ))
+                      } else if (row.id === "problem" || row.id === "feedback") {
+                        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
+                            {isAdmin && e.entryId ? (
+                              <button
+                                type="button"
+                                className="week-table-delete"
+                                onClick={() => deleteCommonEntry(e.entryId)}
+                                aria-label="Delete entry"
+                                title="Delete"
+                              >
+                                ×
+                              </button>
+                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "oneH" || row.id === "r1") {
@@ -2945,6 +3130,17 @@ export default function CommonViewPage() {
                                 .filter(Boolean)
                                 .join(" ")}
                             >
+                              {!cell.placeholder && isAdmin && cell.entryId ? (
+                                <button
+                                  type="button"
+                                  className="swimlane-delete"
+                                  onClick={() => deleteCommonEntry(cell.entryId)}
+                                  aria-label="Delete entry"
+                                  title="Delete"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
                               <div className="swimlane-title">{cell.title}</div>
                               {!cell.placeholder && cell.assignees?.length ? (
                                 <div className="swimlane-assignees">
@@ -3121,15 +3317,15 @@ export default function CommonViewPage() {
                     />
                   </div>
                 </div>
+                <div className="modal-footer">
+                  <button className="btn-outline" type="button" onClick={closeModal} disabled={isSavingEntry}>
+                    Cancel
+                  </button>
+                  <button className="btn-primary" type="submit" disabled={isSavingEntry}>
+                    {isSavingEntry ? "Saving..." : "Save"}
+                  </button>
+                </div>
               </form>
-              </div>
-            <div className="modal-footer">
-              <button className="btn-outline" type="button" onClick={closeModal}>
-                Cancel
-              </button>
-              <button className="btn-primary" type="submit" onClick={submitForm}>
-                Save
-              </button>
               </div>
           </div>
         </div>

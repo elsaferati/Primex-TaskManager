@@ -289,3 +289,29 @@ async def reject_entry(
     return _to_out(entry)
 
 
+@router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_entry(
+    entry_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> None:
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    entry = (await db.execute(select(CommonEntry).where(CommonEntry.id == entry_id))).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="common_entry",
+        entity_id=entry.id,
+        action="deleted",
+        before={"category": entry.category.value, "title": entry.title},
+    )
+
+    await db.delete(entry)
+    await db.commit()
+    return None
+
