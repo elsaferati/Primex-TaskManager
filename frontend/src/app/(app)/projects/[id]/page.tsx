@@ -416,7 +416,14 @@ export default function ProjectPage() {
   const [newDocumentationText, setNewDocumentationText] = React.useState("")
   const [savingDocumentationItem, setSavingDocumentationItem] = React.useState(false)
   const [documentationFilePath, setDocumentationFilePath] = React.useState("")
-  const [documentationFilePaths, setDocumentationFilePaths] = React.useState<string[]>([])
+  const [documentationFilePaths, setDocumentationFilePaths] = React.useState<
+    { id: string; path: string }[]
+  >([])
+  const [documentationFilePathEditingId, setDocumentationFilePathEditingId] = React.useState<
+    string | null
+  >(null)
+  const [documentationFilePathEditingText, setDocumentationFilePathEditingText] = React.useState("")
+  const [documentationFilePathSaving, setDocumentationFilePathSaving] = React.useState(false)
   const [gaPromptContent, setGaPromptContent] = React.useState("")
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
@@ -545,6 +552,23 @@ export default function ProjectPage() {
         isChecked: Boolean(item.is_checked),
         position: item.position ?? index + 1,
       }))
+    )
+  }, [checklistItems])
+
+  React.useEffect(() => {
+    const filePathItems = checklistItems
+      .filter(
+        (item) =>
+          item.path === "DOCUMENTATION" &&
+          item.item_type === "COMMENT" &&
+          item.category === "FILE_PATH"
+      )
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    setDocumentationFilePaths(
+      filePathItems
+        .map((item) => ({ id: item.id, path: item.comment || "" }))
+        .filter((item) => item.path)
     )
   }, [checklistItems])
 
@@ -1218,11 +1242,99 @@ export default function ProjectPage() {
     }
   }
 
-  const addDocumentationFilePath = () => {
+  const addDocumentationFilePath = async () => {
+    if (!project) return
     const value = documentationFilePath.trim()
     if (!value) return
-    setDocumentationFilePaths((prev) => [value, ...prev])
-    setDocumentationFilePath("")
+    try {
+      const existingFilePaths = checklistItems.filter(
+        (item) =>
+          item.path === "DOCUMENTATION" &&
+          item.item_type === "COMMENT" &&
+          item.category === "FILE_PATH"
+      )
+      const position =
+        existingFilePaths.length > 0
+          ? Math.max(...existingFilePaths.map((item) => item.position ?? 0)) + 1
+          : 1
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "COMMENT",
+          path: "DOCUMENTATION",
+          category: "FILE_PATH",
+          comment: value,
+          position,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add file path")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => [...prev, created])
+      setDocumentationFilePath("")
+      toast.success("File path added")
+    } catch (error) {
+      console.error("Failed to add file path:", error)
+      toast.error("Failed to add file path")
+    }
+  }
+
+  const startEditDocumentationFilePath = (itemId: string) => {
+    const item = documentationFilePaths.find((entry) => entry.id === itemId)
+    if (!item) return
+    setDocumentationFilePathEditingId(itemId)
+    setDocumentationFilePathEditingText(item.path)
+  }
+
+  const cancelEditDocumentationFilePath = () => {
+    setDocumentationFilePathEditingId(null)
+    setDocumentationFilePathEditingText("")
+  }
+
+  const saveDocumentationFilePath = async () => {
+    if (!documentationFilePathEditingId) return
+    const value = documentationFilePathEditingText.trim()
+    if (!value) return
+    setDocumentationFilePathSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${documentationFilePathEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: value }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update file path")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditDocumentationFilePath()
+      toast.success("File path updated")
+    } finally {
+      setDocumentationFilePathSaving(false)
+    }
+  }
+
+  const deleteDocumentationFilePath = async (itemId: string) => {
+    if (documentationFilePathEditingId === itemId) {
+      cancelEditDocumentationFilePath()
+    }
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete file path")
+        return
+      }
+      setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+      toast.success("File path deleted")
+    } catch (error) {
+      console.error("Failed to delete file path:", error)
+      toast.error("Failed to delete file path")
+    }
   }
 
   const toggleMemberSelect = (userId: string) => {
@@ -2520,11 +2632,65 @@ export default function ProjectPage() {
                 </div>
                 {documentationFilePaths.length ? (
                   <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                    {documentationFilePaths.map((path, idx) => (
-                      <div key={`${path}-${idx}`} className="rounded-md border px-3 py-2">
-                        {path}
-                      </div>
-                    ))}
+                    {documentationFilePaths.map((item) => {
+                      const isEditing = documentationFilePathEditingId === item.id
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                        >
+                          {isEditing ? (
+                            <>
+                              <Input
+                                value={documentationFilePathEditingText}
+                                onChange={(e) => setDocumentationFilePathEditingText(e.target.value)}
+                              />
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={
+                                    documentationFilePathSaving ||
+                                    !documentationFilePathEditingText.trim()
+                                  }
+                                  onClick={() => void saveDocumentationFilePath()}
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={cancelEditDocumentationFilePath}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex-1">{item.path}</div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEditDocumentationFilePath(item.id)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600 border-red-200 hover:bg-red-50"
+                                  onClick={() => void deleteDocumentationFilePath(item.id)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="mt-3 text-sm text-muted-foreground">No file paths added.</div>
