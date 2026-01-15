@@ -532,8 +532,44 @@ export default function CommonViewPage() {
           
           const today = toISODate(new Date())
           const priorityMap = new Map<string, PriorityItem>()
+          
+          // Debug logging
+          console.log("🔍 [Common View Debug] Total tasks loaded:", tasks.length)
+          const inProgressTasks = tasks.filter(t => !t.completed_at)
+          console.log("🔍 [Common View Debug] In-progress tasks (not completed):", inProgressTasks.length)
+          const tasksWithProjects = inProgressTasks.filter(t => t.project_id)
+          console.log("🔍 [Common View Debug] In-progress tasks with project_id:", tasksWithProjects.length)
+          
+          if (tasksWithProjects.length > 0) {
+            console.log("🔍 [Common View Debug] Tasks contributing to Projects section:")
+            tasksWithProjects.forEach((t, idx) => {
+              const projectName = projectNameById.get(t.project_id || "")
+              const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
+              const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
+              const ownerName = assignee?.full_name || assignee?.username || "Unknown"
+              const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
+              const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
+              
+              console.log(`  ${idx + 1}. Task: "${t.title}"`, {
+                project_id: t.project_id,
+                project_name: projectName || "NOT FOUND",
+                assignee: ownerName,
+                date: taskDate,
+                task_type: t.task_type,
+                is_bllok: t.is_bllok,
+                is_1h_report: t.is_1h_report,
+                is_r1: t.is_r1,
+                completed_at: t.completed_at
+              })
+            })
+          }
 
           for (const t of tasks) {
+            // Only show tasks that are in progress (not completed)
+            if (t.completed_at) {
+              continue
+            }
+            
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
             const ownerName = assignee?.full_name || assignee?.username || null
@@ -584,10 +620,12 @@ export default function CommonViewPage() {
               const projectName = projectNameById.get(t.project_id)
               // Skip if project name is not found (project might be deleted or inaccessible)
               if (!projectName) {
+                console.log(`⚠️ [Common View Debug] Task "${t.title}" has project_id ${t.project_id} but project name not found in map`)
                 continue
               }
               const key = `${t.project_id}-${taskDate}`
               if (!priorityMap.has(key)) {
+                console.log(`✅ [Common View Debug] Adding project "${projectName}" to priority map (key: ${key}, date: ${taskDate})`)
                 priorityMap.set(key, {
                   project: projectName,
                   date: taskDate,
@@ -598,12 +636,27 @@ export default function CommonViewPage() {
               for (const name of assigneeNames) {
                 if (!entry.assignees.includes(name)) {
                   entry.assignees.push(name)
+                  console.log(`  ➕ Added assignee "${name}" to project "${projectName}"`)
                 }
               }
             }
           }
           
           allData.priority = Array.from(priorityMap.values())
+          
+          // Debug logging for final priority items
+          if (allData.priority.length > 0) {
+            console.log("🔍 [Common View Debug] Final Projects in Priority section:", allData.priority.length)
+            allData.priority.forEach((item, idx) => {
+              console.log(`  ${idx + 1}. Project: "${item.project}"`, {
+                date: item.date,
+                assignees: item.assignees,
+                assignee_count: item.assignees.length
+              })
+            })
+          } else {
+            console.log("🔍 [Common View Debug] No projects in Priority section")
+          }
         }
 
         // Single state update with all data
