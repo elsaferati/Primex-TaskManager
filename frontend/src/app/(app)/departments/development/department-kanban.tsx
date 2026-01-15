@@ -102,6 +102,7 @@ const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
+  { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
   { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
   { id: "blocked", label: "Blocked", description: "Blocked all day by a single task." },
   { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
@@ -353,6 +354,7 @@ function noProjectTypeLabel(task: Task) {
   if (task.is_bllok) return "Blocked"
   if (task.is_1h_report) return "1H"
   if (task.is_r1) return "R1"
+  if (task.is_personal) return "Personal"
   return "Normal"
 }
 
@@ -502,7 +504,9 @@ export default function DepartmentKanban() {
           const taskRows = (await tasksRes.json()) as Task[]
           const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter((t) => !t.project_id))
+          setNoProjectTasks(
+            nonSystemTasks.filter((t) => !t.project_id && !t.system_template_origin_id)
+          )
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -949,6 +953,7 @@ export default function DepartmentKanban() {
 
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
+    const personal: Task[] = []
     const ga: Task[] = []
     const blocked: Task[] = []
     const oneHour: Task[] = []
@@ -960,13 +965,15 @@ export default function DepartmentKanban() {
         oneHour.push(t)
       } else if (t.is_r1) {
         r1.push(t)
+      } else if (t.is_personal) {
+        personal.push(t)
       } else if (t.ga_note_origin_id) {
         ga.push(t)
       } else {
         normal.push(t)
       }
     }
-    return { normal, ga, blocked, oneHour, r1 }
+    return { normal, personal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
 
   const statusRows = [
@@ -1017,6 +1024,18 @@ export default function DepartmentKanban() {
       borderClass: "border-sky-500",
       itemBadge: "GA",
       itemBadgeClass: "bg-white text-sky-600 border-slate-200",
+    },
+    {
+      id: "personal",
+      title: "PERSONAL",
+      count: noProjectBuckets.personal.length,
+      items: noProjectBuckets.personal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-purple-600 border border-purple-200",
+      borderClass: "border-purple-500",
+      itemBadge: "Personal",
+      itemBadgeClass: "bg-white text-purple-600 border-purple-200",
     },
     {
       id: "normal",
@@ -1315,20 +1334,21 @@ export default function DepartmentKanban() {
         setGaNotes((prev) => [createdNote, ...prev])
       }
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
-      const payload = {
-        title: noProjectTitle.trim(),
-        description: noProjectDescription.trim() || null,
-        project_id: null,
-        department_id: department.id,
-        status: "TODO",
-        priority: "NORMAL",
-        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
-        is_bllok: noProjectType === "blocked",
-        is_1h_report: noProjectType === "hourly",
-        is_r1: noProjectType === "r1",
-        ga_note_origin_id: gaNoteId,
-        due_date: dueDate,
-      }
+        const payload = {
+          title: noProjectTitle.trim(),
+          description: noProjectDescription.trim() || null,
+          project_id: null,
+          department_id: department.id,
+          status: "TODO",
+          priority: "NORMAL",
+          finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
+          is_bllok: noProjectType === "blocked",
+          is_1h_report: noProjectType === "hourly",
+          is_r1: noProjectType === "r1",
+          is_personal: noProjectType === "personal",
+          ga_note_origin_id: gaNoteId,
+          due_date: dueDate,
+        }
       const assigneeIds =
         noProjectAssignee === "__all__"
           ? departmentUsers.map((u) => u.id)
@@ -1361,7 +1381,11 @@ export default function DepartmentKanban() {
           toast.error(detail)
           return
         }
-        createdTasks.push((await res.json()) as Task)
+        const created = (await res.json()) as Task
+        if (noProjectType === "personal") {
+          created.is_personal = true
+        }
+        createdTasks.push(created)
       }
       if (createdTasks.length) {
         setNoProjectTasks((prev) => [...createdTasks, ...prev])

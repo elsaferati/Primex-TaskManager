@@ -387,6 +387,12 @@ function initials(src: string) {
     .join("")
 }
 
+function initialsWithDots(src: string) {
+  const raw = initials(src)
+  if (!raw) return ""
+  return raw.length === 1 ? raw : raw.split("").join(".")
+}
+
 function statusLabel(status?: string) {
   if (!status) return "-"
   return status
@@ -478,6 +484,14 @@ function isMstProject(project?: Project | null) {
   const title = (project.title || project.name || "").toUpperCase().trim()
   const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
   return title.includes("MST") || isTt
+}
+function mstBadgeLabel(project?: Project | null) {
+  if (!project) return "MST"
+  const title = (project.title || project.name || "").toUpperCase().trim()
+  if (title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")) {
+    return "TT"
+  }
+  return "MST"
 }
 function isVsVlProject(project?: Project | null) {
   if (!project) return false
@@ -712,6 +726,7 @@ export default function PcmProjectPage() {
   const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
   const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
   const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
+  const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
   const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
   const mstChecklistDragRef = React.useRef({
@@ -1676,7 +1691,8 @@ export default function PcmProjectPage() {
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
-      return u?.full_name || u?.username || "-"
+      const label = u?.full_name || u?.username || u?.email || "-"
+      return label === "-" ? "-" : initialsWithDots(label)
     }
     const taskAssigneeIds = (task: Task) => {
       const ids = task.assignees?.map((a) => a.id) || []
@@ -3189,7 +3205,11 @@ export default function PcmProjectPage() {
       setEditingTaskAssignee(latestTask.assigned_to || "__unassigned__")
       const notes = latestTask.internal_notes || ""
       const totalMatch = notes.match(/total_products=(\d+)/)
+      const completedMatch = notes.match(/completed_products=(\d+)/)
       setEditingTaskTotal(totalMatch ? totalMatch[1] : controlEdits[latestTask.id]?.total || "0")
+      setEditingTaskCompleted(
+        controlEdits[latestTask.id]?.completed || completedMatch?.[1] || "0"
+      )
     }
 
     const cancelEditTask = () => {
@@ -3197,6 +3217,7 @@ export default function PcmProjectPage() {
       setEditingTaskTitle("")
       setEditingTaskAssignee("__unassigned__")
       setEditingTaskTotal("")
+      setEditingTaskCompleted("")
     }
 
     const saveTaskEdit = async () => {
@@ -3208,15 +3229,21 @@ export default function PcmProjectPage() {
 
         const currentNotes = task.internal_notes || ""
         const completedMatch = currentNotes.match(/completed_products=(\d+)/)
-        const completed = completedMatch ? completedMatch[1] : controlEdits[task.id]?.completed || "0"
-        
+        const completed =
+          editingTaskCompleted || controlEdits[task.id]?.completed || completedMatch?.[1] || "0"
+
+        const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+        const totalNum = parseInt(totalValue, 10) || 0
+        const completedNum = parseInt(completed, 10) || 0
+        const nextStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
         const res = await apiFetch(`/tasks/${editingTaskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: editingTaskTitle.trim(),
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
-            internal_notes: `total_products=${editingTaskTotal || 0}; completed_products=${completed}`,
+            internal_notes: `total_products=${totalValue}; completed_products=${completed}`,
+            status: nextStatus,
           }),
         })
         if (!res.ok) {
@@ -3230,7 +3257,9 @@ export default function PcmProjectPage() {
           [updated.id]: {
             ...prev[updated.id],
             total: editingTaskTotal || "0",
+            completed,
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+            status: nextStatus,
           },
         }))
         cancelEditTask()
@@ -3245,7 +3274,8 @@ export default function PcmProjectPage() {
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
-      return u?.full_name || u?.username || "-"
+      const label = u?.full_name || u?.username || u?.email || "-"
+      return label === "-" ? "-" : initialsWithDots(label)
     }
     const controlledBy = (assignedTo?: string | null) => {
       const other = members.find((m) => m.id !== assignedTo) || allUsers.find((m) => m.id !== assignedTo)
@@ -3295,7 +3325,7 @@ export default function PcmProjectPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              MST
+              {mstBadgeLabel(project)}
             </Badge>
           </div>
         </div>
@@ -3736,10 +3766,10 @@ export default function PcmProjectPage() {
                               <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
                             )}
                           </div>
-                          <div className="col-span-1 px-2 min-w-[140px]">
+                          <div className="col-span-1 px-2 min-w-0">
                             {isEditing ? (
                               <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
-                                <SelectTrigger className="h-8 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -3752,7 +3782,7 @@ export default function PcmProjectPage() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <span className="text-slate-500">{memberLabel(task.assigned_to)}</span>
+                              <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -3769,63 +3799,87 @@ export default function PcmProjectPage() {
                             )}
                           </div>
                           <div className="col-span-2 px-2">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                type="button"
-                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                onClick={async () => {
-                                  const completedNum = Math.max(
-                                    0,
-                                    (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
-                                  )
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0"
+                                value={editingTaskCompleted}
+                                onChange={(e) => {
+                                  const rawValue = e.target.value
+                                  let completedNum = parseInt(rawValue, 10)
+                                  if (Number.isNaN(completedNum) || completedNum < 0) completedNum = 0
+                                  const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+                                  const totalNum = parseInt(totalValue, 10) || 0
+                                  if (totalNum > 0 && completedNum > totalNum) completedNum = totalNum
                                   const newCompleted = completedNum.toString()
-                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  const newStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
+                                  setEditingTaskCompleted(newCompleted)
                                   setControlEdits((prev) => ({
                                     ...prev,
                                     [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                   }))
-                                  await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                      status: newStatus,
-                                    }),
-                                  })
                                 }}
-                              >
-                                -
-                              </button>
-                              <div className="min-w-[32px] text-center text-sm text-slate-700">
-                                {controlEdits[task.id]?.completed || "0"}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                  onClick={async () => {
+                                    const completedNum = Math.max(
+                                      0,
+                                      (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
+                                    )
+                                    const newCompleted = completedNum.toString()
+                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                    await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        status: newStatus,
+                                      }),
+                                    })
+                                  }}
+                                >
+                                  -
+                                </button>
+                                <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                  {controlEdits[task.id]?.completed || "0"}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                  onClick={async () => {
+                                    let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
+                                    if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                    const newCompleted = completedNum.toString()
+                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                    await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        status: newStatus,
+                                      }),
+                                    })
+                                  }}
+                                >
+                                  +
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                onClick={async () => {
-                                  let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
-                                  if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
-                                  const newCompleted = completedNum.toString()
-                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
-                                  setControlEdits((prev) => ({
-                                    ...prev,
-                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                  }))
-                                  await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                      status: newStatus,
-                                    }),
-                                  })
-                                }}
-                              >
-                                +
-                              </button>
-                            </div>
+                            )}
                           </div>
                           <div className="col-span-2 px-2">
                             <Badge
@@ -4517,7 +4571,14 @@ export default function PcmProjectPage() {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
                       const assignedName = assignedUser?.full_name?.toLowerCase() || ""
-                      const koName = !task.assigned_to ? "-" : assignedName.includes("diellza") ? "Lea Murturi" : assignedName.includes("lea") ? "Diellza Veliu" : "Elsa Ferati"
+                      const koFullName = !task.assigned_to
+                        ? "-"
+                        : assignedName.includes("diellza")
+                          ? "Lea Murturi"
+                          : assignedName.includes("lea")
+                            ? "Diellza Veliu"
+                            : "Elsa Ferati"
+                      const koName = koFullName === "-" ? "-" : initialsWithDots(koFullName)
                       const isEditing = editingTaskId === task.id
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
@@ -4534,10 +4595,10 @@ export default function PcmProjectPage() {
                               <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
                             )}
                           </div>
-                          <div className="col-span-1 px-2 min-w-[140px]">
+                          <div className="col-span-1 px-2 min-w-0">
                             {isEditing ? (
                               <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
-                                <SelectTrigger className="h-8 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -4550,7 +4611,7 @@ export default function PcmProjectPage() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <span className="text-slate-500">{memberLabel(task.assigned_to)}</span>
+                              <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -4567,63 +4628,87 @@ export default function PcmProjectPage() {
                             )}
                           </div>
                           <div className="col-span-2 px-2">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                type="button"
-                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                onClick={async () => {
-                                  const completedNum = Math.max(
-                                    0,
-                                    (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
-                                  )
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0"
+                                value={editingTaskCompleted}
+                                onChange={(e) => {
+                                  const rawValue = e.target.value
+                                  let completedNum = parseInt(rawValue, 10)
+                                  if (Number.isNaN(completedNum) || completedNum < 0) completedNum = 0
+                                  const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+                                  const totalNum = parseInt(totalValue, 10) || 0
+                                  if (totalNum > 0 && completedNum > totalNum) completedNum = totalNum
                                   const newCompleted = completedNum.toString()
-                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                  const newStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
+                                  setEditingTaskCompleted(newCompleted)
                                   setControlEdits((prev) => ({
                                     ...prev,
                                     [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                   }))
-                                  await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                      status: newStatus,
-                                    }),
-                                  })
                                 }}
-                              >
-                                -
-                              </button>
-                              <div className="min-w-[32px] text-center text-sm text-slate-700">
-                                {controlEdits[task.id]?.completed || "0"}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                  onClick={async () => {
+                                    const completedNum = Math.max(
+                                      0,
+                                      (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
+                                    )
+                                    const newCompleted = completedNum.toString()
+                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                    await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        status: newStatus,
+                                      }),
+                                    })
+                                  }}
+                                >
+                                  -
+                                </button>
+                                <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                  {controlEdits[task.id]?.completed || "0"}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                  onClick={async () => {
+                                    let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
+                                    if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                    const newCompleted = completedNum.toString()
+                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
+                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                    await apiFetch(`/tasks/${task.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        status: newStatus,
+                                      }),
+                                    })
+                                  }}
+                                >
+                                  +
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                onClick={async () => {
-                                  let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
-                                  if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
-                                  const newCompleted = completedNum.toString()
-                                  const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                  const newStatus = shouldMarkDone ? "DONE" : "TODO"
-                                  setControlEdits((prev) => ({
-                                    ...prev,
-                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                  }))
-                                  await apiFetch(`/tasks/${task.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
-                                      status: newStatus,
-                                    }),
-                                  })
-                                }}
-                              >
-                                +
-                              </button>
-                            </div>
+                            )}
                           </div>
                           <div className="col-span-1 text-slate-500">{koName}</div>
                           <div className="col-span-2 px-2">

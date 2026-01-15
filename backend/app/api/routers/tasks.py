@@ -90,6 +90,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
         is_r1=task.is_r1,
+        is_personal=task.is_personal,
         is_active=task.is_active,
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -299,6 +300,7 @@ async def create_task(
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,
         is_r1=payload.is_r1 or False,
+        is_personal=payload.is_personal or False,
     )
     db.add(task)
     await db.flush()
@@ -519,6 +521,8 @@ async def update_task(
 
     if payload.status is not None and payload.status != task.status:
         task.status = payload.status
+    if payload.is_personal is not None:
+        task.is_personal = payload.is_personal
         if task.status == TaskStatus.DONE:
             task.completed_at = datetime.now(timezone.utc)
         else:

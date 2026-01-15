@@ -96,6 +96,28 @@ function initials(src: string) {
     .join("")
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
+function formatDateDisplay(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+}
+
+function isOverdue(task: Task) {
+  if (!task.due_date || task.status === "DONE") return false
+  const due = new Date(task.due_date)
+  if (Number.isNaN(due.getTime())) return false
+  due.setHours(23, 59, 59, 999)
+  return Date.now() > due.getTime()
+}
+
 function statusLabel(status?: string) {
   if (!status) return "-"
   return status
@@ -318,6 +340,16 @@ export default function ProjectPage() {
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
+  const [editOpen, setEditOpen] = React.useState(false)
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editTitle, setEditTitle] = React.useState("")
+  const [editDescription, setEditDescription] = React.useState("")
+  const [editStatus, setEditStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
+  const [editPriority, setEditPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
+  const [editAssignedTo, setEditAssignedTo] = React.useState<string>("__unassigned__")
+  const [editPhase, setEditPhase] = React.useState<string>("")
+  const [editDueDate, setEditDueDate] = React.useState("")
+  const [savingEdit, setSavingEdit] = React.useState(false)
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
@@ -762,6 +794,57 @@ export default function ProjectPage() {
         )
       )
       toast.error("Failed to update meeting checklist")
+    }
+  }
+
+  const startEditTask = (task: Task) => {
+    setEditingTaskId(task.id)
+    setEditTitle(task.title || "")
+    setEditDescription(task.description || "")
+    setEditStatus(task.status || "TODO")
+    setEditPriority(task.priority || "NORMAL")
+    setEditAssignedTo(task.assigned_to || task.assigned_to_user_id || "__unassigned__")
+    setEditPhase(task.phase || activePhase)
+    setEditDueDate(toDateInput(task.due_date))
+    setEditOpen(true)
+  }
+
+  const saveEditTask = async () => {
+    if (!editingTaskId || !editTitle.trim()) return
+    setSavingEdit(true)
+    try {
+      const payload = {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        status: editStatus,
+        priority: editPriority,
+        assigned_to: editAssignedTo === "__unassigned__" ? null : editAssignedTo,
+        phase: editPhase || activePhase,
+        due_date: editDueDate || null,
+      }
+      const res = await apiFetch(`/tasks/${editingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(formatErrorDetail(detail))
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setEditOpen(false)
+      setEditingTaskId(null)
+      toast.success("Task updated")
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -2177,6 +2260,104 @@ export default function ProjectPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Edit Task</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Title</Label>
+                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select value={editStatus} onValueChange={(v) => setEditStatus(v as Task["status"])}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TASK_STATUSES.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {statusLabel(s)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Priority</Label>
+                      <Select value={editPriority} onValueChange={(v) => setEditPriority(v as Task["priority"])}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TASK_PRIORITIES.map((p) => (
+                            <SelectItem key={p} value={p}>
+                              {statusLabel(p)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Assign to</Label>
+                      <Select value={editAssignedTo} onValueChange={setEditAssignedTo}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Unassigned" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                          {allUsers.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.full_name || m.username || m.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phase</Label>
+                      <Select value={editPhase} onValueChange={setEditPhase}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select phase" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(isMstProject ? MST_PHASES : GENERAL_PHASES).map((p) => (
+                            <SelectItem key={p} value={p}>
+                              {PHASE_LABELS[p] || p}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Due date</Label>
+                      <Input
+                        type="date"
+                        value={editDueDate}
+                        onChange={(e) => setEditDueDate(normalizeDueDateInput(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setEditOpen(false)} disabled={savingEdit}>
+                      Cancel
+                    </Button>
+                    <Button disabled={!editTitle.trim() || savingEdit} onClick={() => void saveEditTask()}>
+                      {savingEdit ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
           <Card className="p-0">
             <div className="divide-y">
@@ -2184,8 +2365,9 @@ export default function ProjectPage() {
                 visibleTasks.map((task) => {
                   const assignedId = task.assigned_to || task.assigned_to_user_id || null
                   const assigned = assignedId ? userMap.get(assignedId) : null
+                  const overdue = isOverdue(task)
                   return (
-                    <div key={task.id} className="grid grid-cols-4 gap-3 px-6 py-4 text-sm">
+                    <div key={task.id} className="grid grid-cols-5 gap-3 px-6 py-4 text-sm">
                       <div className="font-medium">{task.title}</div>
                       <div className="text-muted-foreground">
                         {assigned?.full_name || assigned?.username || "-"}
@@ -2208,7 +2390,21 @@ export default function ProjectPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="text-muted-foreground">-</div>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <span className={overdue ? "text-red-600 font-semibold" : undefined}>
+                          {formatDateDisplay(task.due_date)}
+                        </span>
+                        {overdue ? (
+                          <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
+                            Late
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="flex justify-end">
+                        <Button size="sm" variant="outline" onClick={() => startEditTask(task)}>
+                          Edit
+                        </Button>
+                      </div>
                     </div>
                   )
                 })

@@ -78,6 +78,28 @@ function initials(src: string) {
     .join("")
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
+function formatDateDisplay(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+}
+
+function isOverdue(task: Task) {
+  if (!task.due_date || task.status === "DONE") return false
+  const due = new Date(task.due_date)
+  if (Number.isNaN(due.getTime())) return false
+  due.setHours(23, 59, 59, 999)
+  return Date.now() > due.getTime()
+}
+
 function statusLabel(status?: string) {
   if (!status) return "-"
   return status
@@ -176,6 +198,16 @@ export default function DevelopmentProjectPage() {
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
+  const [editOpen, setEditOpen] = React.useState(false)
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editTitle, setEditTitle] = React.useState("")
+  const [editDescription, setEditDescription] = React.useState("")
+  const [editStatus, setEditStatus] = React.useState<Task["status"]>("TODO")
+  const [editPriority, setEditPriority] = React.useState<Task["priority"]>("NORMAL")
+  const [editAssignedTo, setEditAssignedTo] = React.useState<string>("__unassigned__")
+  const [editPhase, setEditPhase] = React.useState<string>("")
+  const [editDueDate, setEditDueDate] = React.useState("")
+  const [savingEdit, setSavingEdit] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
@@ -360,6 +392,57 @@ export default function DevelopmentProjectPage() {
       toast.error("Failed to update task status")
     } finally {
       setUpdatingTaskId(null)
+    }
+  }
+
+  const startEditTask = (task: Task) => {
+    setEditingTaskId(task.id)
+    setEditTitle(task.title || "")
+    setEditDescription(task.description || "")
+    setEditStatus(task.status || "TODO")
+    setEditPriority(task.priority || "NORMAL")
+    setEditAssignedTo(task.assigned_to || task.assigned_to_user_id || "__unassigned__")
+    setEditPhase(task.phase || activePhase)
+    setEditDueDate(toDateInput(task.due_date))
+    setEditOpen(true)
+  }
+
+  const saveEditTask = async () => {
+    if (!editingTaskId || !editTitle.trim()) return
+    setSavingEdit(true)
+    try {
+      const payload = {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        status: editStatus,
+        priority: editPriority,
+        assigned_to: editAssignedTo === "__unassigned__" ? null : editAssignedTo,
+        phase: editPhase || activePhase,
+        due_date: editDueDate || null,
+      }
+      const res = await apiFetch(`/tasks/${editingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setEditOpen(false)
+      setEditingTaskId(null)
+      toast.success("Task updated")
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -1249,6 +1332,117 @@ export default function DevelopmentProjectPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                  <DialogContent className="sm:max-w-lg bg-white border-sky-100 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Title</Label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="border-sky-200 focus:border-sky-400 rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Description</Label>
+                        <Textarea
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          className="border-sky-200 focus:border-sky-400 rounded-xl"
+                        />
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Status</Label>
+                          <Select value={editStatus} onValueChange={(v) => setEditStatus(v as Task["status"])}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_STATUSES.map((s) => (
+                                <SelectItem key={s} value={s}>
+                                  {statusLabel(s)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Priority</Label>
+                          <Select value={editPriority} onValueChange={(v) => setEditPriority(v as Task["priority"])}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_PRIORITIES.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {statusLabel(p)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Assign to</Label>
+                          <Select value={editAssignedTo} onValueChange={setEditAssignedTo}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Unassigned" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                              {allUsers.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.full_name || m.username || m.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Phase</Label>
+                          <Select value={editPhase} onValueChange={setEditPhase}>
+                            <SelectTrigger className="border-sky-200 focus:border-sky-400 rounded-xl">
+                              <SelectValue placeholder="Select phase" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PHASES.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {PHASE_LABELS[p]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date</Label>
+                          <Input
+                            type="date"
+                            value={editDueDate}
+                            onChange={(e) => setEditDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setEditOpen(false)} disabled={savingEdit}>
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={!editTitle.trim() || savingEdit}
+                          onClick={() => void saveEditTask()}
+                          className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                        >
+                          {savingEdit ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-0">
                 <div className="divide-y divide-sky-100">
@@ -1256,8 +1450,9 @@ export default function DevelopmentProjectPage() {
                     visibleTasks.map((task, index) => {
                       const assignedId = task.assigned_to || task.assigned_to_user_id || null
                       const assigned = assignedId ? userMap.get(assignedId) : null
+                      const overdue = isOverdue(task)
                       return (
-                        <div key={task.id} className="grid grid-cols-4 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors">
+                        <div key={task.id} className="grid grid-cols-5 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors">
                           <div className="font-medium text-slate-800">
                             <span className="mr-2 text-xs font-semibold text-slate-400">{index + 1}.</span>
                             {task.title}
@@ -1283,7 +1478,26 @@ export default function DevelopmentProjectPage() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="text-slate-500">-</div>
+                          <div className="flex items-center gap-2 text-slate-500">
+                            <span className={overdue ? "text-red-600 font-semibold" : undefined}>
+                              {formatDateDisplay(task.due_date)}
+                            </span>
+                            {overdue ? (
+                              <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
+                                Late
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => startEditTask(task)}
+                              className="rounded-xl border-sky-200"
+                            >
+                              Edit
+                            </Button>
+                          </div>
                         </div>
                       )
                     })

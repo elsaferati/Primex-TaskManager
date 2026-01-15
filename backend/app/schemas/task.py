@@ -39,6 +39,7 @@ class TaskOut(BaseModel):
     is_bllok: bool
     is_1h_report: bool
     is_r1: bool
+    is_personal: bool
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -65,6 +66,7 @@ class TaskCreate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     is_r1: bool | None = None
+    is_personal: bool | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -87,4 +89,5 @@ class TaskUpdate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     is_r1: bool | None = None
+    is_personal: bool | None = None
 

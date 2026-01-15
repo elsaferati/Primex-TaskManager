@@ -155,6 +155,7 @@ export interface Task {
   is_bllok?: boolean
   is_1h_report?: boolean
   is_r1?: boolean
+  is_personal?: boolean
   created_at: string
   updated_at: string
 }
@@ -270,5 +271,4 @@ export interface Meeting {
   created_at: string
   updated_at: string
 }
-
 
