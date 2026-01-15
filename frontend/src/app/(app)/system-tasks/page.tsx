@@ -1566,7 +1566,7 @@ export function SystemTasksView({
   }
 
   const effectiveHeadingTitle =
-    headingTitle ?? (scopeFilter === "GA" ? "Kosove & Gane Admin System Tasks" : "System Tasks")
+    headingTitle ?? (scopeFilter === "GA" ? "Admin System Tasks" : "System Tasks")
   const effectiveHeadingDescription =
     headingDescription ??
     (scopeFilter === "GA"

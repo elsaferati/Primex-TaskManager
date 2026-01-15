@@ -521,12 +521,12 @@ async def update_task(
 
     if payload.status is not None and payload.status != task.status:
         task.status = payload.status
-    if payload.is_personal is not None:
-        task.is_personal = payload.is_personal
         if task.status == TaskStatus.DONE:
-            task.completed_at = datetime.now(timezone.utc)
+            task.completed_at = task.completed_at or datetime.now(timezone.utc)
         else:
             task.completed_at = None
+    if payload.is_personal is not None:
+        task.is_personal = payload.is_personal
 
     if payload.priority is not None:
         task.priority = payload.priority
