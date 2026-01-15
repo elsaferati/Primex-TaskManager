@@ -84,7 +84,7 @@ const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
   { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
-  { id: "blocked", label: "Blocked", description: "Blocked all day by a single task." },
+  { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
   { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
@@ -290,7 +290,7 @@ function formatPrintDay(date: Date) {
 }
 
 function noProjectTypeLabel(task: Task) {
-  if (task.is_bllok) return "Blocked"
+  if (task.is_bllok) return "BLLOK"
   if (task.is_1h_report) return "1H"
   if (task.is_r1) return "R1"
   if (task.is_personal) return "Personal"
@@ -821,7 +821,7 @@ export default function DepartmentKanban() {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
         ga.push(t)
-      } else {
+      } else if (!t.project_id && !t.system_template_origin_id) {
         normal.push(t)
       }
     }
@@ -1622,7 +1622,7 @@ export default function DepartmentKanban() {
                             const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                             const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                             const typeLabel = task.is_bllok
-                              ? "Blocked"
+                              ? "BLLOK"
                               : task.is_1h_report
                                 ? "1H"
                                 : task.is_r1
@@ -1842,7 +1842,7 @@ export default function DepartmentKanban() {
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
                   <div className="rounded-3xl border border-purple-100 bg-purple-50/40 p-4 backdrop-blur-sm dark:border-purple-900/30 dark:bg-purple-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-purple-700 dark:text-purple-400">Personal</span><span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900 dark:text-purple-300">{noProjectBuckets.personal.length}</span></div><div className="space-y-2">{noProjectBuckets.personal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-purple-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-purple-900 dark:bg-purple-950"><div className="text-sm font-medium text-purple-900 dark:text-purple-100">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-purple-500">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
-                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">Blocked</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
+                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">BLLOK</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
                   <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
                   <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
                 </div>
