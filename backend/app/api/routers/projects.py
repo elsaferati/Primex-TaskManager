@@ -291,6 +291,7 @@ async def list_projects(
             current_phase=p.current_phase,
             status=p.status,
             progress_percentage=p.progress_percentage,
+            total_products=p.total_products,
             is_template=p.is_template,
             start_date=p.start_date,
             due_date=p.due_date,
@@ -350,6 +351,7 @@ async def create_project(
         current_phase=current_phase,
         status=status_value,
         progress_percentage=payload.progress_percentage or 0,
+        total_products=payload.total_products,
         start_date=payload.start_date,
         due_date=payload.due_date,
         completed_at=payload.completed_at,
@@ -382,6 +384,7 @@ async def create_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        total_products=project.total_products,
         is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
@@ -410,6 +413,7 @@ async def get_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        total_products=project.total_products,
         is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
@@ -468,6 +472,8 @@ async def update_project(
         project.status = payload.status
     if payload.progress_percentage is not None:
         project.progress_percentage = payload.progress_percentage
+    if payload.total_products is not None:
+        project.total_products = payload.total_products
     if payload.is_template is not None:
         project.is_template = payload.is_template
     if payload.start_date is not None:
@@ -489,6 +495,7 @@ async def update_project(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        total_products=project.total_products,
         is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,
@@ -588,6 +595,7 @@ async def advance_project_phase(
         current_phase=project.current_phase,
         status=project.status,
         progress_percentage=project.progress_percentage,
+        total_products=project.total_products,
         is_template=project.is_template,
         start_date=project.start_date,
         due_date=project.due_date,

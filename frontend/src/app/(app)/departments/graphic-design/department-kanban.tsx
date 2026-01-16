@@ -63,6 +63,19 @@ const formatProjectTitle = (title: string, type: (typeof PROJECT_TYPES)[number][
   return `MST - ${trimmed}`
 }
 
+const formatProjectTitleWithProducts = (project: Project | null | undefined): string => {
+  if (!project) return ""
+  const baseTitle = project.title || project.name || ""
+  if (!baseTitle) return ""
+  
+  // Add total products if available and project is MST type
+  if (project.project_type === "MST" && project.total_products != null && project.total_products > 0) {
+    return `${baseTitle} - ${project.total_products}`
+  }
+  
+  return baseTitle
+}
+
 const FREQUENCY_LABELS: Record<SystemTaskTemplate["frequency"], string> = {
   DAILY: "Daily",
   WEEKLY: "Weekly",
@@ -406,6 +419,7 @@ export default function DepartmentKanban() {
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [mstTemplateId, setMstTemplateId] = React.useState("__auto__")
+  const [totalProducts, setTotalProducts] = React.useState("")
 
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
@@ -976,6 +990,12 @@ export default function DepartmentKanban() {
       if (projectType === "MST" && mstTemplateId !== "__auto__") {
         payload.template_project_id = mstTemplateId
       }
+      if (projectType === "MST" && totalProducts.trim()) {
+        const totalProductsNum = parseInt(totalProducts.trim(), 10)
+        if (!isNaN(totalProductsNum) && totalProductsNum >= 0) {
+          payload.total_products = totalProductsNum
+        }
+      }
       const res = await apiFetch("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) { toast.error("Failed to create project"); return }
       const created = (await res.json()) as Project
@@ -1014,6 +1034,7 @@ export default function DepartmentKanban() {
       setProjectType("GENERAL")
       setProjectPhase("MEETINGS")
       setMstTemplateId("__auto__")
+      setTotalProducts("")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -1439,23 +1460,36 @@ export default function DepartmentKanban() {
                             </div>
                           </div>
                           {projectType === "MST" && (
-                            <div className="space-y-2">
-                              <Label>MST Template</Label>
-                              <Select value={mstTemplateId} onValueChange={setMstTemplateId}>
-                                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__auto__">Auto (first MST template)</SelectItem>
-                                  {mstTemplateOptions.map((project) => (
-                                    <SelectItem key={project.id} value={project.id}>
-                                      {project.title || project.name || "MST Template"}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {!mstTemplateOptions.length && (
-                                <div className="text-xs text-muted-foreground">No MST templates found.</div>
-                              )}
-                            </div>
+                            <>
+                              <div className="space-y-2">
+                                <Label>MST Template</Label>
+                                <Select value={mstTemplateId} onValueChange={setMstTemplateId}>
+                                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__auto__">Auto (first MST template)</SelectItem>
+                                    {mstTemplateOptions.map((project) => (
+                                      <SelectItem key={project.id} value={project.id}>
+                                        {project.title || project.name || "MST Template"}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {!mstTemplateOptions.length && (
+                                  <div className="text-xs text-muted-foreground">No MST templates found.</div>
+                                )}
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Total Products</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Enter number of products"
+                                  className="rounded-xl"
+                                  value={totalProducts}
+                                  onChange={(e) => setTotalProducts(e.target.value)}
+                                />
+                              </div>
+                            </>
                           )}
                           <div className="space-y-2">
                             <Label>Phase</Label>
@@ -1497,7 +1531,7 @@ export default function DepartmentKanban() {
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="space-y-1">
-                              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{project.title || project.name}</h3>
+                              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{formatProjectTitleWithProducts(project)}</h3>
                               {/* Single Phase Badge */}
                               <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
                                 {PHASE_LABELS[phase]}
@@ -2190,7 +2224,7 @@ export default function DepartmentKanban() {
                             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">
                               {initials(author?.full_name || "?")}
                             </div>
-                            <span className="text-[10px] text-slate-400">{project ? project.title : "General"}</span>
+                            <span className="text-[10px] text-slate-400">{project ? formatProjectTitleWithProducts(project) : "General"}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             {gaNoteTaskMap.has(note.id) ? (
@@ -2318,7 +2352,7 @@ export default function DepartmentKanban() {
                               </div>
                               <div>
                                 <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">{meeting.title}</div>
-                                <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">•</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{project.title}</span></>}</div>
+                                <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">•</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{formatProjectTitleWithProducts(project)}</span></>}</div>
                               </div>
                             </div>
                             {!isReadOnly && (

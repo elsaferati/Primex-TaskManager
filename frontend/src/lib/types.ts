@@ -105,6 +105,7 @@ export interface Project {
   current_phase?: string
   status?: string
   progress_percentage?: number
+  total_products?: number | null
   is_template?: boolean
   start_date?: string | null
   due_date?: string | null

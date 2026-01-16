@@ -29,6 +29,7 @@ class Project(Base):
     progress_percentage: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0"
     )
+    total_products: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

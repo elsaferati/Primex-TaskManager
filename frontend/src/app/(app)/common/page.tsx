@@ -328,7 +328,16 @@ export default function CommonViewPage() {
         if (projectsRes?.ok) {
           const projects = (await projectsRes.json()) as Project[]
           projectNameById = new Map(
-            projects.map((p) => [p.id, (p.title || p.name || "").trim()]).filter(([, label]) => label)
+            projects
+              .map((p) => {
+                const baseTitle = (p.title || p.name || "").trim()
+                if (!baseTitle) return null
+                const title = p.project_type === "MST" && p.total_products != null && p.total_products > 0
+                  ? `${baseTitle} - ${p.total_products}`
+                  : baseTitle
+                return [p.id, title] as [string, string]
+              })
+              .filter((entry): entry is [string, string] => entry !== null && entry[1] !== "")
           )
         }
 
@@ -518,8 +527,11 @@ export default function CommonViewPage() {
                 const projRes = await apiFetch(`/projects/${projectId}`)
                 if (projRes?.ok) {
                   const project = (await projRes.json()) as Project
-                  const projectName = (project.title || project.name || "").trim()
-                  if (projectName) {
+                  const baseTitle = (project.title || project.name || "").trim()
+                  if (baseTitle) {
+                    const projectName = project.project_type === "MST" && project.total_products != null && project.total_products > 0
+                      ? `${baseTitle} - ${project.total_products}`
+                      : baseTitle
                     projectNameById.set(projectId, projectName)
                   }
                 }
