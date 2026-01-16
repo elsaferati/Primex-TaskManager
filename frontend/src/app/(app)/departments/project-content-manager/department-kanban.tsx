@@ -2584,7 +2584,6 @@ export default function DepartmentKanban() {
                       <div className="space-y-2">
                         {todayNoProjectTasks.map((task) => {
                           const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                          const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                           const typeLabel = noProjectTypeLabel(task)
                           return (
                             <Link
@@ -2595,9 +2594,6 @@ export default function DepartmentKanban() {
                               <div className="flex items-center gap-2">
                                 <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                                   {typeLabel}
-                                </Badge>
-                                <Badge className="bg-blue-500 text-white border-0 text-xs shadow-sm">
-                                  {phaseLabel}
                                 </Badge>
                                 <div className="font-medium text-slate-800">{task.title}</div>
                               </div>
