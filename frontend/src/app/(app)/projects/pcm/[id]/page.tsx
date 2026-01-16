@@ -773,6 +773,7 @@ export default function PcmProjectPage() {
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
   const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
+  const [newInlineTaskDueDate, setNewInlineTaskDueDate] = React.useState("")
   const [newInlineTaskTotal, setNewInlineTaskTotal] = React.useState("")
   const [newInlineTaskCompleted, setNewInlineTaskCompleted] = React.useState("")
   const [creatingInlineTask, setCreatingInlineTask] = React.useState(false)
@@ -797,6 +798,7 @@ export default function PcmProjectPage() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
   const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
+  const [editingTaskDueDate, setEditingTaskDueDate] = React.useState("")
   const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
   const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
@@ -3328,10 +3330,13 @@ export default function PcmProjectPage() {
       setEditingTaskId(latestTask.id)
       setEditingTaskTitle(latestTask.title || "")
       setEditingTaskAssignee(latestTask.assigned_to || "__unassigned__")
+      // Set due date for editing (format: YYYY-MM-DD for input[type=date])
+      setEditingTaskDueDate(latestTask.due_date ? latestTask.due_date.split("T")[0] : "")
       const notes = latestTask.internal_notes || ""
       const totalMatch = notes.match(/total_products=(\d+)/)
       const completedMatch = notes.match(/completed_products=(\d+)/)
-      setEditingTaskTotal(totalMatch ? totalMatch[1] : controlEdits[latestTask.id]?.total || "0")
+      // Prefer daily_products field over internal_notes
+      setEditingTaskTotal(latestTask.daily_products?.toString() || totalMatch?.[1] || controlEdits[latestTask.id]?.total || "0")
       setEditingTaskCompleted(
         controlEdits[latestTask.id]?.completed || completedMatch?.[1] || "0"
       )
@@ -3341,6 +3346,7 @@ export default function PcmProjectPage() {
       setEditingTaskId(null)
       setEditingTaskTitle("")
       setEditingTaskAssignee("__unassigned__")
+      setEditingTaskDueDate("")
       setEditingTaskTotal("")
       setEditingTaskCompleted("")
     }
@@ -3367,7 +3373,9 @@ export default function PcmProjectPage() {
           body: JSON.stringify({
             title: editingTaskTitle.trim(),
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
-            internal_notes: `total_products=${totalValue}; completed_products=${completed}`,
+            due_date: editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null,
+            daily_products: totalNum || null,
+            internal_notes: `completed_products=${completed}`,
             status: nextStatus,
           }),
         })
@@ -3776,16 +3784,17 @@ export default function PcmProjectPage() {
                   <div className="text-lg font-semibold tracking-tight">Tasks</div>
                   {/* Table header */}
                   <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
-                    <div className="col-span-4">Task</div>
+                    <div className="col-span-3">Task</div>
                     <div className="col-span-1">Assigned</div>
-                    <div className="col-span-2">Total</div>
+                    <div className="col-span-2">Due Date</div>
+                    <div className="col-span-2">Daily Products</div>
                     <div className="col-span-2">Completed</div>
-                    <div className="col-span-2">Status</div>
+                    <div className="col-span-1">Status</div>
                     <div className="col-span-1"></div>
                   </div>
                   {/* Inline form row */}
                   <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                    <div className="col-span-4">
+                    <div className="col-span-3">
                       <input
                         type="text"
                         placeholder="Enter task name..."
@@ -3811,6 +3820,14 @@ export default function PcmProjectPage() {
                     </div>
                     <div className="col-span-2">
                       <input
+                        type="date"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        value={newInlineTaskDueDate}
+                        onChange={(e) => setNewInlineTaskDueDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
                         type="number"
                         placeholder="0"
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
@@ -3827,7 +3844,7 @@ export default function PcmProjectPage() {
                         onChange={(e) => setNewInlineTaskCompleted(e.target.value)}
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1">
                       <Button
                         size="sm"
                         className="rounded-full px-5 shadow-sm"
@@ -3846,7 +3863,9 @@ export default function PcmProjectPage() {
                                 status: "TODO",
                                 priority: "NORMAL",
                                 phase: "PRODUCT",
-                                internal_notes: `total_products=${newInlineTaskTotal || 0}; completed_products=${newInlineTaskCompleted || 0}`,
+                                due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
+                                daily_products: newInlineTaskTotal ? parseInt(newInlineTaskTotal, 10) : null,
+                                internal_notes: `completed_products=${newInlineTaskCompleted || 0}`,
                               }),
                             })
                             if (!res?.ok) {
@@ -3857,6 +3876,7 @@ export default function PcmProjectPage() {
                             setTasks((prev) => [...prev, created])
                             setNewInlineTaskTitle("")
                             setNewInlineTaskAssignee("__unassigned__")
+                            setNewInlineTaskDueDate("")
                             setNewInlineTaskTotal("")
                             setNewInlineTaskCompleted("")
                             toast.success("Task added")
@@ -3866,7 +3886,7 @@ export default function PcmProjectPage() {
                         }}
                         disabled={creatingInlineTask || !newInlineTaskTitle.trim()}
                       >
-                        {creatingInlineTask ? "Saving..." : "Save"}
+                        {creatingInlineTask ? "..." : "Save"}
                       </Button>
                     </div>
                     <div className="col-span-1"></div>
@@ -3874,11 +3894,11 @@ export default function PcmProjectPage() {
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
-                      const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
+                      const totalVal = task.daily_products || parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const isEditing = editingTaskId === task.id
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-4 pr-2">
+                          <div className="col-span-3 pr-2">
                             {isEditing ? (
                               <input
                                 type="text"
@@ -3913,6 +3933,18 @@ export default function PcmProjectPage() {
                           <div className="col-span-2 px-2">
                             {isEditing ? (
                               <input
+                                type="date"
+                                value={editingTaskDueDate}
+                                onChange={(e) => setEditingTaskDueDate(e.target.value)}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                              />
+                            ) : (
+                              <span className="text-slate-500">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "-"}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2 px-2">
+                            {isEditing ? (
+                              <input
                                 type="number"
                                 value={editingTaskTotal}
                                 onChange={(e) => setEditingTaskTotal(e.target.value)}
@@ -3920,7 +3952,7 @@ export default function PcmProjectPage() {
                                 className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
                               />
                             ) : (
-                              <span className="text-slate-500">{controlEdits[task.id]?.total || "-"}</span>
+                              <span className="text-slate-500">{task.daily_products || controlEdits[task.id]?.total || "-"}</span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -4006,7 +4038,7 @@ export default function PcmProjectPage() {
                               </div>
                             )}
                           </div>
-                          <div className="col-span-2 px-2">
+                          <div className="col-span-1 px-2">
                             <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}
                               className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}

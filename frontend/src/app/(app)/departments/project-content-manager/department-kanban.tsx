@@ -576,6 +576,7 @@ export default function DepartmentKanban() {
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
+  const [projectTotalProducts, setProjectTotalProducts] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
   const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
@@ -1366,6 +1367,7 @@ export default function DepartmentKanban() {
     setProjectTemplateId("__custom__")
     setProjectTitle("")
     setProjectDescription("")
+    setProjectTotalProducts("")
     setProjectManagerId("__unassigned__")
     setProjectMemberIds([])
     setProjectStatus("TODO")
@@ -1383,8 +1385,16 @@ export default function DepartmentKanban() {
   const submitProject = async () => {
     if (!department) return
     const template = PROJECT_TEMPLATES.find((item) => item.id === projectTemplateId)
-    const resolvedTitle = applyProjectTemplateTitle(projectTemplateId, projectTitle)
+    let resolvedTitle = applyProjectTemplateTitle(projectTemplateId, projectTitle)
     if (!resolvedTitle) return
+    
+    // Add total_products to title if provided and template is MST, TT, or VS/VL
+    const totalProducts = projectTotalProducts.trim()
+    const isMstTtVsVl = ["MST", "TT", "VS/VL", "VS/VL PROJEKT I MADH", "VS/VL PROJEKT I VOGEL TEMPLATE 2"].includes(projectTemplateId)
+    if (totalProducts && isMstTtVsVl) {
+      resolvedTitle = `${resolvedTitle} (${totalProducts})`
+    }
+    
     const resolvedDescription = projectDescription.trim() || template?.description || null
     setCreatingProject(true)
     try {
@@ -1395,6 +1405,15 @@ export default function DepartmentKanban() {
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         status: projectStatus,
       }
+      
+      // Add total_products to payload if provided
+      if (totalProducts) {
+        const totalNum = parseInt(totalProducts, 10)
+        if (!isNaN(totalNum)) {
+          payload.total_products = totalNum
+        }
+      }
+      
       if (template?.current_phase) {
         payload.current_phase = template.current_phase
       }
@@ -2091,6 +2110,21 @@ export default function DepartmentKanban() {
                             placeholder="Enter the project description..."
                           />
                         </div>
+                        {["MST", "TT", "VS/VL", "VS/VL PROJEKT I MADH", "VS/VL PROJEKT I VOGEL TEMPLATE 2"].includes(projectTemplateId) && (
+                          <div className="space-y-2 md:col-span-2">
+                            <Label>Total Products</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={projectTotalProducts}
+                              onChange={(e) => setProjectTotalProducts(e.target.value)}
+                              placeholder="Enter total number of products..."
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              This will be shown in the project title (e.g., "MST ABC (50)")
+                            </div>
+                          </div>
+                        )}
                         <div className="space-y-2">
                           <Label>Members</Label>
                           <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>

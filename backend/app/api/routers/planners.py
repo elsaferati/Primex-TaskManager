@@ -27,6 +27,7 @@ from app.schemas.planner import (
     WeeklyTableDay,
     WeeklyTableDepartment,
     WeeklyTableProjectEntry,
+    WeeklyTableProjectTaskEntry,
     WeeklyTableResponse,
     WeeklyTableTaskEntry,
     WeeklyTableUserDay,
@@ -102,6 +103,7 @@ def _task_to_out(t: Task, assignees: list[TaskAssigneeOut] | None = None) -> Tas
         finish_period=finish_period_enum,
         phase=phase_enum,
         progress_percentage=t.progress_percentage,
+        daily_products=t.daily_products,
         start_date=t.start_date,
         due_date=t.due_date,
         completed_at=t.completed_at,
@@ -739,8 +741,8 @@ async def weekly_table_planner(
                 
                 # Separate tasks by type: projects, system tasks, fast tasks
                 # And split by AM/PM based on finish_period
-                am_projects_map: dict[uuid.UUID, int] = {}
-                pm_projects_map: dict[uuid.UUID, int] = {}
+                am_projects_map: dict[uuid.UUID, list[Task]] = {}
+                pm_projects_map: dict[uuid.UUID, list[Task]] = {}
                 am_system_tasks: list[WeeklyTableTaskEntry] = []
                 pm_system_tasks: list[WeeklyTableTaskEntry] = []
                 am_fast_tasks: list[WeeklyTableTaskEntry] = []
@@ -755,6 +757,7 @@ async def weekly_table_planner(
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
+                            daily_products=task.daily_products,
                         )
                         if is_pm:
                             pm_system_tasks.append(entry)
@@ -765,6 +768,7 @@ async def weekly_table_planner(
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
+                            daily_products=task.daily_products,
                         )
                         if is_pm:
                             pm_fast_tasks.append(entry)
@@ -773,27 +777,49 @@ async def weekly_table_planner(
                     # Project tasks (have project_id)
                     elif task.project_id is not None:
                         if is_pm:
-                            pm_projects_map[task.project_id] = pm_projects_map.get(task.project_id, 0) + 1
+                            if task.project_id not in pm_projects_map:
+                                pm_projects_map[task.project_id] = []
+                            pm_projects_map[task.project_id].append(task)
                         else:
-                            am_projects_map[task.project_id] = am_projects_map.get(task.project_id, 0) + 1
+                            if task.project_id not in am_projects_map:
+                                am_projects_map[task.project_id] = []
+                            am_projects_map[task.project_id].append(task)
                 
-                # Convert project maps to lists
+                # Convert project maps to lists with task details
                 # Include all projects, even if not in project_map (they'll show as "Unknown Project")
                 am_projects: list[WeeklyTableProjectEntry] = [
                     WeeklyTableProjectEntry(
                         project_id=project_id,
                         project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
-                        task_count=count,
+                        project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                        task_count=len(tasks_list),
+                        tasks=[
+                            WeeklyTableProjectTaskEntry(
+                                task_id=t.id,
+                                task_title=t.title,
+                                daily_products=t.daily_products,
+                            )
+                            for t in tasks_list
+                        ],
                     )
-                    for project_id, count in am_projects_map.items()
+                    for project_id, tasks_list in am_projects_map.items()
                 ]
                 pm_projects: list[WeeklyTableProjectEntry] = [
                     WeeklyTableProjectEntry(
                         project_id=project_id,
                         project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
-                        task_count=count,
+                        project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                        task_count=len(tasks_list),
+                        tasks=[
+                            WeeklyTableProjectTaskEntry(
+                                task_id=t.id,
+                                task_title=t.title,
+                                daily_products=t.daily_products,
+                            )
+                            for t in tasks_list
+                        ],
                     )
-                    for project_id, count in pm_projects_map.items()
+                    for project_id, tasks_list in pm_projects_map.items()
                 ]
                 
                 users_day_data.append(
