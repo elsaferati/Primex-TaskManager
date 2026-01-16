@@ -1655,7 +1655,10 @@ export default function PcmProjectPage() {
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
-  const title = project.title || project.name || "Project"
+  const baseTitle = project.title || project.name || "Project"
+  const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
+    ? `${baseTitle} - ${project.total_products}`
+    : baseTitle
   const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "CLOSED"
