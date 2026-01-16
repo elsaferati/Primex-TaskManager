@@ -369,6 +369,7 @@ function noProjectTypeLabel(task: Task) {
   if (task.is_1h_report) return "1H"
   if (task.is_r1) return "R1"
   if (task.is_personal) return "Personal"
+  if (task.ga_note_origin_id) return "GA"
   return "Normal"
 }
 
@@ -2339,13 +2340,7 @@ export default function DepartmentKanban() {
                       {todayNoProjectTasks.map((task) => {
                         const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
-                        const typeLabel = task.is_bllok
-                          ? "BLLOK"
-                          : task.is_1h_report
-                            ? "1H"
-                            : task.is_r1
-                              ? "R1"
-                              : "Normal"
+                        const typeLabel = noProjectTypeLabel(task)
                         return (
                           <Link
                             key={task.id}
