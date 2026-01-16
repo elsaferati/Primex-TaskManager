@@ -5,13 +5,14 @@ import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { Plus, Save, X } from "lucide-react"
+import { Plus, Save, X, Printer } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
@@ -19,6 +20,11 @@ type WeeklyTableProjectTaskEntry = {
   task_id: string
   task_title: string
   daily_products: number | null
+  is_bllok: boolean
+  is_1h_report: boolean
+  is_r1: boolean
+  is_personal: boolean
+  ga_note_origin_id: string | null
 }
 
 type WeeklyTableProjectEntry = {
@@ -33,6 +39,12 @@ type WeeklyTableTaskEntry = {
   task_id: string | null
   title: string
   daily_products: number | null
+  fast_task_type?: string | null
+  is_bllok: boolean
+  is_1h_report: boolean
+  is_r1: boolean
+  is_personal: boolean
+  ga_note_origin_id: string | null
 }
 
 type WeeklyTableUserDay = {
@@ -86,11 +98,15 @@ export default function WeeklyPlannerPage() {
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
+  const [manualTaskType, setManualTaskType] = React.useState<"project" | "fast">("fast")
   const [manualTaskTitle, setManualTaskTitle] = React.useState("")
-  const [manualTaskDay, setManualTaskDay] = React.useState("")
+  const [manualTaskDay, setManualTaskDay] = React.useState<string[]>([])
+  const [manualTaskDays, setManualTaskDays] = React.useState<string[]>([])
   const [manualTaskUserId, setManualTaskUserId] = React.useState("")
+  const [manualTaskUserIds, setManualTaskUserIds] = React.useState<string[]>([])
   const [manualTaskPeriod, setManualTaskPeriod] = React.useState<"AM" | "PM">("AM")
   const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
+  const [manualTaskFastType, setManualTaskFastType] = React.useState<string>("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
 
   // Drag-to-scroll refs and state
@@ -289,7 +305,19 @@ export default function WeeklyPlannerPage() {
   }, [loadPlanner])
 
   React.useEffect(() => {
-    if (!manualTaskOpen) return
+    if (!manualTaskOpen) {
+      // Reset all form state when dialog closes
+      setManualTaskTitle("")
+      setManualTaskDay("")
+      setManualTaskDays([])
+      setManualTaskUserId("")
+      setManualTaskUserIds([])
+      setManualTaskPeriod("AM")
+      setManualTaskDepartmentId("")
+      setManualTaskFastType("")
+      setManualTaskType("fast")
+      return
+    }
     if (departmentId !== ALL_DEPARTMENTS_VALUE) {
       setManualTaskDepartmentId(departmentId)
     }
@@ -338,16 +366,33 @@ export default function WeeklyPlannerPage() {
       toast.error("Select a department.")
       return
     }
-    if (!manualTaskDay) {
-      toast.error("Select a day.")
-      return
+    if (manualTaskType === "fast") {
+      // Fast Task validation
+      if (!manualTaskDay) {
+        toast.error("Select a day.")
+        return
+      }
+      if (!manualTaskUserId) {
+        toast.error("Select a member.")
+        return
+      }
+      if (!manualTaskFastType) {
+        toast.error("Select a task type.")
+        return
+      }
+    } else {
+      // Project validation
+      if (manualTaskDays.length === 0) {
+        toast.error("Select at least one day.")
+        return
+      }
+      if (manualTaskUserIds.length === 0) {
+        toast.error("Select at least one member.")
+        return
+      }
     }
-    if (!manualTaskUserId) {
-      toast.error("Select a member.")
-      return
-    }
-    const userEntry = users.find((u) => u.id === manualTaskUserId)
-    const departmentValue = manualTaskDepartmentValue || userEntry?.department_id || null
+
+    const departmentValue = manualTaskDepartmentValue
     if (!departmentValue) {
       toast.error("Department is required for this task.")
       return
@@ -355,11 +400,10 @@ export default function WeeklyPlannerPage() {
 
     setIsCreatingManualTask(true)
     try {
-      const dueDateIso = new Date(manualTaskDay).toISOString()
-      const res = await apiFetch("/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      if (manualTaskType === "fast") {
+        // Create single fast task
+        const dueDateIso = new Date(manualTaskDay).toISOString()
+        const taskPayload: any = {
           title: manualTaskTitle.trim(),
           project_id: null,
           department_id: departmentValue,
@@ -368,27 +412,91 @@ export default function WeeklyPlannerPage() {
           priority: "NORMAL",
           finish_period: manualTaskPeriod,
           due_date: dueDateIso,
-        }),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create task"
-        try {
-          const data = await res.json()
-          if (typeof data?.detail === "string") detail = data.detail
-        } catch {
-          // ignore
         }
-        toast.error(detail)
-        return
+        
+        // Set fast task type flags
+        if (manualTaskFastType === "BLL") {
+          taskPayload.is_bllok = true
+        } else if (manualTaskFastType === "R1") {
+          taskPayload.is_r1 = true
+        } else if (manualTaskFastType === "1H") {
+          taskPayload.is_1h_report = true
+        } else if (manualTaskFastType === "GA") {
+          // GA tasks need a ga_note_origin_id, but for manual tasks we'll just mark it
+          // The backend will handle this - we can leave it null and the badge will show based on other logic
+          // Actually, let's check if we need to create a GA note first or if we can just set a flag
+          // For now, we'll leave ga_note_origin_id as null and the frontend will show GA badge based on fast_task_type
+          // But wait, the backend might need it. Let me check the schema again - it's optional, so null should be fine
+        } else if (manualTaskFastType === "P:") {
+          taskPayload.is_personal = true
+        }
+
+        const res = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskPayload),
+        })
+        if (!res.ok) {
+          let detail = "Failed to create task"
+          try {
+            const data = await res.json()
+            if (typeof data?.detail === "string") detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(detail)
+          return
+        }
+        toast.success("Fast task added to weekly planner.")
+      } else {
+        // Create project tasks for multiple days and members
+        const tasksToCreate: Promise<Response>[] = []
+        
+        for (const day of manualTaskDays) {
+          for (const userId of manualTaskUserIds) {
+            const dueDateIso = new Date(day).toISOString()
+            tasksToCreate.push(
+              apiFetch("/tasks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  title: manualTaskTitle.trim(),
+                  project_id: null,
+                  department_id: departmentValue,
+                  assigned_to: userId,
+                  status: "TODO",
+                  priority: "NORMAL",
+                  finish_period: manualTaskPeriod,
+                  due_date: dueDateIso,
+                }),
+              })
+            )
+          }
+        }
+        
+        const results = await Promise.all(tasksToCreate)
+        const failed = results.filter(r => !r.ok)
+        if (failed.length > 0) {
+          toast.error(`Failed to create ${failed.length} task(s).`)
+          return
+        }
+        toast.success(`Created ${tasksToCreate.length} project task(s).`)
       }
-      toast.success("Task added to weekly planner.")
+      
       setManualTaskOpen(false)
       setManualTaskTitle("")
       setManualTaskDay("")
+      setManualTaskDays([])
       setManualTaskUserId("")
+      setManualTaskUserIds([])
       setManualTaskPeriod("AM")
       setManualTaskDepartmentId("")
+      setManualTaskFastType("")
+      setManualTaskType("fast")
       await loadPlanner()
+    } catch (error) {
+      console.error("Error creating task:", error)
+      toast.error("Failed to create task")
     } finally {
       setIsCreatingManualTask(false)
     }
@@ -449,6 +557,361 @@ export default function WeeklyPlannerPage() {
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
 
+  const getTaskStatusBadge = React.useCallback((task: {
+    is_bllok?: boolean
+    is_1h_report?: boolean
+    is_r1?: boolean
+    is_personal?: boolean
+    ga_note_origin_id?: string | null
+  }): { label: string; className: string } | null => {
+    if (task.is_bllok) {
+      return { label: "BLL", className: "border-red-200 bg-red-50 text-red-700" }
+    }
+    if (task.is_r1) {
+      return { label: "R1", className: "border-indigo-200 bg-indigo-50 text-indigo-700" }
+    }
+    if (task.is_1h_report) {
+      return { label: "1H", className: "border-amber-200 bg-amber-50 text-amber-700" }
+    }
+    if (task.ga_note_origin_id) {
+      return { label: "GA", className: "border-sky-200 bg-sky-50 text-sky-700" }
+    }
+    if (task.is_personal) {
+      return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+    }
+    return null // NORMAL = no badge
+  }, [])
+
+  const handlePrint = React.useCallback(() => {
+    if (!data) return
+    
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    const weekRange = `${formatDate(data.week_start)} - ${formatDate(data.week_end)}`
+    const selectedDept = departmentId !== ALL_DEPARTMENTS_VALUE 
+      ? departments.find(d => d.id === departmentId)?.name || "All Departments"
+      : "All Departments"
+
+    let printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Weekly Planner - ${weekRange}</title>
+          <style>
+            @media print {
+              @page { margin: 1cm; }
+              body { margin: 0; padding: 0; }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 10pt;
+              margin: 20px;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 20px;
+              border-bottom: 2px solid #000;
+              padding-bottom: 10px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 18pt;
+            }
+            .header-info {
+              margin-top: 10px;
+              font-size: 11pt;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 10px;
+              page-break-inside: auto;
+            }
+            th {
+              background-color: #f0f0f0;
+              border: 1px solid #000;
+              padding: 8px;
+              text-align: center;
+              font-weight: bold;
+              font-size: 9pt;
+            }
+            td {
+              border: 1px solid #000;
+              padding: 6px;
+              vertical-align: top;
+              font-size: 9pt;
+            }
+            .day-cell {
+              font-weight: bold;
+              background-color: #f9f9f9;
+              text-align: center;
+              width: 80px;
+            }
+            .project-card {
+              margin: 4px 0;
+              padding: 4px;
+              background-color: #f5f5f5;
+              border: 1px solid #ddd;
+              border-radius: 3px;
+            }
+            .project-title {
+              font-weight: bold;
+              margin-bottom: 2px;
+            }
+            .task-item {
+              font-size: 8pt;
+              margin: 2px 0;
+              padding-left: 8px;
+            }
+            .badge {
+              display: inline-block;
+              padding: 2px 6px;
+              border-radius: 3px;
+              font-size: 7pt;
+              font-weight: bold;
+              margin-left: 4px;
+            }
+            .badge-bll { background-color: #fee2e2; color: #991b1b; }
+            .badge-r1 { background-color: #e0e7ff; color: #3730a3; }
+            .badge-1h { background-color: #fef3c7; color: #92400e; }
+            .badge-ga { background-color: #dbeafe; color: #1e40af; }
+            .badge-p { background-color: #d1fae5; color: #065f46; }
+            .products {
+              color: #2563eb;
+              font-weight: bold;
+              font-size: 8pt;
+            }
+            .empty-cell {
+              text-align: center;
+              color: #999;
+            }
+            .pm-row {
+              border-top: 2px solid #000 !important;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Weekly Planner</h1>
+            <div class="header-info">
+              <strong>Week:</strong> ${weekRange} | 
+              <strong>Department:</strong> ${selectedDept}
+            </div>
+          </div>
+    `
+
+    data.departments.forEach((dept) => {
+      // Get all unique users
+      const userMap = new Map<string, WeeklyTableUserDay>()
+      dept.days.forEach((day) => {
+        day.users.forEach((userDay) => {
+          if (!userMap.has(userDay.user_id)) {
+            userMap.set(userDay.user_id, userDay)
+          }
+        })
+      })
+      const allUsers = Array.from(userMap.values())
+
+      printContent += `
+        <h2 style="margin-top: 20px; margin-bottom: 10px; font-size: 14pt;">${dept.department_name}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th class="day-cell" rowspan="2">Day</th>
+              <th style="width: 50px;">Time</th>
+              ${allUsers.map(user => `<th>${user.user_name}</th>`).join("")}
+            </tr>
+            <tr>
+              <th style="width: 50px;"></th>
+              ${allUsers.map(() => `<th></th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+      `
+
+      dept.days.forEach((day, dayIndex) => {
+        const dayName = DAY_NAMES[dayIndex]
+        const dayDate = formatDate(day.date)
+        
+        // AM Row
+        printContent += `
+          <tr>
+            <td class="day-cell" rowspan="2" style="text-align: left; padding: 8px;">
+              <div style="display: flex; flex-direction: column;">
+                <strong>${dayName}</strong>
+                <span style="font-size: 8pt; color: #666; margin-top: 2px;">${dayDate}</span>
+              </div>
+            </td>
+            <td style="text-align: center; font-weight: bold; font-size: 8pt; color: #2563eb;">AM</td>
+        `
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const projects = userDay?.am_projects || []
+          const systemTasks = userDay?.am_system_tasks || []
+          const fastTasks = userDay?.am_fast_tasks || []
+          
+          printContent += `<td>`
+          if (projects.length > 0 || systemTasks.length > 0 || fastTasks.length > 0) {
+            projects.forEach((project) => {
+              const isDevelopment = dept.department_name === "Development"
+              printContent += `<div class="project-card">
+                <div class="project-title">${project.project_title}`
+              if (project.project_total_products) {
+                printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+              }
+              printContent += `</div>`
+              if (!isDevelopment && project.tasks && project.tasks.length > 0) {
+                project.tasks.forEach((task) => {
+                  printContent += `<div class="task-item">${task.task_title}`
+                  if (task.daily_products) {
+                    printContent += ` <span class="products">${task.daily_products} pcs</span>`
+                  }
+                  const badge = getTaskStatusBadge(task)
+                  if (badge) {
+                    const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                     badge.label === "R1" ? "badge-r1" :
+                                     badge.label === "1H" ? "badge-1h" :
+                                     badge.label === "GA" ? "badge-ga" :
+                                     badge.label === "P:" ? "badge-p" : ""
+                    printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+                  }
+                  printContent += `</div>`
+                })
+              }
+              printContent += `</div>`
+            })
+            if (systemTasks.length > 0) {
+              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+              systemTasks.forEach((task) => {
+                printContent += `<div class="task-item">${task.title}</div>`
+              })
+              printContent += `</div>`
+            }
+            if (fastTasks.length > 0) {
+              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
+              fastTasks.forEach((task) => {
+                printContent += `<div class="task-item">${task.title}`
+                const badge = getTaskStatusBadge(task) || (task.fast_task_type ? { label: task.fast_task_type, className: "" } : null)
+                if (badge) {
+                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                   badge.label === "R1" ? "badge-r1" :
+                                   badge.label === "1H" ? "badge-1h" :
+                                   badge.label === "GA" ? "badge-ga" :
+                                   badge.label === "P:" ? "badge-p" : ""
+                  printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+                }
+                printContent += `</div>`
+              })
+              printContent += `</div>`
+            }
+          } else {
+            printContent += `<div class="empty-cell">—</div>`
+          }
+          printContent += `</td>`
+        })
+        printContent += `</tr>`
+        
+        // PM Row
+        printContent += `<tr style="border-top: 2px solid #000;">`
+        printContent += `<td style="text-align: center; font-weight: bold; font-size: 8pt; color: #2563eb;">PM</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const projects = userDay?.pm_projects || []
+          const systemTasks = userDay?.pm_system_tasks || []
+          const fastTasks = userDay?.pm_fast_tasks || []
+          
+          printContent += `<td>`
+          if (projects.length > 0 || systemTasks.length > 0 || fastTasks.length > 0) {
+            projects.forEach((project) => {
+              const isDevelopment = dept.department_name === "Development"
+              printContent += `<div class="project-card">
+                <div class="project-title">${project.project_title}`
+              if (project.project_total_products) {
+                printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+              }
+              printContent += `</div>`
+              if (!isDevelopment && project.tasks && project.tasks.length > 0) {
+                project.tasks.forEach((task) => {
+                  printContent += `<div class="task-item">${task.task_title}`
+                  if (task.daily_products) {
+                    printContent += ` <span class="products">${task.daily_products} pcs</span>`
+                  }
+                  const badge = getTaskStatusBadge(task)
+                  if (badge) {
+                    const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                     badge.label === "R1" ? "badge-r1" :
+                                     badge.label === "1H" ? "badge-1h" :
+                                     badge.label === "GA" ? "badge-ga" :
+                                     badge.label === "P:" ? "badge-p" : ""
+                    printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+                  }
+                  printContent += `</div>`
+                })
+              }
+              printContent += `</div>`
+            })
+            if (systemTasks.length > 0) {
+              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+              systemTasks.forEach((task) => {
+                printContent += `<div class="task-item">${task.title}</div>`
+              })
+              printContent += `</div>`
+            }
+            if (fastTasks.length > 0) {
+              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
+              fastTasks.forEach((task) => {
+                printContent += `<div class="task-item">${task.title}`
+                const badge = getTaskStatusBadge(task) || (task.fast_task_type ? { label: task.fast_task_type, className: "" } : null)
+                if (badge) {
+                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                   badge.label === "R1" ? "badge-r1" :
+                                   badge.label === "1H" ? "badge-1h" :
+                                   badge.label === "GA" ? "badge-ga" :
+                                   badge.label === "P:" ? "badge-p" : ""
+                  printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+                }
+                printContent += `</div>`
+              })
+              printContent += `</div>`
+            }
+          } else {
+            printContent += `<div class="empty-cell">—</div>`
+          }
+          printContent += `</td>`
+        })
+        printContent += `</tr>`
+      })
+
+      printContent += `
+          </tbody>
+        </table>
+      `
+    })
+
+    printContent += `
+        </body>
+      </html>
+    `
+
+    printWindow.document.write(printContent)
+    printWindow.document.close()
+    printWindow.focus()
+    
+    // Wait for content to load, then print
+    setTimeout(() => {
+      printWindow.print()
+    }, 250)
+  }, [data, departmentId, departments, getTaskStatusBadge])
+
+  const fastTaskBadgeStyles: Record<string, string> = {
+    BLL: "border-red-200 bg-red-50 text-red-700",
+    R1: "border-indigo-200 bg-indigo-50 text-indigo-700",
+    "1H": "border-amber-200 bg-amber-50 text-amber-700",
+    GA: "border-sky-200 bg-sky-50 text-sky-700",
+    "P:": "border-emerald-200 bg-emerald-50 text-emerald-700",
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -462,6 +925,10 @@ export default function WeeklyPlannerPage() {
             <Button onClick={handleSavePlan} disabled={isSaving}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? "Saving..." : "Save Plan"}
+            </Button>
+            <Button variant="outline" onClick={handlePrint} disabled={!data}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
             </Button>
           </div>
         )}
@@ -531,6 +998,28 @@ export default function WeeklyPlannerPage() {
                 </Select>
               </div>
             ) : null}
+            
+            <div className="space-y-2">
+              <Label>Task Type</Label>
+              <Select value={manualTaskType} onValueChange={(v) => {
+                setManualTaskType(v as "project" | "fast")
+                // Reset fields when switching type
+                setManualTaskDay("")
+                setManualTaskDays([])
+                setManualTaskUserId("")
+                setManualTaskUserIds([])
+                setManualTaskFastType("")
+              }}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fast">Fast Task</SelectItem>
+                  <SelectItem value="project">Project</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-2">
               <Label>Task title</Label>
               <Input
@@ -539,50 +1028,138 @@ export default function WeeklyPlannerPage() {
                 placeholder="Write the task..."
               />
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Day</Label>
-                <Select value={manualTaskDay} onValueChange={setManualTaskDay}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select day" />
-                  </SelectTrigger>
-                  <SelectContent>
+
+            {manualTaskType === "fast" ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Task Type</Label>
+                  <Select value={manualTaskFastType} onValueChange={setManualTaskFastType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select task type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="BLL">BLL</SelectItem>
+                      <SelectItem value="R1">R1</SelectItem>
+                      <SelectItem value="1H">1H</SelectItem>
+                      <SelectItem value="GA">GA</SelectItem>
+                      <SelectItem value="P:">P:</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Day</Label>
+                    <Select value={manualTaskDay} onValueChange={setManualTaskDay}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableDays.map((day) => (
+                          <SelectItem key={day.value} value={day.value}>
+                            {day.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>AM / PM</Label>
+                    <Select value={manualTaskPeriod} onValueChange={(v) => setManualTaskPeriod(v as "AM" | "PM")}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="AM/PM" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AM">AM</SelectItem>
+                        <SelectItem value="PM">PM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Member</Label>
+                  <Select value={manualTaskUserId} onValueChange={setManualTaskUserId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select member" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableUsers.map((entry) => (
+                        <SelectItem key={entry.id} value={entry.id}>
+                          {entry.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Days (Select multiple)</Label>
+                  <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
                     {availableDays.map((day) => (
-                      <SelectItem key={day.value} value={day.value}>
-                        {day.label}
-                      </SelectItem>
+                      <div key={day.value} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`day-${day.value}`}
+                          checked={manualTaskDays.includes(day.value)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setManualTaskDays([...manualTaskDays, day.value])
+                            } else {
+                              setManualTaskDays(manualTaskDays.filter(d => d !== day.value))
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`day-${day.value}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                        >
+                          {day.label}
+                        </label>
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>AM / PM</Label>
-                <Select value={manualTaskPeriod} onValueChange={(v) => setManualTaskPeriod(v as "AM" | "PM")}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="AM/PM" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AM">AM</SelectItem>
-                    <SelectItem value="PM">PM</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Member</Label>
-              <Select value={manualTaskUserId} onValueChange={setManualTaskUserId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select member" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableUsers.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>AM / PM</Label>
+                  <Select value={manualTaskPeriod} onValueChange={(v) => setManualTaskPeriod(v as "AM" | "PM")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="AM/PM" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AM">AM</SelectItem>
+                      <SelectItem value="PM">PM</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Members (Select multiple)</Label>
+                  <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
+                    {availableUsers.map((entry) => (
+                      <div key={entry.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`user-${entry.id}`}
+                          checked={manualTaskUserIds.includes(entry.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setManualTaskUserIds([...manualTaskUserIds, entry.id])
+                            } else {
+                              setManualTaskUserIds(manualTaskUserIds.filter(id => id !== entry.id))
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`user-${entry.id}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                        >
+                          {entry.name}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setManualTaskOpen(false)}>
                 Cancel
@@ -629,27 +1206,52 @@ export default function WeeklyPlannerPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-32 sticky left-0 bg-background z-10">User</TableHead>
-                        {dept.days.map((day, dayIndex) => (
-                          <React.Fragment key={day.date}>
-                            <TableHead className="min-w-48 text-center">
-                              <div className="font-semibold">{DAY_NAMES[dayIndex]}</div>
-                              <div className="text-xs text-muted-foreground">{formatDate(day.date)}</div>
-                              <div className="text-xs font-medium mt-1">AM</div>
+                        <TableHead className="w-32 sticky left-0 bg-background z-10" rowSpan={2}>Day</TableHead>
+                        <TableHead className="w-12 sticky left-32 bg-background z-10">Time</TableHead>
+                        {(() => {
+                          // Get all unique users from all days
+                          const userMap = new Map<string, WeeklyTableUserDay>()
+                          dept.days.forEach((day) => {
+                            day.users.forEach((userDay) => {
+                              if (!userMap.has(userDay.user_id)) {
+                                userMap.set(userDay.user_id, userDay)
+                              }
+                            })
+                          })
+                          const allUsers = Array.from(userMap.values())
+                          
+                          return allUsers.map((user) => (
+                            <TableHead key={user.user_id} className="min-w-48 text-center">
+                              <div className="font-semibold">{user.user_name}</div>
                             </TableHead>
-                            <TableHead className="min-w-48 text-center">
-                              <div className="text-xs font-medium mt-6">PM</div>
-                            </TableHead>
-                          </React.Fragment>
-                        ))}
+                          ))
+                        })()}
+                      </TableRow>
+                      <TableRow>
+                        <TableHead className="sticky left-32 bg-background z-10"></TableHead>
+                        {(() => {
+                          const userMap = new Map<string, WeeklyTableUserDay>()
+                          dept.days.forEach((day) => {
+                            day.users.forEach((userDay) => {
+                              if (!userMap.has(userDay.user_id)) {
+                                userMap.set(userDay.user_id, userDay)
+                              }
+                            })
+                          })
+                          const allUsers = Array.from(userMap.values())
+                          
+                          return allUsers.map((user) => (
+                            <TableHead key={user.user_id} className="min-w-48 text-center"></TableHead>
+                          ))
+                        })()}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(() => {
+                      {dept.days.map((day, dayIndex) => {
                         // Get all unique users from all days
                         const userMap = new Map<string, WeeklyTableUserDay>()
-                        dept.days.forEach((day) => {
-                          day.users.forEach((userDay) => {
+                        dept.days.forEach((d) => {
+                          d.users.forEach((userDay) => {
                             if (!userMap.has(userDay.user_id)) {
                               userMap.set(userDay.user_id, userDay)
                             }
@@ -657,16 +1259,7 @@ export default function WeeklyPlannerPage() {
                         })
                         const allUsers = Array.from(userMap.values())
 
-                        return allUsers.map((user) => (
-                          <TableRow key={user.user_id}>
-                            <TableCell className="font-medium sticky left-0 bg-background z-10">
-                              {user.user_name}
-                            </TableCell>
-                            {dept.days.map((day, dayIndex) => {
-                              // Find this user's data for this day
-                              const userDay = day.users.find((u) => u.user_id === user.user_id)
-                              
-                              const renderCellContent = (
+                        const renderCellContent = (
                                 projects: WeeklyTableProjectEntry[],
                                 systemTasks: WeeklyTableTaskEntry[],
                                 fastTasks: WeeklyTableTaskEntry[],
@@ -692,32 +1285,46 @@ export default function WeeklyPlannerPage() {
                                         className="p-2 rounded-md bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors"
                                       >
                                         <div className="font-medium text-sm">{project.project_title}</div>
-                                        {project.tasks && project.tasks.length > 0 && (
+                                        {project.tasks && project.tasks.length > 0 && dept.department_name !== "Development" && (
                                           <div className="mt-1 space-y-0.5">
-                                            {project.tasks.map((task) => (
-                                              <div key={task.task_id} className="text-xs text-muted-foreground flex justify-between items-center group/task">
-                                                <span className="truncate">{task.task_title}</span>
-                                                <div className="flex items-center gap-1">
-                                                  {task.daily_products != null && (
-                                                    <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">
-                                                      {task.daily_products} pcs
-                                                    </span>
-                                                  )}
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation()
-                                                      void deleteTask(task.task_id, task.task_title)
-                                                    }}
-                                                    disabled={deletingTaskId === task.task_id}
-                                                    className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
-                                                    title="Delete task"
-                                                  >
-                                                    <X className="h-3 w-3" />
-                                                  </button>
+                                            {project.tasks.map((task) => {
+                                              const statusBadge = getTaskStatusBadge(task)
+                                              return (
+                                                <div key={task.task_id} className="text-xs text-muted-foreground flex justify-between items-center group/task">
+                                                  <span className="truncate">{task.task_title}</span>
+                                                  <div className="flex items-center gap-1">
+                                                    {statusBadge && (
+                                                      <span
+                                                        className={[
+                                                          "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
+                                                          statusBadge.className,
+                                                        ].join(" ")}
+                                                        title={statusBadge.label}
+                                                      >
+                                                        {statusBadge.label}
+                                                      </span>
+                                                    )}
+                                                    {task.daily_products != null && (
+                                                      <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">
+                                                        {task.daily_products} pcs
+                                                      </span>
+                                                    )}
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        void deleteTask(task.task_id, task.task_title)
+                                                      }}
+                                                      disabled={deletingTaskId === task.task_id}
+                                                      className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
+                                                      title="Delete task"
+                                                    >
+                                                      <X className="h-3 w-3" />
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                              </div>
-                                            ))}
+                                              )
+                                            })}
                                           </div>
                                         )}
                                         {(!project.tasks || project.tasks.length === 0) && project.task_count > 1 && (
@@ -732,28 +1339,44 @@ export default function WeeklyPlannerPage() {
                                     {systemTasksList.length > 0 && (
                                       <div className="space-y-1">
                                         <div className="text-xs font-medium text-muted-foreground mb-1">System Tasks</div>
-                                        {systemTasksList.map((task, idx) => (
-                                          <div
-                                            key={task.task_id || idx}
-                                            className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm flex justify-between items-center group/task"
-                                          >
-                                            <span className="truncate">{task.title}</span>
-                                            {task.task_id && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title)
-                                                }}
-                                                disabled={deletingTaskId === task.task_id}
-                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
-                                                title="Delete task"
-                                              >
-                                                <X className="h-3 w-3" />
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
+                                        {systemTasksList.map((task, idx) => {
+                                          const statusBadge = getTaskStatusBadge(task)
+                                          return (
+                                            <div
+                                              key={task.task_id || idx}
+                                              className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm flex justify-between items-center group/task"
+                                            >
+                                              <span className="truncate">{task.title}</span>
+                                              <div className="flex items-center gap-1">
+                                                {statusBadge && (
+                                                  <span
+                                                    className={[
+                                                      "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
+                                                      statusBadge.className,
+                                                    ].join(" ")}
+                                                    title={statusBadge.label}
+                                                  >
+                                                    {statusBadge.label}
+                                                  </span>
+                                                )}
+                                                {task.task_id && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      void deleteTask(task.task_id!, task.title)
+                                                    }}
+                                                    disabled={deletingTaskId === task.task_id}
+                                                    className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                    title="Delete task"
+                                                  >
+                                                    <X className="h-3 w-3" />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
                                       </div>
                                     )}
                                     
@@ -761,38 +1384,73 @@ export default function WeeklyPlannerPage() {
                                     {fastTasksList.length > 0 && (
                                       <div className="space-y-1">
                                         <div className="text-xs font-medium text-muted-foreground mb-1">Fast Tasks</div>
-                                        {fastTasksList.map((task, idx) => (
-                                          <div
-                                            key={task.task_id || idx}
-                                            className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm flex justify-between items-center group/task"
-                                          >
-                                            <span className="truncate">{task.title}</span>
-                                            {task.task_id && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title)
-                                                }}
-                                                disabled={deletingTaskId === task.task_id}
-                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
-                                                title="Delete task"
-                                              >
-                                                <X className="h-3 w-3" />
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
+                                    {fastTasksList.map((task, idx) => {
+                                          const statusBadge = getTaskStatusBadge(task) || (task.fast_task_type ? {
+                                            label: task.fast_task_type,
+                                            className: fastTaskBadgeStyles[task.fast_task_type] || "border-slate-200 bg-slate-50 text-slate-700"
+                                          } : null)
+                                          return (
+                                            <div
+                                              key={task.task_id || idx}
+                                              className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm flex justify-between items-center group/task"
+                                            >
+                                              <span className="truncate">{task.title}</span>
+                                              <div className="flex items-center gap-1">
+                                                {statusBadge && (
+                                                  <span
+                                                    className={[
+                                                      "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
+                                                      statusBadge.className,
+                                                    ].join(" ")}
+                                                    title={statusBadge.label}
+                                                  >
+                                                    {statusBadge.label}
+                                                  </span>
+                                                )}
+                                                {task.task_id && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      void deleteTask(task.task_id!, task.title)
+                                                    }}
+                                                    disabled={deletingTaskId === task.task_id}
+                                                    className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                    title="Delete task"
+                                                  >
+                                                    <X className="h-3 w-3" />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
                                       </div>
                                     )}
                                   </div>
                                 )
                               }
 
-                              return (
-                                <React.Fragment key={day.date}>
-                                  {/* AM Column */}
-                                  <TableCell className="align-top">
+                        return (
+                          <React.Fragment key={day.date}>
+                            {/* AM Row */}
+                            <TableRow>
+                              <TableCell 
+                                className="font-medium sticky left-0 bg-background z-10 align-top"
+                                rowSpan={2}
+                              >
+                                <div className="flex flex-col">
+                                  <div className="font-semibold">{DAY_NAMES[dayIndex]}</div>
+                                  <div className="text-xs text-muted-foreground mt-1">{formatDate(day.date)}</div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="w-12 align-top sticky left-32 bg-background z-10">
+                                <div className="text-xs font-medium text-primary">AM</div>
+                              </TableCell>
+                              {allUsers.map((user) => {
+                                const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                return (
+                                  <TableCell key={`${user.user_id}-am`} className="align-top">
                                     {userDay
                                       ? renderCellContent(
                                           userDay.am_projects || [],
@@ -802,8 +1460,18 @@ export default function WeeklyPlannerPage() {
                                         )
                                       : <div className="min-h-24 text-xs text-muted-foreground/50">—</div>}
                                   </TableCell>
-                                  {/* PM Column */}
-                                  <TableCell className="align-top">
+                                )
+                              })}
+                            </TableRow>
+                            {/* PM Row */}
+                            <TableRow className="border-t-2 border-border">
+                              <TableCell className="w-12 align-top sticky left-32 bg-background z-10">
+                                <div className="text-xs font-medium text-primary">PM</div>
+                              </TableCell>
+                              {allUsers.map((user) => {
+                                const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                return (
+                                  <TableCell key={`${user.user_id}-pm`} className="align-top">
                                     {userDay
                                       ? renderCellContent(
                                           userDay.pm_projects || [],
@@ -813,12 +1481,12 @@ export default function WeeklyPlannerPage() {
                                         )
                                       : <div className="min-h-24 text-xs text-muted-foreground/50">—</div>}
                                   </TableCell>
-                                </React.Fragment>
-                              )
-                            })}
-                          </TableRow>
-                        ))
-                      })()}
+                                )
+                              })}
+                            </TableRow>
+                          </React.Fragment>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>

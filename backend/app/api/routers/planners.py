@@ -617,10 +617,9 @@ async def weekly_table_planner(
     design_dept_names = {"Graphic Design", "Project Content Manager"}
     design_dept_ids = {dept.id for dept in departments if dept.name in design_dept_names}
     
-    # Get all users - we need all users for Design/PCM departments
-    # If viewing all departments or Design/PCM, get all users; otherwise filter by department
+    # Get all users - filter by department if a specific department is selected
     users_stmt = select(User).where(User.is_active == True)
-    if department_id is not None and department_id not in design_dept_ids:
+    if department_id is not None:
         users_stmt = users_stmt.where(User.department_id == department_id)
     all_users = (await db.execute(users_stmt.order_by(User.full_name))).scalars().all()
     
@@ -643,15 +642,26 @@ async def weekly_table_planner(
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
     # Filter tasks for the week (exclude system tasks)
+    # Include all active tasks that are assigned to users in the department
     week_tasks = []
     task_project_ids = set()
+    assigned_task_user_ids = set()
     for t in all_tasks:
         # Skip system tasks (tasks with system_template_origin_id)
         if t.system_template_origin_id is not None:
             continue
+        # Track assigned tasks
+        if t.assigned_to is not None:
+            assigned_task_user_ids.add(t.assigned_to)
         if t.due_date is not None:
             due_date_only = t.due_date.date()
+            # Include tasks with due_date in the week, OR active assigned tasks with any due_date
             if working_days[0] <= due_date_only <= working_days[-1]:
+                week_tasks.append(t)
+                if t.project_id is not None:
+                    task_project_ids.add(t.project_id)
+            elif t.is_active and t.assigned_to is not None:
+                # Include active assigned tasks even if due_date is outside week
                 week_tasks.append(t)
                 if t.project_id is not None:
                     task_project_ids.add(t.project_id)
@@ -691,6 +701,19 @@ async def weekly_table_planner(
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
     
     # Build table structure: Departments -> Days -> Users -> AM/PM
+    def get_fast_task_type(task: Task) -> str | None:
+        if task.is_bllok:
+            return "BLL"
+        if task.is_r1:
+            return "R1"
+        if task.is_1h_report:
+            return "1H"
+        if task.ga_note_origin_id is not None:
+            return "GA"
+        if task.is_personal:
+            return "P:"
+        return None
+
     departments_data: list[WeeklyTableDepartment] = []
     
     # Debug: Log task counts
@@ -698,12 +721,13 @@ async def weekly_table_planner(
     logger.debug(f"Weekly planner: Found {len(week_tasks)} tasks for week {week_start_date} to {week_end}")
     
     for dept in departments:
-        # For Design and PCM departments, show all tasks and all users (same as Development)
+        # Show only users from this specific department (exclude users with no department)
+        dept_users = [u for u in all_users if u.department_id is not None and u.department_id == dept.id]
+        # For Design and PCM departments, show all tasks (from all departments)
+        # For other departments, show only tasks from that department
         if dept.id in design_dept_ids:
-            dept_users = all_users  # All users from all departments
             dept_tasks = week_tasks  # All tasks from all departments
         else:
-            dept_users = [u for u in all_users if u.department_id == dept.id]
             dept_tasks = [t for t in week_tasks if t.department_id == dept.id]
         
         # Organize tasks by day and user
@@ -725,13 +749,17 @@ async def weekly_table_planner(
                         user_task_ids.add(t.id)
                 
                 # Filter tasks for this day:
-                # - Tasks with due_date: only if due_date matches this day
-                # - Tasks without due_date: only show on the first day
+                # - Tasks with due_date in week: only if due_date matches this day
+                # - Tasks with due_date outside week: show on first day only
+                # - Tasks without due_date: show on all days
                 user_tasks = [
                     t for t in dept_tasks
                     if t.id in user_task_ids and (
                         (t.due_date is not None and t.due_date.date() == day_date) or
-                        (t.due_date is None and day_date == working_days[0])
+                        (t.due_date is not None and t.due_date.date() != day_date and 
+                         (t.due_date.date() < working_days[0] or t.due_date.date() > working_days[-1]) and 
+                         day_date == working_days[0]) or
+                        (t.due_date is None)
                     )
                 ]
                 
@@ -758,6 +786,12 @@ async def weekly_table_planner(
                             task_id=task.id,
                             title=task.title,
                             daily_products=task.daily_products,
+                            fast_task_type=get_fast_task_type(task),
+                            is_bllok=task.is_bllok,
+                            is_1h_report=task.is_1h_report,
+                            is_r1=task.is_r1,
+                            is_personal=task.is_personal,
+                            ga_note_origin_id=task.ga_note_origin_id,
                         )
                         if is_pm:
                             pm_system_tasks.append(entry)
@@ -769,6 +803,12 @@ async def weekly_table_planner(
                             task_id=task.id,
                             title=task.title,
                             daily_products=task.daily_products,
+                            fast_task_type=get_fast_task_type(task),
+                            is_bllok=task.is_bllok,
+                            is_1h_report=task.is_1h_report,
+                            is_r1=task.is_r1,
+                            is_personal=task.is_personal,
+                            ga_note_origin_id=task.ga_note_origin_id,
                         )
                         if is_pm:
                             pm_fast_tasks.append(entry)
@@ -798,6 +838,11 @@ async def weekly_table_planner(
                                 task_id=t.id,
                                 task_title=t.title,
                                 daily_products=t.daily_products,
+                                is_bllok=t.is_bllok,
+                                is_1h_report=t.is_1h_report,
+                                is_r1=t.is_r1,
+                                is_personal=t.is_personal,
+                                ga_note_origin_id=t.ga_note_origin_id,
                             )
                             for t in tasks_list
                         ],
@@ -815,6 +860,11 @@ async def weekly_table_planner(
                                 task_id=t.id,
                                 task_title=t.title,
                                 daily_products=t.daily_products,
+                                is_bllok=t.is_bllok,
+                                is_1h_report=t.is_1h_report,
+                                is_r1=t.is_r1,
+                                is_personal=t.is_personal,
+                                ga_note_origin_id=t.ga_note_origin_id,
                             )
                             for t in tasks_list
                         ],

@@ -33,6 +33,11 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     task_id: uuid.UUID
     task_title: str
     daily_products: int | None = None
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
+    ga_note_origin_id: uuid.UUID | None = None
 
 
 class WeeklyTableProjectEntry(BaseModel):
@@ -49,6 +54,12 @@ class WeeklyTableTaskEntry(BaseModel):
     task_id: uuid.UUID | None = None
     title: str
     daily_products: int | None = None
+    fast_task_type: str | None = None
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
+    ga_note_origin_id: uuid.UUID | None = None
 
 
 class WeeklyTableUserDay(BaseModel):
