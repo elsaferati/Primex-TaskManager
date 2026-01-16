@@ -71,7 +71,8 @@ GD_PROJECTS = [
     }
 ]
 
-VS_VL_TEMPLATE_TITLE = "VS/VL PROJEKT I MADH TEMPLATE"
+VS_VL_LARGE_TEMPLATE_TITLE = "VS/VL PROJEKT I MADH"
+VS_VL_LARGE_TEMPLATE_LEGACY_TITLES = ["VS/VL PROJEKT I MADH TEMPLATE"]
 VS_VL_TEMPLATE_DESCRIPTION = "VS/VL project phases: Project Acceptance, Amazon, Check, Dreamrobot."
 VS_VL_SMALL_TEMPLATE_TITLE = "VS/VL PROJEKT I VOGEL TEMPLATE 2"
 VS_VL_SMALL_TEMPLATE_OFFSETS = {
@@ -589,15 +590,24 @@ async def seed() -> None:
             await db.commit()
             print("PCM projects seeded.")
 
-            async def ensure_vs_vl_template(title: str, offsets: dict[str, int] | None) -> None:
-                template_project = (
+            async def ensure_vs_vl_template(
+                title: str,
+                offsets: dict[str, int] | None,
+                legacy_titles: list[str] | None = None,
+            ) -> None:
+                titles = [title, *(legacy_titles or [])]
+                template_projects = (
                     await db.execute(
                         select(Project).where(
                             Project.department_id == pcm_department.id,
-                            Project.title == title,
+                            Project.title.in_(titles),
                         )
                     )
-                ).scalars().first()
+                ).scalars().all()
+                template_project = next(
+                    (project for project in template_projects if project.title == title),
+                    template_projects[0] if template_projects else None,
+                )
                 if template_project is None:
                     template_project = Project(
                         title=title,
@@ -611,6 +621,8 @@ async def seed() -> None:
                     db.add(template_project)
                     await db.flush()
                 else:
+                    if template_project.title != title:
+                        template_project.title = title
                     if not template_project.is_template:
                         template_project.is_template = True
                     if not template_project.description:
@@ -714,7 +726,11 @@ async def seed() -> None:
                 await db.commit()
                 print(f"VS/VL template project seeded: {title}")
 
-            await ensure_vs_vl_template(VS_VL_TEMPLATE_TITLE, None)
+            await ensure_vs_vl_template(
+                VS_VL_LARGE_TEMPLATE_TITLE,
+                None,
+                legacy_titles=VS_VL_LARGE_TEMPLATE_LEGACY_TITLES,
+            )
             await ensure_vs_vl_template(VS_VL_SMALL_TEMPLATE_TITLE, VS_VL_SMALL_TEMPLATE_OFFSETS)
 
         gd_department = next((dept for dept in departments if dept.name == "Graphic Design"), None)
