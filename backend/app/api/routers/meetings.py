@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.meeting import Meeting
@@ -21,19 +21,26 @@ router = APIRouter()
 async def list_meetings(
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
+    include_all_departments: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[MeetingOut]:
-    if department_id is None and project_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id or project_id required")
-
     stmt = select(Meeting)
+    if department_id is None and project_id is None:
+        if include_all_departments:
+            ensure_manager_or_admin(user)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id or project_id required")
+    elif include_all_departments:
+        ensure_manager_or_admin(user)
     if project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         stmt = stmt.where(Meeting.project_id == project_id)
     if department_id is not None:
+        if not include_all_departments:
+            ensure_department_access(user, department_id)
         stmt = stmt.where(Meeting.department_id == department_id)
 
     meetings = (await db.execute(stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
-import type { User, Task, CommonEntry, Project } from "@/lib/types"
+import type { User, Task, CommonEntry, Project, Meeting, Department } from "@/lib/types"
 
 type CommonType =
   | "late"
@@ -125,6 +125,16 @@ export default function CommonViewPage() {
     const d = fromISODate(s)
     return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
   }
+  const formatTime = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  const formatExternalMeetingWhen = (meeting: Meeting) => {
+    const source = meeting.starts_at || meeting.created_at
+    if (!source) return "Date TBD"
+    const date = new Date(source)
+    if (Number.isNaN(date.getTime())) return "Date TBD"
+    const dateLabel = formatDateHuman(toISODate(date))
+    const timeLabel = meeting.starts_at ? formatTime(date) : "TBD"
+    return `${dateLabel} ${timeLabel}`
+  }
   const alWeekdayShort = (d: Date) => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     return days[d.getDay()]
@@ -136,6 +146,7 @@ export default function CommonViewPage() {
 
   // State
   const [users, setUsers] = React.useState<User[]>([])
+  const [departments, setDepartments] = React.useState<Department[]>([])
   const [commonData, setCommonData] = React.useState({
     late: [] as LateItem[],
     absent: [] as AbsentItem[],
@@ -172,6 +183,13 @@ export default function CommonViewPage() {
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
+  const [externalMeetingsOpen, setExternalMeetingsOpen] = React.useState(false)
+  const [externalMeetings, setExternalMeetings] = React.useState<Meeting[]>([])
+  const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
+  const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
+  const [externalMeetingStartsAt, setExternalMeetingStartsAt] = React.useState("")
+  const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
+  const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingRowId, setEditingRowId] = React.useState<string | null>(null)
   const [editDraft, setEditDraft] = React.useState({
     day: "",
@@ -212,6 +230,22 @@ export default function CommonViewPage() {
     if (!hasOwner) return false
     return activeMeeting.rows.every((row, idx) => !row.owner || idx === 0)
   }, [activeMeeting])
+  const canSelectExternalDepartment = user?.role !== "STAFF"
+  const externalMeetingDepartment = React.useMemo(
+    () => departments.find((d) => d.id === externalMeetingDepartmentId) || null,
+    [departments, externalMeetingDepartmentId]
+  )
+  const externalMeetingsSorted = React.useMemo(() => {
+    return [...externalMeetings].sort((a, b) => {
+      const aDate = a.starts_at || a.created_at
+      const bDate = b.starts_at || b.created_at
+      const aTime = aDate ? new Date(aDate).getTime() : 0
+      const bTime = bDate ? new Date(bDate).getTime() : 0
+      return bTime - aTime
+    })
+  }, [externalMeetings])
+  const userById = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
 
   React.useEffect(() => {
     let mounted = true
@@ -289,6 +323,17 @@ export default function CommonViewPage() {
     setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
   }, [activeMeetingId])
 
+  React.useEffect(() => {
+    if (externalMeetingDepartmentId) return
+    if (user?.department_id) {
+      setExternalMeetingDepartmentId(user.department_id)
+      return
+    }
+    if (departments.length) {
+      setExternalMeetingDepartmentId(departments[0].id)
+    }
+  }, [departments, externalMeetingDepartmentId, user?.department_id])
+
   // Load data on mount
   React.useEffect(() => {
     let mounted = true
@@ -319,6 +364,11 @@ export default function CommonViewPage() {
         if (uRes?.ok) {
           loadedUsers = (await uRes.json()) as User[]
           if (mounted) setUsers(loadedUsers)
+        }
+        const depRes = await apiFetch("/departments")
+        if (depRes?.ok) {
+          const loadedDepartments = (await depRes.json()) as Department[]
+          if (mounted) setDepartments(loadedDepartments)
         }
         const projectsEndpoint =
           user?.role && user.role !== "STAFF"
@@ -629,6 +679,42 @@ export default function CommonViewPage() {
           allData.priority = Array.from(priorityMap.values())
         }
 
+        const meetingsEndpoint =
+          user?.role && user.role !== "STAFF"
+            ? "/meetings?include_all_departments=true"
+            : user?.department_id
+              ? `/meetings?department_id=${user.department_id}`
+              : null
+
+        if (meetingsEndpoint) {
+          const meetingsRes = await apiFetch(meetingsEndpoint)
+          if (meetingsRes?.ok) {
+            const meetings = (await meetingsRes.json()) as Meeting[]
+            if (mounted) setExternalMeetings(meetings)
+            for (const meeting of meetings) {
+              const startsAt = meeting.starts_at ? new Date(meeting.starts_at) : null
+              const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null
+              const createdAt = new Date(meeting.created_at)
+              const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
+              const dateSource = validStartsAt ?? validCreatedAt
+              if (!dateSource) continue
+
+              const ownerUser = meeting.created_by
+                ? loadedUsers.find((u) => u.id === meeting.created_by)
+                : null
+              const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
+
+              allData.external.push({
+                title: meeting.title || "External meeting",
+                date: toISODate(dateSource),
+                time: validStartsAt ? formatTime(validStartsAt) : "TBD",
+                platform: meeting.platform?.trim() || "TBD",
+                owner: ownerName,
+              })
+            }
+          }
+        }
+
         // Single state update with all data
         if (mounted) {
           setCommonData(allData)
@@ -651,7 +737,7 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, user?.role])
+  }, [apiFetch, user?.role, user?.department_id])
 
   React.useEffect(() => {
     if (formType === "leave" && !formFullDay) {
@@ -889,6 +975,70 @@ export default function CommonViewPage() {
     },
     [apiFetch, isAdmin]
   )
+
+  const submitExternalMeeting = React.useCallback(async () => {
+    if (!externalMeetingTitle.trim()) return
+    const departmentId = externalMeetingDepartmentId || user?.department_id
+    if (!departmentId) {
+      console.error("Department is required to create a meeting.")
+      return
+    }
+    setCreatingExternalMeeting(true)
+    try {
+      const startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
+      const payload = {
+        title: externalMeetingTitle.trim(),
+        platform: externalMeetingPlatform.trim() || null,
+        starts_at: startsAt,
+        department_id: departmentId,
+        project_id: null,
+      }
+      const res = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res?.ok) {
+        console.error("Failed to create meeting", res?.status)
+        return
+      }
+      const created = (await res.json()) as Meeting
+      setExternalMeetings((prev) => [created, ...prev])
+      const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
+      const dateSource = created.starts_at ? new Date(created.starts_at) : new Date(created.created_at)
+      const safeDate = Number.isNaN(dateSource.getTime()) ? new Date() : dateSource
+      setCommonData((prev) => ({
+        ...prev,
+        external: [
+          ...prev.external,
+          {
+            title: created.title || "External meeting",
+            date: toISODate(safeDate),
+            time: created.starts_at ? formatTime(safeDate) : "TBD",
+            platform: created.platform?.trim() || "TBD",
+            owner: ownerName,
+          },
+        ],
+      }))
+      setExternalMeetingTitle("")
+      setExternalMeetingPlatform("")
+      setExternalMeetingStartsAt("")
+    } finally {
+      setCreatingExternalMeeting(false)
+    }
+  }, [
+    apiFetch,
+    externalMeetingTitle,
+    externalMeetingPlatform,
+    externalMeetingStartsAt,
+    externalMeetingDepartmentId,
+    user?.department_id,
+    user?.email,
+    user?.full_name,
+    user?.username,
+    formatTime,
+    toISODate,
+  ])
 
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
     const baseItems = items.length ? items : [{ title: "No data available.", placeholder: true }]
@@ -1553,6 +1703,9 @@ export default function CommonViewPage() {
           padding: 16px 18px;
           box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
         }
+        .external-meetings-panel {
+          margin-top: 12px;
+        }
         .meeting-panel-header {
           display: flex;
           align-items: center;
@@ -1651,6 +1804,72 @@ export default function CommonViewPage() {
           width: 100%;
           border-collapse: collapse;
           font-size: 12px;
+        }
+        .external-meetings-grid {
+          display: grid;
+          grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+          gap: 16px;
+          margin-top: 14px;
+        }
+        .external-meeting-form-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+          margin-bottom: 8px;
+        }
+        .external-meeting-fields {
+          display: grid;
+          gap: 10px;
+        }
+        .external-meeting-row {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .external-meeting-hint {
+          font-size: 12px;
+          color: #64748b;
+        }
+        .external-meeting-cards {
+          display: grid;
+          gap: 10px;
+        }
+        .external-meeting-card {
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 10px 12px;
+          background: #ffffff;
+          box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
+        }
+        .external-meeting-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .external-meeting-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 12px;
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 4px;
+        }
+        .external-meeting-empty {
+          border: 1px dashed #cbd5e1;
+          border-radius: 12px;
+          padding: 12px;
+          font-size: 12px;
+          color: #94a3b8;
+        }
+        @media (max-width: 900px) {
+          .external-meetings-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @media (max-width: 720px) {
+          .external-meeting-row {
+            grid-template-columns: 1fr;
+          }
         }
         .meeting-table th {
           background: #e2e8f0;
@@ -2496,6 +2715,13 @@ export default function CommonViewPage() {
             <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
               Meeting
             </button>
+            <button
+              className="btn-outline no-print"
+              type="button"
+              onClick={() => setExternalMeetingsOpen((prev) => !prev)}
+            >
+              External Meetings
+            </button>
             <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
               + Add
             </button>
@@ -2933,6 +3159,104 @@ export default function CommonViewPage() {
           ) : (
             <div className="meeting-empty">No meeting selected.</div>
           )}
+        </section>
+      ) : null}
+
+      {externalMeetingsOpen ? (
+        <section className="meeting-panel external-meetings-panel">
+          <div className="meeting-panel-header">
+            <div>
+              <div className="meeting-title">External Meetings</div>
+              <div className="meeting-subtitle">Show all external meetings and add new ones.</div>
+            </div>
+            <button className="btn-outline" type="button" onClick={() => setExternalMeetingsOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="external-meetings-grid">
+            <div className="external-meeting-form">
+              <div className="external-meeting-form-title">Add meeting</div>
+              <div className="external-meeting-fields">
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="Meeting title"
+                  value={externalMeetingTitle}
+                  onChange={(e) => setExternalMeetingTitle(e.target.value)}
+                />
+                <div className="external-meeting-row">
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Platform (Zoom, Meet, Office...)"
+                    value={externalMeetingPlatform}
+                    onChange={(e) => setExternalMeetingPlatform(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    type="datetime-local"
+                    value={externalMeetingStartsAt}
+                    onChange={(e) => setExternalMeetingStartsAt(e.target.value)}
+                  />
+                </div>
+                <div className="external-meeting-row">
+                  <select
+                    className="input"
+                    value={externalMeetingDepartmentId}
+                    onChange={(e) => setExternalMeetingDepartmentId(e.target.value)}
+                    disabled={!canSelectExternalDepartment}
+                  >
+                    <option value="">
+                      {canSelectExternalDepartment ? "Select department" : "Department"}
+                    </option>
+                    {departments.map((dep) => (
+                      <option key={dep.id} value={dep.id}>
+                        {dep.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    disabled={!canCreateExternalMeeting || creatingExternalMeeting}
+                    onClick={() => void submitExternalMeeting()}
+                  >
+                    {creatingExternalMeeting ? "Saving..." : "Add"}
+                  </button>
+                </div>
+                {!canSelectExternalDepartment && externalMeetingDepartment ? (
+                  <div className="external-meeting-hint">Department: {externalMeetingDepartment.name}</div>
+                ) : null}
+              </div>
+            </div>
+            <div className="external-meeting-list">
+              <div className="external-meeting-form-title">All external meetings</div>
+              {externalMeetingsSorted.length ? (
+                <div className="external-meeting-cards">
+                  {externalMeetingsSorted.map((meeting) => {
+                    const department = departments.find((d) => d.id === meeting.department_id) || null
+                    const owner = meeting.created_by ? userById.get(meeting.created_by) : null
+                    const ownerName = owner?.full_name || owner?.username || "Unknown"
+                    return (
+                      <div key={meeting.id} className="external-meeting-card">
+                        <div className="external-meeting-title">{meeting.title || "External meeting"}</div>
+                        <div className="external-meeting-meta">
+                          <span>{formatExternalMeetingWhen(meeting)}</span>
+                          <span>{meeting.platform || "Platform TBD"}</span>
+                        </div>
+                        <div className="external-meeting-meta">
+                          <span>{department?.name || "Department TBD"}</span>
+                          <span>Owner: {ownerName}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="external-meeting-empty">No external meetings yet.</div>
+              )}
+            </div>
+          </div>
         </section>
       ) : null}
 
