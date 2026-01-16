@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update, cast, String as SQLString, or_
+from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,24 +97,57 @@ async def _copy_tasks_from_template_project(
     # Map old task IDs to new task IDs for dependency linking
     old_to_new_task_id: dict[uuid.UUID, uuid.UUID] = {}
     
+    # Fetch all task assignees from template tasks
+    template_task_ids = [t.id for t in template_tasks]
+    template_assignees = {}
+    if template_task_ids:
+        assignee_records = (await db.execute(
+            select(TaskAssignee).where(TaskAssignee.task_id.in_(template_task_ids))
+        )).scalars().all()
+        for assignee in assignee_records:
+            if assignee.task_id not in template_assignees:
+                template_assignees[assignee.task_id] = []
+            template_assignees[assignee.task_id].append(assignee.user_id)
+    
     for template_task in template_tasks:
-        # Create new task based on template
+        # Create new task based on template - copy ALL fields
         new_task = Task(
             title=template_task.title,
             description=template_task.description,
             internal_notes=template_task.internal_notes,
             priority=template_task.priority or "NORMAL",
-            status="TODO",
+            status=template_task.status or "TODO",  # Copy status from template
             phase=template_task.phase or "AMAZON",
             project_id=project.id,
             department_id=project.department_id,
             created_by=created_by_id,
-            # Don't copy: due_date (will be set based on project start), assigned_to, dependency
+            # Copy all date fields
+            start_date=template_task.start_date,
+            due_date=template_task.due_date,  # Copy due_date from template
+            # Copy all other fields
+            finish_period=template_task.finish_period,
+            progress_percentage=template_task.progress_percentage or 0,
+            daily_products=template_task.daily_products,
+            assigned_to=template_task.assigned_to,  # Copy assigned_to from template
+            is_bllok=template_task.is_bllok,
+            is_1h_report=template_task.is_1h_report,
+            is_r1=template_task.is_r1,
+            is_personal=template_task.is_personal,
+            is_active=template_task.is_active,
         )
         db.add(new_task)
         await db.flush()  # Get the new task ID
         
         old_to_new_task_id[template_task.id] = new_task.id
+        
+        # Copy task assignees (multiple assignees from task_assignees table)
+        if template_task.id in template_assignees:
+            assignee_values = [
+                {"task_id": new_task.id, "user_id": user_id}
+                for user_id in template_assignees[template_task.id]
+            ]
+            if assignee_values:
+                await db.execute(insert(TaskAssignee), assignee_values)
     
     # Second pass: set dependencies using the mapping
     for template_task in template_tasks:

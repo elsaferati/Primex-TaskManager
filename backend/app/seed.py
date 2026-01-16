@@ -17,6 +17,7 @@ from app.models.checklist_item import ChecklistItem
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
+from app.models.task_assignee import TaskAssignee
 from app.models.enums import ChecklistItemType
 
 # 2. Load environment variables immediately
@@ -94,21 +95,72 @@ VS_VL_ACCEPTANCE_QUESTIONS = [
     "IS CHATGPT PROJECT OPENED?",
 ]
 VS_VL_TEMPLATE_TASKS = [
-    {"key": "base", "title": "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE", "phase": "AMAZON"},
-    {"key": "template", "title": "PLOTESIMI I TEMPLATE-IT TE AMAZONIT", "phase": "AMAZON", "dependency_key": "base"},
-    {"key": "prices", "title": "KALKULIMI I CMIMEVE", "phase": "AMAZON"},
-    {"key": "photos", "title": "GJENERIMI I FOTOVE", "phase": "AMAZON"},
+    {
+        "key": "base",
+        "title": "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE",
+        "phase": "AMAZON",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "template",
+        "title": "PLOTESIMI I TEMPLATE-IT TE AMAZONIT",
+        "phase": "AMAZON",
+        "dependency_key": "base",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "prices",
+        "title": "KALKULIMI I CMIMEVE",
+        "phase": "AMAZON",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "photos",
+        "title": "GJENERIMI I FOTOVE",
+        "phase": "AMAZON",
+        "description": None,  # Add your description here
+    },
     {
         "key": "kontrol",
         "title": "KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON",
         "phase": "AMAZON",
         "dependency_key": "ko2",
+        "description": None,  # Add your description here
     },
-    {"key": "ko1", "title": "KO1 E PROJEKTIT VS", "phase": "CHECK", "dependency_key": "base"},
-    {"key": "ko2", "title": "KO2 E PROJEKTIT VS", "phase": "CHECK", "dependency_key": "ko1"},
-    {"key": "dreamVs", "title": "DREAM ROBOT VS", "phase": "DREAMROBOT", "dependency_key": "kontrol"},
-    {"key": "dreamVl", "title": "DREAM ROBOT VL", "phase": "DREAMROBOT", "dependency_key": "kontrol"},
-    {"key": "dreamWeights", "title": "KALKULIMI I PESHAVE", "phase": "DREAMROBOT"},
+    {
+        "key": "ko1",
+        "title": "KO1 E PROJEKTIT VS",
+        "phase": "CHECK",
+        "dependency_key": "base",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "ko2",
+        "title": "KO2 E PROJEKTIT VS",
+        "phase": "CHECK",
+        "dependency_key": "ko1",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "dreamVs",
+        "title": "DREAM ROBOT VS",
+        "phase": "DREAMROBOT",
+        "dependency_key": "kontrol",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "dreamVl",
+        "title": "DREAM ROBOT VL",
+        "phase": "DREAMROBOT",
+        "dependency_key": "kontrol",
+        "description": None,  # Add your description here
+    },
+    {
+        "key": "dreamWeights",
+        "title": "KALKULIMI I PESHAVE",
+        "phase": "DREAMROBOT",
+        "description": None,  # Add your description here
+    },
 ]
 
 MST_PLANNING_ACCEPTANCE_GROUP_KEY = "MST_PLANNING_ACCEPTANCE"
@@ -639,11 +691,14 @@ async def seed() -> None:
                 for task_def in VS_VL_TEMPLATE_TASKS:
                     task_title = task_def["title"]
                     phase = task_def["phase"]
+                    description = task_def.get("description")
                     unlock_after_days = offsets.get(task_title) if offsets else None
                     task = task_by_title.get(task_title)
                     if task is None:
+                        # Create new task with all fields from template definition
                         task = Task(
                             title=task_title,
+                            description=description,  # Include description from template
                             internal_notes=_vs_vl_meta(phase, unlock_after_days),
                             priority="NORMAL",
                             status=TaskStatus.TODO,
@@ -655,6 +710,10 @@ async def seed() -> None:
                         await db.flush()
                         task_by_title[task_title] = task
                     else:
+                        # Task already exists - update description if provided and not already set
+                        if description and not task.description:
+                            task.description = description
+                        # Update internal_notes structure and phase if needed
                         if not task.internal_notes or not task.internal_notes.startswith(VS_VL_META_PREFIX):
                             task.internal_notes = _vs_vl_meta(phase, unlock_after_days)
                         else:
@@ -669,6 +728,8 @@ async def seed() -> None:
                             task.internal_notes = f"{VS_VL_META_PREFIX}{json.dumps(meta)}"
                         if not task.phase:
                             task.phase = phase
+                        # NOTE: All other existing fields (due_date, assigned_to, dependencies, etc.) 
+                        # are PRESERVED and NOT overwritten
                     task_by_key[task_def["key"]] = task
 
                 for task_def in VS_VL_TEMPLATE_TASKS:
