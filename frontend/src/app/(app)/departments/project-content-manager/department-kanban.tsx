@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
 import { Pencil, Trash2 } from "lucide-react"
@@ -542,6 +542,7 @@ export default function DepartmentKanban() {
   const departmentDisplayName = "Product Content"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get("tab")
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
@@ -581,6 +582,7 @@ export default function DepartmentKanban() {
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
+  const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
   const [projectTemplateId, setProjectTemplateId] = React.useState<ProjectTemplateId>("__custom__")
   const [projectTitle, setProjectTitle] = React.useState("")
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
@@ -1108,6 +1110,8 @@ export default function DepartmentKanban() {
   const canManage = canCreate && !isReadOnly
   const showSystemActions = viewMode === "mine"
   const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
+  const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
+  const canEditNoProject = !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -1513,6 +1517,33 @@ export default function DepartmentKanban() {
       toast.success("Project deleted")
     } finally {
       setDeletingProjectId((prev) => (prev === projectId ? null : prev))
+    }
+  }
+
+  const deleteNoProjectTask = async (taskId: string) => {
+    const task = noProjectTasks.find((t) => t.id === taskId)
+    const taskLabel = task?.title || "this task"
+    if (!window.confirm(`Delete "${taskLabel}"? This cannot be undone.`)) return
+
+    setDeletingNoProjectTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setDepartmentTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setNoProjectTasks((prev) => prev.filter((t) => t.id !== taskId))
+      toast.success("Task deleted")
+    } finally {
+      setDeletingNoProjectTaskId((prev) => (prev === taskId ? null : prev))
     }
   }
 
@@ -1980,7 +2011,7 @@ export default function DepartmentKanban() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen">
       <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50/30 to-stone-50 p-6 shadow-lg print:hidden dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950/30">
         <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
         <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
@@ -3041,6 +3072,23 @@ export default function DepartmentKanban() {
                                   >
                                     {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
                                   </div>
+                                ) : null}
+                                {canDeleteNoProject ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={deletingNoProjectTaskId === t.id}
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${t.title}`}
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      void deleteNoProjectTask(t.id)
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
                                 ) : null}
                               </div>
                             </div>

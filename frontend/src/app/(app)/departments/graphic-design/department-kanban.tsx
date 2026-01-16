@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
+import { Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -444,6 +445,7 @@ export default function DepartmentKanban() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
+  const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
 
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
@@ -851,6 +853,7 @@ export default function DepartmentKanban() {
   const canCreate = true // Everyone in this department can create/manage
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
+  const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -1098,6 +1101,33 @@ export default function DepartmentKanban() {
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
+    }
+  }
+
+  const deleteNoProjectTask = async (taskId: string) => {
+    const task = noProjectTasks.find((t) => t.id === taskId)
+    const taskLabel = task?.title || "this task"
+    if (!window.confirm(`Delete "${taskLabel}"? This cannot be undone.`)) return
+
+    setDeletingNoProjectTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setDepartmentTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setNoProjectTasks((prev) => prev.filter((t) => t.id !== taskId))
+      toast.success("Task deleted")
+    } finally {
+      setDeletingNoProjectTaskId((prev) => (prev === taskId ? null : prev))
     }
   }
 
@@ -1947,11 +1977,165 @@ export default function DepartmentKanban() {
                   {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={noProjectDescription} onChange={(e) => setNoProjectDescription(e.target.value)} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value) => setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
                 </div>
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span></div><div className="space-y-2">{noProjectBuckets.normal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-white bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"><div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
-                  <div className="rounded-3xl border border-purple-100 bg-purple-50/40 p-4 backdrop-blur-sm dark:border-purple-900/30 dark:bg-purple-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-purple-700 dark:text-purple-400">Personal</span><span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900 dark:text-purple-300">{noProjectBuckets.personal.length}</span></div><div className="space-y-2">{noProjectBuckets.personal.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-purple-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-purple-900 dark:bg-purple-950"><div className="text-sm font-medium text-purple-900 dark:text-purple-100">{t.title}</div>{t.assigned_to && <div className="mt-2 text-xs text-purple-500">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>}</Link>))}</div></div>
-                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-rose-700 dark:text-rose-400">BLLOK</span><span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span></div><div className="space-y-2">{noProjectBuckets.blocked.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-rose-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950"><div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div></Link>))}</div></div>
-                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span><span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span></div><div className="space-y-2">{noProjectBuckets.ga.map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-sky-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950"><div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div></Link>))}</div></div>
-                  <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10"><div className="mb-4 flex items-center justify-between px-1"><span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span></div><div className="space-y-2">{[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (<Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="block rounded-xl border border-amber-100 bg-white/80 p-3 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge></div><div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div></Link>))}</div></div>
+                  <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
+                    <div className="mb-4 flex items-center justify-between px-1">
+                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {noProjectBuckets.normal.map(t => (
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-white bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
+                          {canDeleteNoProject ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingNoProjectTaskId === t.id}
+                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                              title="Delete"
+                              aria-label={`Delete ${t.title}`}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteNoProjectTask(t.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          <div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>
+                          {t.assigned_to ? (
+                            <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
+                          ) : null}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-3xl border border-purple-100 bg-purple-50/40 p-4 backdrop-blur-sm dark:border-purple-900/30 dark:bg-purple-900/10">
+                    <div className="mb-4 flex items-center justify-between px-1">
+                      <span className="text-sm font-semibold text-purple-700 dark:text-purple-400">Personal</span>
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900 dark:text-purple-300">{noProjectBuckets.personal.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {noProjectBuckets.personal.map(t => (
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-purple-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-purple-900 dark:bg-purple-950">
+                          {canDeleteNoProject ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingNoProjectTaskId === t.id}
+                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                              title="Delete"
+                              aria-label={`Delete ${t.title}`}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteNoProjectTask(t.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          <div className="text-sm font-medium text-purple-900 dark:text-purple-100">{t.title}</div>
+                          {t.assigned_to ? (
+                            <div className="mt-2 text-xs text-purple-500">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
+                          ) : null}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10">
+                    <div className="mb-4 flex items-center justify-between px-1">
+                      <span className="text-sm font-semibold text-rose-700 dark:text-rose-400">BLLOK</span>
+                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {noProjectBuckets.blocked.map(t => (
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-rose-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950">
+                          {canDeleteNoProject ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingNoProjectTaskId === t.id}
+                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                              title="Delete"
+                              aria-label={`Delete ${t.title}`}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteNoProjectTask(t.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          <div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10">
+                    <div className="mb-4 flex items-center justify-between px-1">
+                      <span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span>
+                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {noProjectBuckets.ga.map(t => (
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-sky-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950">
+                          {canDeleteNoProject ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingNoProjectTaskId === t.id}
+                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                              title="Delete"
+                              aria-label={`Delete ${t.title}`}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteNoProjectTask(t.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          <div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10">
+                    <div className="mb-4 flex items-center justify-between px-1">
+                      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-amber-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950">
+                          {canDeleteNoProject ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingNoProjectTaskId === t.id}
+                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                              title="Delete"
+                              aria-label={`Delete ${t.title}`}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteNoProjectTask(t.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge>
+                          </div>
+                          <div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

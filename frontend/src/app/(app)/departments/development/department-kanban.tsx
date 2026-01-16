@@ -437,6 +437,7 @@ export default function DepartmentKanban() {
   const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
+  const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
@@ -961,6 +962,7 @@ export default function DepartmentKanban() {
   const canManage = canCreate && !isReadOnly
   const showSystemActions = viewMode === "mine"
   const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
+  const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -1353,6 +1355,33 @@ export default function DepartmentKanban() {
       toast.success("Project deleted")
     } finally {
       setDeletingProjectId((prev) => (prev === projectId ? null : prev))
+    }
+  }
+
+  const deleteNoProjectTask = async (taskId: string) => {
+    const task = noProjectTasks.find((t) => t.id === taskId)
+    const taskLabel = task?.title || "this task"
+    if (!window.confirm(`Delete "${taskLabel}"? This cannot be undone.`)) return
+
+    setDeletingNoProjectTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setDepartmentTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setNoProjectTasks((prev) => prev.filter((t) => t.id !== taskId))
+      toast.success("Task deleted")
+    } finally {
+      setDeletingNoProjectTaskId((prev) => (prev === taskId ? null : prev))
     }
   }
 
@@ -2934,6 +2963,23 @@ export default function DepartmentKanban() {
                                   >
                                     {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
                                   </div>
+                                ) : null}
+                                {canDeleteNoProject ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={deletingNoProjectTaskId === t.id}
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${t.title}`}
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      void deleteNoProjectTask(t.id)
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
                                 ) : null}
                               </div>
                             </div>
