@@ -2397,7 +2397,7 @@ export function SystemTasksView({
           <div className="overflow-x-auto">
             {/* STICKY HEADER ROW - CHANGED TO STATIC to prevent floating issues */}
             <div className="min-w-[1000px] xl:min-w-0">
-              <div className="border-b bg-slate-50 py-3">
+              <div className="border-b bg-slate-50 py-3 px-4">
                 <div
                   className={cn(
                     GRID_CLASS,
