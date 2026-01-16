@@ -45,13 +45,43 @@ async def _copy_tasks_from_template_project(
     )
     template_projects = (await db.execute(stmt)).scalars().all()
     
-    # Find a VS/VL template project
+    # Find the best matching VS/VL template project based on the new project's title
     template_project = None
-    for tp in template_projects:
-        title_upper = tp.title.upper()
-        if "VS" in title_upper or "VL" in title_upper:
-            template_project = tp
-            break
+    project_title_upper = project.title.upper()
+    
+    # First, try to find an exact match or closest match
+    vs_vl_templates = [tp for tp in template_projects if "VS" in tp.title.upper() or "VL" in tp.title.upper()]
+    
+    if not vs_vl_templates:
+        return
+    
+    # Match logic:
+    # 1. If project title contains "VOGEL" or "TEMPLATE 2", use "VS/VL PROJEKT I VOGEL TEMPLATE 2"
+    # 2. If project title contains "MADH", use "VS/VL PROJEKT I MADH"
+    # 3. Otherwise, prefer "MADH" (large project) as default
+    
+    if "VOGEL" in project_title_upper or "TEMPLATE 2" in project_title_upper:
+        # Look for the small project template
+        for tp in vs_vl_templates:
+            if "VOGEL" in tp.title.upper() or "TEMPLATE 2" in tp.title.upper():
+                template_project = tp
+                break
+    elif "MADH" in project_title_upper:
+        # Look for the large project template
+        for tp in vs_vl_templates:
+            if "MADH" in tp.title.upper():
+                template_project = tp
+                break
+    
+    # If no specific match found, use the first "MADH" template, or any VS/VL template
+    if not template_project:
+        for tp in vs_vl_templates:
+            if "MADH" in tp.title.upper():
+                template_project = tp
+                break
+        
+        if not template_project:
+            template_project = vs_vl_templates[0]
     
     if not template_project:
         return
