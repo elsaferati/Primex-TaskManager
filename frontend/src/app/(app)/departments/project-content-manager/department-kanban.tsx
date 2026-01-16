@@ -165,17 +165,26 @@ function applyProjectTemplateTitle(templateId: ProjectTemplateId, rawTitle: stri
   return `${templateId} ${trimmed}`.trim()
 }
 
+function hasProjectId(projectId?: Task["project_id"]) {
+  if (projectId == null) return false
+  if (typeof projectId !== "string") return true
+  return projectId.trim().length > 0
+}
+
+function isNoProjectTask(task: Task) {
+  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+}
+
 function isFastNormalTask(task: Task) {
   return (
-    !task.project_id &&
-    !task.system_template_origin_id &&
-    !task.ga_note_origin_id &&
+    isNoProjectTask(task) &&
+    task.ga_note_origin_id == null &&
     !task.is_bllok &&
     !task.is_1h_report &&
     !task.is_r1 &&
     !task.is_personal &&
     task.priority === "NORMAL" &&
-    task.department_id !== null
+    task.department_id != null
   )
 }
 
@@ -657,7 +666,7 @@ export default function DepartmentKanban() {
           const taskRows = (await tasksRes.json()) as Task[]
           const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isFastNormalTask))
+          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -826,10 +835,10 @@ export default function DepartmentKanban() {
     () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
     [departmentTasks, isMineView, user?.id]
   )
-  const visibleNoProjectTasks = React.useMemo(
-    () => (isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks),
-    [noProjectTasks, isMineView, user?.id]
-  )
+  const visibleNoProjectTasks = React.useMemo(() => {
+    const base = isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks
+    return base.filter(isNoProjectTask)
+  }, [noProjectTasks, isMineView, user?.id])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -1591,10 +1600,9 @@ export default function DepartmentKanban() {
         createdTasks.push(created)
       }
       if (createdTasks.length) {
-        // Only add to noProjectTasks if they meet fast task criteria
-        const fastTasks = createdTasks.filter(isFastNormalTask)
-        if (fastTasks.length) {
-          setNoProjectTasks((prev) => [...fastTasks, ...prev])
+        const noProjectCreatedTasks = createdTasks.filter(isNoProjectTask)
+        if (noProjectCreatedTasks.length) {
+          setNoProjectTasks((prev) => [...noProjectCreatedTasks, ...prev])
         }
         setDepartmentTasks((prev) => [...createdTasks, ...prev])
       }
@@ -1871,8 +1879,7 @@ export default function DepartmentKanban() {
         } else {
           const createdTask = (await taskRes.json()) as Task
           setDepartmentTasks((prev) => [createdTask, ...prev])
-          // Only add to noProjectTasks if it meets fast task criteria
-          if (isFastNormalTask(createdTask)) {
+          if (isNoProjectTask(createdTask)) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
         }
@@ -1931,8 +1938,7 @@ export default function DepartmentKanban() {
       }
       const createdTask = (await res.json()) as Task
       setDepartmentTasks((prev) => [createdTask, ...prev])
-      // Only add to noProjectTasks if it meets fast task criteria
-      if (isFastNormalTask(createdTask)) {
+      if (isNoProjectTask(createdTask)) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
