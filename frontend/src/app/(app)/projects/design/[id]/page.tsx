@@ -1315,6 +1315,8 @@ export default function DesignProjectPage() {
 
   return (
     <div className="space-y-6">
+      <div className="sticky top-0 z-40 bg-white/95 backdrop-blur print:static">
+        <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -1415,6 +1417,8 @@ export default function DesignProjectPage() {
               </button>
             )
           })}
+        </div>
+      </div>
         </div>
       </div>
 
