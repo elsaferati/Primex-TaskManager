@@ -583,6 +583,12 @@ export default function DepartmentKanban() {
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editTaskTitle, setEditTaskTitle] = React.useState("")
+  const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
+  const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [updatingTask, setUpdatingTask] = React.useState(false)
   const [projectTemplateId, setProjectTemplateId] = React.useState<ProjectTemplateId>("__custom__")
   const [projectTitle, setProjectTitle] = React.useState("")
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
@@ -1544,6 +1550,58 @@ export default function DepartmentKanban() {
       toast.success("Task deleted")
     } finally {
       setDeletingNoProjectTaskId((prev) => (prev === taskId ? null : prev))
+    }
+  }
+
+  const startEditTask = (task: Task) => {
+    setEditingTaskId(task.id)
+    setEditTaskTitle(task.title || "")
+    setEditTaskDescription(task.description || "")
+    setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+  }
+
+  const cancelEditTask = () => {
+    setEditingTaskId(null)
+    setEditTaskTitle("")
+    setEditTaskDescription("")
+    setEditTaskDueDate("")
+    setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+  }
+
+  const updateNoProjectTask = async () => {
+    if (!editingTaskId || !editTaskTitle.trim()) return
+    setUpdatingTask(true)
+    try {
+      const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
+      const res = await apiFetch(`/tasks/${editingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editTaskTitle.trim(),
+          description: editTaskDescription.trim() || null,
+          due_date: dueDateValue,
+          finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setDepartmentTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      setNoProjectTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      cancelEditTask()
+      toast.success("Task updated")
+    } finally {
+      setUpdatingTask(false)
     }
   }
 
@@ -3031,6 +3089,74 @@ export default function DepartmentKanban() {
                   </Dialog>
                 ) : null}
               </div>
+              {!isReadOnly ? (
+                <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
+                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Description</Label>
+                        <Textarea
+                          value={editTaskDescription}
+                          onChange={(e) => setEditTaskDescription(e.target.value)}
+                          rows={4}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
+                        />
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Finish by (optional)</Label>
+                          <Select
+                            value={editTaskFinishPeriod}
+                            onValueChange={(value) =>
+                              setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                            }
+                          >
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectValue placeholder="Select period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                              {FINISH_PERIOD_OPTIONS.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {value}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date</Label>
+                          <Input
+                            type="date"
+                            value={editTaskDueDate}
+                            onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={cancelEditTask} className="rounded-xl border-slate-200">
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={!editTaskTitle.trim() || updatingTask}
+                          onClick={() => void updateNoProjectTask()}
+                          className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                        >
+                          {updatingTask ? "Updating..." : "Update"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
             <div className="space-y-4">
               {statusRows.map((row) => (
                 <div
@@ -3074,21 +3200,37 @@ export default function DepartmentKanban() {
                                   </div>
                                 ) : null}
                                 {canDeleteNoProject ? (
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    disabled={deletingNoProjectTaskId === t.id}
-                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                    title="Delete"
-                                    aria-label={`Delete ${t.title}`}
-                                    onClick={(event) => {
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                      void deleteNoProjectTask(t.id)
-                                    }}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
+                                  <>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                      title="Edit"
+                                      aria-label={`Edit ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        startEditTask(t)
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      disabled={deletingNoProjectTaskId === t.id}
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                      title="Delete"
+                                      aria-label={`Delete ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        void deleteNoProjectTask(t.id)
+                                      }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
                                 ) : null}
                               </div>
                             </div>

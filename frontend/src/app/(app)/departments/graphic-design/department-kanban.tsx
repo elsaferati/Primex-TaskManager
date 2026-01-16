@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
-import { Trash2 } from "lucide-react"
+import { Pencil, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -446,6 +446,12 @@ export default function DepartmentKanban() {
   )
   const [creatingNoProject, setCreatingNoProject] = React.useState(false)
   const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editTaskTitle, setEditTaskTitle] = React.useState("")
+  const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
+  const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [updatingTask, setUpdatingTask] = React.useState(false)
 
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
   const [addingGaNote, setAddingGaNote] = React.useState(false)
@@ -1128,6 +1134,58 @@ export default function DepartmentKanban() {
       toast.success("Task deleted")
     } finally {
       setDeletingNoProjectTaskId((prev) => (prev === taskId ? null : prev))
+    }
+  }
+
+  const startEditTask = (task: Task) => {
+    setEditingTaskId(task.id)
+    setEditTaskTitle(task.title || "")
+    setEditTaskDescription(task.description || "")
+    setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+  }
+
+  const cancelEditTask = () => {
+    setEditingTaskId(null)
+    setEditTaskTitle("")
+    setEditTaskDescription("")
+    setEditTaskDueDate("")
+    setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+  }
+
+  const updateNoProjectTask = async () => {
+    if (!editingTaskId || !editTaskTitle.trim()) return
+    setUpdatingTask(true)
+    try {
+      const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
+      const res = await apiFetch(`/tasks/${editingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editTaskTitle.trim(),
+          description: editTaskDescription.trim() || null,
+          due_date: dueDateValue,
+          finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setDepartmentTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      setNoProjectTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      cancelEditTask()
+      toast.success("Task updated")
+    } finally {
+      setUpdatingTask(false)
     }
   }
 
@@ -1976,6 +2034,65 @@ export default function DepartmentKanban() {
                   <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
                   {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={noProjectDescription} onChange={(e) => setNoProjectDescription(e.target.value)} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value) => setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
                 </div>
+              {!isReadOnly ? (
+                <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
+                  <DialogContent className="rounded-2xl sm:max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Edit Task</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input className="rounded-xl" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea className="rounded-xl" value={editTaskDescription} onChange={(e) => setEditTaskDescription(e.target.value)} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Finish by</Label>
+                          <Select
+                            value={editTaskFinishPeriod}
+                            onValueChange={(value) =>
+                              setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                            }
+                          >
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue placeholder="Select period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                              {FINISH_PERIOD_OPTIONS.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {value}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Due Date</Label>
+                          <Input
+                            className="rounded-xl"
+                            type="date"
+                            value={editTaskDueDate}
+                            onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={cancelEditTask}>
+                          Cancel
+                        </Button>
+                        <Button disabled={!editTaskTitle.trim() || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
+                          {updatingTask ? "Updating..." : "Update"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
                     <div className="mb-4 flex items-center justify-between px-1">
@@ -1984,23 +2101,39 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="space-y-2">
                       {noProjectBuckets.normal.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-white bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
+                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-white bg-white/80 p-3 pr-16 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
                           {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="absolute right-10 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                title="Edit"
+                                aria-label={`Edit ${t.title}`}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  startEditTask(t)
+                                }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                disabled={deletingNoProjectTaskId === t.id}
+                                className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                title="Delete"
+                                aria-label={`Delete ${t.title}`}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  void deleteNoProjectTask(t.id)
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
                           ) : null}
                           <div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>
                           {t.assigned_to ? (
