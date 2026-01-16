@@ -78,17 +78,35 @@ async function initializeMstChecklistItems(
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>
 ) {
   // Create a map of existing items by path + title for quick lookup
+  // Also detect and remove duplicates
   const existingMap = new Map<string, ChecklistItem>()
+  const duplicates: string[] = []
+  
   existingItems.forEach((item) => {
+    let key: string
     if (item.path && item.title) {
-      const key = `${item.path}|${item.title}`
-      existingMap.set(key, item)
+      key = `${item.path}|${item.title}`
     } else if (item.title && !item.path) {
       // For planning questions, use just title as key
-      const key = `PLANNING|${item.title}`
+      key = `PLANNING|${item.title}`
+    } else {
+      return // Skip items without title
+    }
+    
+    if (existingMap.has(key)) {
+      // Found a duplicate - mark for deletion
+      if (item.id) duplicates.push(item.id)
+    } else {
       existingMap.set(key, item)
     }
   })
+  
+  // Delete duplicates
+  for (const dupId of duplicates) {
+    await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
+      // Ignore errors - item might already be deleted
+    })
+  }
 
   // Find user IDs for "DV, LM" initials (we'll need to parse this)
   // For now, we'll create items without assignees and they can be added later
@@ -186,13 +204,34 @@ async function initializeVsVlPlanningItems(
   existingItems: ChecklistItem[],
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>
 ) {
-  const existingTitles = new Set(
-    existingItems
-      .filter((item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING")
-      .map((item) => item.title || "")
-      .filter(Boolean)
+  // Get all existing VS/VL planning items (including duplicates)
+  const vsVlItems = existingItems.filter(
+    (item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING"
   )
-  const itemsToCreate = VS_VL_ACCEPTANCE_QUESTIONS.filter((title) => !existingTitles.has(title))
+  
+  // Track unique titles and duplicates
+  const seenTitles = new Map<string, ChecklistItem>()
+  const duplicates: string[] = []
+  
+  for (const item of vsVlItems) {
+    if (!item.title) continue
+    if (seenTitles.has(item.title)) {
+      // Found a duplicate - mark for deletion
+      if (item.id) duplicates.push(item.id)
+    } else {
+      seenTitles.set(item.title, item)
+    }
+  }
+  
+  // Delete duplicates
+  for (const dupId of duplicates) {
+    await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
+      // Ignore errors - item might already be deleted
+    })
+  }
+  
+  // Create missing items
+  const itemsToCreate = VS_VL_ACCEPTANCE_QUESTIONS.filter((title) => !seenTitles.has(title))
   for (const [index, title] of itemsToCreate.entries()) {
     await apiFetch("/checklist-items", {
       method: "POST",
@@ -200,7 +239,7 @@ async function initializeVsVlPlanningItems(
       body: JSON.stringify({
         project_id: projectId,
         item_type: "CHECKBOX",
-        position: index + 1,
+        position: seenTitles.size + index + 1,
         path: "VS_VL_PLANNING",
         keyword: "VS_VL_PLANNING",
         description: title,
@@ -650,6 +689,7 @@ export default function PcmProjectPage() {
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
   const mstCommentTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const vsVlDescriptionTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -1139,6 +1179,14 @@ export default function PcmProjectPage() {
     const phaseValue = viewedPhase || project?.current_phase || "INICIMI"
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
+
+  React.useEffect(() => {
+    return () => {
+      // Cleanup timers on unmount
+      Object.values(vsVlDescriptionTimersRef.current).forEach(clearTimeout)
+      Object.values(mstCommentTimersRef.current).forEach(clearTimeout)
+    }
+  }, [])
 
   const submitCreateTask = async () => {
     if (!project) return
@@ -1811,6 +1859,16 @@ export default function PcmProjectPage() {
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       return updated
     }
+    
+    const queueDescriptionSave = (taskId: string, description: string) => {
+      const timers = vsVlDescriptionTimersRef.current
+      if (timers[taskId]) {
+        clearTimeout(timers[taskId])
+      }
+      timers[taskId] = setTimeout(() => {
+        void patchTask(taskId, { description: description.trim() || null }, "Failed to update description")
+      }, 800)
+    }
     const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
       const current = parseVsVlMeta(task.internal_notes) || {}
       const nextMeta: VsVlTaskMeta = {
@@ -2274,7 +2332,7 @@ export default function PcmProjectPage() {
               </div>
               
               {/* Compact Add Task Form */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2">
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={vsVlTaskTitle}
@@ -2358,6 +2416,13 @@ export default function PcmProjectPage() {
                     {creatingVsVlTask ? "..." : "Add"}
                   </Button>
                 </div>
+                <Textarea
+                  value={vsVlTaskDetail}
+                  onChange={(e) => setVsVlTaskDetail(e.target.value)}
+                  placeholder="Description..."
+                  rows={2}
+                  className="text-xs border-slate-300 bg-white resize-none"
+                />
               </div>
               
               <div className="space-y-2">
@@ -2591,18 +2656,10 @@ export default function PcmProjectPage() {
                                 <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Description</Label>
                                 <Textarea
                                   value={descriptionValue}
-                                  onChange={(e) =>
-                                    setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
-                                  }
-                                  onBlur={async (e) => {
-                                    if (isLocked) return
-                                    const nextValue = e.target.value.trim()
-                                    const currentValue = task.description || ""
-                                    if (nextValue === currentValue) return
-                                    const updated = await patchTask(task.id, { description: nextValue || null }, "Failed to update description")
-                                    if (updated) {
-                                      setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                    }
+                                  onChange={(e) => {
+                                    const newValue = e.target.value
+                                    setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: newValue }))
+                                    queueDescriptionSave(task.id, newValue)
                                   }}
                                   rows={2}
                                   className="text-xs border-slate-300 bg-white resize-none h-auto"
@@ -2683,7 +2740,6 @@ export default function PcmProjectPage() {
                                 onClick={() =>
                                   setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
                                 }
-                                disabled={isLocked}
                               >
                                 {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
                               </Button>
@@ -2700,9 +2756,7 @@ export default function PcmProjectPage() {
                                       >
                                         <Checkbox
                                           checked={checked}
-                                          disabled={isLocked}
                                           onCheckedChange={() => {
-                                            if (isLocked) return
                                             const nextIds = checked
                                               ? selectedAssignees.filter((id) => id !== u.id)
                                               : [...selectedAssignees, u.id]
