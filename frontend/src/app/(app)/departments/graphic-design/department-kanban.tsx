@@ -1290,73 +1290,78 @@ export default function DepartmentKanban() {
   // --- RENDER ---
   return (
     <div className="min-h-screen ">
-      <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 shadow-sm print:hidden dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
-        <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
-        <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
+      <div className="relative rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 print:hidden dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+          <div className="absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
+          <div className="absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
+        </div>
 
         <div className="relative space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
-              <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
-              <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
-            </div>
-            <div className="inline-flex rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-              <button
-                type="button"
-                onClick={() => setViewMode("department")}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  viewMode === "department"
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                ].join(" ")}
-              >
-                Department
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("mine")}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  viewMode === "mine"
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                ].join(" ")}
-              >
-                My View
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur">
-            <div className="flex flex-wrap gap-2">
-              {TABS.map((tab) => {
-                const isActive = tab.id === activeTab
-                const badgeTone =
-                  tab.tone === "blue"
-                    ? "bg-blue-50 text-blue-600"
-                    : tab.tone === "red"
-                      ? "bg-red-50 text-red-600"
-                      : "bg-muted text-foreground"
-                const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
-                return (
+<div className="sticky top-0 z-40 rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50 pb-4 px-4 pt-4 -mt-4 -mx-4 print:static">       <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
+                  <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
+                  <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+                </div>
+                <div className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
                   <button
-                    key={tab.id}
                     type="button"
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => setViewMode("department")}
                     className={[
-                      "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                      isActive
+                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                      viewMode === "department"
                         ? "bg-foreground text-background shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                        : "text-muted-foreground hover:text-foreground",
                     ].join(" ")}
                   >
-                    <span className="uppercase tracking-wide">{tab.label}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                    Department
                   </button>
-                )
-              })}
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("mine")}
+                    className={[
+                      "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                      viewMode === "mine"
+                        ? "bg-foreground text-background shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    My View
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-card/70 p-1 backdrop-blur">
+                <div className="flex flex-wrap gap-2">
+                  {TABS.map((tab) => {
+                    const isActive = tab.id === activeTab
+                    const badgeTone =
+                      tab.tone === "blue"
+                        ? "bg-blue-50 text-blue-600"
+                        : tab.tone === "red"
+                          ? "bg-red-50 text-red-600"
+                          : "bg-muted text-foreground"
+                    const badgeClass = isActive ? "bg-background text-foreground" : badgeTone
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={[
+                          "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                          isActive
+                            ? "bg-foreground text-background shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                        ].join(" ")}
+                      >
+                        <span className="uppercase tracking-wide">{tab.label}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           </div>
 
