@@ -28,17 +28,27 @@ class WeeklyPlannerResponse(BaseModel):
     days: list[WeeklyPlannerDay]
 
 
+class WeeklyTableProjectTaskEntry(BaseModel):
+    """A task within a project entry in the weekly table"""
+    task_id: uuid.UUID
+    task_title: str
+    daily_products: int | None = None
+
+
 class WeeklyTableProjectEntry(BaseModel):
     """A project entry in the weekly table"""
     project_id: uuid.UUID
     project_title: str
+    project_total_products: int | None = None
     task_count: int = 0
+    tasks: list[WeeklyTableProjectTaskEntry] = []
 
 
 class WeeklyTableTaskEntry(BaseModel):
     """A task entry (for system/fast tasks) in the weekly table"""
     task_id: uuid.UUID | None = None
     title: str
+    daily_products: int | None = None
 
 
 class WeeklyTableUserDay(BaseModel):

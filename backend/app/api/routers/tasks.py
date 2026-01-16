@@ -101,6 +101,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut], user_comment: str
         finish_period=task.finish_period,
         phase=task.phase,
         progress_percentage=task.progress_percentage,
+        daily_products=task.daily_products,
         start_date=task.start_date,
         due_date=task.due_date,
         completed_at=task.completed_at,
@@ -314,6 +315,7 @@ async def create_task(
         finish_period=payload.finish_period,
         phase=phase_value,
         progress_percentage=payload.progress_percentage or 0,
+        daily_products=payload.daily_products,
         start_date=payload.start_date or datetime.now(timezone.utc),
         due_date=payload.due_date,
         completed_at=completed_at,
@@ -557,6 +559,8 @@ async def update_task(
         task.phase = payload.phase
     if payload.progress_percentage is not None:
         task.progress_percentage = payload.progress_percentage
+    if payload.daily_products is not None:
+        task.daily_products = payload.daily_products
     if payload.start_date is not None:
         task.start_date = payload.start_date
     if payload.due_date is not None:

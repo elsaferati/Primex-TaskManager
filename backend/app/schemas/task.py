@@ -33,6 +33,7 @@ class TaskOut(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus
     progress_percentage: int
+    daily_products: int | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
@@ -61,6 +62,7 @@ class TaskCreate(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
+    daily_products: int | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
@@ -84,6 +86,7 @@ class TaskUpdate(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     phase: ProjectPhaseStatus | None = None
     progress_percentage: int | None = Field(default=None, ge=0, le=100)
+    daily_products: int | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None

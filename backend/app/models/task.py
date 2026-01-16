@@ -52,6 +52,7 @@ class Task(Base):
         server_default="MEETINGS",
     )
     progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    daily_products: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

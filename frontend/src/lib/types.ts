@@ -151,6 +151,7 @@ export interface Task {
   finish_period?: TaskFinishPeriod | null
   phase?: string
   progress_percentage?: number
+  daily_products?: number | null
   start_date?: string | null
   due_date?: string | null
   completed_at?: string | null

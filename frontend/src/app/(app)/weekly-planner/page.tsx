@@ -11,19 +11,28 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { Plus, Save } from "lucide-react"
+import { Plus, Save, X } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
+
+type WeeklyTableProjectTaskEntry = {
+  task_id: string
+  task_title: string
+  daily_products: number | null
+}
 
 type WeeklyTableProjectEntry = {
   project_id: string
   project_title: string
+  project_total_products: number | null
   task_count: number
+  tasks: WeeklyTableProjectTaskEntry[]
 }
 
 type WeeklyTableTaskEntry = {
   task_id: string | null
   title: string
+  daily_products: number | null
 }
 
 type WeeklyTableUserDay = {
@@ -83,6 +92,87 @@ export default function WeeklyPlannerPage() {
   const [manualTaskPeriod, setManualTaskPeriod] = React.useState<"AM" | "PM">("AM")
   const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
+
+  // Drag-to-scroll refs and state
+  const scrollContainerRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
+  const isDragging = React.useRef(false)
+  const startX = React.useRef(0)
+  const scrollLeft = React.useRef(0)
+  const activeContainer = React.useRef<HTMLDivElement | null>(null)
+
+  const handleMouseDown = React.useCallback((e: React.MouseEvent<HTMLDivElement>, deptId: string) => {
+    const container = scrollContainerRefs.current.get(deptId)
+    if (!container) return
+    isDragging.current = true
+    activeContainer.current = container
+    startX.current = e.pageX - container.offsetLeft
+    scrollLeft.current = container.scrollLeft
+    container.style.cursor = "grabbing"
+    container.style.userSelect = "none"
+  }, [])
+
+  const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging.current || !activeContainer.current) return
+    e.preventDefault()
+    const x = e.pageX - activeContainer.current.offsetLeft
+    const walk = (x - startX.current) * 1.5 // Scroll speed multiplier
+    activeContainer.current.scrollLeft = scrollLeft.current - walk
+  }, [])
+
+  const handleMouseUp = React.useCallback(() => {
+    if (activeContainer.current) {
+      activeContainer.current.style.cursor = "grab"
+      activeContainer.current.style.userSelect = ""
+    }
+    isDragging.current = false
+    activeContainer.current = null
+  }, [])
+
+  const handleMouseLeave = React.useCallback(() => {
+    if (isDragging.current && activeContainer.current) {
+      activeContainer.current.style.cursor = "grab"
+      activeContainer.current.style.userSelect = ""
+    }
+    isDragging.current = false
+    activeContainer.current = null
+  }, [])
+
+  const setScrollRef = React.useCallback((deptId: string) => (el: HTMLDivElement | null) => {
+    if (el) {
+      scrollContainerRefs.current.set(deptId, el)
+    } else {
+      scrollContainerRefs.current.delete(deptId)
+    }
+  }, [])
+
+  const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
+
+  const deleteTask = React.useCallback(async (taskId: string) => {
+    if (!taskId) return
+    setDeletingTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete task")
+        return
+      }
+      toast.success("Task deleted")
+      // Refresh data
+      const params = new URLSearchParams()
+      if (departmentId !== ALL_DEPARTMENTS_VALUE) {
+        params.set("department_id", departmentId)
+      }
+      params.set("is_this_week", isThisWeek.toString())
+      const tableRes = await apiFetch(`/planners/weekly-table?${params.toString()}`)
+      if (tableRes.ok) {
+        setData(await tableRes.json())
+      }
+    } catch {
+      toast.error("Failed to delete task")
+    } finally {
+      setDeletingTaskId(null)
+    }
+  }, [apiFetch, departmentId, isThisWeek])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -472,7 +562,14 @@ export default function WeeklyPlannerPage() {
                 <CardTitle>{dept.department_name}</CardTitle>
             </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto">
+                <div 
+                  ref={setScrollRef(dept.department_id)}
+                  className="overflow-x-auto cursor-grab select-none"
+                  onMouseDown={(e) => handleMouseDown(e, dept.department_id)}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseLeave}
+                >
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -539,7 +636,35 @@ export default function WeeklyPlannerPage() {
                                         className="p-2 rounded-md bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors"
                                       >
                                         <div className="font-medium text-sm">{project.project_title}</div>
-                                        {project.task_count > 1 && (
+                                        {project.tasks && project.tasks.length > 0 && (
+                                          <div className="mt-1 space-y-0.5">
+                                            {project.tasks.map((task) => (
+                                              <div key={task.task_id} className="text-xs text-muted-foreground flex justify-between items-center group/task">
+                                                <span className="truncate">{task.task_title}</span>
+                                                <div className="flex items-center gap-1">
+                                                  {task.daily_products != null && (
+                                                    <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">
+                                                      {task.daily_products} pcs
+                                                    </span>
+                                                  )}
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      void deleteTask(task.task_id)
+                                                    }}
+                                                    disabled={deletingTaskId === task.task_id}
+                                                    className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
+                                                    title="Delete task"
+                                                  >
+                                                    <X className="h-3 w-3" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {(!project.tasks || project.tasks.length === 0) && project.task_count > 1 && (
                                           <div className="text-xs text-muted-foreground mt-0.5">
                                             {project.task_count} tasks
                                           </div>
@@ -553,10 +678,24 @@ export default function WeeklyPlannerPage() {
                                         <div className="text-xs font-medium text-muted-foreground mb-1">System Tasks</div>
                                         {systemTasksList.map((task, idx) => (
                                           <div
-                                            key={idx}
-                                            className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm"
+                                            key={task.task_id || idx}
+                                            className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm flex justify-between items-center group/task"
                                           >
-                                            {task.title}
+                                            <span className="truncate">{task.title}</span>
+                                            {task.task_id && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  void deleteTask(task.task_id!)
+                                                }}
+                                                disabled={deletingTaskId === task.task_id}
+                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                title="Delete task"
+                                              >
+                                                <X className="h-3 w-3" />
+                                              </button>
+                                            )}
                                           </div>
                                         ))}
                                       </div>
@@ -568,10 +707,24 @@ export default function WeeklyPlannerPage() {
                                         <div className="text-xs font-medium text-muted-foreground mb-1">Fast Tasks</div>
                                         {fastTasksList.map((task, idx) => (
                                           <div
-                                            key={idx}
-                                            className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm"
+                                            key={task.task_id || idx}
+                                            className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm flex justify-between items-center group/task"
                                           >
-                                            {task.title}
+                                            <span className="truncate">{task.title}</span>
+                                            {task.task_id && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  void deleteTask(task.task_id!)
+                                                }}
+                                                disabled={deletingTaskId === task.task_id}
+                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                title="Delete task"
+                                              >
+                                                <X className="h-3 w-3" />
+                                              </button>
+                                            )}
                                           </div>
                                         ))}
                                       </div>
