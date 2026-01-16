@@ -422,6 +422,7 @@ export default function DepartmentKanban() {
   const [projectStatus, setProjectStatus] = React.useState("TODO")
   const [mstTemplateId, setMstTemplateId] = React.useState("__auto__")
   const [totalProducts, setTotalProducts] = React.useState("")
+  const [projectDueDate, setProjectDueDate] = React.useState("")
 
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
@@ -994,8 +995,16 @@ export default function DepartmentKanban() {
         department_id: department.id,
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         project_type: projectType,
-        current_phase: projectPhase,
+        current_phase: projectType === "MST" ? "PLANNING" : "MEETINGS", // Automatically set to first phase
         status: projectStatus,
+      }
+      
+      // Add due_date if provided
+      if (projectDueDate.trim()) {
+        const normalized = normalizeDueDateInput(projectDueDate.trim())
+        if (normalized) {
+          payload.due_date = normalized.toISOString()
+        }
       }
       if (projectType === "MST" && mstTemplateId !== "__auto__") {
         payload.template_project_id = mstTemplateId
@@ -1045,6 +1054,7 @@ export default function DepartmentKanban() {
       setProjectPhase("MEETINGS")
       setMstTemplateId("__auto__")
       setTotalProducts("")
+      setProjectDueDate("")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -1464,140 +1474,150 @@ export default function DepartmentKanban() {
                     <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                       <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
                       <DialogContent className="sm:max-w-xl rounded-2xl">
-                        <DialogHeader><DialogTitle>Create Project</DialogTitle></DialogHeader>
+                        <DialogHeader>
+                          <DialogTitle>Add Project</DialogTitle>
+                        </DialogHeader>
                         <div className="grid gap-4 py-4">
-                          <div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
-                          <div className="space-y-2"><Label>Description</Label><Textarea className="rounded-xl" value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Members</Label>
-                              <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>
-                                <DialogTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="w-full justify-start rounded-xl"
-                                  >
-                                    {projectMemberIds.length === 0
-                                      ? "Select members..."
-                                      : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent className="sm:max-w-md">
-                                  <DialogHeader>
-                                    <DialogTitle>Select Project Members</DialogTitle>
-                                  </DialogHeader>
-                                  <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
-                                    {departmentUsers.map((u) => {
-                                      const isSelected = projectMemberIds.includes(u.id)
-                                      return (
-                                        <div
-                                          key={u.id}
-                                          className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
-                                          onClick={() => {
-                                            if (isSelected) {
-                                              setProjectMemberIds((prev) => prev.filter((id) => id !== u.id))
-                                            } else {
-                                              setProjectMemberIds((prev) => [...prev, u.id])
-                                            }
-                                          }}
-                                        >
-                                          <Checkbox checked={isSelected} />
-                                          <Label className="cursor-pointer flex-1">
-                                            {u.full_name || u.username || "-"}
-                                          </Label>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                  <div className="mt-4 flex justify-end gap-2">
-                                    <Button
-                                      variant="outline"
-                                      onClick={() => {
-                                        setProjectMemberIds([])
-                                        setSelectMembersOpen(false)
-                                      }}
-                                    >
-                                      Clear
-                                    </Button>
-                                    <Button onClick={() => setSelectMembersOpen(false)}>
-                                      Done
-                                    </Button>
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
-                              {projectMemberIds.length > 0 && (
-                                <div className="text-xs text-muted-foreground">
-                                  {projectMemberIds.length} member{projectMemberIds.length === 1 ? "" : "s"} selected
-                                </div>
-                              )}
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Project Type</Label>
-                              <Select
-                                value={projectType}
-                                onValueChange={(value) => {
-                                  setProjectType(value as (typeof PROJECT_TYPES)[number]["id"])
-                                  setProjectPhase(value === "MST" ? "PLANNING" : "MEETINGS")
-                                  if (value !== "MST") {
-                                    setMstTemplateId("__auto__")
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {PROJECT_TYPES.map((type) => (
-                                    <SelectItem key={type.id} value={type.id}>{type.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          {projectType === "MST" && (
-                            <>
-                              <div className="space-y-2">
-                                <Label>MST Template</Label>
-                                <Select value={mstTemplateId} onValueChange={setMstTemplateId}>
-                                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__auto__">Auto (first MST template)</SelectItem>
-                                    {mstTemplateOptions.map((project) => (
-                                      <SelectItem key={project.id} value={project.id}>
-                                        {project.title || project.name || "MST Template"}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {!mstTemplateOptions.length && (
-                                  <div className="text-xs text-muted-foreground">No MST templates found.</div>
-                                )}
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Total Products</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  placeholder="Enter number of products"
-                                  className="rounded-xl"
-                                  value={totalProducts}
-                                  onChange={(e) => setTotalProducts(e.target.value)}
-                                />
-                              </div>
-                            </>
-                          )}
                           <div className="space-y-2">
-                            <Label>Phase</Label>
-                            <Select value={projectPhase} onValueChange={setProjectPhase}>
-                              <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                            <Label>Template</Label>
+                            <Select
+                              value={projectType}
+                              onValueChange={(value) => {
+                                setProjectType(value as (typeof PROJECT_TYPES)[number]["id"])
+                                if (value !== "MST") {
+                                  setMstTemplateId("__auto__")
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue placeholder="Select template" />
+                              </SelectTrigger>
                               <SelectContent>
-                                {projectPhaseOptions.map((p) => (
-                                  <SelectItem key={p} value={p}>{PHASE_LABELS[p]}</SelectItem>
+                                {PROJECT_TYPES.map((type) => (
+                                  <SelectItem key={type.id} value={type.id}>{type.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
+                          <div className="space-y-2">
+                            <Label>Title</Label>
+                            <Input
+                              className="rounded-xl"
+                              value={projectTitle}
+                              onChange={(e) => setProjectTitle(e.target.value)}
+                              placeholder="Enter project shortcut (e.g., ABC, XYZ)"
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              Use a shortcut/abbreviation, not the full client name (e.g., "ABC" instead of "ABC Company").
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Description</Label>
+                            <Textarea
+                              className="rounded-xl"
+                              value={projectDescription}
+                              onChange={(e) => setProjectDescription(e.target.value)}
+                              placeholder="Enter the project description..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Members</Label>
+                            <Dialog open={selectMembersOpen} onOpenChange={setSelectMembersOpen}>
+                              <DialogTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="w-full justify-start rounded-xl"
+                                >
+                                  {projectMemberIds.length === 0
+                                    ? "Select members..."
+                                    : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="sm:max-w-md">
+                                <DialogHeader>
+                                  <DialogTitle>Select Project Members</DialogTitle>
+                                </DialogHeader>
+                                <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                  {departmentUsers.map((u) => {
+                                    const isSelected = projectMemberIds.includes(u.id)
+                                    return (
+                                      <div
+                                        key={u.id}
+                                        className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setProjectMemberIds((prev) => prev.filter((id) => id !== u.id))
+                                          } else {
+                                            setProjectMemberIds((prev) => [...prev, u.id])
+                                          }
+                                        }}
+                                      >
+                                        <Checkbox checked={isSelected} />
+                                        <Label className="cursor-pointer flex-1">
+                                          {u.full_name || u.username || "-"}
+                                        </Label>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                <div className="mt-4 flex justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      setProjectMemberIds([])
+                                      setSelectMembersOpen(false)
+                                    }}
+                                  >
+                                    Clear
+                                  </Button>
+                                  <Button onClick={() => setSelectMembersOpen(false)}>
+                                    Done
+                                  </Button>
+                                </div>
+                              </DialogContent>
+                            </Dialog>
+                            {projectMemberIds.length > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                {projectMemberIds.length} member{projectMemberIds.length === 1 ? "" : "s"} selected
+                              </div>
+                            )}
+                          </div>
+                          {projectType === "MST" && (
+                            <div className="space-y-2">
+                              <Label>Total Products</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                placeholder="Enter number of products"
+                                className="rounded-xl"
+                                value={totalProducts}
+                                onChange={(e) => setTotalProducts(e.target.value)}
+                              />
+                            </div>
+                          )}
+                          <div className="space-y-2">
+                            <Label>Due Date</Label>
+                            <Input
+                              type="date"
+                              value={projectDueDate}
+                              onChange={(e) => setProjectDueDate(e.target.value)}
+                              className="rounded-xl"
+                            />
+                          </div>
                         </div>
-                        <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreateProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitProject()}>Create</Button></div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl">
+                            Cancel
+                          </Button>
+                          <Button
+                            disabled={!projectTitle.trim() || creatingProject}
+                            onClick={() => void submitProject()}
+                            className="rounded-xl"
+                          >
+                            {creatingProject ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
                       </DialogContent>
                     </Dialog>
                   )}
@@ -1748,9 +1768,9 @@ export default function DepartmentKanban() {
                 <div className="grid gap-4 md:grid-cols-4">
                   {[
                     { label: "PROJECT TASKS", value: todayProjectTasks.length },
-                    { label: "NO PROJECT", value: todayNoProjectTasks.length },
-                    { label: "NOTES (OPEN)", value: todayOpenNotes.length },
-                    { label: "SYSTEM", value: todaySystemTasks.length },
+                    { label: "GA NOTES", value: todayOpenNotes.length },
+                    { label: "FAST TASKS", value: todayNoProjectTasks.length },
+                    { label: "SYSTEM TASKS", value: todaySystemTasks.length },
                   ].map((stat) => (
                     <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
@@ -1809,8 +1829,39 @@ export default function DepartmentKanban() {
                   </div>
 
                   <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">GA NOTES</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todayOpenNotes.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Quick notes</div>
+                    </div>
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                      {todayOpenNotes.length ? (
+                        <div className="space-y-2">
+                          {todayOpenNotes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {note.note_type || "GA"}
+                                </Badge>
+                                <div className="font-medium">{note.content}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No open notes today.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                      <div className="text-sm font-semibold">NO PROJECT</div>
+                      <div className="text-sm font-semibold">FAST TASKS</div>
                       <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
                         {todayNoProjectTasks.length}
                       </span>
@@ -1852,39 +1903,8 @@ export default function DepartmentKanban() {
                   </div>
 
                   <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
-                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                      <div className="text-sm font-semibold">NOTES (OPEN)</div>
-                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                        {todayOpenNotes.length}
-                      </span>
-                      <div className="mt-2 text-xs text-slate-500">Quick notes</div>
-                    </div>
-                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                      {todayOpenNotes.length ? (
-                        <div className="space-y-2">
-                          {todayOpenNotes.map((note) => (
-                            <div
-                              key={note.id}
-                              className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {note.note_type || "GA"}
-                                </Badge>
-                                <div className="font-medium">{note.content}</div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted-foreground">No open notes today.</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                      <div className="text-sm font-semibold">SYSTEM</div>
+                      <div className="text-sm font-semibold">SYSTEM TASKS</div>
                       <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
                         {todaySystemTasks.length}
                       </span>
@@ -1911,7 +1931,7 @@ export default function DepartmentKanban() {
 
                   <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                      <div className="text-sm font-semibold">MEETINGS</div>
+                      <div className="text-sm font-semibold">EXTERNAL MEETINGS</div>
                       <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                         {todayMeetings.length}
                       </span>

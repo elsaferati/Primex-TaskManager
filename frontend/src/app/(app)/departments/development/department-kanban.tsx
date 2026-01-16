@@ -434,8 +434,8 @@ export default function DepartmentKanban() {
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
   const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
-  const [projectPhase, setProjectPhase] = React.useState("MEETINGS")
   const [projectStatus, setProjectStatus] = React.useState("TODO")
+  const [projectDueDate, setProjectDueDate] = React.useState("")
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
@@ -1275,8 +1275,15 @@ export default function DepartmentKanban() {
         description: projectDescription.trim() || null,
         department_id: department.id,
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
-        current_phase: projectPhase,
         status: projectStatus,
+      }
+      
+      // Add due_date if provided
+      if (projectDueDate.trim()) {
+        const normalized = normalizeDueDateInput(projectDueDate.trim())
+        if (normalized) {
+          payload.due_date = normalized.toISOString()
+        }
       }
       const res = await apiFetch("/projects", {
         method: "POST",
@@ -1330,8 +1337,8 @@ export default function DepartmentKanban() {
       setProjectManagerId("__unassigned__")
       setProjectMemberIds([])
       setProjectMemberIds([])
-      setProjectPhase("MEETINGS")
       setProjectStatus("TODO")
+      setProjectDueDate("")
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
@@ -2175,19 +2182,14 @@ export default function DepartmentKanban() {
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Phase</Label>
-                        <Select value={projectPhase} onValueChange={setProjectPhase}>
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="Phase" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PHASES.map((p) => (
-                              <SelectItem key={p} value={p}>
-                                {PHASE_LABELS[p]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-slate-700">Due Date</Label>
+                        <Input
+                          type="date"
+                          value={projectDueDate}
+                          onChange={(e) => setProjectDueDate(e.target.value)}
+                          placeholder="Select due date"
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
+                        />
                       </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
@@ -2353,9 +2355,9 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 md:grid-cols-4">
               {[
                 { label: "PROJECT TASKS", value: todayProjectTasks.length, color: "sky" },
-                { label: "NO PROJECT", value: todayNoProjectTasks.length, color: "blue" },
-                { label: "NOTES (OPEN)", value: todayOpenNotes.length, color: "sky" },
-                { label: "SYSTEM", value: todaySystemTasks.length, color: "blue" },
+                { label: "GA NOTES", value: todayOpenNotes.length, color: "sky" },
+                { label: "FAST TASKS", value: todayNoProjectTasks.length, color: "blue" },
+                { label: "SYSTEM TASKS", value: todaySystemTasks.length, color: "blue" },
               ].map((stat) => (
                 <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
@@ -2414,8 +2416,39 @@ export default function DepartmentKanban() {
               </div>
 
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
+                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                  <div className="text-sm font-semibold">GA NOTES</div>
+                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {todayOpenNotes.length}
+                  </span>
+                  <div className="mt-2 text-xs text-slate-500">Quick notes</div>
+                </div>
+                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                  {todayOpenNotes.length ? (
+                    <div className="space-y-2">
+                      {todayOpenNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {note.note_type || "GA"}
+                            </Badge>
+                            <div className="font-medium">{note.content}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No open notes today.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">NO PROJECT</div>
+                  <div className="text-sm font-semibold">FAST TASKS</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
                     {todayNoProjectTasks.length}
                   </span>
@@ -2457,39 +2490,8 @@ export default function DepartmentKanban() {
               </div>
 
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">NOTES (OPEN)</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todayOpenNotes.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Quick notes</div>
-                </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayOpenNotes.length ? (
-                    <div className="space-y-2">
-                      {todayOpenNotes.map((note) => (
-                        <div
-                          key={note.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {note.note_type || "GA"}
-                            </Badge>
-                            <div className="font-medium">{note.content}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No open notes today.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">SYSTEM</div>
+                  <div className="text-sm font-semibold">SYSTEM TASKS</div>
                   <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
                     {todaySystemTasks.length}
                   </span>
@@ -2516,7 +2518,7 @@ export default function DepartmentKanban() {
 
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">MEETINGS</div>
+                  <div className="text-sm font-semibold">EXTERNAL MEETINGS</div>
                   <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                     {todayMeetings.length}
                   </span>
