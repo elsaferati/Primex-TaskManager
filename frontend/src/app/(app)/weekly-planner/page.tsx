@@ -95,46 +95,89 @@ export default function WeeklyPlannerPage() {
 
   // Drag-to-scroll refs and state
   const scrollContainerRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
-  const isDragging = React.useRef(false)
-  const startX = React.useRef(0)
-  const scrollLeft = React.useRef(0)
-  const activeContainer = React.useRef<HTMLDivElement | null>(null)
+  const isDraggingRef = React.useRef(false)
+  const startXRef = React.useRef(0)
+  const startYRef = React.useRef(0)
+  const scrollLeftRef = React.useRef(0)
+  const activeContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const hasDraggedRef = React.useRef(false)
 
-  const handleMouseDown = React.useCallback((e: React.MouseEvent<HTMLDivElement>, deptId: string) => {
+  const handlePointerDown = React.useCallback((e: React.PointerEvent<HTMLDivElement>, deptId: string) => {
+    // Don't start drag if clicking on a button, link, or input
+    const target = e.target as HTMLElement
+    if (target.closest("button") || target.closest("a") || target.closest("input")) return
+    if (e.pointerType === "mouse" && e.button !== 0) return
+
     const container = scrollContainerRefs.current.get(deptId)
     if (!container) return
-    isDragging.current = true
-    activeContainer.current = container
-    startX.current = e.pageX - container.offsetLeft
-    scrollLeft.current = container.scrollLeft
-    container.style.cursor = "grabbing"
-    container.style.userSelect = "none"
+
+    isDraggingRef.current = true
+    hasDraggedRef.current = false
+    activeContainerRef.current = container
+    startXRef.current = e.clientX
+    startYRef.current = e.clientY
+    scrollLeftRef.current = container.scrollLeft
+
+    container.setPointerCapture(e.pointerId)
   }, [])
 
-  const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging.current || !activeContainer.current) return
-    e.preventDefault()
-    const x = e.pageX - activeContainer.current.offsetLeft
-    const walk = (x - startX.current) * 1.5 // Scroll speed multiplier
-    activeContainer.current.scrollLeft = scrollLeft.current - walk
-  }, [])
+  // Global mouse move and up handlers
+  React.useEffect(() => {
+    const handleGlobalPointerMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current || !activeContainerRef.current) return
 
-  const handleMouseUp = React.useCallback(() => {
-    if (activeContainer.current) {
-      activeContainer.current.style.cursor = "grab"
-      activeContainer.current.style.userSelect = ""
+      const deltaX = Math.abs(e.clientX - startXRef.current)
+      const deltaY = Math.abs(e.clientY - startYRef.current)
+
+      // Only start dragging if moved more than 5px horizontally
+      if (!hasDraggedRef.current && deltaX < 5) return
+
+      // If we're dragging more vertically than horizontally, don't scroll
+      if (deltaY > deltaX) return
+
+      hasDraggedRef.current = true
+      e.preventDefault()
+
+      activeContainerRef.current.style.cursor = "grabbing"
+      document.body.style.userSelect = "none"
+
+      const walk = (e.clientX - startXRef.current) * 2
+      activeContainerRef.current.scrollLeft = scrollLeftRef.current - walk
     }
-    isDragging.current = false
-    activeContainer.current = null
+
+    const handleGlobalPointerUp = () => {
+      if (activeContainerRef.current) {
+        activeContainerRef.current.style.cursor = "grab"
+      }
+      document.body.style.userSelect = ""
+      isDraggingRef.current = false
+      hasDraggedRef.current = false
+      activeContainerRef.current = null
+    }
+
+    document.addEventListener("pointermove", handleGlobalPointerMove, { passive: false })
+    document.addEventListener("pointerup", handleGlobalPointerUp)
+    document.addEventListener("pointercancel", handleGlobalPointerUp)
+
+    return () => {
+      document.removeEventListener("pointermove", handleGlobalPointerMove)
+      document.removeEventListener("pointerup", handleGlobalPointerUp)
+      document.removeEventListener("pointercancel", handleGlobalPointerUp)
+    }
   }, [])
 
-  const handleMouseLeave = React.useCallback(() => {
-    if (isDragging.current && activeContainer.current) {
-      activeContainer.current.style.cursor = "grab"
-      activeContainer.current.style.userSelect = ""
+  // Horizontal wheel scroll handler
+  const handleWheel = React.useCallback((e: React.WheelEvent<HTMLDivElement>, deptId: string) => {
+    const container = scrollContainerRefs.current.get(deptId)
+    if (!container) return
+    
+    // Allow horizontal scrolling with Shift+wheel or trackpad horizontal swipe
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      e.preventDefault()
+      // Use deltaX if available (trackpad), otherwise use deltaY with Shift key
+      const scrollAmount = e.deltaX !== 0 ? e.deltaX : e.deltaY
+      container.scrollLeft += scrollAmount
     }
-    isDragging.current = false
-    activeContainer.current = null
   }, [])
 
   const setScrollRef = React.useCallback((deptId: string) => (el: HTMLDivElement | null) => {
@@ -147,8 +190,18 @@ export default function WeeklyPlannerPage() {
 
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
 
-  const deleteTask = React.useCallback(async (taskId: string) => {
+  const deleteTask = React.useCallback(async (taskId: string, taskTitle?: string) => {
     if (!taskId) return
+    
+    // Confirmation dialog
+    const confirmed = window.confirm(
+      taskTitle 
+        ? `Are you sure you want to delete the task "${taskTitle}"?\n\nThis action cannot be undone.`
+        : "Are you sure you want to delete this task?\n\nThis action cannot be undone."
+    )
+    
+    if (!confirmed) return
+    
     setDeletingTaskId(taskId)
     try {
       const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
@@ -564,11 +617,14 @@ export default function WeeklyPlannerPage() {
               <CardContent>
                 <div 
                   ref={setScrollRef(dept.department_id)}
-                  className="overflow-x-auto cursor-grab select-none"
-                  onMouseDown={(e) => handleMouseDown(e, dept.department_id)}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseLeave}
+                  className="overflow-x-auto cursor-grab"
+                  onPointerDown={(e) => handlePointerDown(e, dept.department_id)}
+                  onWheel={(e) => handleWheel(e, dept.department_id)}
+                  style={{
+                    scrollbarWidth: "thin",
+                    scrollbarColor: "#94a3b8 #e2e8f0",
+                    touchAction: "pan-y",
+                  }}
                 >
                   <Table>
                     <TableHeader>
@@ -651,7 +707,7 @@ export default function WeeklyPlannerPage() {
                                                     type="button"
                                                     onClick={(e) => {
                                                       e.stopPropagation()
-                                                      void deleteTask(task.task_id)
+                                                      void deleteTask(task.task_id, task.task_title)
                                                     }}
                                                     disabled={deletingTaskId === task.task_id}
                                                     className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
@@ -687,7 +743,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!)
+                                                  void deleteTask(task.task_id!, task.title)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
@@ -716,7 +772,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!)
+                                                  void deleteTask(task.task_id!, task.title)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
