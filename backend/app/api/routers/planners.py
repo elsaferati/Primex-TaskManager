@@ -236,8 +236,12 @@ async def weekly_planner(
     week_end_datetime = datetime.combine(working_days[-1], datetime.max.time()).replace(tzinfo=timezone.utc)
     
     # Get tasks that are due in the next week OR have no due_date (active tasks)
+    # Exclude system tasks (tasks with system_template_origin_id)
     week_tasks = []
     for t in all_tasks:
+        # Skip system tasks
+        if t.system_template_origin_id is not None:
+            continue
         if t.due_date is not None:
             # Task has a due date - check if it's in the working days range
             due_date_only = t.due_date.date()
@@ -635,10 +639,13 @@ async def weekly_table_planner(
         task_stmt = task_stmt.where(Task.department_id == department_id)
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
-    # Filter tasks for the week
+    # Filter tasks for the week (exclude system tasks)
     week_tasks = []
     task_project_ids = set()
     for t in all_tasks:
+        # Skip system tasks (tasks with system_template_origin_id)
+        if t.system_template_origin_id is not None:
+            continue
         if t.due_date is not None:
             due_date_only = t.due_date.date()
             if working_days[0] <= due_date_only <= working_days[-1]:
