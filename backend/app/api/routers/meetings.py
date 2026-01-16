@@ -32,11 +32,8 @@ async def list_meetings(
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        if project.department_id is not None:
-            ensure_department_access(user, project.department_id)
         stmt = stmt.where(Meeting.project_id == project_id)
     if department_id is not None:
-        ensure_department_access(user, department_id)
         stmt = stmt.where(Meeting.department_id == department_id)
 
     meetings = (await db.execute(stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()

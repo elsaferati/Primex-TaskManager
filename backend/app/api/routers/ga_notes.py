@@ -35,11 +35,8 @@ async def list_ga_notes(
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        if project.department_id is not None:
-            ensure_department_access(user, project.department_id)
         stmt = stmt.where(GaNote.project_id == project_id)
     elif department_id is not None:
-        ensure_department_access(user, department_id)
         stmt = stmt.where(GaNote.department_id == department_id)
 
     notes = (await db.execute(stmt)).scalars().all()

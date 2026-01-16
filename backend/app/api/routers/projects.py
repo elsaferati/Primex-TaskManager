@@ -247,16 +247,7 @@ async def list_projects(
         stmt = stmt.where(Project.is_template == False)
     
     if department_id:
-        if not include_all_departments:
-            ensure_department_access(user, department_id)
         stmt = stmt.where(Project.department_id == department_id)
-
-    if include_all_departments:
-        ensure_manager_or_admin(user)
-    elif user.role != UserRole.ADMIN:
-        if user.department_id is None:
-            return []
-        stmt = stmt.where(Project.department_id == user.department_id)
 
     projects = (await db.execute(stmt.order_by(Project.created_at))).scalars().all()
     return [
@@ -379,8 +370,6 @@ async def get_project(
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.department_id is not None:
-        ensure_department_access(user, project.department_id)
     return ProjectOut(
         id=project.id,
         title=project.title,

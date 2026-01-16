@@ -157,23 +157,25 @@ async def list_tasks(
 ) -> list[TaskOut]:
     stmt = select(Task)
 
-    if include_all_departments:
-        ensure_manager_or_admin(user)
-    elif user.role == UserRole.ADMIN:
-        pass  # Admin can see all tasks
-    elif user.role == UserRole.MANAGER:
-        # Manager can see their department's tasks OR tasks without a department (GA tasks)
-        if user.department_id is not None:
-            stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
-        # If manager has no department, they can see tasks without a department
-    else:
-        # STAFF can only see their department's tasks
-        if user.department_id is None:
-            return []
-        stmt = stmt.where(Task.department_id == user.department_id)
+    if project_id is None:
+        if include_all_departments:
+            ensure_manager_or_admin(user)
+        elif user.role == UserRole.ADMIN:
+            pass  # Admin can see all tasks
+        elif user.role == UserRole.MANAGER:
+            # Manager can see their department's tasks OR tasks without a department (GA tasks)
+            if user.department_id is not None:
+                stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
+            # If manager has no department, they can see tasks without a department
+        else:
+            # STAFF can only see their department's tasks
+            if user.department_id is None:
+                return []
+            stmt = stmt.where(Task.department_id == user.department_id)
 
     if department_id:
-        ensure_department_access(user, department_id)
+        if project_id is None:
+            ensure_department_access(user, department_id)
         stmt = stmt.where(Task.department_id == department_id)
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)

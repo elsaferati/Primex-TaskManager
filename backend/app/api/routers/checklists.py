@@ -7,7 +7,6 @@ from sqlalchemy import nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
@@ -64,8 +63,6 @@ async def list_checklists(
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        if project.department_id is not None:
-            ensure_department_access(user, project.department_id)
         stmt = stmt.where(Checklist.project_id == project_id)
     if meeting_only:
         stmt = stmt.where(Checklist.group_key.isnot(None))

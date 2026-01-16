@@ -511,8 +511,6 @@ async def list_checklist_items(
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        if project.department_id is not None:
-            ensure_department_access(user, project.department_id)
 
         # Auto-seed GD "Pranimi i Projektit" checklist (no deletes, only inserts missing items).
         await _ensure_gd_project_acceptance_items(db, project)
