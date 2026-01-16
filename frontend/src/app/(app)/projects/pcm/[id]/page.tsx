@@ -718,6 +718,7 @@ export default function PcmProjectPage() {
   const [vsVlTaskComment, setVsVlTaskComment] = React.useState("")
   const [vsVlCommentEdits, setVsVlCommentEdits] = React.useState<Record<string, string>>({})
   const [vsVlChecklistEdits, setVsVlChecklistEdits] = React.useState<Record<string, string>>({})
+  const [vsVlDescriptionEdits, setVsVlDescriptionEdits] = React.useState<Record<string, string>>({})
   const [vsVlAssigneeOpen, setVsVlAssigneeOpen] = React.useState<Record<string, boolean>>({})
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
@@ -1107,6 +1108,20 @@ export default function PcmProjectPage() {
         if (next[task.id] !== undefined) continue
         const meta = parseVsVlMeta(task.internal_notes)
         next[task.id] = meta?.comment || ""
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [isVsVl, tasks])
+
+  React.useEffect(() => {
+    if (!isVsVl) return
+    setVsVlDescriptionEdits((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const task of tasks) {
+        if (next[task.id] !== undefined) continue
+        next[task.id] = task.description || ""
         changed = true
       }
       return changed ? next : prev
@@ -2411,6 +2426,7 @@ export default function PcmProjectPage() {
                     const selectedAssignees = taskAssigneeIds(task)
                     const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
                     const checklistValue = vsVlChecklistEdits[task.id] ?? meta?.checklist ?? ""
+                    const descriptionValue = vsVlDescriptionEdits[task.id] ?? task.description ?? ""
                     const isEditing = Boolean(vsVlEditMode[task.id])
                     return (
                       <div 
@@ -2571,13 +2587,19 @@ export default function PcmProjectPage() {
                               <div>
                                 <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Description</Label>
                                 <Textarea
-                                  key={`description-${task.id}-${task.updated_at}`}
-                                  defaultValue={task.description || ""}
-                                  onBlur={(e) => {
+                                  value={descriptionValue}
+                                  onChange={(e) =>
+                                    setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                  }
+                                  onBlur={async (e) => {
+                                    if (isLocked) return
                                     const nextValue = e.target.value.trim()
                                     const currentValue = task.description || ""
                                     if (nextValue === currentValue) return
-                                    void patchTask(task.id, { description: nextValue || null }, "Failed to update description")
+                                    const updated = await patchTask(task.id, { description: nextValue || null }, "Failed to update description")
+                                    if (updated) {
+                                      setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                    }
                                   }}
                                   rows={2}
                                   className="text-xs border-slate-300 bg-white resize-none h-auto"
