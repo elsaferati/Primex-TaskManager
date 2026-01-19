@@ -278,7 +278,7 @@ export default function TaskDetailsPage() {
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Flags</div>
                 <div className="flex flex-wrap gap-2">
                   {task.is_bllok ? <Badge variant="secondary">Blocked</Badge> : null}
-                  {task.is_1h_report ? <Badge variant="secondary">1H Report</Badge> : null}
+                  {task.is_1h_report ? <Badge variant="secondary">1H</Badge> : null}
                   {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
                   {task.ga_note_origin_id ? <Badge variant="secondary">GA/KA Note</Badge> : null}
                   {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.ga_note_origin_id ? (

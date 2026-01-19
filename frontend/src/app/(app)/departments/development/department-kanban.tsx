@@ -105,14 +105,23 @@ const NO_PROJECT_TYPES = [
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
   { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
   { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
-  { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
+  { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
 
+function hasProjectId(projectId?: Task["project_id"]) {
+  if (projectId == null) return false
+  if (typeof projectId !== "string") return true
+  return projectId.trim().length > 0
+}
+
+function isNoProjectTask(task: Task) {
+  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+}
+
 function isFastNormalTask(task: Task) {
   return (
-    !task.project_id &&
-    !task.system_template_origin_id &&
+    isNoProjectTask(task) &&
     !task.ga_note_origin_id &&
     !task.is_bllok &&
     !task.is_1h_report &&
@@ -530,7 +539,7 @@ export default function DepartmentKanban() {
           const taskRows = (await tasksRes.json()) as Task[]
           const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isFastNormalTask))
+          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -1544,7 +1553,7 @@ export default function DepartmentKanban() {
       }
       if (createdTasks.length) {
         // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
-        const nonProjectTasks = createdTasks.filter((t) => !t.project_id)
+        const nonProjectTasks = createdTasks.filter(isNoProjectTask)
         if (nonProjectTasks.length) {
           setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
         }
@@ -1902,7 +1911,7 @@ export default function DepartmentKanban() {
           const createdTask = (await taskRes.json()) as Task
           setDepartmentTasks((prev) => [createdTask, ...prev])
           // Add to noProjectTasks if it's a non-project task (will be categorized into buckets)
-          if (!createdTask.project_id) {
+          if (isNoProjectTask(createdTask)) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
         }
@@ -1962,7 +1971,7 @@ export default function DepartmentKanban() {
       const createdTask = (await res.json()) as Task
       setDepartmentTasks((prev) => [createdTask, ...prev])
       // Add to noProjectTasks if it's a non-project task (will be categorized into buckets)
-      if (!createdTask.project_id) {
+      if (isNoProjectTask(createdTask)) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
