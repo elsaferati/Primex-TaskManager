@@ -219,6 +219,7 @@ export default function DevelopmentProjectPage() {
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
+  const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
   const [membersOpen, setMembersOpen] = React.useState(false)
@@ -467,6 +468,40 @@ export default function DevelopmentProjectPage() {
       toast.success("Task updated")
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  const deleteTask = async (taskId: string, taskTitle?: string) => {
+    if (!taskId) return
+
+    const confirmed = window.confirm(
+      taskTitle
+        ? `Are you sure you want to delete the task "${taskTitle}"?\n\nThis action cannot be undone.`
+        : "Are you sure you want to delete this task?\n\nThis action cannot be undone."
+    )
+
+    if (!confirmed) return
+
+    setDeletingTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      setTasks((prev) => prev.filter((task) => task.id !== taskId))
+      toast.success("Task deleted")
+    } catch {
+      toast.error("Failed to delete task")
+    } finally {
+      setDeletingTaskId(null)
     }
   }
 
@@ -1655,7 +1690,7 @@ export default function DevelopmentProjectPage() {
                               </Badge>
                             ) : null}
                           </div>
-                          <div className="flex justify-end">
+                          <div className="flex justify-end gap-2">
                             <Button
                               size="sm"
                               variant="outline"
@@ -1663,6 +1698,15 @@ export default function DevelopmentProjectPage() {
                               className="rounded-xl border-sky-200"
                             >
                               Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void deleteTask(task.id, task.title)}
+                              disabled={deletingTaskId === task.id}
+                              className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            >
+                              {deletingTaskId === task.id ? "Deleting..." : "Delete"}
                             </Button>
                           </div>
                         </div>

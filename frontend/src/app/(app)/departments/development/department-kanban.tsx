@@ -119,7 +119,8 @@ function isFastNormalTask(task: Task) {
     !task.is_r1 &&
     !task.is_personal &&
     task.priority === "NORMAL" &&
-    task.department_id !== null
+    task.department_id !== null &&
+    task.department_id !== undefined
   )
 }
 
@@ -1529,16 +1530,23 @@ export default function DepartmentKanban() {
           return
         }
         const created = (await res.json()) as Task
-        if (noProjectType === "personal") {
-          created.is_personal = true
+        // Ensure boolean fields are explicitly set (backend might return undefined)
+        // Explicitly set all boolean fields based on task type to ensure proper categorization
+        created.is_bllok = noProjectType === "blocked" ? true : (created.is_bllok ?? false)
+        created.is_1h_report = noProjectType === "hourly" ? true : (created.is_1h_report ?? false)
+        created.is_r1 = noProjectType === "r1" ? true : (created.is_r1 ?? false)
+        created.is_personal = noProjectType === "personal" ? true : (created.is_personal ?? false)
+        if (noProjectType === "normal") {
+          created.ga_note_origin_id = created.ga_note_origin_id || null
+          created.priority = created.priority || "NORMAL"
         }
         createdTasks.push(created)
       }
       if (createdTasks.length) {
-        // Only add to noProjectTasks if they meet fast task criteria
-        const fastTasks = createdTasks.filter(isFastNormalTask)
-        if (fastTasks.length) {
-          setNoProjectTasks((prev) => [...fastTasks, ...prev])
+        // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
+        const nonProjectTasks = createdTasks.filter((t) => !t.project_id)
+        if (nonProjectTasks.length) {
+          setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
         }
         setDepartmentTasks((prev) => [...createdTasks, ...prev])
       }
@@ -1893,8 +1901,8 @@ export default function DepartmentKanban() {
         } else {
           const createdTask = (await taskRes.json()) as Task
           setDepartmentTasks((prev) => [createdTask, ...prev])
-          // Only add to noProjectTasks if it meets fast task criteria
-          if (isFastNormalTask(createdTask)) {
+          // Add to noProjectTasks if it's a non-project task (will be categorized into buckets)
+          if (!createdTask.project_id) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
         }
@@ -1953,8 +1961,8 @@ export default function DepartmentKanban() {
       }
       const createdTask = (await res.json()) as Task
       setDepartmentTasks((prev) => [createdTask, ...prev])
-      // Only add to noProjectTasks if it meets fast task criteria
-      if (isFastNormalTask(createdTask)) {
+      // Add to noProjectTasks if it's a non-project task (will be categorized into buckets)
+      if (!createdTask.project_id) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
