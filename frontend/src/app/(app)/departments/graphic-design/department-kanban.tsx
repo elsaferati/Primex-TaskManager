@@ -91,6 +91,11 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   HIGH: "High",
 }
 
+const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
+  NORMAL: "border-amber-200 bg-amber-50 text-amber-700",
+  HIGH: "border-red-200 bg-red-50 text-red-700",
+}
+
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -1798,6 +1803,7 @@ export default function DepartmentKanban() {
                                 {group.tasks.map((task) => {
                                   const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                                   const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                                  const priorityValue = normalizePriority(task.priority)
                                   return (
                                     <Link
                                       key={task.id}
@@ -1810,6 +1816,12 @@ export default function DepartmentKanban() {
                                         </Badge>
                                         <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
                                           {phaseLabel}
+                                        </Badge>
+                                        <Badge
+                                          variant="outline"
+                                          className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                        >
+                                          {PRIORITY_LABELS[priorityValue]}
                                         </Badge>
                                         <div className="font-medium text-slate-800">{task.title}</div>
                                       </div>
@@ -1840,7 +1852,9 @@ export default function DepartmentKanban() {
                     <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
                       {todayOpenNotes.length ? (
                         <div className="space-y-2">
-                          {todayOpenNotes.map((note) => (
+                          {todayOpenNotes.map((note) => {
+                            const priorityValue = normalizePriority(note.priority)
+                            return (
                             <div
                               key={note.id}
                               className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
@@ -1849,10 +1863,17 @@ export default function DepartmentKanban() {
                                 <Badge variant="outline" className="text-xs">
                                   {note.note_type || "GA"}
                                 </Badge>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                >
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </Badge>
                                 <div className="font-medium">{note.content}</div>
                               </div>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       ) : (
                         <div className="text-sm text-muted-foreground">No open notes today.</div>
@@ -1910,15 +1931,26 @@ export default function DepartmentKanban() {
                     <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
                       {todaySystemTasks.length ? (
                         <div className="space-y-2">
-                          {todaySystemTasks.map((task) => (
+                          {todaySystemTasks.map((task) => {
+                            const priorityValue = normalizePriority(task.priority)
+                            return (
                             <div
                               key={task.id}
                               className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
                             >
-                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <div className="flex items-center gap-2">
+                                <div className="font-medium text-slate-800">{task.title}</div>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                >
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </Badge>
+                              </div>
                               <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       ) : (
                         <div className="text-sm text-slate-500">No system tasks today.</div>
