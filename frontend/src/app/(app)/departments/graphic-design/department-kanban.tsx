@@ -91,6 +91,11 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   HIGH: "High",
 }
 
+const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
+  NORMAL: "border-amber-200 bg-amber-50 text-amber-700",
+  HIGH: "border-red-200 bg-red-50 text-red-700",
+}
+
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -1798,6 +1803,7 @@ export default function DepartmentKanban() {
                                 {group.tasks.map((task) => {
                                   const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                                   const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                                  const priorityValue = normalizePriority(task.priority)
                                   return (
                                     <Link
                                       key={task.id}
@@ -1810,6 +1816,12 @@ export default function DepartmentKanban() {
                                         </Badge>
                                         <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
                                           {phaseLabel}
+                                        </Badge>
+                                        <Badge
+                                          variant="outline"
+                                          className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                        >
+                                          {PRIORITY_LABELS[priorityValue]}
                                         </Badge>
                                         <div className="font-medium text-slate-800">{task.title}</div>
                                       </div>

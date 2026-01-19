@@ -11,13 +11,13 @@ from app.models.enums import GaNoteStatus
 
 async def cleanup_old_closed_ga_notes() -> int:
     """
-    Delete closed GA/KA notes that were closed more than 5 days ago.
+    Delete closed GA/KA notes that were closed more than 1 month ago.
     Returns the number of notes deleted.
     """
-    cutoff = datetime.utcnow() - timedelta(days=5)
+    cutoff = datetime.utcnow() - timedelta(days=30)
     
     async with SessionLocal() as db:
-        # Find all closed notes that were completed more than 5 days ago
+        # Find all closed notes that were completed more than 1 month ago
         stmt = select(GaNote).where(
             GaNote.status == GaNoteStatus.CLOSED,
             GaNote.completed_at.isnot(None),

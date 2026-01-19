@@ -2510,6 +2510,7 @@ export default function DepartmentKanban() {
                               {group.tasks.map((task) => {
                                 const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                                 const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                                const priorityValue = normalizePriority(task.priority)
                                 return (
                                   <Link
                                     key={task.id}
@@ -2522,6 +2523,12 @@ export default function DepartmentKanban() {
                                       </Badge>
                                       <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
                                         {phaseLabel}
+                                      </Badge>
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                      >
+                                        {PRIORITY_LABELS[priorityValue]}
                                       </Badge>
                                       <div className="font-medium text-slate-800">{task.title}</div>
                                     </div>

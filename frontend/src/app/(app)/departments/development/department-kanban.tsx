@@ -2400,6 +2400,7 @@ export default function DepartmentKanban() {
                             {group.tasks.map((task) => {
                               const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                               const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
+                              const priorityValue = normalizePriority(task.priority)
                               return (
                                 <Link
                                   key={task.id}
@@ -2412,6 +2413,12 @@ export default function DepartmentKanban() {
                                     </Badge>
                                     <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
                                       {phaseLabel}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                    >
+                                      {PRIORITY_LABELS[priorityValue]}
                                     </Badge>
                                     <div className="font-medium text-slate-800">{task.title}</div>
                                     {task.finish_period && (
@@ -2481,17 +2488,29 @@ export default function DepartmentKanban() {
                       {todayNoProjectTasks.map((task) => {
                         const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         const typeLabel = noProjectTypeLabel(task)
+                        const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
+                        const isHighPriority = taskPriority === "HIGH"
                         return (
                           <Link
                             key={task.id}
                             href={`/tasks/${task.id}`}
                             className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                                 {typeLabel}
                               </Badge>
                               <div className="font-medium text-slate-800">{task.title}</div>
+                              <Badge
+                                variant="secondary"
+                                className={`text-xs ${
+                                  isHighPriority
+                                    ? "bg-red-100 text-red-700 border-red-200"
+                                    : "bg-slate-100 text-slate-700 border-slate-200"
+                                }`}
+                              >
+                                {taskPriority}
+                              </Badge>
                               {task.finish_period && (
                                 <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
                                   {task.finish_period}
@@ -3094,14 +3113,29 @@ export default function DepartmentKanban() {
                   <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
-                        {row.items.map((t) => (
+                        {row.items.map((t) => {
+                          const taskPriority = (t.priority as "HIGH" | "NORMAL") || "NORMAL"
+                          const isHighPriority = taskPriority === "HIGH"
+                          return (
                           <Link
                             key={t.id}
                             href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
                             className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <div className="font-medium text-slate-800 text-xs">{t.title}</div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="font-medium text-slate-800 text-xs">{t.title}</div>
+                                <Badge
+                                  variant="secondary"
+                                  className={`text-[11px] ${
+                                    isHighPriority
+                                      ? "bg-red-100 text-red-700 border-red-200"
+                                      : "bg-slate-100 text-slate-700 border-slate-200"
+                                  }`}
+                                >
+                                  {taskPriority}
+                                </Badge>
+                              </div>
                               <div className="flex items-center gap-2">
                                 <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
                                   {row.itemBadge}
@@ -3153,7 +3187,8 @@ export default function DepartmentKanban() {
                               <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
                             ) : null}
                           </Link>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="text-sm text-slate-500">No tasks in this category.</div>
