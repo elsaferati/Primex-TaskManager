@@ -205,6 +205,9 @@ export default function CommonViewPage() {
     time: "",
   })
   const [isSavingEntry, setIsSavingEntry] = React.useState(false)
+  const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
+  const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
+  const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
@@ -230,6 +233,59 @@ export default function CommonViewPage() {
     if (!hasOwner) return false
     return activeMeeting.rows.every((row, idx) => !row.owner || idx === 0)
   }, [activeMeeting])
+
+  const startEditMeetingTitle = React.useCallback(() => {
+    if (!activeMeeting) return
+    setMeetingTitleDraft(activeMeeting.title || "")
+    setEditingMeetingTitle(true)
+  }, [activeMeeting])
+
+  const cancelEditMeetingTitle = React.useCallback(() => {
+    setEditingMeetingTitle(false)
+    setMeetingTitleDraft("")
+  }, [])
+
+  const saveMeetingTitle = React.useCallback(async () => {
+    if (!activeMeeting || !meetingTitleDraft.trim()) return
+    setSavingMeetingTitle(true)
+    try {
+      const res = await apiFetch(`/checklists/${activeMeeting.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: meetingTitleDraft.trim() }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update meeting title"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // If response is not JSON, try to get status text
+          if (res.status === 404) {
+            detail = "Meeting template not found. Please refresh the page."
+          } else if (res.status === 403) {
+            detail = "Only admins can update meeting templates."
+          } else {
+            detail = `Failed to update meeting title (${res.status})`
+          }
+        }
+        alert(detail)
+        return
+      }
+      const updated = (await res.json()) as { id: string; title: string; [key: string]: unknown }
+      setMeetingTemplates((prev) =>
+        prev.map((meeting) => (meeting.id === activeMeeting.id ? { ...meeting, title: updated.title } : meeting))
+      )
+      setEditingMeetingTitle(false)
+      setMeetingTitleDraft("")
+    } catch (err) {
+      console.error("Error updating meeting title:", err)
+      alert("Failed to update meeting title. Please try again.")
+    } finally {
+      setSavingMeetingTitle(false)
+    }
+  }, [activeMeeting, meetingTitleDraft, apiFetch])
+
   const canSelectExternalDepartment = user?.role !== "STAFF"
   const externalMeetingDepartment = React.useMemo(
     () => departments.find((d) => d.id === externalMeetingDepartmentId) || null,
@@ -2929,7 +2985,45 @@ export default function CommonViewPage() {
           {activeMeeting ? (
             <div className="meeting-table-card">
               <div className="meeting-table-header">
-                <div className="meeting-table-title">{activeMeeting.title}</div>
+                {editingMeetingTitle ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                    <input
+                      type="text"
+                      value={meetingTitleDraft}
+                      onChange={(e) => setMeetingTitleDraft(e.target.value)}
+                      className="input"
+                      style={{ flex: 1, fontSize: "inherit", fontWeight: "inherit" }}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          void saveMeetingTitle()
+                        } else if (e.key === "Escape") {
+                          cancelEditMeetingTitle()
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn-primary"
+                      type="button"
+                      onClick={() => void saveMeetingTitle()}
+                      disabled={savingMeetingTitle || !meetingTitleDraft.trim()}
+                    >
+                      {savingMeetingTitle ? "Saving..." : "Save"}
+                    </button>
+                    <button className="btn-outline" type="button" onClick={cancelEditMeetingTitle}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className="meeting-table-title"
+                    style={isAdmin ? { cursor: "pointer", userSelect: "none" } : undefined}
+                    onClick={isAdmin ? startEditMeetingTitle : undefined}
+                    title={isAdmin ? "Click to edit" : undefined}
+                  >
+                    {activeMeeting.title}
+                  </div>
+                )}
                 {activeMeeting.defaultOwner || activeMeeting.defaultTime ? (
                   <div className="meeting-table-meta">
                     {activeMeeting.defaultOwner ? `WHO: ${activeMeeting.defaultOwner}` : null}

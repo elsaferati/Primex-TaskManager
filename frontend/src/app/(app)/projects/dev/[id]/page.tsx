@@ -989,7 +989,7 @@ export default function DevelopmentProjectPage() {
     : baseTitle
   const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-  const canClosePhase = phase !== "MBYLLUR"
+  const canClosePhase = phase !== "MBYLLUR" && phase !== "CLOSED" && phaseIndex < PHASES.length - 1
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
   const savePrompt = async (type: "GA_PROMPT" | "ZHVILLIM_PROMPT") => {
     if (!project) return
@@ -1120,16 +1120,18 @@ export default function DevelopmentProjectPage() {
             </div>
 
             {/* Close Phase Button */}
-            <div className="px-6 py-4 bg-white/50 flex justify-end">
-              <Button
-                variant="outline"
-                disabled={!canClosePhase || advancingPhase}
-                onClick={() => void advancePhase()}
-                className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {advancingPhase ? "Closing..." : "Close Phase"}
-              </Button>
-            </div>
+            {canClosePhase && (
+              <div className="px-6 py-4 bg-white/50 flex justify-end">
+                <Button
+                  variant="outline"
+                  disabled={advancingPhase}
+                  onClick={() => void advancePhase()}
+                  className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {advancingPhase ? "Closing..." : "Close Phase"}
+                </Button>
+              </div>
+            )}
           </Card>
 
           {/* Tabs Navigation - Soft Blue Design */}
@@ -1598,11 +1600,29 @@ export default function DevelopmentProjectPage() {
                       const assignedId = task.assigned_to || task.assigned_to_user_id || null
                       const assigned = assignedId ? userMap.get(assignedId) : null
                       const overdue = isOverdue(task)
+                      const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
+                      const isHighPriority = taskPriority === "HIGH"
+                      if (index === 0) {
+                        console.log("Task priority debug:", { title: task.title, priority: task.priority, taskPriority, isHighPriority })
+                      }
                       return (
-                        <div key={task.id} className="grid grid-cols-5 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors">
-                          <div className="font-medium text-slate-800">
-                            <span className="mr-2 text-xs font-semibold text-slate-400">{index + 1}.</span>
-                            {task.title}
+                        <div
+                          key={task.id}
+                          className="grid grid-cols-5 gap-4 px-6 py-4 text-sm hover:bg-sky-50/30 transition-colors"
+                        >
+                          <div className="font-medium text-slate-800 flex items-center gap-2 flex-wrap min-w-0">
+                            <span className="mr-2 text-xs font-semibold text-slate-400 shrink-0">{index + 1}.</span>
+                            <span className="min-w-0 flex-1">{task.title}</span>
+                            <Badge
+                              variant="secondary"
+                              className={`text-xs ${
+                                isHighPriority
+                                  ? "bg-red-100 text-red-700 border-red-200"
+                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {taskPriority}
+                            </Badge>
                           </div>
                           <div className="text-slate-600">
                             {assigned?.full_name || assigned?.username || "-"}
