@@ -17,6 +17,8 @@ import {
   ClipboardCheck,
   Hexagon,
   StickyNote,
+  Briefcase,
+  DollarSign,
   type LucideIcon
 } from "lucide-react"
 
@@ -76,6 +78,18 @@ const items: NavItem[] = [
     label: "Graphic Design", 
     icon: Palette,
     match: ["/departments/graphic-design", "/projects/design"]
+  },
+  { 
+    href: "/departments/human-resource", 
+    label: "Human Resource", 
+    icon: Briefcase,
+    match: ["/departments/human-resource"]
+  },
+  { 
+    href: "/departments/finance", 
+    label: "Finance", 
+    icon: DollarSign,
+    match: ["/departments/finance"]
   },
   { 
     href: "/weekly-planner", 
