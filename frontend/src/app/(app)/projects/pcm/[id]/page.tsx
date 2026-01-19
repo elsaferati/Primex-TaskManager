@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
+import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
 
 
@@ -40,6 +40,10 @@ const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
   CONTROL: "Control",
   FINAL: "Final",
 }
+
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const VS_VL_PHASES = ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT"] as const
 const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
@@ -838,11 +842,17 @@ export default function PcmProjectPage() {
   const [newMemberId, setNewMemberId] = React.useState<string>("")
   const [controlTitle, setControlTitle] = React.useState("")
   const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
+  const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
   const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
   const [newInlineTaskDueDate, setNewInlineTaskDueDate] = React.useState("")
+  const [newInlineTaskFinishPeriod, setNewInlineTaskFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
   const [newInlineTaskTotal, setNewInlineTaskTotal] = React.useState("")
   const [newInlineTaskCompleted, setNewInlineTaskCompleted] = React.useState("")
   const [creatingInlineTask, setCreatingInlineTask] = React.useState(false)
@@ -868,6 +878,9 @@ export default function PcmProjectPage() {
   const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
   const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
   const [editingTaskDueDate, setEditingTaskDueDate] = React.useState("")
+  const [editingTaskFinishPeriod, setEditingTaskFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
   const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
   const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
@@ -3429,6 +3442,7 @@ export default function PcmProjectPage() {
       setEditingTaskAssignee(latestTask.assigned_to || "__unassigned__")
       // Set due date for editing (format: YYYY-MM-DD for input[type=date])
       setEditingTaskDueDate(latestTask.due_date ? latestTask.due_date.split("T")[0] : "")
+      setEditingTaskFinishPeriod(latestTask.finish_period || FINISH_PERIOD_NONE_VALUE)
       const notes = latestTask.internal_notes || ""
       const totalMatch = notes.match(/total_products=(\d+)/)
       const completedMatch = notes.match(/completed_products=(\d+)/)
@@ -3444,6 +3458,7 @@ export default function PcmProjectPage() {
       setEditingTaskTitle("")
       setEditingTaskAssignee("__unassigned__")
       setEditingTaskDueDate("")
+      setEditingTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setEditingTaskTotal("")
       setEditingTaskCompleted("")
     }
@@ -3471,6 +3486,8 @@ export default function PcmProjectPage() {
             title: editingTaskTitle.trim(),
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
             due_date: editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null,
+            finish_period:
+              editingTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editingTaskFinishPeriod,
             daily_products: totalNum || null,
             internal_notes: `completed_products=${completed}`,
             status: nextStatus,
@@ -3906,7 +3923,8 @@ export default function PcmProjectPage() {
                     <div className="col-span-3">Task</div>
                     <div className="col-span-1">Assigned</div>
                     <div className="col-span-2">Due Date</div>
-                    <div className="col-span-2">Daily Products</div>
+                    <div className="col-span-1">Finish</div>
+                    <div className="col-span-1">Daily Products</div>
                     <div className="col-span-2">Completed</div>
                     <div className="col-span-1">Status</div>
                     <div className="col-span-1"></div>
@@ -3945,7 +3963,27 @@ export default function PcmProjectPage() {
                         onChange={(e) => setNewInlineTaskDueDate(e.target.value)}
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1">
+                      <Select
+                        value={newInlineTaskFinishPeriod}
+                        onValueChange={(value) =>
+                          setNewInlineTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                          <SelectValue placeholder="All day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-1">
                       <input
                         type="number"
                         placeholder="0"
@@ -3983,6 +4021,10 @@ export default function PcmProjectPage() {
                                 priority: "NORMAL",
                                 phase: "PRODUCT",
                                 due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
+                                finish_period:
+                                  newInlineTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE
+                                    ? null
+                                    : newInlineTaskFinishPeriod,
                                 daily_products: newInlineTaskTotal ? parseInt(newInlineTaskTotal, 10) : null,
                                 internal_notes: `completed_products=${newInlineTaskCompleted || 0}`,
                               }),
@@ -3996,6 +4038,7 @@ export default function PcmProjectPage() {
                             setNewInlineTaskTitle("")
                             setNewInlineTaskAssignee("__unassigned__")
                             setNewInlineTaskDueDate("")
+                            setNewInlineTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                             setNewInlineTaskTotal("")
                             setNewInlineTaskCompleted("")
                             toast.success("Task added")
@@ -4061,7 +4104,33 @@ export default function PcmProjectPage() {
                               <span className="text-slate-500">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "-"}</span>
                             )}
                           </div>
-                          <div className="col-span-2 px-2">
+                          <div className="col-span-1 px-2">
+                            {isEditing ? (
+                              <Select
+                                value={editingTaskFinishPeriod}
+                                onValueChange={(value) =>
+                                  setEditingTaskFinishPeriod(
+                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue placeholder="All day" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-slate-500">{task.finish_period || "-"}</span>
+                            )}
+                          </div>
+                          <div className="col-span-1 px-2">
                             {isEditing ? (
                               <input
                                 type="number"
@@ -4743,10 +4812,11 @@ export default function PcmProjectPage() {
                   <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
                     <div className="col-span-3">Task</div>
                     <div className="col-span-1">Assigned</div>
+                    <div className="col-span-1">Finish</div>
                     <div className="col-span-2">Total</div>
                     <div className="col-span-2">Completed</div>
                     <div className="col-span-1">KO</div>
-                    <div className="col-span-2">Status</div>
+                    <div className="col-span-1">Status</div>
                     <div className="col-span-1"></div>
                   </div>
                   {/* Inline form row */}
@@ -4770,6 +4840,26 @@ export default function PcmProjectPage() {
                           {assignableUsers.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.full_name || u.username || u.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-1">
+                      <Select
+                        value={controlFinishPeriod}
+                        onValueChange={(value) =>
+                          setControlFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                          <SelectValue placeholder="All day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -4799,7 +4889,7 @@ export default function PcmProjectPage() {
                         return "Elsa Ferati"
                       })()}
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1">
                       <Button
                         size="sm"
                         className="rounded-full px-5 shadow-sm"
@@ -4818,6 +4908,8 @@ export default function PcmProjectPage() {
                                 status: "TODO",
                                 priority: "NORMAL",
                                 phase: "CONTROL",
+                                finish_period:
+                                  controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
                                 internal_notes: "total_products=0; completed_products=0",
                               }),
                             })
@@ -4829,6 +4921,7 @@ export default function PcmProjectPage() {
                             setTasks((prev) => [...prev, created])
                             setControlTitle("")
                             setControlAssignee("__unassigned__")
+                            setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                             toast.success("Task added")
                           } finally {
                             setCreatingControlTask(false)
@@ -4888,6 +4981,32 @@ export default function PcmProjectPage() {
                               </Select>
                             ) : (
                               <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
+                            )}
+                          </div>
+                          <div className="col-span-1 px-2">
+                            {isEditing ? (
+                              <Select
+                                value={editingTaskFinishPeriod}
+                                onValueChange={(value) =>
+                                  setEditingTaskFinishPeriod(
+                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue placeholder="All day" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-slate-500">{task.finish_period || "-"}</span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -4987,7 +5106,7 @@ export default function PcmProjectPage() {
                             )}
                           </div>
                           <div className="col-span-1 text-slate-500">{koName}</div>
-                          <div className="col-span-2 px-2">
+                          <div className="col-span-1 px-2">
                             <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}
                               className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
