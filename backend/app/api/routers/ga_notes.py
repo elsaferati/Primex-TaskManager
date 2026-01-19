@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -27,7 +27,20 @@ async def list_ga_notes(
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
     cutoff = datetime.utcnow() - timedelta(days=7)
+    # Filter out closed notes that were closed more than 5 days ago
+    closed_cutoff = datetime.utcnow() - timedelta(days=5)
+    
     stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
+    
+    # Exclude closed notes that are older than 5 days
+    stmt = stmt.where(
+        or_(
+            GaNote.status != GaNoteStatus.CLOSED,
+            GaNote.completed_at.is_(None),
+            GaNote.completed_at >= closed_cutoff,
+        )
+    )
+    
     if project_id is None and department_id is None:
         if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id or department_id required")

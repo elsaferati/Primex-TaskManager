@@ -2546,11 +2546,35 @@ export default function DepartmentKanban() {
                   {visibleGaNotes.length ? visibleGaNotes.map(note => {
                     const author = users.find(u => u.id === note.created_by)
                     const project = note.project_id ? projects.find(p => p.id === note.project_id) : null
+                    const isHighPriority = note.priority === "HIGH"
                     return (
-                      <Card key={note.id} className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border-0 bg-white/60 p-5 shadow-sm ring-1 ring-slate-900/5 transition hover:shadow-md dark:bg-slate-900/60 dark:ring-white/10">
+                      <Card
+                        key={note.id}
+                        className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border-l-4 p-5 shadow-sm ring-1 transition hover:shadow-md ${
+                          isHighPriority
+                            ? "border-l-red-500 border-0 bg-red-50/60 ring-red-900/5 dark:bg-red-950/60 dark:ring-red-500/10"
+                            : "border-0 bg-white/60 ring-slate-900/5 dark:bg-slate-900/60 dark:ring-white/10"
+                        }`}
+                      >
                         <div className="absolute top-0 right-0 h-16 w-16 -translate-y-6 translate-x-6 rounded-full bg-slate-50 dark:bg-slate-800"></div>
                         <div className="relative z-10">
-                          <div className="flex items-center justify-between mb-3"><span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>{note.note_type}</span><span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span></div>
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
+                                {note.note_type}
+                              </span>
+                              {note.priority && (
+                                <span
+                                  className={`rounded-md px-2 py-1 text-[10px] font-bold ${
+                                    isHighPriority ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {note.priority}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span>
+                          </div>
                           <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
                         </div>
                         <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
