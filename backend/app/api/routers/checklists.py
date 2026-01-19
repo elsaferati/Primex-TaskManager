@@ -11,8 +11,9 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
+from app.models.enums import UserRole
 from app.models.project import Project
-from app.schemas.checklist import ChecklistCreate, ChecklistOut, ChecklistWithItemsOut
+from app.schemas.checklist import ChecklistCreate, ChecklistOut, ChecklistUpdate, ChecklistWithItemsOut
 from app.schemas.checklist_item import ChecklistItemAssigneeOut, ChecklistItemOut
 
 
@@ -142,6 +143,51 @@ async def create_checklist(
         position=payload.position,
     )
     db.add(checklist)
+    await db.commit()
+    await db.refresh(checklist)
+    return ChecklistOut(
+        id=checklist.id,
+        title=checklist.title,
+        task_id=checklist.task_id,
+        project_id=checklist.project_id,
+        note=checklist.note,
+        default_owner=checklist.default_owner,
+        default_time=checklist.default_time,
+        group_key=checklist.group_key,
+        columns=checklist.columns,
+        position=checklist.position,
+        created_at=checklist.created_at,
+    )
+
+
+@router.patch("/{checklist_id}", response_model=ChecklistOut)
+async def update_checklist(
+    checklist_id: uuid.UUID,
+    payload: ChecklistUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> ChecklistOut:
+    checklist = (await db.execute(select(Checklist).where(Checklist.id == checklist_id))).scalar_one_or_none()
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
+    
+    # Only admins can update meeting templates (checklists with group_key)
+    if checklist.group_key and user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update meeting templates")
+    
+    if payload.title is not None:
+        checklist.title = payload.title
+    if payload.note is not None:
+        checklist.note = payload.note
+    if payload.default_owner is not None:
+        checklist.default_owner = payload.default_owner
+    if payload.default_time is not None:
+        checklist.default_time = payload.default_time
+    if payload.columns is not None:
+        checklist.columns = payload.columns
+    if payload.position is not None:
+        checklist.position = payload.position
+    
     await db.commit()
     await db.refresh(checklist)
     return ChecklistOut(

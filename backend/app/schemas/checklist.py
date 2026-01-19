@@ -40,6 +40,15 @@ class ChecklistCreate(BaseModel):
     position: int | None = None
 
 
+class ChecklistUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=150)
+    note: str | None = None
+    default_owner: str | None = None
+    default_time: str | None = None
+    columns: list[ChecklistColumn] | None = None
+    position: int | None = None
+
+
 class ChecklistWithItemsOut(ChecklistOut):
     items: list[ChecklistItemOut] = []
 

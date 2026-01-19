@@ -2606,9 +2606,28 @@ export default function ProjectPage() {
                   const assignedId = task.assigned_to || task.assigned_to_user_id || null
                   const assigned = assignedId ? userMap.get(assignedId) : null
                   const overdue = isOverdue(task)
+                  const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
+                  const isHighPriority = taskPriority === "HIGH"
                   return (
-                    <div key={task.id} className="grid grid-cols-5 gap-3 px-6 py-4 text-sm">
-                      <div className="font-medium">{task.title}</div>
+                    <div
+                      key={task.id}
+                      className="grid grid-cols-5 gap-3 px-6 py-4 text-sm"
+                    >
+                      <div className="font-medium flex items-center gap-2 flex-wrap">
+                        <span>{task.title}</span>
+                        {isDevelopmentProject && (
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs ${
+                              isHighPriority
+                                ? "bg-red-100 text-red-700 border-red-200"
+                                : "bg-slate-100 text-slate-700 border-slate-200"
+                            }`}
+                          >
+                            {taskPriority}
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-muted-foreground">
                         {assigned?.full_name || assigned?.username || "-"}
                       </div>
