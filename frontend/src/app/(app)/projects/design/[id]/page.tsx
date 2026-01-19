@@ -201,6 +201,7 @@ export default function DesignProjectPage() {
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [activeTab, setActiveTab] = React.useState<TabId>("description")
   const [newChecklistContent, setNewChecklistContent] = React.useState("")
+  const [newChecklistNumber, setNewChecklistNumber] = React.useState("")
   const [addingChecklist, setAddingChecklist] = React.useState(false)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState("")
@@ -258,6 +259,11 @@ export default function DesignProjectPage() {
   const [punimiNewText, setPunimiNewText] = React.useState("")
   const [punimiNewNumber, setPunimiNewNumber] = React.useState("")
   const [punimiSaving, setPunimiSaving] = React.useState(false)
+
+  // Admin controls for Finalization checklist
+  const [finalizationNewText, setFinalizationNewText] = React.useState("")
+  const [finalizationNewNumber, setFinalizationNewNumber] = React.useState("")
+  const [finalizationSaving, setFinalizationSaving] = React.useState(false)
   
   // Comment editing state (for all checklist items)
   const [commentEditingId, setCommentEditingId] = React.useState<string | null>(null)
@@ -442,21 +448,25 @@ export default function DesignProjectPage() {
   // Add checklist item
   const submitChecklistItem = async () => {
     if (!project || !newChecklistContent.trim()) return
+    const rawNumber = newChecklistNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
     setAddingChecklist(true)
     try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        title: newChecklistContent.trim(),
+        is_checked: false,
+      }
+      if (activePhase === "CONTROL") payload.path = CONTROL_CHECKLIST_PATH
+      if (position != null) payload.position = position
+
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: project.id,
-          item_type: "CHECKBOX",
-          title: newChecklistContent.trim(),
-          is_checked: false,
-          ...(activePhase === "CONTROL" ? { path: CONTROL_CHECKLIST_PATH } : {}),
-          item_type: "CHECKBOX",
-          title: newChecklistContent.trim(),
-          is_checked: false,
-        }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         let detail = "Failed to add checklist item"
@@ -469,9 +479,9 @@ export default function DesignProjectPage() {
         toast.error(detail)
         return
       }
-      const created = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => [...prev, created])
       setNewChecklistContent("")
+      setNewChecklistNumber("")
+      await reloadChecklistItems()
       toast.success("Checklist item added")
     } finally {
       setAddingChecklist(false)
@@ -847,6 +857,39 @@ export default function DesignProjectPage() {
       toast.success("Item deleted")
     } finally {
       setPunimiSaving(false)
+    }
+  }
+
+  const addFinalizationItem = async () => {
+    if (!project) return
+    const text = finalizationNewText.trim()
+    if (!text) return
+    const rawNumber = finalizationNewNumber.trim()
+    const position = rawNumber ? Math.max(0, Number.parseInt(rawNumber, 10) - 1) : undefined
+    setFinalizationSaving(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: FINALIZATION_PATH,
+          title: text,
+          position,
+          is_checked: false,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add item")
+        return
+      }
+      setFinalizationNewText("")
+      setFinalizationNewNumber("")
+      await reloadChecklistItems()
+      toast.success("Item added")
+    } finally {
+      setFinalizationSaving(false)
     }
   }
 
@@ -1314,7 +1357,37 @@ export default function DesignProjectPage() {
     () => checklistItems.filter((item) => item.path === FINALIZATION_PATH),
     [checklistItems]
   )
-  const checklistItemsForTab = activePhase === "CONTROL" ? controlChecklistItems : generalChecklistItems
+  const finalizationItemsOrdered = React.useMemo(
+    () =>
+      finalizationItems
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => {
+          const aPos = a.item.position
+          const bPos = b.item.position
+          if (aPos == null && bPos == null) return a.index - b.index
+          if (aPos == null) return 1
+          if (bPos == null) return -1
+          if (aPos !== bPos) return aPos - bPos
+          return a.index - b.index
+        })
+        .map((entry) => entry.item),
+    [finalizationItems]
+  )
+  const checklistItemsForTab = React.useMemo(() => {
+    const baseItems = activePhase === "CONTROL" ? controlChecklistItems : generalChecklistItems
+    return baseItems
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        const aPos = a.item.position
+        const bPos = b.item.position
+        if (aPos == null && bPos == null) return a.index - b.index
+        if (aPos == null) return 1
+        if (bPos == null) return -1
+        if (aPos !== bPos) return aPos - bPos
+        return a.index - b.index
+      })
+      .map((entry) => entry.item)
+  }, [activePhase, controlChecklistItems, generalChecklistItems])
   const checklistTitle = activePhase === "CONTROL" ? CONTROL_CHECKLIST_TITLE : "Checklist"
 
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
@@ -1632,16 +1705,17 @@ export default function DesignProjectPage() {
               <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
             ) : (
               <div className="space-y-2">
-                {checklistItemsForTab.map((item) => (
+                {checklistItemsForTab.map((item, idx) => (
                   <div key={item.id} className="p-3 border rounded-lg space-y-2">
                     <div className="flex items-center gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
                       <Checkbox
                         checked={item.is_checked || false}
                         onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
                       />
-                      {activePhase === "CONTROL" && isAdmin ? (
-                        <div className="flex-1">
-                          {controlChecklistEditingId === item.id ? (
+                      <div className="flex-1">
+                        {activePhase === "CONTROL" && isAdmin ? (
+                          controlChecklistEditingId === item.id ? (
                             <Input
                               value={controlChecklistEditingText}
                               onChange={(e) => setControlChecklistEditingText(e.target.value)}
@@ -1650,13 +1724,13 @@ export default function DesignProjectPage() {
                             <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
                               {item.title || item.content}
                             </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                          {item.title || item.content}
-                        </span>
-                      )}
+                          )
+                        ) : (
+                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                            {item.title || item.content}
+                          </span>
+                        )}
+                      </div>
                       {activePhase === "CONTROL" && isAdmin ? (
                         <div className="ml-auto flex items-center gap-2">
                           {controlChecklistEditingId === item.id ? (
@@ -1697,7 +1771,7 @@ export default function DesignProjectPage() {
                       ) : null}
                     </div>
                     {/* Comment section */}
-                    <div className="ml-7 space-y-2">
+                    <div className="ml-9 space-y-2">
                       {commentEditingId === item.id ? (
                         <div className="space-y-2">
                           <Textarea
@@ -1741,18 +1815,31 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
-            <div className="mt-4 flex gap-2">
-              <Input
-                value={newChecklistContent}
-                onChange={(e) => setNewChecklistContent(e.target.value)}
-                placeholder="Add new checklist item..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submitChecklistItem()
-                }}
-              />
-              <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
-                {addingChecklist ? "Adding..." : "Add"}
-              </Button>
+            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+              <div className="space-y-1">
+                <Label>Number</Label>
+                <Input
+                  value={newChecklistNumber}
+                  onChange={(e) => setNewChecklistNumber(e.target.value)}
+                  placeholder="e.g. 3"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Item</Label>
+                <Input
+                  value={newChecklistContent}
+                  onChange={(e) => setNewChecklistContent(e.target.value)}
+                  placeholder="Add new checklist item..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void submitChecklistItem()
+                  }}
+                />
+              </div>
+              <div className="flex items-end">
+                <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
+                  {addingChecklist ? "Adding..." : "Add"}
+                </Button>
+              </div>
             </div>
           </Card>
         )}
@@ -3147,13 +3234,14 @@ export default function DesignProjectPage() {
         {activeTab === "finalization" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">{FINALIZATION_TITLE}</h3>
-            {finalizationItems.length === 0 ? (
+            {finalizationItemsOrdered.length === 0 ? (
               <p className="text-muted-foreground">No finalization items yet.</p>
             ) : (
               <div className="space-y-2">
-                {finalizationItems.map((item) => (
+                {finalizationItemsOrdered.map((item, idx) => (
                   <div key={item.id} className="p-3 border rounded-lg space-y-2">
                     <div className="flex items-center gap-3">
+                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
                       <Checkbox
                         checked={item.is_checked || false}
                         onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
@@ -3162,7 +3250,7 @@ export default function DesignProjectPage() {
                         {item.title || item.content}
                       </span>
                     </div>
-                    <div className="ml-7 space-y-2">
+                    <div className="ml-9 space-y-2">
                       {commentEditingId === item.id ? (
                         <div className="space-y-2">
                           <Textarea
@@ -3206,6 +3294,35 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
+            {isAdmin ? (
+              <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={finalizationNewNumber}
+                    onChange={(e) => setFinalizationNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={finalizationNewText}
+                    onChange={(e) => setFinalizationNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!finalizationNewText.trim() || finalizationSaving}
+                    onClick={() => void addFinalizationItem()}
+                  >
+                    {finalizationSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
 
