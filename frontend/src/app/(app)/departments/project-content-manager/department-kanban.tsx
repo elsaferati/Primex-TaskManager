@@ -103,7 +103,7 @@ const NO_PROJECT_TYPES = [
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
   { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
   { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
-  { id: "hourly", label: "1H Report", description: "Hourly meeting/reporting task." },
+  { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
 
