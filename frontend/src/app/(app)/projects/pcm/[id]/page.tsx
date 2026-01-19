@@ -869,6 +869,8 @@ export default function PcmProjectPage() {
   const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
+  const [controlTotal, setControlTotal] = React.useState("0")
+  const [controlCompleted, setControlCompleted] = React.useState("0")
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
@@ -5000,6 +5002,8 @@ export default function PcmProjectPage() {
                       <input
                         type="number"
                         placeholder="0"
+                        value={controlTotal}
+                        onChange={(e) => setControlTotal(e.target.value)}
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
                       />
                     </div>
@@ -5007,6 +5011,8 @@ export default function PcmProjectPage() {
                       <input
                         type="number"
                         placeholder="0"
+                        value={controlCompleted}
+                        onChange={(e) => setControlCompleted(e.target.value)}
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
                       />
                     </div>
@@ -5041,7 +5047,7 @@ export default function PcmProjectPage() {
                                 phase: "CONTROL",
                                 finish_period:
                                   controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
-                                internal_notes: "total_products=0; completed_products=0",
+                                internal_notes: `total_products=${controlTotal || "0"}; completed_products=${controlCompleted || "0"}`,
                               }),
                             })
                             if (!res?.ok) {
@@ -5053,6 +5059,8 @@ export default function PcmProjectPage() {
                             setControlTitle("")
                             setControlAssignee("__unassigned__")
                             setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                            setControlTotal("0")
+                            setControlCompleted("0")
                             toast.success("Task added")
                           } finally {
                             setCreatingControlTask(false)
