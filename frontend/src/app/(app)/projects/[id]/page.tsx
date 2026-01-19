@@ -375,18 +375,22 @@ export default function ProjectPage() {
   const [meetingChecklist, setMeetingChecklist] = React.useState<
     { id: string; content: string; answer: string; isChecked: boolean; position: number }[]
   >([])
+  const [meetingChecklistNewNumber, setMeetingChecklistNewNumber] = React.useState("")
   const [newMeetingItemContent, setNewMeetingItemContent] = React.useState("")
   const [newMeetingItemAnswer, setNewMeetingItemAnswer] = React.useState("")
   const [addingMeetingItem, setAddingMeetingItem] = React.useState(false)
   const [editingMeetingItemId, setEditingMeetingItemId] = React.useState<string | null>(null)
   const [editingMeetingItemContent, setEditingMeetingItemContent] = React.useState("")
   const [editingMeetingItemAnswer, setEditingMeetingItemAnswer] = React.useState("")
+  const [editingMeetingItemNumber, setEditingMeetingItemNumber] = React.useState("")
   const [meetingFocusItems, setMeetingFocusItems] = React.useState<
-    { id: string; text: string; position?: number }[]
+    { id: string; text: string; position: number }[]
   >([])
   const [newMeetingFocusText, setNewMeetingFocusText] = React.useState("")
+  const [meetingFocusNewNumber, setMeetingFocusNewNumber] = React.useState("")
   const [meetingFocusEditingId, setMeetingFocusEditingId] = React.useState<string | null>(null)
   const [meetingFocusEditingText, setMeetingFocusEditingText] = React.useState("")
+  const [meetingFocusEditingNumber, setMeetingFocusEditingNumber] = React.useState("")
   const [savingMeetingFocusItem, setSavingMeetingFocusItem] = React.useState(false)
   const [mstAcceptanceChecklist, setMstAcceptanceChecklist] = React.useState<ChecklistItem[]>([])
   const [mstGaMeetingChecklist, setMstGaMeetingChecklist] = React.useState<ChecklistItem[]>([])
@@ -409,6 +413,8 @@ export default function ProjectPage() {
   >([])
   const [testingEditingId, setTestingEditingId] = React.useState<string | null>(null)
   const [testingEditingText, setTestingEditingText] = React.useState("")
+  const [testingEditingNumber, setTestingEditingNumber] = React.useState("")
+  const [newTestingNumber, setNewTestingNumber] = React.useState("")
   const [newTestingText, setNewTestingText] = React.useState("")
   const [savingTestingItem, setSavingTestingItem] = React.useState(false)
   const [documentationChecklist, setDocumentationChecklist] = React.useState<
@@ -423,6 +429,8 @@ export default function ProjectPage() {
   )
   const [documentationEditingId, setDocumentationEditingId] = React.useState<string | null>(null)
   const [documentationEditingText, setDocumentationEditingText] = React.useState("")
+  const [documentationEditingNumber, setDocumentationEditingNumber] = React.useState("")
+  const [newDocumentationNumber, setNewDocumentationNumber] = React.useState("")
   const [newDocumentationText, setNewDocumentationText] = React.useState("")
   const [savingDocumentationItem, setSavingDocumentationItem] = React.useState(false)
   const [documentationFilePath, setDocumentationFilePath] = React.useState("")
@@ -778,7 +786,7 @@ export default function ProjectPage() {
 
   const patchMeetingChecklistItem = async (
     itemId: string,
-    payload: Partial<{ title: string; comment: string | null; is_checked: boolean }>
+    payload: Partial<{ title: string; comment: string | null; is_checked: boolean; position: number }>
   ) => {
     const res = await apiFetch(`/checklist-items/${itemId}`, {
       method: "PATCH",
@@ -931,12 +939,14 @@ export default function ProjectPage() {
     setEditingMeetingItemId(itemId)
     setEditingMeetingItemContent(item.content)
     setEditingMeetingItemAnswer(item.answer)
+    setEditingMeetingItemNumber(item.position ? String(item.position) : "")
   }
 
   const cancelEditMeetingChecklistItem = () => {
     setEditingMeetingItemId(null)
     setEditingMeetingItemContent("")
     setEditingMeetingItemAnswer("")
+    setEditingMeetingItemNumber("")
   }
 
   const startEditMeetingFocusItem = (itemId: string) => {
@@ -944,30 +954,53 @@ export default function ProjectPage() {
     if (!item) return
     setMeetingFocusEditingId(itemId)
     setMeetingFocusEditingText(item.text)
+    setMeetingFocusEditingNumber(item.position ? String(item.position) : "")
   }
 
   const cancelEditMeetingFocusItem = () => {
     setMeetingFocusEditingId(null)
     setMeetingFocusEditingText("")
+    setMeetingFocusEditingNumber("")
   }
+
+  const reloadChecklistItems = React.useCallback(async () => {
+    const res = await apiFetch(`/checklist-items?project_id=${projectId}`)
+    if (!res.ok) return false
+    const items = (await res.json()) as ChecklistItem[]
+    setChecklistItems(items)
+    return true
+  }, [apiFetch, projectId])
 
   const saveMeetingFocusItem = async () => {
     if (!meetingFocusEditingId) return
     const text = meetingFocusEditingText.trim()
     if (!text) return
+    const rawNumber = meetingFocusEditingNumber.trim()
+    let position: number | undefined
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      position = parsed
+    }
     setSavingMeetingFocusItem(true)
     try {
       const res = await apiFetch(`/checklist-items/${meetingFocusEditingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comment: text }),
+        body: JSON.stringify({ comment: text, position }),
       })
       if (!res.ok) {
         toast.error("Failed to update meeting focus item")
         return
       }
       const updated = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      }
       cancelEditMeetingFocusItem()
     } finally {
       setSavingMeetingFocusItem(false)
@@ -980,8 +1013,10 @@ export default function ProjectPage() {
       toast.error("Failed to delete meeting focus item")
       return
     }
-    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
-    setMeetingFocusItems((prev) => prev.filter((item) => item.id !== itemId))
+    const refreshed = await reloadChecklistItems()
+    if (!refreshed) {
+      setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    }
     toast.success("Meeting focus item deleted")
   }
 
@@ -989,9 +1024,18 @@ export default function ProjectPage() {
     if (!project) return
     const text = newMeetingFocusText.trim()
     if (!text) return
+    const rawNumber = meetingFocusNewNumber.trim()
+    let position = meetingFocusItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      position = parsed
+    }
     setSavingMeetingFocusItem(true)
     try {
-      const position = meetingFocusItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1008,8 +1052,12 @@ export default function ProjectPage() {
         return
       }
       const created = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => [...prev, created])
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => [...prev, created])
+      }
       setNewMeetingFocusText("")
+      setMeetingFocusNewNumber("")
       toast.success("Meeting focus item added")
     } finally {
       setSavingMeetingFocusItem(false)
@@ -1021,11 +1069,23 @@ export default function ProjectPage() {
     const title = editingMeetingItemContent.trim()
     if (!title) return
     const comment = editingMeetingItemAnswer.trim()
+    const rawNumber = editingMeetingItemNumber.trim()
+    let position: number | undefined
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      position = parsed
+    }
     const saved = await patchMeetingChecklistItem(editingMeetingItemId, {
       title,
       comment: comment || null,
+      position,
     })
     if (saved) {
+      await reloadChecklistItems()
       cancelEditMeetingChecklistItem()
     }
   }
@@ -1036,7 +1096,10 @@ export default function ProjectPage() {
       toast.error("Failed to delete meeting checklist item")
       return
     }
-    setChecklistItems((prev) => prev.filter((entry) => entry.id !== itemId))
+    const refreshed = await reloadChecklistItems()
+    if (!refreshed) {
+      setChecklistItems((prev) => prev.filter((entry) => entry.id !== itemId))
+    }
     toast.success("Checklist item deleted")
   }
 
@@ -1044,10 +1107,19 @@ export default function ProjectPage() {
     if (!project) return
     const title = newMeetingItemContent.trim()
     if (!title) return
+    const rawNumber = meetingChecklistNewNumber.trim()
+    let nextPosition =
+      meetingChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      nextPosition = parsed
+    }
     setAddingMeetingItem(true)
     try {
-      const nextPosition =
-        meetingChecklist.reduce((max, item) => Math.max(max, item.position), 0) + 1
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1066,9 +1138,13 @@ export default function ProjectPage() {
         return
       }
       const created = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => [...prev, created])
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => [...prev, created])
+      }
       setNewMeetingItemContent("")
       setNewMeetingItemAnswer("")
+      setMeetingChecklistNewNumber("")
       toast.success("Checklist item added")
     } finally {
       setAddingMeetingItem(false)
@@ -1119,30 +1195,45 @@ export default function ProjectPage() {
     if (!item) return
     setTestingEditingId(itemId)
     setTestingEditingText(item.question)
+    setTestingEditingNumber(item.position ? String(item.position) : "")
   }
 
   const cancelEditTestingItem = () => {
     setTestingEditingId(null)
     setTestingEditingText("")
+    setTestingEditingNumber("")
   }
 
   const saveTestingItem = async () => {
     if (!testingEditingId) return
     const text = testingEditingText.trim()
     if (!text) return
+    const rawNumber = testingEditingNumber.trim()
+    let position: number | undefined
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      position = parsed
+    }
     setSavingTestingItem(true)
     try {
       const res = await apiFetch(`/checklist-items/${testingEditingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: text }),
+        body: JSON.stringify({ title: text, position }),
       })
       if (!res.ok) {
         toast.error("Failed to update testing checklist item")
         return
       }
       const updated = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      }
       cancelEditTestingItem()
     } finally {
       setSavingTestingItem(false)
@@ -1155,8 +1246,11 @@ export default function ProjectPage() {
       toast.error("Failed to delete testing checklist item")
       return
     }
-    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
-    setTestingChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    const refreshed = await reloadChecklistItems()
+    if (!refreshed) {
+      setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+      setTestingChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    }
     toast.success("Testing checklist item deleted")
   }
 
@@ -1166,7 +1260,16 @@ export default function ProjectPage() {
     if (!text) return
     setSavingTestingItem(true)
     try {
-      const position = testingChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      const rawNumber = newTestingNumber.trim()
+      let position = testingChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid order number")
+          return
+        }
+        position = parsed
+      }
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1184,8 +1287,12 @@ export default function ProjectPage() {
         return
       }
       const created = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => [...prev, created])
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => [...prev, created])
+      }
       setNewTestingText("")
+      setNewTestingNumber("")
       toast.success("Testing checklist item added")
     } finally {
       setSavingTestingItem(false)
@@ -1221,30 +1328,45 @@ export default function ProjectPage() {
     if (!item) return
     setDocumentationEditingId(itemId)
     setDocumentationEditingText(item.question)
+    setDocumentationEditingNumber(item.position ? String(item.position) : "")
   }
 
   const cancelEditDocumentationItem = () => {
     setDocumentationEditingId(null)
     setDocumentationEditingText("")
+    setDocumentationEditingNumber("")
   }
 
   const saveDocumentationItem = async () => {
     if (!documentationEditingId) return
     const text = documentationEditingText.trim()
     if (!text) return
+    const rawNumber = documentationEditingNumber.trim()
+    let position: number | undefined
+    if (rawNumber) {
+      const parsed = Number.parseInt(rawNumber, 10)
+      if (Number.isNaN(parsed) || parsed < 1) {
+        toast.error("Invalid order number")
+        return
+      }
+      position = parsed
+    }
     setSavingDocumentationItem(true)
     try {
       const res = await apiFetch(`/checklist-items/${documentationEditingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: text }),
+        body: JSON.stringify({ title: text, position }),
       })
       if (!res.ok) {
         toast.error("Failed to update documentation checklist item")
         return
       }
       const updated = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      }
       cancelEditDocumentationItem()
     } finally {
       setSavingDocumentationItem(false)
@@ -1257,8 +1379,11 @@ export default function ProjectPage() {
       toast.error("Failed to delete documentation checklist item")
       return
     }
-    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
-    setDocumentationChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    const refreshed = await reloadChecklistItems()
+    if (!refreshed) {
+      setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+      setDocumentationChecklist((prev) => prev.filter((item) => item.id !== itemId))
+    }
     toast.success("Documentation checklist item deleted")
   }
 
@@ -1268,8 +1393,17 @@ export default function ProjectPage() {
     if (!text) return
     setSavingDocumentationItem(true)
     try {
-      const position =
+      const rawNumber = newDocumentationNumber.trim()
+      let position =
         documentationChecklist.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid order number")
+          return
+        }
+        position = parsed
+      }
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1287,8 +1421,12 @@ export default function ProjectPage() {
         return
       }
       const created = (await res.json()) as ChecklistItem
-      setChecklistItems((prev) => [...prev, created])
+      const refreshed = await reloadChecklistItems()
+      if (!refreshed) {
+        setChecklistItems((prev) => [...prev, created])
+      }
       setNewDocumentationText("")
+      setNewDocumentationNumber("")
       toast.success("Documentation checklist item added")
     } finally {
       setSavingDocumentationItem(false)
@@ -2069,10 +2207,22 @@ export default function ProjectPage() {
             {meetingFocusItems.length ? (
               meetingFocusItems.map((item, index) => {
                 const isEditing = meetingFocusEditingId === item.id
+                const displayNumber = item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
-                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
-                      {index + 1}.
+                    <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          min={1}
+                          inputMode="numeric"
+                          value={meetingFocusEditingNumber}
+                          onChange={(e) => setMeetingFocusEditingNumber(e.target.value)}
+                          className="h-8 w-16 text-right"
+                        />
+                      ) : (
+                        `${displayNumber}.`
+                      )}
                     </div>
                     <div className="flex-1">
                       {isEditing ? (
@@ -2123,6 +2273,15 @@ export default function ProjectPage() {
             )}
             <div className="flex flex-wrap items-center gap-2">
               <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={meetingFocusNewNumber}
+                onChange={(e) => setMeetingFocusNewNumber(e.target.value)}
+                placeholder="No."
+                className="w-24"
+              />
+              <Input
                 value={newMeetingFocusText}
                 onChange={(e) => setNewMeetingFocusText(e.target.value)}
                 placeholder="Add meeting focus item..."
@@ -2147,10 +2306,22 @@ export default function ProjectPage() {
             {meetingChecklist.length ? (
               meetingChecklist.map((item, index) => {
                 const isEditing = editingMeetingItemId === item.id
+                const displayNumber = item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
-                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
-                      {index + 1}.
+                    <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          min={1}
+                          inputMode="numeric"
+                          value={editingMeetingItemNumber}
+                          onChange={(e) => setEditingMeetingItemNumber(e.target.value)}
+                          className="h-8 w-16 text-right"
+                        />
+                      ) : (
+                        `${displayNumber}.`
+                      )}
                     </div>
                     <Checkbox
                       checked={item.isChecked}
@@ -2213,6 +2384,15 @@ export default function ProjectPage() {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={meetingChecklistNewNumber}
+                onChange={(e) => setMeetingChecklistNewNumber(e.target.value)}
+                placeholder="No."
+                className="w-24"
+              />
               <Input
                 value={newMeetingItemContent}
                 onChange={(e) => setNewMeetingItemContent(e.target.value)}
@@ -2280,10 +2460,22 @@ export default function ProjectPage() {
             {testingChecklist.length ? (
               testingChecklist.map((item, index) => {
                 const isEditing = testingEditingId === item.id
+                const displayNumber = item.position > 0 ? item.position : index + 1
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
-                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
-                      {index + 1}.
+                    <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          min={1}
+                          inputMode="numeric"
+                          value={testingEditingNumber}
+                          onChange={(e) => setTestingEditingNumber(e.target.value)}
+                          className="h-8 w-16 text-right"
+                        />
+                      ) : (
+                        `${displayNumber}.`
+                      )}
                     </div>
                     <Checkbox
                       checked={item.isChecked}
@@ -2339,6 +2531,15 @@ export default function ProjectPage() {
               <div className="text-sm text-muted-foreground">No testing checklist items yet.</div>
             )}
             <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={newTestingNumber}
+                onChange={(e) => setNewTestingNumber(e.target.value)}
+                placeholder="No."
+                className="w-24"
+              />
               <Input
                 value={newTestingText}
                 onChange={(e) => setNewTestingText(e.target.value)}
@@ -2693,10 +2894,22 @@ export default function ProjectPage() {
                 {documentationChecklist.length ? (
                   documentationChecklist.map((item, index) => {
                     const isEditing = documentationEditingId === item.id
+                    const displayNumber = item.position ? item.position : index + 1
                     return (
                       <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
-                        <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
-                          {index + 1}.
+                        <div className="mt-0.5 w-16 shrink-0 text-right text-sm text-muted-foreground">
+                          {isEditing ? (
+                            <Input
+                              type="number"
+                              min={1}
+                              inputMode="numeric"
+                              value={documentationEditingNumber}
+                              onChange={(e) => setDocumentationEditingNumber(e.target.value)}
+                              className="h-8 w-16 text-right"
+                            />
+                          ) : (
+                            `${displayNumber}.`
+                          )}
                         </div>
                         <Checkbox
                           checked={item.isChecked}
@@ -2758,6 +2971,15 @@ export default function ProjectPage() {
                   <div className="text-sm text-muted-foreground">No documentation checklist items yet.</div>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={newDocumentationNumber}
+                    onChange={(e) => setNewDocumentationNumber(e.target.value)}
+                    placeholder="No."
+                    className="w-24"
+                  />
                   <Input
                     value={newDocumentationText}
                     onChange={(e) => setNewDocumentationText(e.target.value)}
