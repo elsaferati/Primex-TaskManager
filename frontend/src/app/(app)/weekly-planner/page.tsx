@@ -915,6 +915,13 @@ export default function WeeklyPlannerPage() {
 
   return (
     <div className="space-y-4">
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          button[title="Delete task"] {
+            display: none !important;
+          }
+        }
+      `}} />
       <div className="flex items-center justify-between">
       <div className="text-lg font-semibold">Weekly Planner</div>
         {data && (

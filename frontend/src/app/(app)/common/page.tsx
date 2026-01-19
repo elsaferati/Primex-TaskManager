@@ -1641,6 +1641,8 @@ export default function CommonViewPage() {
         @media print {
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
+          .swimlane-delete { display: none !important; }
+          .week-table-delete { display: none !important; }
           aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
             display: none !important;
           }
