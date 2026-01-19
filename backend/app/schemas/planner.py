@@ -47,6 +47,7 @@ class WeeklyTableProjectEntry(BaseModel):
     project_total_products: int | None = None
     task_count: int = 0
     tasks: list[WeeklyTableProjectTaskEntry] = []
+    is_late: bool = False
 
 
 class WeeklyTableTaskEntry(BaseModel):

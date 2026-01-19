@@ -33,6 +33,7 @@ type WeeklyTableProjectEntry = {
   project_total_products: number | null
   task_count: number
   tasks: WeeklyTableProjectTaskEntry[]
+  is_late?: boolean
 }
 
 type WeeklyTableTaskEntry = {
@@ -1279,12 +1280,29 @@ export default function WeeklyPlannerPage() {
                                 return (
                                   <div className="space-y-2 min-h-24">
                                     {/* Projects */}
-                                    {projectsList.map((project, idx) => (
+                                    {projectsList.map((project, idx) => {
+                                      // Debug: log if project should be late
+                                      if (project.project_title.includes("LATE") || project.project_title.includes("PRJK")) {
+                                        console.log("Project:", project.project_title, "is_late:", project.is_late, "project_id:", project.project_id)
+                                      }
+                                      return (
                                       <div
                                         key={project.project_id}
-                                        className="p-2 rounded-md bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors"
+                                        className={[
+                                          "p-2 rounded-md transition-colors",
+                                          project.is_late
+                                            ? "bg-red-50 dark:bg-red-950/20 border-2 border-red-500 hover:bg-red-100 dark:hover:bg-red-950/30"
+                                            : "bg-primary/5 border border-primary/20 hover:bg-primary/10",
+                                        ].join(" ")}
                                       >
-                                        <div className="font-medium text-sm">{project.project_title}</div>
+                                        <div className="font-medium text-sm flex items-center gap-2">
+                                          {project.project_title}
+                                          {project.is_late && (
+                                            <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
+                                              LATE
+                                            </span>
+                                          )}
+                                        </div>
                                         {project.tasks && project.tasks.length > 0 && dept.department_name !== "Development" && (
                                           <div className="mt-1 space-y-0.5">
                                             {project.tasks.map((task) => {
@@ -1333,7 +1351,8 @@ export default function WeeklyPlannerPage() {
                                           </div>
                                         )}
                                       </div>
-                                    ))}
+                                      )
+                                    })}
                                     
                                     {/* System Tasks */}
                                     {systemTasksList.length > 0 && (
