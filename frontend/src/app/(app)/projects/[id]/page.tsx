@@ -3223,35 +3223,6 @@ export default function ProjectPage() {
       {activeTab === "mst-ga-meeting" ? (
         <Card className="p-6">
           <div className="text-lg font-semibold">GA Meeting</div>
-          {isAdmin ? (
-            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-              <div className="space-y-1">
-                <Label>Number</Label>
-                <Input
-                  value={mstGaMeetingNewNumber}
-                  onChange={(e) => setMstGaMeetingNewNumber(e.target.value)}
-                  placeholder="e.g. 3"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Item</Label>
-                <Input
-                  value={mstGaMeetingNewText}
-                  onChange={(e) => setMstGaMeetingNewText(e.target.value)}
-                  placeholder="Add new checklist item..."
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  variant="outline"
-                  disabled={!mstGaMeetingNewText.trim() || mstGaMeetingSaving}
-                  onClick={() => void addMstGaMeetingItem()}
-                >
-                  {mstGaMeetingSaving ? "Saving..." : "Add"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
           <div className="mt-4 space-y-3">
             {mstGaMeetingChecklist.length ? (
               mstGaMeetingChecklist
@@ -3313,6 +3284,35 @@ export default function ProjectPage() {
               <div className="text-sm text-muted-foreground">No items yet.</div>
             )}
           </div>
+          {isAdmin ? (
+            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+              <div className="space-y-1">
+                <Label>Number</Label>
+                <Input
+                  value={mstGaMeetingNewNumber}
+                  onChange={(e) => setMstGaMeetingNewNumber(e.target.value)}
+                  placeholder="e.g. 3"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Item</Label>
+                <Input
+                  value={mstGaMeetingNewText}
+                  onChange={(e) => setMstGaMeetingNewText(e.target.value)}
+                  placeholder="Add new checklist item..."
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  disabled={!mstGaMeetingNewText.trim() || mstGaMeetingSaving}
+                  onClick={() => void addMstGaMeetingItem()}
+                >
+                  {mstGaMeetingSaving ? "Saving..." : "Add"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 

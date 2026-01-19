@@ -1628,21 +1628,8 @@ export default function DesignProjectPage() {
         {activeTab === "checklist" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">{checklistTitle}</h3>
-            <div className="flex gap-2 mb-4">
-              <Input
-                value={newChecklistContent}
-                onChange={(e) => setNewChecklistContent(e.target.value)}
-                placeholder="Add new checklist item..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submitChecklistItem()
-                }}
-              />
-              <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
-                {addingChecklist ? "Adding..." : "Add"}
-              </Button>
-            </div>
             {checklistItemsForTab.length === 0 ? (
-              <p className="text-muted-foreground">No checklist items yet. Add items above.</p>
+              <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
             ) : (
               <div className="space-y-2">
                 {checklistItemsForTab.map((item) => (
@@ -1754,6 +1741,19 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
+            <div className="mt-4 flex gap-2">
+              <Input
+                value={newChecklistContent}
+                onChange={(e) => setNewChecklistContent(e.target.value)}
+                placeholder="Add new checklist item..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitChecklistItem()
+                }}
+              />
+              <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
+                {addingChecklist ? "Adding..." : "Add"}
+              </Button>
+            </div>
           </Card>
         )}
 
@@ -1764,35 +1764,6 @@ export default function DesignProjectPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Plotësoni këto pika për të konfirmuar pranimin e projektit.
             </p>
-            {isAdmin ? (
-              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                <div className="space-y-1">
-                  <Label>Number</Label>
-                  <Input
-                    value={acceptanceNewNumber}
-                    onChange={(e) => setAcceptanceNewNumber(e.target.value)}
-                    placeholder="e.g. 3"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Item</Label>
-                  <Input
-                    value={acceptanceNewText}
-                    onChange={(e) => setAcceptanceNewText(e.target.value)}
-                    placeholder="Add new checklist item..."
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    variant="outline"
-                    disabled={!acceptanceNewText.trim() || acceptanceSaving}
-                    onClick={() => void addAcceptanceItem()}
-                  >
-                    {acceptanceSaving ? "Saving..." : "Add"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
             {acceptanceItems.length === 0 ? (
               <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
             ) : (
@@ -1896,6 +1867,35 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
+            {isAdmin ? (
+              <div className="mt-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={acceptanceNewNumber}
+                    onChange={(e) => setAcceptanceNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={acceptanceNewText}
+                    onChange={(e) => setAcceptanceNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!acceptanceNewText.trim() || acceptanceSaving}
+                    onClick={() => void addAcceptanceItem()}
+                  >
+                    {acceptanceSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
 
@@ -1903,36 +1903,6 @@ export default function DesignProjectPage() {
         {activeTab === "ga-meeting" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Takim me GA/DV</h3>
-            
-            {isAdmin ? (
-              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                <div className="space-y-1">
-                  <Label>Number</Label>
-                  <Input
-                    value={gaMeetingNewNumber}
-                    onChange={(e) => setGaMeetingNewNumber(e.target.value)}
-                    placeholder="e.g. 3"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Item</Label>
-                  <Input
-                    value={gaMeetingNewText}
-                    onChange={(e) => setGaMeetingNewText(e.target.value)}
-                    placeholder="Add new checklist item..."
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    variant="outline"
-                    disabled={!gaMeetingNewText.trim() || gaMeetingSaving}
-                    onClick={() => void addGaMeetingItem()}
-                  >
-                    {gaMeetingSaving ? "Saving..." : "Add"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
             
             {/* GA Meeting Questions */}
             <div className="space-y-3">
@@ -2038,6 +2008,35 @@ export default function DesignProjectPage() {
                 ))
               )}
             </div>
+            {isAdmin ? (
+              <div className="mt-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={gaMeetingNewNumber}
+                    onChange={(e) => setGaMeetingNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={gaMeetingNewText}
+                    onChange={(e) => setGaMeetingNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!gaMeetingNewText.trim() || gaMeetingSaving}
+                    onClick={() => void addGaMeetingItem()}
+                  >
+                    {gaMeetingSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
 
@@ -2045,35 +2044,7 @@ export default function DesignProjectPage() {
         {activeTab === "propozim-ko1-ko2" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">PROPOZIM KO1/KO2</h3>
-            {isAdmin ? (
-              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                <div className="space-y-1">
-                  <Label>Number</Label>
-                  <Input
-                    value={propozimNewNumber}
-                    onChange={(e) => setPropozimNewNumber(e.target.value)}
-                    placeholder="e.g. 3"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Item</Label>
-                  <Input
-                    value={propozimNewText}
-                    onChange={(e) => setPropozimNewText(e.target.value)}
-                    placeholder="Add new checklist item..."
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    variant="outline"
-                    disabled={!propozimNewText.trim() || propozimSaving}
-                    onClick={() => void addPropozimItem()}
-                  >
-                    {propozimSaving ? "Saving..." : "Add"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+
             {propozimItems.length === 0 ? (
               <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
             ) : (
@@ -2177,6 +2148,35 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
+            {isAdmin ? (
+              <div className="mt-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={propozimNewNumber}
+                    onChange={(e) => setPropozimNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={propozimNewText}
+                    onChange={(e) => setPropozimNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!propozimNewText.trim() || propozimSaving}
+                    onClick={() => void addPropozimItem()}
+                  >
+                    {propozimSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
 
@@ -2184,35 +2184,7 @@ export default function DesignProjectPage() {
         {activeTab === "punimi" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">PUNIMI</h3>
-            {isAdmin ? (
-              <div className="mb-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                <div className="space-y-1">
-                  <Label>Number</Label>
-                  <Input
-                    value={punimiNewNumber}
-                    onChange={(e) => setPunimiNewNumber(e.target.value)}
-                    placeholder="e.g. 3"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Item</Label>
-                  <Input
-                    value={punimiNewText}
-                    onChange={(e) => setPunimiNewText(e.target.value)}
-                    placeholder="Add new checklist item..."
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    variant="outline"
-                    disabled={!punimiNewText.trim() || punimiSaving}
-                    onClick={() => void addPunimiItem()}
-                  >
-                    {punimiSaving ? "Saving..." : "Add"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+
             {punimiItems.length === 0 ? (
               <p className="text-muted-foreground">Duke ngarkuar checklistën...</p>
             ) : (
@@ -2316,6 +2288,35 @@ export default function DesignProjectPage() {
                 ))}
               </div>
             )}
+            {isAdmin ? (
+              <div className="mt-6 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                <div className="space-y-1">
+                  <Label>Number</Label>
+                  <Input
+                    value={punimiNewNumber}
+                    onChange={(e) => setPunimiNewNumber(e.target.value)}
+                    placeholder="e.g. 3"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item</Label>
+                  <Input
+                    value={punimiNewText}
+                    onChange={(e) => setPunimiNewText(e.target.value)}
+                    placeholder="Add new checklist item..."
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="outline"
+                    disabled={!punimiNewText.trim() || punimiSaving}
+                    onClick={() => void addPunimiItem()}
+                  >
+                    {punimiSaving ? "Saving..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
 
