@@ -2010,79 +2010,80 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:hidden">
-        <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
-          <div className="px-6 py-5 border-b border-slate-200">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Department</div>
-                <div className="text-4xl font-bold text-slate-800 tracking-tight">{departmentName}</div>
-                <div className="text-sm text-slate-600">Manage projects and daily tasks.</div>
-              </div>
-              <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("department")}
-                  className={[
-                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
-                    viewMode === "department"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
-                  ].join(" ")}
-                >
-                  Department
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("mine")}
-                  className={[
-                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
-                    viewMode === "mine"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
-                  ].join(" ")}
-                >
-                  My View
-                </button>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
-          <div className="px-6 py-3">
-            <div className="flex flex-wrap gap-2">
-              {TABS.map((tab) => {
-                const isActive = tab.id === activeTab
-                const badgeTone = "bg-slate-100 text-slate-600 border-slate-200"
-                const activeBadge = "bg-slate-900 text-white border-slate-900"
-                const badgeClass = isActive ? activeBadge : badgeTone
-                const activeTabClass = "bg-white text-slate-900 shadow-sm border border-slate-200"
-                const inactiveTabClass = "text-slate-500 hover:text-slate-900"
-                return (
+        <div className="sticky top-0 z-10 bg-slate-50 print:static pt-8 pb-4">
+          <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
+            <div className="px-6 py-5 border-b border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Department</div>
+                  <div className="text-4xl font-bold text-slate-800 tracking-tight">{departmentName}</div>
+                  <div className="text-sm text-slate-600">Manage projects and daily tasks.</div>
+                </div>
+                <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
                   <button
-                    key={tab.id}
                     type="button"
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => setViewMode("department")}
                     className={[
-                      "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200",
-                      isActive ? activeTabClass : inactiveTabClass,
+                      "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                      viewMode === "department"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
                     ].join(" ")}
                   >
-                    <span className="uppercase tracking-wide">{tab.label}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${badgeClass}`}>
-                      {counts[tab.id]}
-                    </span>
+                    Department
                   </button>
-                )
-              })}
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("mine")}
+                    className={[
+                      "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                      viewMode === "mine"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-100",
+                    ].join(" ")}
+                  >
+                    My View
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
 
-        {activeTab === "projects" ? (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xl font-semibold text-slate-800">Active Projects</div>
+          <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden mb-6">
+            <div className="px-6 py-3">
+              <div className="flex flex-wrap gap-2">
+                {TABS.map((tab) => {
+                  const isActive = tab.id === activeTab
+                  const badgeTone = "bg-slate-100 text-slate-600 border-slate-200"
+                  const activeBadge = "bg-slate-900 text-white border-slate-900"
+                  const badgeClass = isActive ? activeBadge : badgeTone
+                  const activeTabClass = "bg-white text-slate-900 shadow-sm border border-slate-200"
+                  const inactiveTabClass = "text-slate-500 hover:text-slate-900"
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveTab(tab.id)}
+                      className={[
+                        "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200",
+                        isActive ? activeTabClass : inactiveTabClass,
+                      ].join(" ")}
+                    >
+                      <span className="uppercase tracking-wide">{tab.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${badgeClass}`}>
+                        {counts[tab.id]}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </Card>
+
+          {activeTab === "projects" ? (
+            <div className="mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
@@ -2203,7 +2204,13 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
+              </div>
             </div>
+          ) : null}
+        </div>
+
+        {activeTab === "projects" ? (
+          <div className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
@@ -2398,6 +2405,11 @@ export default function DepartmentKanban() {
                                       {phaseLabel}
                                     </Badge>
                                     <div className="font-medium text-slate-800">{task.title}</div>
+                                    {task.finish_period && (
+                                      <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                                        {task.finish_period}
+                                      </Badge>
+                                    )}
                                   </div>
                                   <div className="mt-1 text-xs text-slate-600">
                                     {assignee?.full_name || assignee?.username || "Unassigned"}
@@ -2471,6 +2483,11 @@ export default function DepartmentKanban() {
                                 {typeLabel}
                               </Badge>
                               <div className="font-medium text-slate-800">{task.title}</div>
+                              {task.finish_period && (
+                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                                  {task.finish_period}
+                                </Badge>
+                              )}
                             </div>
                             <div className="mt-1 text-xs text-slate-600">
                               {assignee?.full_name || assignee?.username || "Unassigned"}
