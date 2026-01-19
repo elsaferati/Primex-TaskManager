@@ -13,6 +13,7 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
@@ -700,6 +701,42 @@ async def weekly_table_planner(
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
     
+    # Get projects with due dates and their members
+    # Projects should show for members from Monday until due date
+    # If overdue and not completed, show on Monday as late project
+    logger = logging.getLogger(__name__)
+    projects_with_due_dates = [
+        p for p in projects
+        if p.due_date is not None and p.completed_at is None
+    ]
+    logger.debug(f"Total projects in department: {len(projects)}")
+    logger.debug(f"Projects with due dates (not completed): {len(projects_with_due_dates)}")
+    for p in projects_with_due_dates:
+        logger.debug(f"  - {p.title} (id={p.id}, due={p.due_date.date() if p.due_date else None}, dept={p.department_id})")
+    
+    # Get project members for all projects with due dates
+    project_members_map: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if projects_with_due_dates:
+        project_ids_with_due = [p.id for p in projects_with_due_dates]
+        project_members = (
+            await db.execute(
+                select(ProjectMember.project_id, ProjectMember.user_id)
+                .where(ProjectMember.project_id.in_(project_ids_with_due))
+            )
+        ).all()
+        for project_id, user_id in project_members:
+            if project_id not in project_members_map:
+                project_members_map[project_id] = set()
+            project_members_map[project_id].add(user_id)
+        
+        # Debug logging
+        logger.debug(f"Found {len(projects_with_due_dates)} projects with due dates")
+        logger.debug(f"Found {len(project_members)} project member relationships")
+        for p in projects_with_due_dates:
+            members_count = len(project_members_map.get(p.id, set()))
+            member_ids = list(project_members_map.get(p.id, set()))
+            logger.debug(f"Project {p.title} (id={p.id}, due={p.due_date.date()}) has {members_count} members: {member_ids}")
+    
     # Build table structure: Departments -> Days -> Users -> AM/PM
     def get_fast_task_type(task: Task) -> str | None:
         if task.is_bllok:
@@ -717,7 +754,6 @@ async def weekly_table_planner(
     departments_data: list[WeeklyTableDepartment] = []
     
     # Debug: Log task counts
-    logger = logging.getLogger(__name__)
     logger.debug(f"Weekly planner: Found {len(week_tasks)} tasks for week {week_start_date} to {week_end}")
     
     for dept in departments:
@@ -763,9 +799,94 @@ async def weekly_table_planner(
                     )
                 ]
                 
+                # Add projects with due dates for this user
+                # Projects should show from Monday until due date
+                # If overdue (due_date < Monday) and not completed, show on Monday as late project
+                user_projects_with_due: set[uuid.UUID] = set()
+                user_late_projects: set[uuid.UUID] = set()
+                for project in projects_with_due_dates:
+                    # Check if user is a member of this project
+                    if project.id not in project_members_map:
+                        logger.debug(f"Project {project.title} (id={project.id}) has no members in map - skipping")
+                        continue
+                    if dept_user.id not in project_members_map[project.id]:
+                        logger.debug(f"Project {project.title} (id={project.id}) - user {dept_user.full_name} (id={dept_user.id}) is not a member. Members: {list(project_members_map[project.id])}")
+                        continue
+                    
+                    # Check department filter
+                    # For Design/PCM departments, show projects from all departments
+                    # For other departments, only show projects from that department
+                    if dept.id not in design_dept_ids:
+                        if project.department_id != dept.id:
+                            logger.debug(f"Project {project.title} (id={project.id}) - department mismatch: project.dept={project.department_id}, current_dept={dept.id}")
+                            continue
+                    # For Design/PCM, we already have all projects in the projects list, so no need to filter
+                    
+                    project_due_date = project.due_date.date()
+                    project_start_date = project.start_date.date() if project.start_date else project.created_at.date()
+                    monday_of_week = working_days[0]
+                    week_end = working_days[-1]
+                    
+                    # Debug logging for this specific project
+                    logger.info(
+                        f"[PROJECT CHECK] {project.title}: "
+                        f"start={project_start_date}, due={project_due_date}, "
+                        f"monday={monday_of_week}, week_end={week_end}, "
+                        f"day={day_date}, user={dept_user.full_name}, "
+                        f"dept={dept.name}"
+                    )
+                    
+                    # Determine if project should show on this day
+                    should_show = False
+                    is_late = False
+                    
+                    if project_due_date < monday_of_week:
+                        # Project is overdue - show on Monday only as late project
+                        if day_date == monday_of_week:
+                            should_show = True
+                            is_late = True
+                            logger.debug(f"Project {project.title} is LATE - showing on Monday")
+                    elif project_due_date >= monday_of_week:
+                        # Determine the effective start date for this week
+                        # If start_date is before this week, start from Monday
+                        # If start_date is within this week, start from start_date
+                        # If start_date is after this week, don't show yet
+                        effective_start = max(project_start_date, monday_of_week)
+                        
+                        # Show from effective start until due date (within current week)
+                        # Only check if start_date is not after the week_end
+                        if project_start_date <= week_end:
+                            if day_date >= effective_start and day_date <= project_due_date and day_date <= week_end:
+                                should_show = True
+                                logger.debug(f"Project {project.title} showing from {effective_start} to {project_due_date} on {day_date}")
+                        else:
+                            logger.debug(f"Project {project.title} start_date {project_start_date} is after week_end {week_end} - not showing")
+                    
+                    if should_show:
+                        user_projects_with_due.add(project.id)
+                        if is_late:
+                            user_late_projects.add(project.id)
+                        logger.info(
+                            f"[PROJECT ADDED] {project.title} added to user_projects_with_due for "
+                            f"user={dept_user.full_name}, day={day_date}, is_late={is_late}"
+                        )
+                        # Ensure project is in project_map
+                        if project.id not in project_map:
+                            project_map[project.id] = project
+                    else:
+                        logger.debug(
+                            f"[PROJECT SKIPPED] {project.title} NOT added - "
+                            f"start={project_start_date}, due={project_due_date}, "
+                            f"monday={monday_of_week}, day={day_date}, week_end={week_end}"
+                        )
+                
                 # Debug: Log user tasks found
                 if user_tasks:
                     logger.debug(f"User {dept_user.full_name} on {day_date}: {len(user_tasks)} tasks")
+                if user_projects_with_due:
+                    logger.info(f"[USER PROJECTS] User {dept_user.full_name} on {day_date}: {len(user_projects_with_due)} projects with due dates: {list(user_projects_with_due)}")
+                else:
+                    logger.debug(f"User {dept_user.full_name} on {day_date}: NO projects with due dates")
                 
                 # Separate tasks by type: projects, system tasks, fast tasks
                 # And split by AM/PM based on finish_period
@@ -825,52 +946,74 @@ async def weekly_table_planner(
                                 am_projects_map[task.project_id] = []
                             am_projects_map[task.project_id].append(task)
                 
+                # Add projects with due dates that don't have tasks yet
+                # These projects should show for members even without tasks
+                # If project already has tasks in map, keep those tasks
+                for project_id in user_projects_with_due:
+                    # Only add if not already in maps (from tasks above)
+                    # If project already has tasks, we keep those tasks
+                    # The project will show with its tasks on days with tasks,
+                    # and without tasks (but still visible) on other days until due date
+                    if project_id not in am_projects_map and project_id not in pm_projects_map:
+                        # Default to AM if no tasks exist
+                        am_projects_map[project_id] = []
+                
                 # Convert project maps to lists with task details
                 # Include all projects, even if not in project_map (they'll show as "Unknown Project")
-                am_projects: list[WeeklyTableProjectEntry] = [
-                    WeeklyTableProjectEntry(
-                        project_id=project_id,
-                        project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
-                        project_total_products=project_map[project_id].total_products if project_id in project_map else None,
-                        task_count=len(tasks_list),
-                        tasks=[
-                            WeeklyTableProjectTaskEntry(
-                                task_id=t.id,
-                                task_title=t.title,
-                                daily_products=t.daily_products,
-                                is_bllok=t.is_bllok,
-                                is_1h_report=t.is_1h_report,
-                                is_r1=t.is_r1,
-                                is_personal=t.is_personal,
-                                ga_note_origin_id=t.ga_note_origin_id,
-                            )
-                            for t in tasks_list
-                        ],
+                am_projects: list[WeeklyTableProjectEntry] = []
+                for project_id, tasks_list in am_projects_map.items():
+                    is_late_flag = project_id in user_late_projects
+                    if is_late_flag:
+                        logger.debug(f"Marking project {project_id} as LATE for user {dept_user.full_name} on {day_date}")
+                    am_projects.append(
+                        WeeklyTableProjectEntry(
+                            project_id=project_id,
+                            project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
+                            project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                            task_count=len(tasks_list),
+                            tasks=[
+                                WeeklyTableProjectTaskEntry(
+                                    task_id=t.id,
+                                    task_title=t.title,
+                                    daily_products=t.daily_products,
+                                    is_bllok=t.is_bllok,
+                                    is_1h_report=t.is_1h_report,
+                                    is_r1=t.is_r1,
+                                    is_personal=t.is_personal,
+                                    ga_note_origin_id=t.ga_note_origin_id,
+                                )
+                                for t in tasks_list
+                            ],
+                            is_late=is_late_flag,
+                        )
                     )
-                    for project_id, tasks_list in am_projects_map.items()
-                ]
-                pm_projects: list[WeeklyTableProjectEntry] = [
-                    WeeklyTableProjectEntry(
-                        project_id=project_id,
-                        project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
-                        project_total_products=project_map[project_id].total_products if project_id in project_map else None,
-                        task_count=len(tasks_list),
-                        tasks=[
-                            WeeklyTableProjectTaskEntry(
-                                task_id=t.id,
-                                task_title=t.title,
-                                daily_products=t.daily_products,
-                                is_bllok=t.is_bllok,
-                                is_1h_report=t.is_1h_report,
-                                is_r1=t.is_r1,
-                                is_personal=t.is_personal,
-                                ga_note_origin_id=t.ga_note_origin_id,
-                            )
-                            for t in tasks_list
-                        ],
+                pm_projects: list[WeeklyTableProjectEntry] = []
+                for project_id, tasks_list in pm_projects_map.items():
+                    is_late_flag = project_id in user_late_projects
+                    if is_late_flag:
+                        logger.debug(f"Marking project {project_id} as LATE for user {dept_user.full_name} on {day_date}")
+                    pm_projects.append(
+                        WeeklyTableProjectEntry(
+                            project_id=project_id,
+                            project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
+                            project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                            task_count=len(tasks_list),
+                            tasks=[
+                                WeeklyTableProjectTaskEntry(
+                                    task_id=t.id,
+                                    task_title=t.title,
+                                    daily_products=t.daily_products,
+                                    is_bllok=t.is_bllok,
+                                    is_1h_report=t.is_1h_report,
+                                    is_r1=t.is_r1,
+                                    is_personal=t.is_personal,
+                                    ga_note_origin_id=t.ga_note_origin_id,
+                                )
+                                for t in tasks_list
+                            ],
+                            is_late=is_late_flag,
+                        )
                     )
-                    for project_id, tasks_list in pm_projects_map.items()
-                ]
                 
                 users_day_data.append(
                     WeeklyTableUserDay(

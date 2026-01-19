@@ -1282,7 +1282,7 @@ export default function DepartmentKanban() {
       if (projectDueDate.trim()) {
         const normalized = normalizeDueDateInput(projectDueDate.trim())
         if (normalized) {
-          payload.due_date = normalized.toISOString()
+          payload.due_date = new Date(normalized).toISOString()
         }
       }
       const res = await apiFetch("/projects", {
