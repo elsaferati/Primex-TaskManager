@@ -438,6 +438,16 @@ export default function ProjectPage() {
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
+  const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
+  const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
+  const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+
+  // Sync the edit date when dialog opens or project changes
+  React.useEffect(() => {
+    if (editProjectDueDateOpen && project) {
+      setEditProjectDueDate(toDateInput(project.due_date))
+    }
+  }, [editProjectDueDateOpen, project?.due_date])
 
   React.useEffect(() => {
     const load = async () => {
@@ -1944,7 +1954,29 @@ export default function ProjectPage() {
             >
               &larr; Back to Projects
             </button>
-            <div className="mt-3 text-3xl font-semibold">{title}</div>
+            <div className="mt-3 flex items-center gap-3">
+              <div className="text-3xl font-semibold">{title}</div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
+                    console.log("Edit due date clicked", { project: project?.id, due_date: project?.due_date, formatted: currentDueDate })
+                    setEditProjectDueDate(currentDueDate)
+                    setEditProjectDueDateOpen(true)
+                  }}
+                  className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
+                  title="Edit project due date"
+                >
+                  {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
+                </button>
+              )}
+              {!isAdmin && project.due_date && (
+                <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+              )}
+            </div>
             <div className="mt-3">
               <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
                 {PHASE_LABELS[phase] || "Meetings"}
@@ -3229,6 +3261,60 @@ export default function ProjectPage() {
           </Card>
         </div>
       ) : null}
+      <Dialog open={editProjectDueDateOpen} onOpenChange={setEditProjectDueDateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Project Due Date</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Due Date</Label>
+              <Input
+                type="date"
+                value={editProjectDueDate}
+                onChange={(e) => setEditProjectDueDate(normalizeDueDateInput(e.target.value))}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditProjectDueDateOpen(false)} disabled={savingProjectDueDate}>
+                Cancel
+              </Button>
+              <Button
+                disabled={savingProjectDueDate}
+                onClick={async () => {
+                  if (!project) return
+                  setSavingProjectDueDate(true)
+                  try {
+                    const dueDateValue = editProjectDueDate.trim()
+                      ? new Date(editProjectDueDate).toISOString()
+                      : null
+                    const res = await apiFetch(`/projects/${project.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ due_date: dueDateValue }),
+                    })
+                    if (!res.ok) {
+                      toast.error("Failed to update project due date")
+                      return
+                    }
+                    const updated = (await res.json()) as Project
+                    setProject(updated)
+                    setEditProjectDueDateOpen(false)
+                    toast.success("Project due date updated")
+                  } catch (err) {
+                    console.error("Failed to update project due date", err)
+                    toast.error("Failed to update project due date")
+                  } finally {
+                    setSavingProjectDueDate(false)
+                  }
+                }}
+              >
+                {savingProjectDueDate ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

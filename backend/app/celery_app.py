@@ -35,5 +35,9 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.run_carryover",
         "schedule": crontab(minute=5, hour=0),
     },
+    "cleanup-old-closed-ga-notes": {
+        "task": "app.celery_tasks.cleanup_old_closed_ga_notes",
+        "schedule": crontab(minute=0, hour=2),  # Run daily at 2 AM UTC
+    },
 }
 

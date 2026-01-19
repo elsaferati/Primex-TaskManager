@@ -15,7 +15,22 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
+import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
+
+function toDateInput(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
+function formatDateDisplay(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+}
 
 // MST phases for Graphic Design projects
 const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
@@ -279,8 +294,18 @@ export default function DesignProjectPage() {
   const [editingTaskTitles, setEditingTaskTitles] = React.useState<Record<string, string>>({})
   const [editingTaskAssignees, setEditingTaskAssignees] = React.useState<Record<string, string>>({})
   const [editingTaskTotals, setEditingTaskTotals] = React.useState<Record<string, string>>({})
+  const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
+  const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
+  const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
 
   const isAdmin = user?.role === "ADMIN"
+
+  // Sync the edit date when dialog opens or project changes
+  React.useEffect(() => {
+    if (editProjectDueDateOpen && project) {
+      setEditProjectDueDate(toDateInput(project.due_date))
+    }
+  }, [editProjectDueDateOpen, project?.due_date])
 
   // Load project data
   React.useEffect(() => {
@@ -1321,7 +1346,28 @@ export default function DesignProjectPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
-          <div className="mt-3 text-3xl font-semibold">{title}</div>
+          <div className="mt-3 flex items-center gap-3">
+            <div className="text-3xl font-semibold">{title}</div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
+                  setEditProjectDueDate(currentDueDate)
+                  setEditProjectDueDateOpen(true)
+                }}
+                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
+                title="Edit project due date"
+              >
+                {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
+              </button>
+            )}
+            {!isAdmin && project.due_date && (
+              <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+            )}
+          </div>
           <div className="mt-3">
             <Badge variant="outline" className="text-purple-600 border-purple-200 bg-purple-50">
               {phaseLabels[phase] || "Design"}
@@ -3163,6 +3209,60 @@ export default function DesignProjectPage() {
         )}
 
       </div>
+      <Dialog open={editProjectDueDateOpen} onOpenChange={setEditProjectDueDateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Project Due Date</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Due Date</Label>
+              <Input
+                type="date"
+                value={editProjectDueDate}
+                onChange={(e) => setEditProjectDueDate(normalizeDueDateInput(e.target.value))}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditProjectDueDateOpen(false)} disabled={savingProjectDueDate}>
+                Cancel
+              </Button>
+              <Button
+                disabled={savingProjectDueDate}
+                onClick={async () => {
+                  if (!project) return
+                  setSavingProjectDueDate(true)
+                  try {
+                    const dueDateValue = editProjectDueDate.trim()
+                      ? new Date(editProjectDueDate).toISOString()
+                      : null
+                    const res = await apiFetch(`/projects/${project.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ due_date: dueDateValue }),
+                    })
+                    if (!res.ok) {
+                      toast.error("Failed to update project due date")
+                      return
+                    }
+                    const updated = (await res.json()) as Project
+                    setProject(updated)
+                    setEditProjectDueDateOpen(false)
+                    toast.success("Project due date updated")
+                  } catch (err) {
+                    console.error("Failed to update project due date", err)
+                    toast.error("Failed to update project due date")
+                  } finally {
+                    setSavingProjectDueDate(false)
+                  }
+                }}
+              >
+                {savingProjectDueDate ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

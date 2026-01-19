@@ -2297,6 +2297,7 @@ export default function DepartmentKanban() {
                             value={projectDueDate}
                             onChange={(e) => setProjectDueDate(e.target.value)}
                             placeholder="Select due date"
+                            disabled={user?.role !== "ADMIN"}
                           />
                         </div>
                         <div className="flex justify-end gap-2 md:col-span-2">
@@ -3497,8 +3498,16 @@ export default function DepartmentKanban() {
                     const author = users.find((u) => u.id === note.created_by) || null
                     const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
                     const linkedTask = gaNoteTaskMap.get(note.id) || null
+                    const isHighPriority = note.priority === "HIGH"
                     return (
-                      <Card key={note.id} className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70">
+                      <Card
+                        key={note.id}
+                        className={`rounded-2xl border-l-4 p-5 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70 ${
+                          isHighPriority
+                            ? "border-l-red-500 border-stone-200/70 bg-red-50/50 dark:bg-red-950/20"
+                            : "border-stone-200/70 bg-white/80"
+                        }`}
+                      >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Badge
@@ -3518,7 +3527,14 @@ export default function DepartmentKanban() {
                                 General
                               </Badge>
                             )}
-                            {note.priority ? <Badge variant="secondary">{note.priority}</Badge> : null}
+                            {note.priority ? (
+                              <Badge
+                                variant={isHighPriority ? "destructive" : "secondary"}
+                                className={isHighPriority ? "bg-red-100 text-red-700 border-red-200" : ""}
+                              >
+                                {note.priority}
+                              </Badge>
+                            ) : null}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             {linkedTask ? (

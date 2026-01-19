@@ -255,6 +255,17 @@ export default function DevelopmentProjectPage() {
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
+  const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
+  const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
+  const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const isAdmin = user?.role === "ADMIN"
+
+  // Sync the edit date when dialog opens or project changes
+  React.useEffect(() => {
+    if (editProjectDueDateOpen && project) {
+      setEditProjectDueDate(project.due_date ? new Date(project.due_date).toISOString().slice(0, 10) : "")
+    }
+  }, [editProjectDueDateOpen, project?.due_date])
 
   React.useEffect(() => {
     const load = async () => {
@@ -1069,7 +1080,25 @@ export default function DevelopmentProjectPage() {
                   >
                     <span className="text-sky-500">←</span> Back to Projects
                   </button>
-                  <h1 className="text-4xl font-bold text-slate-800 mb-4 tracking-tight">{title}</h1>
+                  <div className="flex items-center gap-3 mb-4">
+                    <h1 className="text-4xl font-bold text-slate-800 tracking-tight">{title}</h1>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditProjectDueDate(project.due_date ? new Date(project.due_date).toISOString().slice(0, 10) : "")
+                          setEditProjectDueDateOpen(true)
+                        }}
+                        className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors"
+                        title="Edit project due date"
+                      >
+                        {project.due_date ? `Due: ${new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}` : "Set due date"}
+                      </button>
+                    )}
+                    {!isAdmin && project.due_date && (
+                      <span className="text-sm text-slate-600">Due: {new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}</span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap items-center gap-3 mb-4">
                     <Badge className="bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-200/80 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm">
                       {PHASE_LABELS[phase] || "Meetings"}
@@ -1538,6 +1567,64 @@ export default function DevelopmentProjectPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                {isAdmin && (
+                  <Dialog open={editProjectDueDateOpen} onOpenChange={setEditProjectDueDateOpen}>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Edit Project Due Date</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due Date</Label>
+                          <Input
+                            type="date"
+                            value={editProjectDueDate}
+                            onChange={(e) => setEditProjectDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setEditProjectDueDateOpen(false)} disabled={savingProjectDueDate} className="rounded-xl border-slate-200">
+                            Cancel
+                          </Button>
+                          <Button
+                            disabled={savingProjectDueDate}
+                            onClick={async () => {
+                              if (!project) return
+                              setSavingProjectDueDate(true)
+                              try {
+                                const dueDateValue = editProjectDueDate.trim()
+                                  ? new Date(editProjectDueDate).toISOString()
+                                  : null
+                                const res = await apiFetch(`/projects/${project.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ due_date: dueDateValue }),
+                                })
+                                if (!res.ok) {
+                                  toast.error("Failed to update project due date")
+                                  return
+                                }
+                                const updated = (await res.json()) as Project
+                                setProject(updated)
+                                setEditProjectDueDateOpen(false)
+                                toast.success("Project due date updated")
+                              } catch (err) {
+                                console.error("Failed to update project due date", err)
+                                toast.error("Failed to update project due date")
+                              } finally {
+                                setSavingProjectDueDate(false)
+                              }
+                            }}
+                            className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6"
+                          >
+                            {savingProjectDueDate ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </div>
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-0">
                 <div className="divide-y divide-sky-100">
