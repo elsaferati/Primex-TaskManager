@@ -2559,7 +2559,9 @@ export default function DepartmentKanban() {
                   <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {todayOpenNotes.length ? (
                       <div className="space-y-2">
-                        {todayOpenNotes.map((note) => (
+                        {todayOpenNotes.map((note) => {
+                          const priorityValue = normalizePriority(note.priority)
+                          return (
                           <div
                             key={note.id}
                             className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
@@ -2568,10 +2570,17 @@ export default function DepartmentKanban() {
                               <Badge variant="outline" className="text-xs">
                                 {note.note_type || "GA"}
                               </Badge>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
                               <div className="font-medium">{note.content}</div>
                             </div>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="text-sm text-muted-foreground">No open notes today.</div>
@@ -2630,6 +2639,7 @@ export default function DepartmentKanban() {
                     {todaySystemTasks.length ? (
                       <div className="space-y-2">
                         {todaySystemTasks.map((task) => {
+                          const priorityValue = normalizePriority(task.priority)
                           const description = task.description?.trim() || ""
                           const isExpanded = Boolean(expandedSystemDescriptions[task.id])
                           const { text, truncated } = truncateDescription(description)
@@ -2639,7 +2649,15 @@ export default function DepartmentKanban() {
                               key={task.id}
                               className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
                             >
-                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <div className="flex items-center gap-2">
+                                <div className="font-medium text-slate-800">{task.title}</div>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                >
+                                  {PRIORITY_LABELS[priorityValue]}
+                                </Badge>
+                              </div>
                               <div className="mt-1 text-xs text-slate-600">
                                 {displayText}
                                 {description && truncated ? (
