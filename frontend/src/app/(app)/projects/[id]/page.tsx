@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { ChecklistItem, Department, GaNote, Meeting, Project, ProjectPrompt, Task, User } from "@/lib/types"
+import type { ChecklistItem, Department, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, User } from "@/lib/types"
 
 const GENERAL_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const MST_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
@@ -54,6 +54,9 @@ type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 const MEETING_FOCUS_POINTS = [
   "Confirm scope and goals with the client.",
@@ -339,6 +342,9 @@ export default function ProjectPage() {
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
+  const [newFinishPeriod, setNewFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [creating, setCreating] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
@@ -349,6 +355,9 @@ export default function ProjectPage() {
   const [editAssignedTo, setEditAssignedTo] = React.useState<string>("__unassigned__")
   const [editPhase, setEditPhase] = React.useState<string>("")
   const [editDueDate, setEditDueDate] = React.useState("")
+  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
   const [editingDescription, setEditingDescription] = React.useState("")
@@ -615,6 +624,7 @@ export default function ProjectPage() {
         priority: newPriority,
         phase: newTaskPhase || activePhase,
         due_date: newDueDate || null,
+        finish_period: newFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : newFinishPeriod,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -642,6 +652,7 @@ export default function ProjectPage() {
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
       setNewDueDate("")
+      setNewFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
       setCreating(false)
@@ -830,6 +841,7 @@ export default function ProjectPage() {
     setEditAssignedTo(task.assigned_to || task.assigned_to_user_id || "__unassigned__")
     setEditPhase(task.phase || activePhase)
     setEditDueDate(toDateInput(task.due_date))
+    setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
   }
 
@@ -845,6 +857,7 @@ export default function ProjectPage() {
         assigned_to: editAssignedTo === "__unassigned__" ? null : editAssignedTo,
         phase: editPhase || activePhase,
         due_date: editDueDate || null,
+        finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
       }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1891,96 +1904,98 @@ export default function ProjectPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            &larr; Back to Projects
-          </button>
-          <div className="mt-3 text-3xl font-semibold">{title}</div>
-          <div className="mt-3">
-            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              {PHASE_LABELS[phase] || "Meetings"}
-            </Badge>
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur print:static pt-6 pb-4 border-b border-slate-200">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              &larr; Back to Projects
+            </button>
+            <div className="mt-3 text-3xl font-semibold">{title}</div>
+            <div className="mt-3">
+              <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
+                {PHASE_LABELS[phase] || "Meetings"}
+              </Badge>
+            </div>
+            <div className="mt-3 text-sm text-muted-foreground">
+              {phaseSteps.map((p, idx) => {
+                const isViewed = p === activePhase
+                const isCurrent = p === phase
+                const isLocked = phaseIndex !== -1 && idx > phaseIndex
+                return (
+                  <span key={p}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isLocked) return
+                        setViewedPhase(p)
+                      }}
+                      className={[
+                        "transition-colors",
+                        isLocked
+                          ? "text-slate-300 cursor-not-allowed"
+                          : isViewed
+                            ? "text-blue-600 font-medium"
+                            : isCurrent
+                              ? "text-foreground"
+                              : "text-muted-foreground",
+                      ].join(" ")}
+                      aria-pressed={isViewed}
+                      disabled={isLocked}
+                    >
+                      {PHASE_LABELS[p] || p}
+                    </button>
+                    {idx < phaseSteps.length - 1 ? " -> " : ""}
+                  </span>
+                )
+              })}
+            </div>
+            {activePhase !== phase ? (
+              <div className="mt-2 text-xs text-muted-foreground">
+                View: {PHASE_LABELS[activePhase] || "Meetings"}
+              </div>
+            ) : null}
           </div>
-          <div className="mt-3 text-sm text-muted-foreground">
-            {phaseSteps.map((p, idx) => {
-              const isViewed = p === activePhase
-              const isCurrent = p === phase
-              const isLocked = phaseIndex !== -1 && idx > phaseIndex
+          <div className="flex items-center gap-2">
+            <Button className="rounded-xl">Settings</Button>
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <Button
+            variant="outline"
+            disabled={!canClosePhase || advancingPhase}
+            onClick={() => void advancePhase()}
+          >
+            {advancingPhase ? "Closing..." : "Close Phase"}
+          </Button>
+        </div>
+
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap gap-6">
+            {visibleTabs.map((tab) => {
+              const isActive = tab.id === activeTab
+              const label = activePhase === "TESTING" && tab.id === "description" ? "Testing" : tab.label
               return (
-                <span key={p}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isLocked) return
-                      setViewedPhase(p)
-                    }}
-                    className={[
-                      "transition-colors",
-                      isLocked
-                        ? "text-slate-300 cursor-not-allowed"
-                        : isViewed
-                          ? "text-blue-600 font-medium"
-                          : isCurrent
-                            ? "text-foreground"
-                            : "text-muted-foreground",
-                    ].join(" ")}
-                    aria-pressed={isViewed}
-                    disabled={isLocked}
-                  >
-                    {PHASE_LABELS[p] || p}
-                  </button>
-                  {idx < phaseSteps.length - 1 ? " -> " : ""}
-                </span>
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={[
+                    "relative pb-3 text-sm font-medium",
+                    tab.id === "ga" ? "ml-auto" : "",
+                    isActive ? "text-blue-600" : "text-muted-foreground",
+                  ].join(" ")}
+                >
+                  {label}
+                  {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                </button>
               )
             })}
           </div>
-          {activePhase !== phase ? (
-            <div className="mt-2 text-xs text-muted-foreground">
-              View: {PHASE_LABELS[activePhase] || "Meetings"}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button className="rounded-xl">Settings</Button>
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <Button
-          variant="outline"
-          disabled={!canClosePhase || advancingPhase}
-          onClick={() => void advancePhase()}
-        >
-          {advancingPhase ? "Closing..." : "Close Phase"}
-        </Button>
-      </div>
-
-      <div className="border-b">
-        <div className="flex flex-wrap gap-6">
-          {visibleTabs.map((tab) => {
-            const isActive = tab.id === activeTab
-            const label = activePhase === "TESTING" && tab.id === "description" ? "Testing" : tab.label
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={[
-                  "relative pb-3 text-sm font-medium",
-                  tab.id === "ga" ? "ml-auto" : "",
-                  isActive ? "text-blue-600" : "text-muted-foreground",
-                ].join(" ")}
-              >
-                {label}
-                {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-              </button>
-            )
-          })}
         </div>
       </div>
 
@@ -1989,28 +2004,13 @@ export default function ProjectPage() {
           <div className="text-lg font-semibold text-slate-900">Meeting focus</div>
           <div className="mt-2 text-sm text-slate-700">Main points to discuss in the meeting.</div>
           <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                value={newMeetingFocusText}
-                onChange={(e) => setNewMeetingFocusText(e.target.value)}
-                placeholder="Add meeting focus item..."
-                className="flex-1 min-w-[220px]"
-              />
-              <Button
-                variant="outline"
-                disabled={!newMeetingFocusText.trim() || savingMeetingFocusItem}
-                onClick={() => void addMeetingFocusItem()}
-              >
-                {savingMeetingFocusItem ? "Saving..." : "Add"}
-              </Button>
-            </div>
             {meetingFocusItems.length ? (
               meetingFocusItems.map((item, index) => {
                 const isEditing = meetingFocusEditingId === item.id
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
                     <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
-                      {(item.position ?? index + 1)}.
+                      {index + 1}.
                     </div>
                     <div className="flex-1">
                       {isEditing ? (
@@ -2059,6 +2059,21 @@ export default function ProjectPage() {
             ) : (
               <div className="text-sm text-muted-foreground">No meeting focus items yet.</div>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={newMeetingFocusText}
+                onChange={(e) => setNewMeetingFocusText(e.target.value)}
+                placeholder="Add meeting focus item..."
+                className="flex-1 min-w-[220px]"
+              />
+              <Button
+                variant="outline"
+                disabled={!newMeetingFocusText.trim() || savingMeetingFocusItem}
+                onClick={() => void addMeetingFocusItem()}
+              >
+                {savingMeetingFocusItem ? "Saving..." : "Add"}
+              </Button>
+            </div>
           </div>
         </Card>
       ) : null}
@@ -2066,33 +2081,15 @@ export default function ProjectPage() {
       {activeTab === "meeting-checklist" ? (
         <Card className="p-6">
           <div className="text-lg font-semibold">Meeting checklist</div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Input
-              value={newMeetingItemContent}
-              onChange={(e) => setNewMeetingItemContent(e.target.value)}
-              placeholder="Add checklist item..."
-              className="min-w-[220px] flex-1"
-            />
-            <Input
-              value={newMeetingItemAnswer}
-              onChange={(e) => setNewMeetingItemAnswer(e.target.value)}
-              placeholder="Notes (optional)"
-              className="min-w-[220px] flex-1"
-            />
-            <Button
-              variant="outline"
-              disabled={!newMeetingItemContent.trim() || addingMeetingItem}
-              onClick={() => void addMeetingChecklistItem()}
-            >
-              {addingMeetingItem ? "Adding..." : "Add"}
-            </Button>
-          </div>
-          <div className="mt-3 space-y-3">
+          <div className="mt-4 space-y-3">
             {meetingChecklist.length ? (
-              meetingChecklist.map((item) => {
+              meetingChecklist.map((item, index) => {
                 const isEditing = editingMeetingItemId === item.id
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                      {index + 1}.
+                    </div>
                     <Checkbox
                       checked={item.isChecked}
                       onCheckedChange={(checked) => toggleMeetingChecklistItem(item.id, Boolean(checked))}
@@ -2153,6 +2150,27 @@ export default function ProjectPage() {
                 No meeting checklist items yet.
               </div>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={newMeetingItemContent}
+                onChange={(e) => setNewMeetingItemContent(e.target.value)}
+                placeholder="Add checklist item..."
+                className="min-w-[220px] flex-1"
+              />
+              <Input
+                value={newMeetingItemAnswer}
+                onChange={(e) => setNewMeetingItemAnswer(e.target.value)}
+                placeholder="Notes (optional)"
+                className="min-w-[220px] flex-1"
+              />
+              <Button
+                variant="outline"
+                disabled={!newMeetingItemContent.trim() || addingMeetingItem}
+                onClick={() => void addMeetingChecklistItem()}
+              >
+                {addingMeetingItem ? "Adding..." : "Add"}
+              </Button>
+            </div>
           </div>
         </Card>
       ) : null}
@@ -2197,26 +2215,14 @@ export default function ProjectPage() {
         <Card className="p-6">
           <div className="text-lg font-semibold">Testing Questions</div>
           <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                value={newTestingText}
-                onChange={(e) => setNewTestingText(e.target.value)}
-                placeholder="Add testing checklist item..."
-                className="flex-1 min-w-[220px]"
-              />
-              <Button
-                variant="outline"
-                disabled={!newTestingText.trim() || savingTestingItem}
-                onClick={() => void addTestingChecklistItem()}
-              >
-                {savingTestingItem ? "Saving..." : "Add"}
-              </Button>
-            </div>
             {testingChecklist.length ? (
-              testingChecklist.map((item) => {
+              testingChecklist.map((item, index) => {
                 const isEditing = testingEditingId === item.id
                 return (
                   <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                    <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                      {index + 1}.
+                    </div>
                     <Checkbox
                       checked={item.isChecked}
                       onCheckedChange={(checked) => toggleTestingChecklistItemDb(item.id, Boolean(checked))}
@@ -2270,6 +2276,21 @@ export default function ProjectPage() {
             ) : (
               <div className="text-sm text-muted-foreground">No testing checklist items yet.</div>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={newTestingText}
+                onChange={(e) => setNewTestingText(e.target.value)}
+                placeholder="Add testing checklist item..."
+                className="flex-1 min-w-[220px]"
+              />
+              <Button
+                variant="outline"
+                disabled={!newTestingText.trim() || savingTestingItem}
+                onClick={() => void addTestingChecklistItem()}
+              >
+                {savingTestingItem ? "Saving..." : "Add"}
+              </Button>
+            </div>
           </div>
         </Card>
       ) : null}
@@ -2366,6 +2387,27 @@ export default function ProjectPage() {
                         onChange={(e) => setNewDueDate(normalizeDueDateInput(e.target.value))}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label>Finish period</Label>
+                      <Select
+                        value={newFinishPeriod}
+                        onValueChange={(value) =>
+                          setNewFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="All day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((o) => (
+                            <SelectItem key={o} value={o}>
+                              {o}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="flex justify-end">
                     <Button disabled={!newTitle.trim() || creating} onClick={() => void submitCreateTask()}>
@@ -2461,6 +2503,27 @@ export default function ProjectPage() {
                         onChange={(e) => setEditDueDate(normalizeDueDateInput(e.target.value))}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label>Finish period</Label>
+                      <Select
+                        value={editFinishPeriod}
+                        onValueChange={(value) =>
+                          setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="All day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                          {FINISH_PERIOD_OPTIONS.map((o) => (
+                            <SelectItem key={o} value={o}>
+                              {o}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setEditOpen(false)} disabled={savingEdit}>
@@ -2537,26 +2600,14 @@ export default function ProjectPage() {
             <Card className="p-6">
               <div className="text-lg font-semibold">Documentation checklist</div>
               <div className="mt-4 space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={newDocumentationText}
-                    onChange={(e) => setNewDocumentationText(e.target.value)}
-                    placeholder="Add documentation checklist item..."
-                    className="flex-1 min-w-[220px]"
-                  />
-                  <Button
-                    variant="outline"
-                    disabled={!newDocumentationText.trim() || savingDocumentationItem}
-                    onClick={() => void addDocumentationChecklistItem()}
-                  >
-                    {savingDocumentationItem ? "Saving..." : "Add"}
-                  </Button>
-                </div>
                 {documentationChecklist.length ? (
-                  documentationChecklist.map((item) => {
+                  documentationChecklist.map((item, index) => {
                     const isEditing = documentationEditingId === item.id
                     return (
                       <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3">
+                        <div className="mt-0.5 w-7 shrink-0 text-right text-sm text-muted-foreground">
+                          {index + 1}.
+                        </div>
                         <Checkbox
                           checked={item.isChecked}
                           onCheckedChange={(checked) =>
@@ -2616,6 +2667,21 @@ export default function ProjectPage() {
                 ) : (
                   <div className="text-sm text-muted-foreground">No documentation checklist items yet.</div>
                 )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={newDocumentationText}
+                    onChange={(e) => setNewDocumentationText(e.target.value)}
+                    placeholder="Add documentation checklist item..."
+                    className="flex-1 min-w-[220px]"
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={!newDocumentationText.trim() || savingDocumentationItem}
+                    onClick={() => void addDocumentationChecklistItem()}
+                  >
+                    {savingDocumentationItem ? "Saving..." : "Add"}
+                  </Button>
+                </div>
               </div>
               <div className="mt-6">
                 <div className="text-sm font-semibold">Documentation file paths</div>
