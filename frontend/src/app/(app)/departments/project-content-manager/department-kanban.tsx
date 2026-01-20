@@ -552,6 +552,17 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [showTemplates, setShowTemplates] = React.useState(false)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const stored = window.localStorage.getItem("pcm_show_templates")
+    if (stored === "true") {
+      setShowTemplates(true)
+    }
+  }, [])
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("pcm_show_templates", showTemplates ? "true" : "false")
+  }, [showTemplates])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
