@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -2979,12 +2980,7 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Description</Label>
-                        <Textarea
-                          value={noProjectDescription}
-                          onChange={(e) => setNoProjectDescription(e.target.value)}
-                          rows={4}
-                          className="border-slate-200 focus:border-slate-400 rounded-xl"
-                        />
+                        <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2">
@@ -3064,12 +3060,7 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Description</Label>
-                        <Textarea
-                          value={editTaskDescription}
-                          onChange={(e) => setEditTaskDescription(e.target.value)}
-                          rows={4}
-                          className="border-slate-200 focus:border-slate-400 rounded-xl"
-                        />
+                        <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">

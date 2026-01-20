@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, User } from "@/lib/types"
@@ -1328,7 +1328,7 @@ export default function DevelopmentProjectPage() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Description</Label>
-                        <Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                        <BoldOnlyEditor value={newDescription} onChange={setNewDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">

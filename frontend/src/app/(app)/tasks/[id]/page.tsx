@@ -10,7 +10,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { Task, User, UserLookup } from "@/lib/types"
@@ -46,6 +45,8 @@ function statusLabel(value?: string | null) {
   const hit = TASK_STATUS_OPTIONS.find((option) => option.value === value)
   return hit?.label ?? value
 }
+
+import { BoldOnlyEditor } from "@/components/bold-only-editor"
 
 export default function TaskDetailsPage() {
   const UNASSIGNED_VALUE = "__unassigned__"
@@ -197,7 +198,7 @@ export default function TaskDetailsPage() {
 
               <div className="space-y-2">
                 <Label>Description</Label>
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} />
+                <BoldOnlyEditor value={description} onChange={setDescription} />
               </div>
 
               {canAssign ? (

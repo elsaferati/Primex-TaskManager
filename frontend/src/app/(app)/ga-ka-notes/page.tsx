@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, GaNote, Project, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
@@ -650,11 +650,7 @@ export default function GaKaNotesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>
-                <Textarea
-                  value={taskDescription}
-                  onChange={(e) => setTaskDescription(e.target.value)}
-                  rows={4}
-                />
+                <BoldOnlyEditor value={taskDescription} onChange={setTaskDescription} />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
