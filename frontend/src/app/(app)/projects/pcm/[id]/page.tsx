@@ -68,6 +68,16 @@ const MST_PLANNING_QUESTIONS = [
   "Is there a plan for when the project is expected to be completed?",
 ]
 const MST_PROGRAM_QUESTION_LEGACY = "A eshte hapur projekti ne chat GPT?"
+const MST_PLANNING_ORDER = new Map(
+  MST_PLANNING_QUESTIONS.map((question, index) => [question.trim().toLowerCase(), index])
+)
+MST_PLANNING_ORDER.set(MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase(), 1)
+
+function getMstPlanningOrder(item: ChecklistItem) {
+  const key = (item.description || item.title || "").trim().toLowerCase()
+  const order = key ? MST_PLANNING_ORDER.get(key) : undefined
+  return order ?? Number.MAX_SAFE_INTEGER
+}
 const FINALIZATION_PATH = "FINALIZATION"
 const MST_EXCLUDED_PATHS = new Set(["PLANNING", FINALIZATION_PATH, "MEETINGS", "VS_VL_PLANNING"])
 const FINALIZATION_CHECKLIST = [
@@ -126,11 +136,18 @@ async function initializeMstChecklistItems(
     return !existingMap.has(key)
   })
 
-  // Create missing planning questions
-  const planningItemsToCreate = MST_PLANNING_QUESTIONS.filter((question) => {
-    const key = `PLANNING|${question}`
-    return !existingMap.has(key)
-  })
+  const existingPlanningItems = existingItems.filter(
+    (item) => item.item_type === "CHECKBOX" && item.path === "PLANNING"
+  )
+  const shouldSeedPlanning = existingPlanningItems.length === 0
+
+  // Create missing planning questions only when none exist yet (admin-managed afterwards).
+  const planningItemsToCreate = shouldSeedPlanning
+    ? MST_PLANNING_QUESTIONS.filter((question) => {
+        const key = `PLANNING|${question}`
+        return !existingMap.has(key)
+      })
+    : []
 
   // Combine all items to create
   const itemsToCreate = [
@@ -914,6 +931,13 @@ export default function PcmProjectPage() {
   const [mstPlanningChecks, setMstPlanningChecks] = React.useState<Record<string, boolean>>({})
   const [descriptionChecks, setDescriptionChecks] = React.useState<Record<string, boolean>>({})
   const [planningComments, setPlanningComments] = React.useState<Record<string, string>>({})
+  const [editingPlanningItemId, setEditingPlanningItemId] = React.useState<string | null>(null)
+  const [editingPlanningItemText, setEditingPlanningItemText] = React.useState("")
+  const [editingPlanningItemNumber, setEditingPlanningItemNumber] = React.useState("")
+  const [savingPlanningItem, setSavingPlanningItem] = React.useState(false)
+  const [newPlanningItemNumber, setNewPlanningItemNumber] = React.useState("")
+  const [newPlanningItemText, setNewPlanningItemText] = React.useState("")
+  const [addingPlanningItem, setAddingPlanningItem] = React.useState(false)
   const [vsVlAcceptanceChecks, setVsVlAcceptanceChecks] = React.useState<Record<string, boolean>>({})
   const [vsVlPlanningItems, setVsVlPlanningItems] = React.useState<ChecklistItem[]>([])
   const [editingVsVlPlanningId, setEditingVsVlPlanningId] = React.useState<string | null>(null)
@@ -952,6 +976,8 @@ export default function PcmProjectPage() {
   const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
+  const [controlTotal, setControlTotal] = React.useState("0")
+  const [controlCompleted, setControlCompleted] = React.useState("0")
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
@@ -968,6 +994,8 @@ export default function PcmProjectPage() {
   const [finalizationItems, setFinalizationItems] = React.useState<ChecklistItem[]>([])
   const [editingFinalizationId, setEditingFinalizationId] = React.useState<string | null>(null)
   const [editingFinalizationText, setEditingFinalizationText] = React.useState("")
+  const [editingFinalizationNumber, setEditingFinalizationNumber] = React.useState("")
+  const [newFinalizationNumber, setNewFinalizationNumber] = React.useState("")
   const [newFinalizationText, setNewFinalizationText] = React.useState("")
   const [savingFinalization, setSavingFinalization] = React.useState(false)
   const [controlEdits, setControlEdits] = React.useState<
@@ -1085,6 +1113,24 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
+  const planningItems = React.useMemo(
+    () => checklistItems.filter((item) => item.item_type === "CHECKBOX" && item.path === "PLANNING"),
+    [checklistItems]
+  )
+  const planningItemsOrdered = React.useMemo(() => {
+    if (!planningItems.length) return []
+    return planningItems
+      .slice()
+      .sort((a, b) => {
+        const posA = a.position ?? Number.MAX_SAFE_INTEGER
+        const posB = b.position ?? Number.MAX_SAFE_INTEGER
+        if (posA !== posB) return posA - posB
+        const orderA = getMstPlanningOrder(a)
+        const orderB = getMstPlanningOrder(b)
+        if (orderA !== orderB) return orderA - orderB
+        return (a.title || "").localeCompare(b.title || "")
+      })
+  }, [planningItems])
 
   // Initialize MST checklist checked state and comments from database
   React.useEffect(() => {
@@ -1108,37 +1154,20 @@ export default function PcmProjectPage() {
     setMstChecklistChecked(checked)
     setMstChecklistComments(comments)
 
-    // Load planning questions from database
-    const planningItems = checklistItems.filter((item) => {
-      if (item.item_type !== "CHECKBOX") return false
-      return item.path === "PLANNING" && MST_PLANNING_QUESTIONS.includes(item.title || "")
-    })
-
     const planningChecked: Record<string, boolean> = {}
     const descriptionChecked: Record<string, boolean> = {}
     const planningCommentsData: Record<string, string> = {}
     planningItems.forEach((item) => {
-      if (item.title) {
-        planningChecked[item.title] = item.is_checked || false
-        descriptionChecked[item.title] = item.is_checked || false
-
-        // Load planning comments
-        if (item.comment) {
-          planningCommentsData[item.title] = item.comment
-        }
-
-        // Load program name from the second question's comment (supports legacy title)
-        if (
-          (item.title === MST_PLANNING_QUESTIONS[1] || item.title === MST_PROGRAM_QUESTION_LEGACY) &&
-          item.comment
-        ) {
-          setProgramName(item.comment)
-        }
+      planningChecked[item.id] = item.is_checked || false
+      descriptionChecked[item.id] = item.is_checked || false
+      if (item.comment) {
+        planningCommentsData[item.id] = item.comment
       }
     })
     setMstPlanningChecks(planningChecked)
     setDescriptionChecks(descriptionChecked)
     setPlanningComments(planningCommentsData)
+    setProgramName(planningItemsOrdered[1]?.comment || "")
 
     const finalizationItemsFromDb = checklistItems.filter((item) => {
       return item.item_type === "CHECKBOX" && item.path === FINALIZATION_PATH
@@ -1153,7 +1182,7 @@ export default function PcmProjectPage() {
       })
       setFinalizationChecks(finalizationData)
     }
-  }, [checklistItems, isMst, project])
+  }, [checklistItems, isMst, planningItems, planningItemsOrdered, project])
 
   // Load VS/VL acceptance questions from database (separate from MST)
   const isVsVlForEffect = React.useMemo(() => isVsVlProject(project), [project])
@@ -4201,68 +4230,144 @@ export default function PcmProjectPage() {
   }
 
   if (isMst) {
-    // Get planning items from database
-    const planningItems = checklistItems.filter((item) => {
-      if (item.item_type !== "CHECKBOX") return false
-      return item.path === "PLANNING" && MST_PLANNING_QUESTIONS.includes(item.title || "")
-    })
+    const planningTopItems = planningItemsOrdered.slice(0, 2)
+    const planningOtherItems = planningItemsOrdered.slice(2)
+    const planningIndexMap = new Map(
+      planningItemsOrdered.map((item, index) => [item.id, index + 1])
+    )
+    const programItem =
+      planningItems.find(
+        (item) =>
+          (item.description || "").trim().toLowerCase() ===
+            MST_PLANNING_QUESTIONS[1].trim().toLowerCase() ||
+          (item.description || "").trim().toLowerCase() ===
+            MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase()
+      ) || planningItemsOrdered[1] || null
 
-    const planningItemMap = new Map<string, ChecklistItem>()
-    planningItems.forEach((item) => {
-      if (item.title) {
-        planningItemMap.set(item.title, item)
+    const togglePlanning = async (item: ChecklistItem) => {
+      const newChecked = !mstPlanningChecks[item.id]
+      setMstPlanningChecks((prev) => ({ ...prev, [item.id]: newChecked }))
+      setDescriptionChecks((prev) => ({ ...prev, [item.id]: newChecked }))
+      setChecklistItems((prev) =>
+        prev.map((entry) => (entry.id === item.id ? { ...entry, is_checked: newChecked } : entry))
+      )
+
+      try {
+        await apiFetch(`/checklist-items/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_checked: newChecked }),
+        })
+      } catch {
+        // Silently handle errors - update might still succeed
       }
-    })
+    }
 
-    const planningChecks = mstPlanningChecks
-    const togglePlanning = async (q: string) => {
-      const newChecked = !mstPlanningChecks[q]
-      // Optimistically update UI
-      setMstPlanningChecks((prev) => ({ ...prev, [q]: newChecked }))
-      setDescriptionChecks((prev) => ({ ...prev, [q]: newChecked }))
+    const startEditPlanningItem = (item: ChecklistItem) => {
+      setEditingPlanningItemId(item.id)
+      setEditingPlanningItemText(item.title || "")
+      setEditingPlanningItemNumber(item.position ? String(item.position) : "")
+    }
 
-      let item = planningItemMap.get(q)
+    const cancelEditPlanningItem = () => {
+      setEditingPlanningItemId(null)
+      setEditingPlanningItemText("")
+      setEditingPlanningItemNumber("")
+    }
 
-      // Create item if it doesn't exist
-      if (!item && project) {
-        try {
-          const createRes = await apiFetch("/checklist-items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: project.id,
-              item_type: "CHECKBOX",
-              path: "PLANNING",
-              title: q,
-              keyword: "PLANNING",
-              description: q,
-              category: "PLANNING",
-              is_checked: newChecked,
-            }),
-          })
+    const savePlanningItem = async () => {
+      if (!editingPlanningItemId) return
+      const title = editingPlanningItemText.trim()
+      if (!title) return
+      const rawNumber = editingPlanningItemNumber.trim()
+      let position: number | undefined
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid order number")
+          return
+        }
+        position = parsed
+      }
+      setSavingPlanningItem(true)
+      try {
+        const res = await apiFetch(`/checklist-items/${editingPlanningItemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, position }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to update checklist item")
+          return
+        }
+        const updated = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)))
+        cancelEditPlanningItem()
+        toast.success("Checklist item updated")
+      } finally {
+        setSavingPlanningItem(false)
+      }
+    }
 
-          if (createRes.ok) {
-            const created = (await createRes.json()) as ChecklistItem
-            item = created
-            setChecklistItems((prev) => [...prev, created])
-            planningItemMap.set(q, created)
+    const deletePlanningItem = async (item: ChecklistItem) => {
+      const res = await apiFetch(`/checklist-items/${item.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete checklist item")
+        return
+      }
+      setChecklistItems((prev) => prev.filter((entry) => entry.id !== item.id))
+      if (editingPlanningItemId === item.id) {
+        cancelEditPlanningItem()
+      }
+      toast.success("Checklist item deleted")
+    }
+
+    const addPlanningItem = async () => {
+      if (!project) return
+      const text = newPlanningItemText.trim()
+      if (!text) return
+      const rawNumber = newPlanningItemNumber.trim()
+      setAddingPlanningItem(true)
+      try {
+        const maxPosition = planningItems.reduce(
+          (max, item) => Math.max(max, item.position ?? 0),
+          0
+        )
+        let position = maxPosition + 1
+        if (rawNumber) {
+          const parsed = Number.parseInt(rawNumber, 10)
+          if (Number.isNaN(parsed) || parsed < 1) {
+            toast.error("Invalid order number")
+            return
           }
-        } catch (error) {
-          console.error("Failed to create planning item:", error)
+          position = parsed
         }
-      }
-
-      if (item) {
-        // Update in background
-        try {
-          await apiFetch(`/checklist-items/${item.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ is_checked: newChecked }),
-          })
-        } catch (error) {
-          // Silently handle errors - update might still succeed
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: "PLANNING",
+            title: text,
+            keyword: "PLANNING",
+            description: text,
+            category: "PLANNING",
+            is_checked: false,
+            position,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to add checklist item")
+          return
         }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => [...prev, created])
+        setNewPlanningItemNumber("")
+        setNewPlanningItemText("")
+        toast.success("Checklist item added")
+      } finally {
+        setAddingPlanningItem(false)
       }
     }
     const templateOrderMap = new Map(
@@ -4586,9 +4691,19 @@ export default function PcmProjectPage() {
       if (!project || !newFinalizationText.trim()) return
       setSavingFinalization(true)
       try {
+        const rawNumber = newFinalizationNumber.trim()
         const position = finalizationItems.length > 0
           ? Math.max(...finalizationItems.map((item) => item.position ?? 0)) + 1
           : 1
+        let nextPosition = position
+        if (rawNumber) {
+          const parsed = Number.parseInt(rawNumber, 10)
+          if (Number.isNaN(parsed) || parsed < 1) {
+            toast.error("Invalid order number")
+            return
+          }
+          nextPosition = parsed
+        }
         
         const res = await apiFetch("/checklist-items", {
           method: "POST",
@@ -4602,7 +4717,7 @@ export default function PcmProjectPage() {
             description: newFinalizationText.trim(),
             category: FINALIZATION_PATH,
             is_checked: false,
-            position,
+            position: nextPosition,
           }),
         })
         if (!res.ok) {
@@ -4613,6 +4728,7 @@ export default function PcmProjectPage() {
         setChecklistItems((prev) => [...prev, created])
         setFinalizationItems((prev) => [...prev, created])
         setFinalizationChecks((prev) => ({ ...prev, [created.id]: false }))
+        setNewFinalizationNumber("")
         setNewFinalizationText("")
         toast.success("Checklist item added")
       } catch {
@@ -4627,21 +4743,33 @@ export default function PcmProjectPage() {
       if (!item) return
       setEditingFinalizationId(itemId)
       setEditingFinalizationText(item.title || "")
+      setEditingFinalizationNumber(item.position ? String(item.position) : "")
     }
 
     const cancelEditFinalizationItem = () => {
       setEditingFinalizationId(null)
       setEditingFinalizationText("")
+      setEditingFinalizationNumber("")
     }
 
     const saveFinalizationItem = async () => {
       if (!editingFinalizationId || !editingFinalizationText.trim()) return
+      const rawNumber = editingFinalizationNumber.trim()
+      let position: number | undefined
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid order number")
+          return
+        }
+        position = parsed
+      }
       setSavingFinalization(true)
       try {
         const res = await apiFetch(`/checklist-items/${editingFinalizationId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: editingFinalizationText.trim() }),
+          body: JSON.stringify({ title: editingFinalizationText.trim(), position }),
         })
         if (!res.ok) {
           toast.error("Failed to update checklist item")
@@ -4871,139 +4999,199 @@ export default function PcmProjectPage() {
               <Card>
                 <div className="p-4 space-y-4">
                   <div className="text-lg font-semibold">Planifikimi</div>
+                  <div className="max-w-md">
+                    <Textarea
+                      placeholder="Shkruaj emrin e programit..."
+                      value={programName}
+                      onChange={(e) => {
+                        const newValue = e.target.value
+                        setProgramName(newValue)
+                        if (!programItem) return
+                        setPlanningComments((prev) => ({ ...prev, [programItem.id]: newValue }))
+                        setChecklistItems((prev) =>
+                          prev.map((entry) =>
+                            entry.id === programItem.id ? { ...entry, comment: newValue } : entry
+                          )
+                        )
+                        apiFetch(`/checklist-items/${programItem.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ comment: newValue || null }),
+                        }).catch(() => {
+                          // Silently handle errors - update might still succeed
+                        })
+                      }}
+                      onBlur={async (e) => {
+                        if (!programItem) return
+                        const newValue = e.target.value
+                        try {
+                          await apiFetch(`/checklist-items/${programItem.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ comment: newValue || null }),
+                          })
+                        } catch {
+                          // Silently handle network errors - update might still succeed
+                        }
+                      }}
+                    />
+                  </div>
                   <div className="grid gap-3">
-                    {MST_PLANNING_QUESTIONS.slice(0, 2).map((q, idx) => (
-                      <div key={q} className="grid grid-cols-12 gap-3 items-center">
-                        <div className="col-span-9 flex items-center gap-3">
-                          <Checkbox
-                            checked={Boolean(descriptionChecks[q])}
-                            onCheckedChange={() => togglePlanning(q)}
-                          />
-                          <span className="text-sm font-semibold uppercase tracking-wide">{q}</span>
-                        </div>
-                        <div className="col-span-3">
-                          {idx === 1 ? (
-                            <Textarea
-                              placeholder="Shkruaj emrin e programit..."
-                              value={programName}
-                              onChange={(e) => {
-                                const newValue = e.target.value
-                                setProgramName(newValue)
-
-                                // Save to database as comment on the checklist item
-                                const planningItem = planningItemMap.get(q)
-
-                                if (planningItem) {
-                                  // Item exists, update it
-                                  apiFetch(`/checklist-items/${planningItem.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ comment: newValue || null }),
-                                  }).catch(() => {
-                                    // Silently handle errors - update might still succeed
-                                  })
-                                } else if (project) {
-                                  // Item doesn't exist, create it
-                                  apiFetch("/checklist-items", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      project_id: project.id,
-                                      item_type: "CHECKBOX",
-                                      path: "PLANNING",
-                                      title: q,
-                                      keyword: "PLANNING",
-                                      description: q,
-                                      category: "PLANNING",
-                                      is_checked: false,
-                                      comment: newValue || null,
-                                    }),
-                                  }).then((createRes) => {
-                                    if (createRes.ok) {
-                                      createRes.json().then((created: ChecklistItem) => {
-                                        setChecklistItems((prev) => [...prev, created])
-                                        planningItemMap.set(q, created)
-                                      }).catch(() => { })
-                                    }
-                                  }).catch(() => {
-                                    // Silently handle errors
-                                  })
-                                }
-                              }}
-                              onBlur={async (e) => {
-                                // Ensure it's saved on blur
-                                const planningItem = planningItemMap.get(q)
-                                const newValue = e.target.value
-
-                                if (planningItem) {
-                                  // Item exists, update it
-                                  try {
-                                    const res = await apiFetch(`/checklist-items/${planningItem.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ comment: newValue || null }),
-                                    })
-                                    if (!res.ok && res.status !== 503) {
-                                      // Real error, but don't spam the user
-                                    }
-                                  } catch {
-                                    // Silently handle network errors - update might still succeed
-                                  }
-                                } else if (project) {
-                                  // Item doesn't exist, create it
-                                  try {
-                                    const createRes = await apiFetch("/checklist-items", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        project_id: project.id,
-                                        item_type: "CHECKBOX",
-                                        path: "PLANNING",
-                                        title: q,
-                                        keyword: "PLANNING",
-                                        description: q,
-                                        category: "PLANNING",
-                                        is_checked: false,
-                                        comment: newValue || null,
-                                      }),
-                                    })
-
-                                    if (createRes.ok) {
-                                      const created = (await createRes.json()) as ChecklistItem
-                                      setChecklistItems((prev) => [...prev, created])
-                                      planningItemMap.set(q, created)
-                                    }
-                                  } catch {
-                                    // Silently handle network errors
-                                  }
-                                }
-                              }}
+                    {planningTopItems.map((item, idx) => {
+                      const isEditing = editingPlanningItemId === item.id
+                      const itemNumber = item.position ?? planningIndexMap.get(item.id) ?? idx + 1
+                      return (
+                        <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3">
+                          <div className="col-span-1 text-right text-xs text-muted-foreground">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                value={editingPlanningItemNumber}
+                                onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
+                                className="h-8 w-14 text-right"
+                              />
+                            ) : (
+                              itemNumber ? `${itemNumber}.` : "-"
+                            )}
+                          </div>
+                          <div className="col-span-1 flex justify-center">
+                            <Checkbox
+                              checked={Boolean(descriptionChecks[item.id])}
+                              onCheckedChange={() => togglePlanning(item)}
                             />
-                          ) : null}
+                          </div>
+                          <div className="col-span-6">
+                            {isEditing ? (
+                              <Input
+                                value={editingPlanningItemText}
+                                onChange={(e) => setEditingPlanningItemText(e.target.value)}
+                                className="w-full"
+                              />
+                            ) : (
+                              <span className="text-sm font-semibold uppercase tracking-wide">
+                                {item.title || "-"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="col-span-2">
+                            {isAdmin ? (
+                              isEditing ? (
+                                <div className="flex flex-col items-start gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!editingPlanningItemText.trim() || savingPlanningItem}
+                                    onClick={() => void savePlanningItem()}
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-start gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                    onClick={() => void deletePlanningItem(item)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              )
+                            ) : null}
+                          </div>
+                          <div className="col-span-2" />
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
 
                   <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
-                    <div className="col-span-10">Description/General Points (me checkbox)</div>
+                    <div className="col-span-1" />
+                    <div className="col-span-1" />
+                    <div className="col-span-6">Description/General Points (me checkbox)</div>
+                    <div className="col-span-2 text-center">Actions</div>
                     <div className="col-span-2 text-right">Status/Koment</div>
                   </div>
 
                   <div className="divide-y border rounded-lg">
-                    {MST_PLANNING_QUESTIONS.slice(2).map((q) => {
-                      const planningItem = planningItemMap.get(q)
-                      // Use local state for immediate UI updates, fallback to database value
-                      const comment = planningComments[q] || planningItem?.comment || ""
+                    {planningOtherItems.map((item) => {
+                      const comment = planningComments[item.id] || item.comment || ""
+                      const itemNumber = item.position ?? planningIndexMap.get(item.id)
 
                       return (
-                        <div key={q} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
-                          <div className="col-span-10 flex items-start gap-3">
+                        <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
+                          <div className="col-span-1 text-right text-xs text-muted-foreground">
+                            {editingPlanningItemId === item.id ? (
+                              <Input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                value={editingPlanningItemNumber}
+                                onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
+                                className="h-8 w-14 text-right"
+                              />
+                            ) : (
+                              itemNumber ? `${itemNumber}.` : "-"
+                            )}
+                          </div>
+                          <div className="col-span-1 flex justify-center">
                             <Checkbox
-                              checked={Boolean(descriptionChecks[q])}
-                              onCheckedChange={() => togglePlanning(q)}
+                              checked={Boolean(descriptionChecks[item.id])}
+                              onCheckedChange={() => togglePlanning(item)}
                             />
-                            <span className="text-sm">{q}</span>
+                          </div>
+                          <div className="col-span-6">
+                            {editingPlanningItemId === item.id ? (
+                              <Input
+                                value={editingPlanningItemText}
+                                onChange={(e) => setEditingPlanningItemText(e.target.value)}
+                                className="w-full"
+                              />
+                            ) : (
+                              <span className="text-sm">{item.title || "-"}</span>
+                            )}
+                          </div>
+                          <div className="col-span-2">
+                            {isAdmin ? (
+                              editingPlanningItemId === item.id ? (
+                                <div className="flex flex-col items-start gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!editingPlanningItemText.trim() || savingPlanningItem}
+                                    onClick={() => void savePlanningItem()}
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-start gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                    onClick={() => void deletePlanningItem(item)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              )
+                            ) : null}
                           </div>
                           <div className="col-span-2">
                             <Input
@@ -5011,111 +5199,30 @@ export default function PcmProjectPage() {
                               value={comment}
                               onChange={(e) => {
                                 const newComment = e.target.value
-                                // Update local state immediately for responsive UI
-                                setPlanningComments((prev) => ({ ...prev, [q]: newComment }))
-
-                                // Also update in checklistItems for consistency
+                                setPlanningComments((prev) => ({ ...prev, [item.id]: newComment }))
                                 setChecklistItems((prev) =>
-                                  prev.map((item) =>
-                                    item.id === planningItem?.id
-                                      ? { ...item, comment: newComment }
-                                      : item
+                                  prev.map((entry) =>
+                                    entry.id === item.id ? { ...entry, comment: newComment } : entry
                                   )
                                 )
-
-                                // Save to database
-                                const saveComment = async (item: ChecklistItem | undefined) => {
-                                  if (item) {
-                                    // Item exists, update it
-                                    try {
-                                      const res = await apiFetch(`/checklist-items/${item.id}`, {
-                                        method: "PATCH",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ comment: newComment || null }),
-                                      })
-                                      if (!res.ok && res.status !== 503) {
-                                        // Real error, but don't spam the user
-                                      }
-                                    } catch {
-                                      // Silently handle network errors - update might still succeed
-                                    }
-                                  } else if (project) {
-                                    // Item doesn't exist, create it
-                                    try {
-                                      const createRes = await apiFetch("/checklist-items", {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({
-                                          project_id: project.id,
-                                          item_type: "CHECKBOX",
-                                          path: "PLANNING",
-                                          title: q,
-                                          keyword: "PLANNING",
-                                          description: q,
-                                          category: "PLANNING",
-                                          is_checked: false,
-                                          comment: newComment || null,
-                                        }),
-                                      })
-
-                                      if (createRes.ok) {
-                                        const created = (await createRes.json()) as ChecklistItem
-                                        setChecklistItems((prev) => [...prev, created])
-                                        planningItemMap.set(q, created)
-                                      }
-                                    } catch {
-                                      // Silently handle network errors
-                                    }
-                                  }
-                                }
-
-                                // Save in background
-                                saveComment(planningItem)
+                                apiFetch(`/checklist-items/${item.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ comment: newComment || null }),
+                                }).catch(() => {
+                                  // Silently handle errors - update might still succeed
+                                })
                               }}
                               onBlur={async (e) => {
                                 const newComment = e.target.value
-
-                                if (planningItem) {
-                                  // Item exists, update it
-                                  try {
-                                    const res = await apiFetch(`/checklist-items/${planningItem.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ comment: newComment || null }),
-                                    })
-                                    if (!res.ok && res.status !== 503) {
-                                      // Real error, but don't spam the user
-                                    }
-                                  } catch {
-                                    // Silently handle network errors - update might still succeed
-                                  }
-                                } else if (project) {
-                                  // Item doesn't exist, create it
-                                  try {
-                                    const createRes = await apiFetch("/checklist-items", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        project_id: project.id,
-                                        item_type: "CHECKBOX",
-                                        path: "PLANNING",
-                                        title: q,
-                                        keyword: "PLANNING",
-                                        description: q,
-                                        category: "PLANNING",
-                                        is_checked: false,
-                                        comment: newComment || null,
-                                      }),
-                                    })
-
-                                    if (createRes.ok) {
-                                      const created = (await createRes.json()) as ChecklistItem
-                                      setChecklistItems((prev) => [...prev, created])
-                                      planningItemMap.set(q, created)
-                                    }
-                                  } catch {
-                                    // Silently handle network errors
-                                  }
+                                try {
+                                  await apiFetch(`/checklist-items/${item.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ comment: newComment || null }),
+                                  })
+                                } catch {
+                                  // Silently handle network errors - update might still succeed
                                 }
                               }}
                             />
@@ -5124,6 +5231,32 @@ export default function PcmProjectPage() {
                       )
                     })}
                   </div>
+                  {isAdmin ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={newPlanningItemNumber}
+                        onChange={(e) => setNewPlanningItemNumber(e.target.value)}
+                        placeholder="No."
+                        className="w-24"
+                      />
+                      <Input
+                        value={newPlanningItemText}
+                        onChange={(e) => setNewPlanningItemText(e.target.value)}
+                        placeholder="Add planning checklist item..."
+                        className="flex-1 min-w-[220px]"
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={!newPlanningItemText.trim() || addingPlanningItem}
+                        onClick={() => void addPlanningItem()}
+                      >
+                        {addingPlanningItem ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               </Card>
             )}
@@ -6110,6 +6243,8 @@ export default function PcmProjectPage() {
                       <input
                         type="number"
                         placeholder="0"
+                        value={controlTotal}
+                        onChange={(e) => setControlTotal(e.target.value)}
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
                       />
                     </div>
@@ -6117,6 +6252,8 @@ export default function PcmProjectPage() {
                       <input
                         type="number"
                         placeholder="0"
+                        value={controlCompleted}
+                        onChange={(e) => setControlCompleted(e.target.value)}
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
                       />
                     </div>
@@ -6151,7 +6288,7 @@ export default function PcmProjectPage() {
                                 phase: "CONTROL",
                                 finish_period:
                                   controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
-                                internal_notes: "total_products=0; completed_products=0",
+                                internal_notes: `total_products=${controlTotal || "0"}; completed_products=${controlCompleted || "0"}`,
                               }),
                             })
                             if (!res?.ok) {
@@ -6163,6 +6300,8 @@ export default function PcmProjectPage() {
                             setControlTitle("")
                             setControlAssignee("__unassigned__")
                             setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                            setControlTotal("0")
+                            setControlCompleted("0")
                             toast.success("Task added")
                           } finally {
                             setCreatingControlTask(false)
@@ -6454,39 +6593,32 @@ export default function PcmProjectPage() {
                 <div className="p-6 space-y-6">
                   <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
                   
-                  {/* Add new item */}
-                  <div className="flex items-center gap-2 mb-4">
-                    <Input
-                      placeholder="Add checklist item..."
-                      value={newFinalizationText}
-                      onChange={(e) => setNewFinalizationText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !savingFinalization) {
-                          void addFinalizationItem()
-                        }
-                      }}
-                      className="flex-1"
-                    />
-                    <Button
-                      onClick={() => void addFinalizationItem()}
-                      disabled={!newFinalizationText.trim() || savingFinalization}
-                      size="sm"
-                    >
-                      {savingFinalization ? "Adding..." : "Add"}
-                    </Button>
-                  </div>
-
                   <div className="space-y-4">
                     {finalizationItems
                       .slice()
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item) => {
                         const isEditing = editingFinalizationId === item.id
+                        const itemNumber = item.position ?? 0
                         return (
                           <div
                             key={item.id}
                             className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
                           >
+                            <div className="w-10 text-right text-xs text-muted-foreground">
+                              {isEditing ? (
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  inputMode="numeric"
+                                  value={editingFinalizationNumber}
+                                  onChange={(e) => setEditingFinalizationNumber(e.target.value)}
+                                  className="h-8 w-14 text-right"
+                                />
+                              ) : (
+                                itemNumber ? `${itemNumber}.` : "-"
+                              )}
+                            </div>
                             <Checkbox
                               id={item.id}
                               checked={Boolean(finalizationChecks[item.id])}
@@ -6565,6 +6697,36 @@ export default function PcmProjectPage() {
                         No checklist items yet. Add one above.
                       </div>
                     )}
+                  </div>
+                  {/* Add new item */}
+                  <div className="flex items-center gap-2 pt-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      placeholder="No."
+                      value={newFinalizationNumber}
+                      onChange={(e) => setNewFinalizationNumber(e.target.value)}
+                      className="w-24"
+                    />
+                    <Input
+                      placeholder="Add checklist item..."
+                      value={newFinalizationText}
+                      onChange={(e) => setNewFinalizationText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !savingFinalization) {
+                          void addFinalizationItem()
+                        }
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={() => void addFinalizationItem()}
+                      disabled={!newFinalizationText.trim() || savingFinalization}
+                      size="sm"
+                    >
+                      {savingFinalization ? "Adding..." : "Add"}
+                    </Button>
                   </div>
                   {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
                     <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">

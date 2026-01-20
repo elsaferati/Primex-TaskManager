@@ -684,11 +684,16 @@ async def create_checklist_item(
                 return _item_to_out(existing)
 
     position = create_payload.position
+    path_filter = (
+        ChecklistItem.path.is_(None)
+        if create_payload.path is None
+        else ChecklistItem.path == create_payload.path
+    )
     if position is None:
         max_position = (
             await db.execute(
                 select(ChecklistItem.position)
-                .where(ChecklistItem.checklist_id == checklist.id)
+                .where(ChecklistItem.checklist_id == checklist.id, path_filter)
                 .order_by(ChecklistItem.position.desc())
             )
         ).scalars().first()
@@ -697,7 +702,11 @@ async def create_checklist_item(
         # Insert by position: shift existing items down to keep numbering consistent.
         await db.execute(
             update(ChecklistItem)
-            .where(ChecklistItem.checklist_id == checklist.id, ChecklistItem.position >= position)
+            .where(
+                ChecklistItem.checklist_id == checklist.id,
+                path_filter,
+                ChecklistItem.position >= position,
+            )
             .values(position=ChecklistItem.position + 1)
         )
 
@@ -777,12 +786,18 @@ async def update_checklist_item(
         new_pos = payload.position
         old_pos = item.position
         if new_pos != old_pos and item.checklist_id is not None:
+            path_filter = (
+                ChecklistItem.path.is_(None)
+                if item.path is None
+                else ChecklistItem.path == item.path
+            )
             if new_pos > old_pos:
                 # Moving down: pull intervening items up.
                 await db.execute(
                     update(ChecklistItem)
                     .where(
                         ChecklistItem.checklist_id == item.checklist_id,
+                        path_filter,
                         ChecklistItem.position > old_pos,
                         ChecklistItem.position <= new_pos,
                         ChecklistItem.id != item.id,
@@ -795,6 +810,7 @@ async def update_checklist_item(
                     update(ChecklistItem)
                     .where(
                         ChecklistItem.checklist_id == item.checklist_id,
+                        path_filter,
                         ChecklistItem.position >= new_pos,
                         ChecklistItem.position < old_pos,
                         ChecklistItem.id != item.id,
@@ -876,6 +892,11 @@ async def delete_checklist_item(
 
     deleted_checklist_id = item.checklist_id
     deleted_position = item.position
+    path_filter = (
+        ChecklistItem.path.is_(None)
+        if item.path is None
+        else ChecklistItem.path == item.path
+    )
     await db.delete(item)
     # Keep numbering contiguous.
     if deleted_checklist_id is not None:
@@ -883,6 +904,7 @@ async def delete_checklist_item(
             update(ChecklistItem)
             .where(
                 ChecklistItem.checklist_id == deleted_checklist_id,
+                path_filter,
                 ChecklistItem.position > deleted_position,
             )
             .values(position=ChecklistItem.position - 1)

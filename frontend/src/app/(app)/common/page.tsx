@@ -10,6 +10,7 @@ type CommonType =
   | "leave"
   | "blocked"
   | "oneH"
+  | "personal"
   | "external"
   | "r1"
   | "problem"
@@ -21,6 +22,7 @@ type AbsentItem = { entryId?: string; person: string; date: string; from: string
 type LeaveItem = { entryId?: string; person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
 type BlockedItem = { title: string; person: string; date: string; note?: string }
 type OneHItem = { title: string; person: string; date: string; note?: string }
+type PersonalItem = { title: string; person: string; date: string; note?: string }
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string }
 type R1Item = { title: string; date: string; owner: string; note?: string }
 type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
@@ -153,6 +155,7 @@ export default function CommonViewPage() {
     leave: [] as LeaveItem[],
     blocked: [] as BlockedItem[],
     oneH: [] as OneHItem[],
+    personal: [] as PersonalItem[],
     external: [] as ExternalItem[],
     r1: [] as R1Item[],
     problems: [] as ProblemItem[],
@@ -402,6 +405,7 @@ export default function CommonViewPage() {
           leave: [] as LeaveItem[],
           blocked: [] as BlockedItem[],
           oneH: [] as OneHItem[],
+          personal: [] as PersonalItem[],
           external: [] as ExternalItem[],
           r1: [] as R1Item[],
           problems: [] as ProblemItem[],
@@ -690,6 +694,14 @@ export default function CommonViewPage() {
                 note: t.description || undefined,
               })
             }
+            if (t.is_personal) {
+              allData.personal.push({
+                title: t.title,
+                person: ownerName || "Unknown",
+                date: taskDate,
+                note: t.description || undefined,
+              })
+            }
             if (t.is_r1) {
               allData.r1.push({
                 title: t.title,
@@ -816,6 +828,7 @@ export default function CommonViewPage() {
     )
     const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date))
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date))
+    const personal = commonData.personal.filter((x) => inSelectedDates(x.date))
     const external = commonData.external.filter((x) => inSelectedDates(x.date))
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date))
     const problems = commonData.problems.filter((x) => inSelectedDates(x.date))
@@ -824,7 +837,7 @@ export default function CommonViewPage() {
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
 
-    return { late, absent, leave, blocked, oneH, external, r1, problems, feedback, priority }
+    return { late, absent, leave, blocked, oneH, personal, external, r1, problems, feedback, priority }
   }, [commonData, selectedDates])
 
   // Common people for priority (from users)
@@ -1144,6 +1157,11 @@ export default function CommonViewPage() {
       subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent oneh",
     }))
+    const personalItems: SwimlaneCell[] = filtered.personal.map((x) => ({
+      title: x.title,
+      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      accentClass: "swimlane-accent personal",
+    }))
     const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
       title: x.title,
       subtitle: `${x.time} - ${formatDateHuman(x.date)} - ${x.platform} - ${x.owner}`,
@@ -1223,6 +1241,14 @@ export default function CommonViewPage() {
         items: oneHItems,
       },
       {
+        id: "personal",
+        label: "Personal",
+        count: filtered.personal.length,
+        headerClass: "swimlane-header personal",
+        badgeClass: "swimlane-badge personal",
+        items: personalItems,
+      },
+      {
         id: "r1",
         label: "R1",
         count: filtered.r1.length,
@@ -1267,6 +1293,7 @@ export default function CommonViewPage() {
       leave: LeaveItem[]
       blocked: BlockedItem[]
       oneH: OneHItem[]
+      personal: PersonalItem[]
       external: ExternalItem[]
       r1: R1Item[]
       problems: ProblemItem[]
@@ -1281,6 +1308,7 @@ export default function CommonViewPage() {
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         blocked: filtered.blocked.filter((x) => x.date === iso),
         oneH: filtered.oneH.filter((x) => x.date === iso),
+        personal: filtered.personal.filter((x) => x.date === iso),
         external: filtered.external.filter((x) => x.date === iso),
         r1: filtered.r1.filter((x) => x.date === iso),
         problems: filtered.problems.filter((x) => x.date === iso),
@@ -1614,6 +1642,8 @@ export default function CommonViewPage() {
           --blocked-accent: #be123c;
           --oneh-bg: #e0f2fe;
           --oneh-accent: #0ea5e9;
+          --personal-bg: #f3e8ff;
+          --personal-accent: #a855f7;
           --external-bg: #e0f2fe;
           --external-accent: #0284c7;
           --r1-bg: #dcfce7;
@@ -1689,6 +1719,12 @@ export default function CommonViewPage() {
         .btn-outline:hover { 
           background: rgba(255, 255, 255, 0.3);
           border-color: rgba(255, 255, 255, 0.5);
+        }
+        .btn-outline.active {
+          background: #ffffff;
+          color: #0f172a;
+          border-color: #ffffff;
+          box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2);
         }
 
         .no-print { display: inline-flex; }
@@ -2295,6 +2331,7 @@ export default function CommonViewPage() {
         .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
         .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
+        .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
@@ -2305,6 +2342,7 @@ export default function CommonViewPage() {
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
+        .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
@@ -2315,6 +2353,7 @@ export default function CommonViewPage() {
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
         .swimlane-accent.blocked { border-left: 4px solid var(--blocked-accent); }
         .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
+        .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
@@ -2770,12 +2809,18 @@ export default function CommonViewPage() {
             <button className="btn-primary no-print" type="button" onClick={handlePrint}>
               Export / Print
             </button>
-            <button className="btn-outline no-print" type="button" onClick={() => setMeetingPanelOpen((prev) => !prev)}>
+            <button
+              className={`btn-outline no-print ${meetingPanelOpen ? "active" : ""}`}
+              type="button"
+              aria-pressed={meetingPanelOpen}
+              onClick={() => setMeetingPanelOpen((prev) => !prev)}
+            >
               Meeting
             </button>
             <button
-              className="btn-outline no-print"
+              className={`btn-outline no-print ${externalMeetingsOpen ? "active" : ""}`}
               type="button"
+              aria-pressed={externalMeetingsOpen}
               onClick={() => setExternalMeetingsOpen((prev) => !prev)}
             >
               External Meetings
@@ -2884,6 +2929,13 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("oneH")}
             >
               1H
+            </button>
+            <button
+              className={`chip ${typeFilters.has("personal") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("personal")}
+            >
+              Personal
             </button>
             <button
               className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
@@ -3395,6 +3447,7 @@ export default function CommonViewPage() {
                       else if (row.id === "leave") dayEntries[iso] = dayData.leave || []
                       else if (row.id === "blocked") dayEntries[iso] = dayData.blocked || []
                       else if (row.id === "oneH") dayEntries[iso] = dayData.oneH || []
+                      else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
                       else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
                       else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
@@ -3487,6 +3540,12 @@ export default function CommonViewPage() {
                         return entries.map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             {e.title} ({initials(e.person || e.owner || "")})
+                          </div>
+                        ))
+                      } else if (row.id === "personal") {
+                        return entries.map((e: PersonalItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            {e.title} ({initials(e.person || "")})
                           </div>
                         ))
                       } else if (row.id === "external") {

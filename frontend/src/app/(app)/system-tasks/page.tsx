@@ -106,7 +106,7 @@ const FINISH_PERIOD_LABELS: Record<TaskFinishPeriod, string> = {
 const INTERNAL_NOTE_FIELDS = [
   { key: "REGJ", label: "REGJ", placeholder: "0" },
   { key: "PATH", label: "PATH", placeholder: "S:\\03_HOMEFACE\\04_PLAN PRODUTION\\2023" },
-  { key: "CHECK", label: "CHECK", placeholder: "S:\\03_HOMEFACE\\01_CHECKLISTA\\01_CHECKLISTA" },
+  { key: "CHECK", label: "CHECKLISTA", placeholder: "S:\\03_HOMEFACE\\01_CHECKLISTA\\01_CHECKLISTA" },
   { key: "TRAINING", label: "TRAINING", placeholder: "Z:\\03_HOMEFACE\\04_PLAN PRODUCTION" },
   { key: "BZ GROUP", label: "BZ GROUP", placeholder: "! BO PLAN PRODUCTION (PR 15:00 - H 10:00)" },
 ]
@@ -140,7 +140,7 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 // Define the grid layout once so header and body always match.
 // Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
 // MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
-const GRID_CLASS = "grid grid-cols-[52px_minmax(200px,1fr)_120px_120px_100px_90px_80px_70px] xl:grid-cols-[64px_1fr_150px_150px_120px_100px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
 
 type Section = {
   id: string
@@ -2394,24 +2394,26 @@ export function SystemTasksView({
           )}
         >
           {/* SCROLL WRAPPER for responsive table */}
-          <div className="overflow-x-auto">
-            {/* STICKY HEADER ROW - CHANGED TO STATIC to prevent floating issues */}
+          <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain">
+            {/* STICKY HEADER ROW */}
             <div className="min-w-[1000px] xl:min-w-0">
-              <div className="border-b bg-slate-50 py-3 px-4">
-                <div
-                  className={cn(
-                    GRID_CLASS,
-                    "text-[11px] font-bold uppercase tracking-wider text-slate-500"
-                  )}
-                >
-                  <div>No.</div>
-                  <div>Task Title</div>
-                  <div>Department</div>
-                  <div>Owner</div>
-                  <div>Frequency</div>
-                  <div>Finish by</div>
-                  <div>Priority</div>
-                  <div className="text-right">Actions</div>
+              <div className="sticky top-0 z-30 print:static">
+                <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4">
+                  <div
+                    className={cn(
+                      GRID_CLASS,
+                      "text-[11px] font-bold uppercase tracking-wider text-slate-500"
+                    )}
+                  >
+                    <div>No.</div>
+                    <div>Task Title</div>
+                    <div>Department</div>
+                    <div>Owner</div>
+                    <div>Frequency</div>
+                    <div>Finish by</div>
+                    <div>Priority</div>
+                    <div className="text-right">Actions</div>
+                  </div>
                 </div>
               </div>
 
