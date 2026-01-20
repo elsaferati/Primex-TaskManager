@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight, Plus } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -959,6 +959,12 @@ export default function PcmProjectPage() {
   const [vsVlAssigneeOpen, setVsVlAssigneeOpen] = React.useState<Record<string, boolean>>({})
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [vsVlAmazonCommentEdits, setVsVlAmazonCommentEdits] = React.useState<Record<string, string>>({})
+  const [showVsVlAddTask, setShowVsVlAddTask] = React.useState(false)
+  const [newVsVlDreamrobotRow, setNewVsVlDreamrobotRow] = React.useState({
+    task: "",
+    comment: "",
+    time: "",
+  })
   // VS/VL Checklist CRUD state
   const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({
     task: "",
@@ -2031,6 +2037,50 @@ export default function PcmProjectPage() {
     toast.success("Checklist row deleted")
   }
 
+  const addVsVlDreamrobotChecklistRow = async (path: string) => {
+    if (!project) return
+    const task = newVsVlDreamrobotRow.task.trim()
+    if (!task) {
+      toast.error("Task is required.")
+      return
+    }
+    setSavingVsVlChecklist(true)
+    try {
+      const existing = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === path
+      )
+      const maxPosition = existing.reduce((max, item) => Math.max(max, item.position ?? 0), 0)
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path,
+          title: task,
+          keyword: newVsVlDreamrobotRow.time.trim() || null,
+          description: newVsVlDreamrobotRow.comment.trim() || null,
+          category: path === VS_VL_DREAMROBOT_VS_CHECKLIST_PATH ? "DREAMROBOT_VS" : "DREAMROBOT_VL",
+          is_checked: false,
+          position: maxPosition + 1,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add checklist row")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev
+        return [...prev, created]
+      })
+      setNewVsVlDreamrobotRow({ task: "", comment: "", time: "" })
+      toast.success("Checklist row added")
+    } finally {
+      setSavingVsVlChecklist(false)
+    }
+  }
+
   const patchMeetingChecklistItem = async (
     itemId: string,
     payload: Partial<{ title: string; comment: string | null; is_checked: boolean }>
@@ -2880,24 +2930,6 @@ export default function PcmProjectPage() {
                   <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                 )}
               </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {VS_VL_PHASES.map((p) => {
-                const isActive = p === vsVlPhase
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setVsVlPhase(p)}
-                    className={[
-                      "rounded-full border px-3 py-1 transition-colors",
-                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {VS_VL_PHASE_LABELS[p]}
-                  </button>
-                )
-              })}
-            </div>
             <div className="text-sm text-muted-foreground">
               {VS_VL_PHASES.map((p, idx) => (
                 <span key={p}>
@@ -3012,6 +3044,46 @@ export default function PcmProjectPage() {
                         <div>TIME</div>
                         <div>KOMENT</div>
                         <div className="text-right">ACTIONS</div>
+                      </div>
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.task}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.comment}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.time}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VS_CHECKLIST_PATH)}
+                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                            className="h-7 text-xs"
+                          >
+                            {savingVsVlChecklist ? "..." : "Add"}
+                          </Button>
+                        </div>
                       </div>
                       <div className="divide-y max-h-[500px] overflow-y-auto">
                         {vsVlDreamrobotVsChecklistItems
@@ -3140,6 +3212,46 @@ export default function PcmProjectPage() {
                         <div>TIME</div>
                         <div>KOMENT</div>
                         <div className="text-right">ACTIONS</div>
+                      </div>
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.task}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.comment}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.time}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VL_CHECKLIST_PATH)}
+                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                            className="h-7 text-xs"
+                          >
+                            {savingVsVlChecklist ? "..." : "Add"}
+                          </Button>
+                        </div>
                       </div>
                       <div className="divide-y max-h-[500px] overflow-y-auto">
                         {vsVlDreamrobotVlChecklistItems
@@ -3745,12 +3857,24 @@ export default function PcmProjectPage() {
             <div className="p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-base font-semibold">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-                <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
-                  {VS_VL_PHASE_LABELS[vsVlPhase]}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
+                    {VS_VL_PHASE_LABELS[vsVlPhase]}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setShowVsVlAddTask((prev) => !prev)}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add task
+                  </Button>
+                </div>
               </div>
               
               {/* Compact Add Task Form */}
+              {showVsVlAddTask && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
@@ -3826,6 +3950,7 @@ export default function PcmProjectPage() {
                         setVsVlTaskDependencyId("__none__")
                         setVsVlTaskChecklist("")
                         setVsVlTaskComment("")
+                        setShowVsVlAddTask(false)
                         toast.success("Task added")
                       } finally {
                         setCreatingVsVlTask(false)
@@ -3843,6 +3968,7 @@ export default function PcmProjectPage() {
                   className="text-xs border-slate-300 bg-white resize-none"
                 />
               </div>
+              )}
               
               <div className="space-y-2">
                 {orderedVsVlTasks.length ? (
@@ -3963,26 +4089,52 @@ export default function PcmProjectPage() {
                               disabled={isLocked || !isEditing}
                             />
                           </div>
-                          <Badge
-                            className={`text-[10px] px-1.5 py-0 h-5 flex-shrink-0 ${
+                          <Select
+                            value={(task.priority || "NORMAL").toUpperCase()}
+                            onValueChange={(value) => {
+                              if (isLocked || !isEditing) return
+                              const nextPriority = (value || "NORMAL").toUpperCase()
+                              if (nextPriority === (task.priority || "NORMAL").toUpperCase()) return
+                              void patchTask(task.id, { priority: nextPriority }, "Failed to update priority")
+                            }}
+                            disabled={isLocked || !isEditing}
+                          >
+                          <SelectTrigger
+                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
                               task.priority === "HIGH"
-                                ? "bg-rose-500 text-white"
-                                : "bg-slate-100 text-slate-700"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-slate-50 text-slate-700 border-slate-200"
                             }`}
                           >
-                            {vsVlPriorityLabel(task.priority)}
-                          </Badge>
+                            <SelectValue />
+                          </SelectTrigger>
+                            <SelectContent>
+                              {TASK_PRIORITIES.map((priority) => (
+                                <SelectItem key={priority} value={priority}>
+                                  {vsVlPriorityLabel(priority)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Select
                             value={task.status || "TODO"}
                             onValueChange={(value) => {
-                              if (isLocked) return
+                              if (isLocked || !isEditing) return
                               void patchTask(task.id, { status: value }, "Failed to update status")
                             }}
-                            disabled={isLocked}
+                            disabled={isLocked || !isEditing}
                           >
-                            <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
-                              <SelectValue />
-                            </SelectTrigger>
+                          <SelectTrigger
+                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
+                              task.status === "DONE"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : task.status === "IN_PROGRESS"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-slate-50 text-slate-700 border-slate-200"
+                            }`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
                             <SelectContent>
                               {TASK_STATUSES.map((status) => (
                                 <SelectItem key={status} value={status}>
