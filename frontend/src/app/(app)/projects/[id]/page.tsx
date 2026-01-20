@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, Department, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, User } from "@/lib/types"
@@ -2576,7 +2576,7 @@ export default function ProjectPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Description</Label>
-                    <Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} />
+                    <BoldOnlyEditor value={newDescription} onChange={setNewDescription} />
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
@@ -2692,7 +2692,7 @@ export default function ProjectPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Description</Label>
-                    <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                    <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
