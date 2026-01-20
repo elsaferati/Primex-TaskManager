@@ -199,6 +199,12 @@ export default function CommonViewPage() {
   >(new Map())
   const [externalMeetingChecklistOpen, setExternalMeetingChecklistOpen] = React.useState(false)
   const [externalMeetingChecklistLoading, setExternalMeetingChecklistLoading] = React.useState(false)
+  const [externalChecklistEditingId, setExternalChecklistEditingId] = React.useState<string | null>(null)
+  const [externalChecklistEditTitle, setExternalChecklistEditTitle] = React.useState("")
+  const [externalChecklistSavingId, setExternalChecklistSavingId] = React.useState<string | null>(null)
+  const [externalChecklistDeletingId, setExternalChecklistDeletingId] = React.useState<string | null>(null)
+  const [externalChecklistAddTitle, setExternalChecklistAddTitle] = React.useState("")
+  const [externalChecklistAdding, setExternalChecklistAdding] = React.useState(false)
   const [editingRowId, setEditingRowId] = React.useState<string | null>(null)
   const [editDraft, setEditDraft] = React.useState({
     day: "",
@@ -311,50 +317,111 @@ export default function CommonViewPage() {
   }, [externalMeetings])
   const userById = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   
+  const reloadExternalChecklist = React.useCallback(async () => {
+    setExternalMeetingChecklistLoading(true)
+    try {
+      const res = await apiFetch("/checklists?group_key=external&include_items=true")
+      if (!res?.ok) return
+      const data = (await res.json()) as MeetingChecklist[]
+      const checklist = data.length > 0 ? data[0] : null
+      setExternalMeetingChecklist(checklist)
+      const itemsMap = new Map<string, boolean>()
+      if (checklist?.items) {
+        for (const item of checklist.items) {
+          itemsMap.set(item.id, item.is_checked ?? false)
+        }
+      }
+      setExternalMeetingChecklistItems(itemsMap)
+    } catch (err) {
+      console.error("Failed to load external meeting checklist", err)
+    } finally {
+      setExternalMeetingChecklistLoading(false)
+    }
+  }, [apiFetch])
+
   // Load external meeting checklist when panel opens
   React.useEffect(() => {
     if (!externalMeetingsOpen) return
-    let mounted = true
-    async function loadExternalChecklist() {
-      setExternalMeetingChecklistLoading(true)
+    void reloadExternalChecklist()
+  }, [externalMeetingsOpen, reloadExternalChecklist])
+
+  const startEditExternalChecklistItem = React.useCallback(
+    (itemId: string, currentTitle: string) => {
+      setExternalChecklistEditingId(itemId)
+      setExternalChecklistEditTitle(currentTitle || "")
+    },
+    []
+  )
+
+  const cancelEditExternalChecklistItem = React.useCallback(() => {
+    setExternalChecklistEditingId(null)
+    setExternalChecklistEditTitle("")
+  }, [])
+
+  const saveExternalChecklistItemTitle = React.useCallback(
+    async (itemId: string) => {
+      if (!isAdmin) return
+      const nextTitle = externalChecklistEditTitle.trim()
+      if (!nextTitle) return
+      setExternalChecklistSavingId(itemId)
       try {
-        const res = await apiFetch("/checklists?group_key=external&include_items=true")
-        if (!res?.ok) {
-          if (mounted) {
-            setExternalMeetingChecklistLoading(false)
-          }
-          return
-        }
-        const data = (await res.json()) as MeetingChecklist[]
-        if (mounted) {
-          setExternalMeetingChecklistLoading(false)
-          if (data.length > 0) {
-            const checklist = data[0]
-            setExternalMeetingChecklist(checklist)
-            const itemsMap = new Map<string, boolean>()
-            if (checklist.items) {
-              for (const item of checklist.items) {
-                itemsMap.set(item.id, item.is_checked ?? false)
-              }
-            }
-            setExternalMeetingChecklistItems(itemsMap)
-          } else {
-            setExternalMeetingChecklist(null)
-            setExternalMeetingChecklistItems(new Map())
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load external meeting checklist", err)
-        if (mounted) {
-          setExternalMeetingChecklistLoading(false)
-        }
+        const res = await apiFetch(`/checklist-items/${itemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: nextTitle }),
+        })
+        if (!res?.ok) return
+        await reloadExternalChecklist()
+        setExternalChecklistEditingId(null)
+        setExternalChecklistEditTitle("")
+      } finally {
+        setExternalChecklistSavingId(null)
       }
+    },
+    [apiFetch, externalChecklistEditTitle, isAdmin, reloadExternalChecklist]
+  )
+
+  const deleteExternalChecklistItem = React.useCallback(
+    async (itemId: string) => {
+      if (!isAdmin) return
+      const confirmed = window.confirm("Delete this checklist item?")
+      if (!confirmed) return
+      setExternalChecklistDeletingId(itemId)
+      try {
+        const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+        if (!res?.ok) return
+        await reloadExternalChecklist()
+      } finally {
+        setExternalChecklistDeletingId(null)
+      }
+    },
+    [apiFetch, isAdmin, reloadExternalChecklist]
+  )
+
+  const addExternalChecklistItem = React.useCallback(async () => {
+    if (!isAdmin) return
+    const checklistId = externalMeetingChecklist?.id
+    const title = externalChecklistAddTitle.trim()
+    if (!checklistId || !title) return
+    setExternalChecklistAdding(true)
+    try {
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checklist_id: checklistId,
+          item_type: "CHECKBOX",
+          title,
+          is_checked: false,
+        }),
+      })
+      if (!res?.ok) return
+      setExternalChecklistAddTitle("")
+      await reloadExternalChecklist()
+    } finally {
+      setExternalChecklistAdding(false)
     }
-    void loadExternalChecklist()
-    return () => {
-      mounted = false
-    }
-  }, [externalMeetingsOpen, apiFetch])
+  }, [apiFetch, externalChecklistAddTitle, externalMeetingChecklist?.id, isAdmin, reloadExternalChecklist])
 
   // Reset checklist when panel closes
   React.useEffect(() => {
@@ -3544,35 +3611,119 @@ export default function CommonViewPage() {
                             {externalMeetingChecklist.items
                               .slice()
                               .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                              .map((item) => {
+                              .map((item, idx) => {
                                 const isChecked = externalMeetingChecklistItems.get(item.id) ?? false
                                 return (
-                                  <label
+                                  <div
                                     key={item.id}
                                     style={{
                                       display: "flex",
                                       alignItems: "flex-start",
                                       gap: "8px",
-                                      cursor: "pointer",
                                       padding: "8px",
                                       borderRadius: "4px",
                                       backgroundColor: isChecked ? "#f0fdf4" : "transparent",
                                       transition: "background-color 0.2s",
                                     }}
                                   >
+                                    <span
+                                      style={{
+                                        width: "22px",
+                                        flexShrink: 0,
+                                        fontSize: "12px",
+                                        fontWeight: 700,
+                                        color: "#475569",
+                                        textAlign: "right",
+                                        marginTop: "2px",
+                                      }}
+                                    >
+                                      {idx + 1}.
+                                    </span>
                                     <input
                                       type="checkbox"
                                       checked={isChecked}
                                       onChange={() => void toggleChecklistItem(item.id)}
                                       style={{ marginTop: "2px", cursor: "pointer" }}
                                     />
-                                    <span style={{ flex: 1, fontSize: "13px", lineHeight: "1.5", color: "#334155" }}>
-                                      {item.title || ""}
-                                    </span>
-                                  </label>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      {isAdmin && externalChecklistEditingId === item.id ? (
+                                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                          <input
+                                            className="input"
+                                            type="text"
+                                            value={externalChecklistEditTitle}
+                                            onChange={(e) => setExternalChecklistEditTitle(e.target.value)}
+                                            style={{ flex: 1 }}
+                                          />
+                                          <button
+                                            className="btn-surface"
+                                            type="button"
+                                            onClick={() => void saveExternalChecklistItemTitle(item.id)}
+                                            disabled={externalChecklistSavingId === item.id || !externalChecklistEditTitle.trim()}
+                                          >
+                                            Save
+                                          </button>
+                                          <button
+                                            className="btn-surface"
+                                            type="button"
+                                            onClick={() => cancelEditExternalChecklistItem()}
+                                            disabled={externalChecklistSavingId === item.id}
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <span style={{ fontSize: "13px", lineHeight: "1.5", color: "#334155" }}>
+                                          {item.title || ""}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {isAdmin ? (
+                                      <div style={{ display: "flex", gap: "6px", marginLeft: "8px" }}>
+                                        <button
+                                          className="btn-surface"
+                                          type="button"
+                                          onClick={() => startEditExternalChecklistItem(item.id, item.title || "")}
+                                          disabled={externalChecklistDeletingId === item.id || externalChecklistSavingId === item.id}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          className="btn-surface"
+                                          type="button"
+                                          onClick={() => void deleteExternalChecklistItem(item.id)}
+                                          disabled={externalChecklistDeletingId === item.id || externalChecklistSavingId === item.id}
+                                        >
+                                          {externalChecklistDeletingId === item.id ? "Deleting..." : "Delete"}
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 )
                               })}
                           </div>
+                          {isAdmin ? (
+                            <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+                              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                <input
+                                  className="input"
+                                  type="text"
+                                  placeholder="Add new checklist item..."
+                                  value={externalChecklistAddTitle}
+                                  onChange={(e) => setExternalChecklistAddTitle(e.target.value)}
+                                  style={{ flex: 1 }}
+                                />
+                                <button
+                                  className="btn-surface"
+                                  type="button"
+                                  onClick={() => void addExternalChecklistItem()}
+                                  disabled={externalChecklistAdding || !externalChecklistAddTitle.trim() || !externalMeetingChecklist?.id}
+                                >
+                                  {externalChecklistAdding ? "Adding..." : "Add"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <div style={{ padding: "12px", textAlign: "center", color: "#dc2626", fontSize: "13px", border: "1px solid #fecaca", borderRadius: "4px", backgroundColor: "#fef2f2" }}>
