@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight, Plus } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -959,6 +959,7 @@ export default function PcmProjectPage() {
   const [vsVlAssigneeOpen, setVsVlAssigneeOpen] = React.useState<Record<string, boolean>>({})
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [vsVlAmazonCommentEdits, setVsVlAmazonCommentEdits] = React.useState<Record<string, string>>({})
+  const [showVsVlAddTask, setShowVsVlAddTask] = React.useState(false)
   // VS/VL Checklist CRUD state
   const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({
     task: "",
@@ -2880,24 +2881,6 @@ export default function PcmProjectPage() {
                   <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                 )}
               </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {VS_VL_PHASES.map((p) => {
-                const isActive = p === vsVlPhase
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setVsVlPhase(p)}
-                    className={[
-                      "rounded-full border px-3 py-1 transition-colors",
-                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {VS_VL_PHASE_LABELS[p]}
-                  </button>
-                )
-              })}
-            </div>
             <div className="text-sm text-muted-foreground">
               {VS_VL_PHASES.map((p, idx) => (
                 <span key={p}>
@@ -3745,12 +3728,24 @@ export default function PcmProjectPage() {
             <div className="p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-base font-semibold">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-                <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
-                  {VS_VL_PHASE_LABELS[vsVlPhase]}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
+                    {VS_VL_PHASE_LABELS[vsVlPhase]}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setShowVsVlAddTask((prev) => !prev)}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add task
+                  </Button>
+                </div>
               </div>
               
               {/* Compact Add Task Form */}
+              {showVsVlAddTask && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
@@ -3826,6 +3821,7 @@ export default function PcmProjectPage() {
                         setVsVlTaskDependencyId("__none__")
                         setVsVlTaskChecklist("")
                         setVsVlTaskComment("")
+                        setShowVsVlAddTask(false)
                         toast.success("Task added")
                       } finally {
                         setCreatingVsVlTask(false)
@@ -3843,6 +3839,7 @@ export default function PcmProjectPage() {
                   className="text-xs border-slate-300 bg-white resize-none"
                 />
               </div>
+              )}
               
               <div className="space-y-2">
                 {orderedVsVlTasks.length ? (
@@ -3963,22 +3960,34 @@ export default function PcmProjectPage() {
                               disabled={isLocked || !isEditing}
                             />
                           </div>
-                          <Badge
-                            className={`text-[10px] px-1.5 py-0 h-5 flex-shrink-0 ${
-                              task.priority === "HIGH"
-                                ? "bg-rose-500 text-white"
-                                : "bg-slate-100 text-slate-700"
-                            }`}
+                          <Select
+                            value={(task.priority || "NORMAL").toUpperCase()}
+                            onValueChange={(value) => {
+                              if (isLocked || !isEditing) return
+                              const nextPriority = (value || "NORMAL").toUpperCase()
+                              if (nextPriority === (task.priority || "NORMAL").toUpperCase()) return
+                              void patchTask(task.id, { priority: nextPriority }, "Failed to update priority")
+                            }}
+                            disabled={isLocked || !isEditing}
                           >
-                            {vsVlPriorityLabel(task.priority)}
-                          </Badge>
+                            <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_PRIORITIES.map((priority) => (
+                                <SelectItem key={priority} value={priority}>
+                                  {vsVlPriorityLabel(priority)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Select
                             value={task.status || "TODO"}
                             onValueChange={(value) => {
-                              if (isLocked) return
+                              if (isLocked || !isEditing) return
                               void patchTask(task.id, { status: value }, "Failed to update status")
                             }}
-                            disabled={isLocked}
+                            disabled={isLocked || !isEditing}
                           >
                             <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
                               <SelectValue />
