@@ -1,30 +1,19 @@
 name: Primex Auto Deploy
- 
 on:
-  push:
-    branches: [ main ] # Sigurohu që emri i branch-it tënd është 'main'
- 
+  push:    branches: [ main ] # Sigurohu që emri i branch-it tënd është 'main'
 jobs:
-  deploy:
-    runs-on: self-hosted
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
- 
-      - name: Update Backend
-        shell: cmd
-        run: |
-          cd backend
-          python -m pip install -r requirements.txt
- 
+  deploy:    runs-on: self-hosted
+    steps:      - name: Checkout Code
+        uses: actions/checkout@v3- name: Update Backend
+        shell: cmd        run: |          cd backend          python -m pip install -r requirements.txt
+
       - name: Update Frontend
-        shell: cmd
-        run: |
+        shell: cmd        run: |
           cd frontend
           npm install
           npm run build
- 
-      - name: Start/Restart Services with PM2
+
+      - name: Start Services with PM2
         shell: cmd
         run: |
           pm2 delete all || ver > nul
