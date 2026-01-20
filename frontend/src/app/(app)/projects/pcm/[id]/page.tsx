@@ -960,6 +960,11 @@ export default function PcmProjectPage() {
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [vsVlAmazonCommentEdits, setVsVlAmazonCommentEdits] = React.useState<Record<string, string>>({})
   const [showVsVlAddTask, setShowVsVlAddTask] = React.useState(false)
+  const [newVsVlDreamrobotRow, setNewVsVlDreamrobotRow] = React.useState({
+    task: "",
+    comment: "",
+    time: "",
+  })
   // VS/VL Checklist CRUD state
   const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({
     task: "",
@@ -2032,6 +2037,50 @@ export default function PcmProjectPage() {
     toast.success("Checklist row deleted")
   }
 
+  const addVsVlDreamrobotChecklistRow = async (path: string) => {
+    if (!project) return
+    const task = newVsVlDreamrobotRow.task.trim()
+    if (!task) {
+      toast.error("Task is required.")
+      return
+    }
+    setSavingVsVlChecklist(true)
+    try {
+      const existing = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === path
+      )
+      const maxPosition = existing.reduce((max, item) => Math.max(max, item.position ?? 0), 0)
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path,
+          title: task,
+          keyword: newVsVlDreamrobotRow.time.trim() || null,
+          description: newVsVlDreamrobotRow.comment.trim() || null,
+          category: path === VS_VL_DREAMROBOT_VS_CHECKLIST_PATH ? "DREAMROBOT_VS" : "DREAMROBOT_VL",
+          is_checked: false,
+          position: maxPosition + 1,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add checklist row")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev
+        return [...prev, created]
+      })
+      setNewVsVlDreamrobotRow({ task: "", comment: "", time: "" })
+      toast.success("Checklist row added")
+    } finally {
+      setSavingVsVlChecklist(false)
+    }
+  }
+
   const patchMeetingChecklistItem = async (
     itemId: string,
     payload: Partial<{ title: string; comment: string | null; is_checked: boolean }>
@@ -2996,6 +3045,46 @@ export default function PcmProjectPage() {
                         <div>KOMENT</div>
                         <div className="text-right">ACTIONS</div>
                       </div>
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.task}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.comment}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.time}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VS_CHECKLIST_PATH)}
+                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                            className="h-7 text-xs"
+                          >
+                            {savingVsVlChecklist ? "..." : "Add"}
+                          </Button>
+                        </div>
+                      </div>
                       <div className="divide-y max-h-[500px] overflow-y-auto">
                         {vsVlDreamrobotVsChecklistItems
                           .slice()
@@ -3123,6 +3212,46 @@ export default function PcmProjectPage() {
                         <div>TIME</div>
                         <div>KOMENT</div>
                         <div className="text-right">ACTIONS</div>
+                      </div>
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.task}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.comment}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        <div>
+                          <Input
+                            value={newVsVlDreamrobotRow.time}
+                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VL_CHECKLIST_PATH)}
+                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                            className="h-7 text-xs"
+                          >
+                            {savingVsVlChecklist ? "..." : "Add"}
+                          </Button>
+                        </div>
                       </div>
                       <div className="divide-y max-h-[500px] overflow-y-auto">
                         {vsVlDreamrobotVlChecklistItems
@@ -3970,9 +4099,15 @@ export default function PcmProjectPage() {
                             }}
                             disabled={isLocked || !isEditing}
                           >
-                            <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
-                              <SelectValue />
-                            </SelectTrigger>
+                          <SelectTrigger
+                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
+                              task.priority === "HIGH"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-slate-50 text-slate-700 border-slate-200"
+                            }`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
                             <SelectContent>
                               {TASK_PRIORITIES.map((priority) => (
                                 <SelectItem key={priority} value={priority}>
@@ -3989,9 +4124,17 @@ export default function PcmProjectPage() {
                             }}
                             disabled={isLocked || !isEditing}
                           >
-                            <SelectTrigger className="h-7 min-w-[90px] text-xs px-2 flex-shrink-0">
-                              <SelectValue />
-                            </SelectTrigger>
+                          <SelectTrigger
+                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
+                              task.status === "DONE"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : task.status === "IN_PROGRESS"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-slate-50 text-slate-700 border-slate-200"
+                            }`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
                             <SelectContent>
                               {TASK_STATUSES.map((status) => (
                                 <SelectItem key={status} value={status}>
