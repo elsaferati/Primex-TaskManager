@@ -1,56 +1,33 @@
 name: Primex Auto Deploy
  
 on:
-
   push:
-
     branches: [ main ]
  
 jobs:
-
   deploy:
-
     runs-on: self-hosted
-
     steps:
-
       - name: Checkout Code
-
         uses: actions/checkout@v3
  
       - name: Update Backend
-
         shell: cmd
-
         run: |
-
           cd backend
-
-          python -m pip install -r requirements.txt
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
  
       - name: Update Frontend
-
         shell: cmd
-
         run: |
-
           cd frontend
-
           npm install
-
           npm run build
  
       - name: Start Services with PM2
-
         shell: cmd
-
         run: |
-
           pm2 delete all || ver > nul
-
-          pm2 start "uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend
-
+          pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend
           pm2 start "npm.cmd run start -- -p 3000" --name frontend
-
           pm2 save
- 
