@@ -2670,33 +2670,7 @@ export default function DepartmentKanban() {
                   <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Meetings</h2>
                 </div>
 
-                <div className="grid gap-8 lg:grid-cols-2">
-                  {/* Internal Sync */}
-                  <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
-                    <div className="relative z-10">
-                      <h3 className="text-lg font-medium text-slate-900 dark:text-white">Internal Sync</h3>
-                      <p className="text-sm text-slate-500">Daily routine checks.</p>
-
-                      <div className="mt-6 mb-8 flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                        {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map(slot => (
-                          <button key={slot} onClick={() => setInternalSlot(slot)} className={`flex-1 rounded-lg py-2 text-xs font-medium transition-all ${internalSlot === slot ? "bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-900"}`}>{slot}</button>
-                        ))}
-                      </div>
-
-                      <div className="space-y-4">
-                        <h4 className="font-medium text-emerald-600 dark:text-emerald-400">{INTERNAL_MEETING.slots[internalSlot].label}</h4>
-                        <ul className="space-y-3">
-                          {INTERNAL_MEETING.slots[internalSlot].items.map((item, i) => (
-                            <li key={i} className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400">{i + 1}</span>
-                              <span className="leading-relaxed">{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-
+                <div className="grid gap-8">
                   {/* Scheduled */}
                   <div className="relative overflow-hidden rounded-3xl bg-white/70 p-8 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900/60 dark:ring-slate-800">
                     <div className="flex items-center justify-between mb-4">
