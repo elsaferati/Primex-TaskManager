@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { toast } from "sonner"
+import { Pencil, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -259,6 +260,21 @@ export default function GaKaTasksPage() {
     FINISH_PERIOD_NONE_VALUE
   )
 
+  // Edit task state
+  const [editOpen, setEditOpen] = React.useState(false)
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
+  const [editTitle, setEditTitle] = React.useState("")
+  const [editDescription, setEditDescription] = React.useState("")
+  const [editDueDate, setEditDueDate] = React.useState("")
+  const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
+  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
+  const [savingEdit, setSavingEdit] = React.useState(false)
+  const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
+
+  const isAdmin = user?.role === "ADMIN"
+
   const load = React.useCallback(async () => {
     setLoadingTasks(true)
     try {
@@ -417,6 +433,74 @@ export default function GaKaTasksPage() {
       }),
     [filteredTasks]
   )
+
+  const startEditTask = (task: Task) => {
+    setEditingTaskId(task.id)
+    setEditTitle(task.title || "")
+    setEditDescription(task.description || "")
+    setEditDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setEditPriority((task.priority || "NORMAL") as TaskPriority)
+    setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    setEditOpen(true)
+  }
+
+  const saveEditTask = async () => {
+    if (!editingTaskId || !editTitle.trim()) return
+    setSavingEdit(true)
+    try {
+      const dueDateValue = editDueDate ? new Date(editDueDate).toISOString() : null
+      const payload = {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        priority: editPriority,
+        due_date: dueDateValue,
+        finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
+      }
+      const res = await apiFetch(`/tasks/${editingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setEditOpen(false)
+      setEditingTaskId(null)
+      toast.success("Task updated")
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const deleteTask = async (taskId: string) => {
+    if (!confirm("Are you sure you want to delete this task?")) return
+    setDeletingTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res?.ok) {
+        if (res?.status === 405) {
+          toast.error("Delete endpoint not active. Restart backend.")
+        } else {
+          toast.error("Failed to delete task")
+        }
+        return
+      }
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+      toast.success("Task deleted")
+    } finally {
+      setDeletingTaskId(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -583,40 +667,95 @@ export default function GaKaTasksPage() {
               {loadingTasks ? (
                 <div className="text-sm text-muted-foreground">Loading tasks...</div>
               ) : sortedTasks.length ? (
-                <div className="space-y-2">
-                  {sortedTasks.map((task) => {
-                    const department = task.department_id ? departmentMap.get(task.department_id) : null
-                    const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                    const assigneeEmail = assignee && "email" in assignee ? assignee.email || "" : ""
-                    const assigneeLabel = assignee?.full_name || assignee?.username || assigneeEmail || "-"
-                    return (
-                      <Link
-                        key={task.id}
-                        href={`/tasks/${task.id}`}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm hover:border-slate-300"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold text-slate-900">{task.title}</span>
-                            {task.status ? (
-                              <Badge variant="secondary" className="uppercase">
-                                {task.status}
-                              </Badge>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200">
+                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Task Title
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Priority
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Due Date
+                        </th>
+                        {isAdmin ? (
+                          <th className="text-right py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Actions
+                          </th>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {sortedTasks.map((task) => {
+                        const department = task.department_id ? departmentMap.get(task.department_id) : null
+                        const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                        return (
+                          <tr
+                            key={task.id}
+                            className="hover:bg-slate-50 transition-colors"
+                          >
+                            <td className="py-3 px-4">
+                              <Link
+                                href={`/tasks/${task.id}`}
+                                className="font-semibold text-slate-900 hover:text-blue-600"
+                              >
+                                {task.title}
+                              </Link>
+                            </td>
+                            <td className="py-3 px-4">
+                              {task.status ? (
+                                <Badge variant="secondary" className="uppercase">
+                                  {task.status}
+                                </Badge>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {task.priority ? (
+                                <Badge variant="outline" className="border-slate-200 text-slate-700">
+                                  {task.priority}
+                                </Badge>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="text-sm text-slate-700">{formatDate(task.due_date)}</span>
+                            </td>
+                            {isAdmin ? (
+                              <td className="py-3 px-4">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                    onClick={() => startEditTask(task)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                    disabled={deletingTaskId === task.id}
+                                    onClick={() => void deleteTask(task.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </td>
                             ) : null}
-                            {task.priority ? (
-                              <Badge variant="outline" className="border-slate-200 text-slate-700">
-                                {task.priority}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            Department: {department ? formatDepartmentName(department.name) : "-"} - Assignee: {assigneeLabel}
-                          </div>
-                        </div>
-                        <div className="text-xs text-muted-foreground">Due: {formatDate(task.due_date)}</div>
-                      </Link>
-                    )
-                  })}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">No tasks found.</div>
@@ -625,6 +764,72 @@ export default function GaKaTasksPage() {
           </Card>
         ) : null}
       </div>
+
+      {/* Edit Task Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Task</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Title</Label>
+              <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+            </div>
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select value={editPriority} onValueChange={(value) => setEditPriority(value as TaskPriority)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIORITY_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Finish period</Label>
+                <Select
+                  value={editFinishPeriod}
+                  onValueChange={(value) =>
+                    setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Due date (optional)</Label>
+                <Input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={savingEdit || !editTitle.trim()} onClick={() => void saveEditTask()}>
+                {savingEdit ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {viewFilter !== "tasks" ? (
         <SystemTasksView
