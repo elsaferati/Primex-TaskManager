@@ -410,11 +410,22 @@ async def update_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    if task.department_id is not None:
+    
+    # For system task status updates, allow admins and managers to bypass department check
+    is_system_task_status_update = (
+        task.system_template_origin_id is not None
+        and payload.status is not None
+        and user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    )
+    
+    if task.department_id is not None and not is_system_task_status_update:
         ensure_department_access(user, task.department_id)
 
     if payload.status is not None and task.system_template_origin_id is not None:
         if task.assigned_to == user.id:
+            pass
+        elif user.role in (UserRole.ADMIN, UserRole.MANAGER):
+            # Allow admins and managers to update system task status
             pass
         else:
             status_assignment = (
