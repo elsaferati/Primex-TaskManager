@@ -140,7 +140,7 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 // Define the grid layout once so header and body always match.
 // Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
 // MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
-const GRID_CLASS = "grid grid-cols-[52px_minmax(200px,1fr)_120px_120px_100px_90px_80px_70px] xl:grid-cols-[64px_1fr_150px_150px_120px_100px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
 
 type Section = {
   id: string
