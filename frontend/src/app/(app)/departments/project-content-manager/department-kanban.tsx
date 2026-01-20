@@ -41,7 +41,37 @@ const PHASE_LABELS: Record<string, string> = {
   DEVELOPMENT: "Development",
   TESTING: "Testing",
   DOCUMENTATION: "Documentation",
+  PRODUCT: "Product",
+  CONTROL: "Control",
+  FINAL: "Final",
+  AMAZON: "Amazon",
+  CHECK: "Check",
+  DREAMROBOT: "Dreamrobot",
   CLOSED: "Closed",
+}
+
+// Get project-specific phases based on project type
+function getProjectPhases(project: Project): string[] {
+  const projectType = project.project_type
+  const title = (project.title || project.name || "").toUpperCase()
+
+  // MST and TT projects (both use MST phases)
+  if (projectType === "MST" || title.includes("MST") || title === "TT" || title.startsWith("TT ")) {
+    return ["PLANNING", "PRODUCT", "CONTROL", "FINAL", "CLOSED"]
+  }
+
+  // VS/VL projects
+  if (title.includes("VS") || title.includes("VL")) {
+    return ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT", "CLOSED"]
+  }
+
+  // General/Development projects
+  if (projectType === "GENERAL") {
+    return ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"]
+  }
+
+  // Default fallback (Development phases)
+  return ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"]
 }
 
 const WEEKDAYS_SQ = [
@@ -834,7 +864,11 @@ export default function DepartmentKanban() {
   }, [todayDate])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
-    let next = projects
+    let next = projects.filter((p) => {
+      // Exclude General projects
+      const title = (p.title || p.name || "").toUpperCase()
+      return p.project_type !== "GENERAL" && title !== "GENERAL"
+    })
     if (showTemplates) {
       next = next.filter((p) => p.is_template)
     }
@@ -2159,10 +2193,10 @@ export default function DepartmentKanban() {
           </div>
         </div>
       </div>
-      <div className="p-6 print:hidden">
+      <div className="px-6 pb-6 print:hidden">
         {activeTab === "projects" ? (
             <div className="space-y-4">
-              <div className="sticky top-[200px] z-[90] -mx-6 border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+<div className="sticky top-[200px] z-[90] -mx-6 rounded-b-2xl border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="text-lg font-semibold">Active Projects</div>
@@ -2328,6 +2362,7 @@ export default function DepartmentKanban() {
                 {filteredProjects.map((project) => {
                   const manager = project.manager_id ? userMap.get(project.manager_id) : null
                   const phase = project.current_phase || "MEETINGS"
+                  const projectPhases = getProjectPhases(project)
                   const membersForProject = projectMembers[project.id] || []
                   const memberColors = [
                     "bg-slate-100 text-slate-700",
@@ -2371,14 +2406,14 @@ export default function DepartmentKanban() {
                         </div>
                       </div>
                       <div className="mt-2 text-[11px] text-muted-foreground">
-                        {PHASES.map((p, idx) => {
+                        {projectPhases.map((p, idx) => {
                           const isCurrent = p === phase
                           return (
                             <span key={p}>
                               <span className={isCurrent ? "text-rose-600 font-semibold" : ""}>
-                                {PHASE_LABELS[p]}
+                                {PHASE_LABELS[p] || p}
                               </span>
-                              {idx < PHASES.length - 1 ? " -> " : ""}
+                              {idx < projectPhases.length - 1 ? " -> " : ""}
                             </span>
                           )
                         })}
