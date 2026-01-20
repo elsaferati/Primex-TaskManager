@@ -654,6 +654,103 @@ const VS_VL_TASK_TITLES = {
   dreamWeights: normalizeTaskTitle("KALKULIMI I PESHAVE"),
 }
 
+const VS_VL_AMAZON_CHECKLIST_PATH = "VS_VL_AMAZON_CHECKLIST"
+const VS_VL_IMAGES_CHECKLIST_PATH = "VS_VL_IMAGES_CHECKLIST"
+
+const VS_VL_AMAZON_CHECKLIST_NOTES = [
+  "WHEN SOMETHING CHANGES FOR PARENTS, CHANGE IT FOR CHILDREN TOO",
+  "FIRST ADJUST THE NAME THEN KEYWORDS",
+  "WE CAN'T USE NEVER WORD PROSECCO. WE SHOULD ALWAYS UPDATE WITH SCHAUMWEIN or FRIZZANTE",
+  "Do not add volume (e.g. 0.75 l) to child product names. Only add volume to the parent if there are duplicates.",
+  "Do not mention \"Holzkiste\" (or \"HK\") in the product name, and don't put photo with wooden cask (Holzkisten).",
+  "Check Dropdowns on \"Gültige Werte\" Sheet on Amazon Template",
+  "Always use VLOOKUP to connect, not copy-paste, because the order of article numbers can change, and using copy-paste may lead to errors",
+  "The term '1er Grand Cru Classé' is used for first-class wines, so it is not related to the quantity of the wine. Do not delete 03, 06, 12 in this case",
+  "Food should not appear anywhere. In no title. Even if it is food like olives or anything like that",
+]
+
+interface VsVlChecklistRow {
+  task: string
+  comment: string
+  time: string
+  automatizohet?: string
+}
+
+const VS_VL_AMAZON_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
+  { task: "Fill data for missing Attributes in Produktdaten file (Ausbau, Beurteilung, Servierempfehlung, Temperature, Story, Geschmack)", comment: "Search for information on different websites: Wein Wolf, Vinello, and also on ChatGPT. Search by product name and producent (marke).", time: "1 H", automatizohet: "" },
+  { task: "Transfer the missing data into the automated Excel file (with vlookup) and add for 4 child products.", comment: "", time: "2.5 H", automatizohet: "PO" },
+  { task: "Check the Geschmack", comment: "If there is a Geschmack that isn't available in the dropdown, use ChatGPT to find the closest match.", time: "30 min", automatizohet: "" },
+  { task: "Check how many characters the STORY has.", comment: "By adding an empty column after the Story column and using the LEN formula, it must not have more than 500 characters.", time: "2 min", automatizohet: "" },
+  { task: "Check if there are any repeated words in Ausbau.", comment: "Delete if you find duplicate words", time: "15 min", automatizohet: "" },
+  { task: "Price Calculation (normal price / feinkost price)", comment: "Create an excel file with two columns, in column A put Artikel Nr. only for parents and in column B put the price you find in Produktdaten. When we have same article numbers, we should use the highest price.", time: "10 min", automatizohet: "PO" },
+  { task: "Price for 01- products, should always be -3 Euro for products with price under 50 Euro", comment: "Filter 01- products, and to price column, check for products with price under 50 Euro, and minus them (-3 Euro)", time: "10 min", automatizohet: "PO" },
+  { task: "Fill in column K by looking at the category in column (AV). For Wein Wolf projekt ONLY BLANKS", comment: "IDs can be found in the Browse Nodes Amazon Excel file. Path: Y:\\20_VS\\99_TEMPLATE\\General", time: "1.5 H", automatizohet: "" },
+  { task: "If the product is beer, write \"beer\" in column A. If the product is sirup, write \"grocery\" in column A.", comment: "", time: "", automatizohet: "" },
+  { task: "Check column A for wine and spirits", comment: "If column AV mentions 'wein', put 'wine' in column A; otherwise, put 'spirits'.", time: "20 min", automatizohet: "" },
+  { task: "Check the product name: [name of the vinery] [name of the wine] [Weisswein (Rotwein ...)] [colour] [süss (trocken ...)] [BIO (vegan ...)] [country] [inkl. FeinWert E-Book]", comment: "Replace Weißwein with Weisswein in product name. All product names should include the manufacturer. No (- / \" ) etc in the title/product name.", time: "2 H", automatizohet: "" },
+  { task: "Create keywords, fill column (BK)", comment: "Add the product name + 2015-2025. Add for 4 child products. Do not write 01,03,16,12, liters (ex. (1 x 0.75l) and inkl. FeinWert E-Book", time: "40 min", automatizohet: "" },
+  { task: "Remove \"brand\" from Keywords", comment: "If you have \"ST. Laurent\" and \"Gavi\" written in the keywords, delete it.", time: "2 min", automatizohet: "" },
+  { task: "Products that are alcohol-free need to have separate columns filled out.", comment: "Amazon Template - Produktdaten (BY)- (AZ); (BZ) - (BA); (CA) - (BB); (CC) - (BC); (CD) - (BE); (CE) - (BF); (GF) - (AX)", time: "1H", automatizohet: "PO" },
+  { task: "Alcohol free product & expiration date", comment: "For alcohol-free products, fill: Column NB with JA, Column NI with Expiration on Package, Column ND with 720 (2 years).", time: "3-5 min", automatizohet: "PO" },
+  { task: "For alcohol-free products (alkoholfrei): Add ingredients in column IB", comment: "All alcohol-free wines and spirits must include the \"Ingredients (Zutaten)\" information in the Amazon file.", time: "", automatizohet: "" },
+  { task: "Country", comment: "Mexico should be german Spelling = Mexiko, USA = Vereinigte Staaten, Schottland = Vereinigtes Königreich", time: "2 min", automatizohet: "" },
+  { task: "For products from Israel: Ask Juliane to confirm", comment: "Amazon does not allow products from Israel.", time: "", automatizohet: "" },
+  { task: "Check for the versluss (cap/closure) of wein (FC column)", comment: "If it's missing, search for it on the website.", time: "10 min", automatizohet: "" },
+  { task: "Change Beschreibung with Story", comment: "Copy the text from the Story section (BC) into the Description field (I), but do not remove the 'Inverkehrbringer/Hersteller:' part at the end.", time: "1 H", automatizohet: "" },
+  { task: "Verkaufsvolumen and Flüssigkeitsvolumen Should be displayed at 0.357 l with 0.38 l", comment: "(Column HE)= 0,38 (Column HL)= 0,38", time: "5 min", automatizohet: "" },
+  { task: "If it is Magnum (1.5 liters) only create 01. This is only for MAGNUM!", comment: "Leave only parent and 01", time: "1 H", automatizohet: "" },
+  { task: "Where there is 'Bio' in column IH, add 'bio' at the end after the article number", comment: "Filter bio in Article Number, then filter country, and in product name replace country with BIO+Country. EXAMPLE: \"Italien\" with \"BIO Italien\"", time: "2 H", automatizohet: "PO" },
+  { task: "Check if a product includes 2 or more bottles.", comment: "If it does, keep only the parent and 01 children", time: "30 min", automatizohet: "PO" },
+  { task: "If the product is in a can (dose), delete the whole product", comment: "They don't sell cans (dose).", time: "10 min", automatizohet: "" },
+  { task: "Holzkiste Products", comment: "For products with wooden box, check their photos. If the photo shows the wooden box, replace it with a photo with a white background.", time: "2.5 H", automatizohet: "" },
+  { task: "For \"Bag in Box\" products: Delete the entire product", comment: "These are not sold on Amazon.", time: "", automatizohet: "" },
+  { task: "Delete the products - the entire item - when a product has no photo.", comment: "", time: "5 min", automatizohet: "PO" },
+  { task: "Delete products that have the same article number and more than 1.5 liters on column (CK)", comment: "", time: "2 H", automatizohet: "PO" },
+  { task: "Check if have duplicate on product name", comment: "Check for name in wein wolf website and in excel file produkt daten ohne filter", time: "1.5 H", automatizohet: "" },
+  { task: "No more than one space", comment: "", time: "", automatizohet: "" },
+  { task: "For alcohol free product fill column (IS) (Alkoholgehalt) 0.01%", comment: "", time: "2-3 min", automatizohet: "" },
+  { task: "Marke/ Hersteller", comment: "Marke and Hersteller name is always FeinWert (column C and column H)", time: "1 min", automatizohet: "" },
+  { task: "Check if there are any products on Amazon (Inventory) that are identical to any product in our list.", comment: "Delete the product on Amazon if it does not include the Inkl. Feinwert Ebook and 4 variations.", time: "2.5 H", automatizohet: "" },
+  { task: "Delete the first 5 rows that are examples and created sheets.", comment: "", time: "1 min", automatizohet: "" },
+  { task: "Upload Spreadsheet on Amazon", comment: "If there are no duplicates, upload our final list to Amazon.", time: "5 min", automatizohet: "" },
+  { task: "Fix errors after 24 hours, after the list uploaded", comment: "", time: "2.5-3 H", automatizohet: "" },
+]
+
+const VS_VL_IMAGES_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
+  { task: "Save Photos in Separate Folders", comment: "Path: V:\\20_VS\\99_TEMPLATE\\PICTURE. Use python download_photo_vs.py to open the Excel Product Folder Automator app.", time: "20 min" },
+  { task: "Special Case – When the photos are saved as JPG or PNG files and not in Excel", comment: "Path: V:\\20_VS\\99_TEMPLATE\\PICTURE. Use python photo_organizer.py to open the Excel Organizer Pro.", time: "10 min" },
+  { task: "Generate Photos for Quantities 1, 3, 6, 12", comment: "Path: V:\\20_VS\\99_TEMPLATE\\PICTURE. Use python VS_IMAGE_GENERATOR_BIG_BOTTLE.py to open the Chic Bottle Grid Generator.", time: "20 min" },
+  { task: "Generate URLs for Each Quantity", comment: "Path: V:\\20_VS\\99_TEMPLATE\\PICTURE. Use python url_generator.py to open LinkGen Pro. Create folder on Remote Desktop 65.", time: "30 min - 1H" },
+  { task: "Connect URLs with Article Numbers", comment: "VBA për kodet nga URL - GJENERAL", time: "10-15 min" },
+]
+
+// Dreamrobot Phase Checklists
+const VS_VL_DREAMROBOT_VS_CHECKLIST_PATH = "VS_VL_DREAMROBOT_VS_CHECKLIST"
+const VS_VL_DREAMROBOT_VL_CHECKLIST_PATH = "VS_VL_DREAMROBOT_VL_CHECKLIST"
+
+const VS_VL_DREAMROBOT_VS_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
+  { task: "DREAMROBOT", comment: "Filter the Amazon Template product list to include only child products with quantities 01, 03, 06, and 12. Move these filtered products into the DreamRobot template. After that, get the ASINs from SellerCentralAmazon (Reports). Once the Excel file is ready, import it into DreamRobot using LAGER IMPORT NEU MIT GEWICHT.", time: "2.5 H" },
+  { task: "Weight", comment: "Take the weight from Produktdaten (the Gewicht column) and paste it into the weight_calculation file: V:\\20_VS\\0_TEMPLATE\\GENERAL", time: "30 min - 1 H" },
+  { task: "Checking for duplicates on DreamRobot Manually", comment: "After posting the list in DreamRobot, export the report and use filters to find the duplicates marked in red. Then, manually delete only the duplicate products that begin with 01-, 03-, 06-, or 12-. Keep the products that end with -01, -03, -06, or -12 and connect them with our products.", time: "2-3 H" },
+  { task: "Export Product List", comment: "Export all articles using \"Export Stücklisten-Sets\" in DreamRobot. Select 5000 items per file, and open the latest file.", time: "2 min" },
+  { task: "Fill the DreamRobot Template\nPath: Y:\\20_VS\\99_TEMPLATE\\DREAMROBOT\n\nImport DR Stückliste VS_Template_18.08.2025", comment: "Fill the template like this:\n- Column A: lager_nr\n- Column B: set_article (values: :3, :6, :12)\n- Columns C and D: Always the same values (1, 24765)\n- Column E: Always 12 4 4 4 (So the pattern is always 12 for 1, and 4 for 3/6/12)\n\nUse the example in the template and replace it with your actual data.\n\nMake sure the article number is shown in column H (as a reference). Then separate the quantity in column G.\n\nIn column A you have the codes, while in column G you have the values, and the logic is this: whenever G shows 1, the corresponding cell in column B remains empty but the code from column A of that row is taken as the base for the following rows, and when G shows 3 or 6 or 12, column B is filled with the base code taken from column A plus \":3\" or \":6\" or \":12\" depending on the value in G, while if G is blank then B also stays blank.\n\nAlso, make sure to adjust the set_article values in column B to match only the quantities that are available for that product (e.g. :3, :6 if only 03 and 06 exist)", time: "2.5 H" },
+  { task: "Delete column G and H", comment: "After checking, delete columns G and H, because they are only used as a reference.", time: "1 min" },
+  { task: "Import into DreamRobot", comment: "Import the finished Excel file into DreamRobot using Import Stücklisten Sets.", time: "1-2 min" },
+  { task: "Export Stücklisten-Sets", comment: "Make sure that the connections of parent and children is done", time: "5-10 min" },
+]
+
+const VS_VL_DREAMROBOT_VL_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
+  { task: "Fill Amazon Listing Loader Template", comment: "Template path: V:\\26_VL\\4_TEMPLATES\\AMAZON\n\"Listing loader Riegel spirit_VL\"\n\nFill with:\nSKU = Artikel Nr. from Visando\nPrice = same as Visando\nQuantity = 12, 4, 4, 4\nASIN = from Visando report\nColumn E: (\"asin\")= always default\nColumn F (\"neu\") = always default\nLeave all other columns empty\n!!!Parents not included - only children", time: "30 min" },
+  { task: "Dream Robot (DR)", comment: "Take the existing file from Visando and rename it to VS.\n-Remove \"inkl. FeinWert E-Book\" from product names.\n-Adapt prices in column H (vk_preis):\n01 → minus 0.5\n03 → minus 1\n06 → minus 1\n12 → minus 2\n-Change ID and Nr of the Deliverer (find correct values in Lieferanten on DreamRobot)\n-links for photos must be filled in (columns AC, AD) - Use VLOOKUP to connect columns AC and AD with the Amazon list created for Visando. At the end, check for N/A → delete those rows.\n-link ASINs via VLOOKUP - In column P, connect with VLOOKUP to fetch ASINs from Visando report: V:\\26_VL\\4_TEMPLATES\\AMAZON\\All+Listings+Report+09-10-2025. Filter results → delete all rows with N/A.\n-Check Product Names (HK / Holzkiste) - If the name contains HK or Holzkiste, delete that part from the name.\n-Check Product Names (Magnum) - If the name contains (12 x 1.5l) → delete these products completely (they are magnum bottles - only 12 quantity, 01,03,06 do not delete!!!)\n-If strange characters appear - Import via Data - From Text/CSV - Code 10000 (check carefully if changes apply)", time: "1.2 H" },
+  { task: "Import list into DreamRobot", comment: "Import it into DreamRobot using LAGER IMPORT NEU MIT GEWICHT", time: "1-2 min" },
+  { task: "Checking for duplicates on DreamRobot Manually", comment: "After posting the list in DreamRobot, export the report and use filters to find the duplicates marked in red. Then, delete the duplicate products manually from DreamRobot.", time: "2-3 H" },
+  { task: "Export Product List", comment: "Export all articles using \"Export Stücklisten-Sets\" in DreamRobot. Select 5000 items per file, and open the latest file.", time: "1 min" },
+  { task: "Fill the DreamRobot Template\nPath: Y:\\20_VS\\99_TEMPLATE\\DREAMROBOT\n\nImport DR Stückliste Visando_Template_18.08.2025", comment: "Fill the template like this:\n- Column A: lager_nr\n- Column B: set_article (values: :3, :6, :12)\n- Columns C and D: Always the same values (1, 8942)\n- Column E: Always 12 4 4 4 (So the pattern is always 12 for 1, and 4 for 3/6/12)\n\nUse the example in the template and replace it with your actual data.\n\nMake sure the article number is shown in column H (as a reference). Then separate the quantity in column G.\n\nIn column A you have the codes, while in column G you have the values, and the logic is this: whenever G shows 1, the corresponding cell in column B remains empty but the code from column A of that row is taken as the base for the following rows, and when G shows 3 or 6 or 12, column B is filled with the base code taken from column A plus \":3\" or \":6\" or \":12\" depending on the value in G, while if G is blank then B also stays blank.\n\nAlso, make sure to adjust the set_article values in column B to match only the quantities that are available for that product (e.g. :3, :6 if only 03 and 06 exist)", time: "2.5 H" },
+  { task: "Delete column G and H", comment: "After checking, delete columns G and H, because they are only used as a reference.", time: "1 min" },
+  { task: "Import into DreamRobot", comment: "Import the finished Excel file into DreamRobot using Import Stücklisten Sets.", time: "1 min" },
+  { task: "Export Stücklisten-Sets", comment: "Make sure that the connections of parent and children is done", time: "5-10 min" },
+]
+
 function findVsVlTask(tasks: Task[], titleKey: string) {
   return tasks.find((task) => normalizeTaskTitle(task.title) === titleKey)
 }
@@ -670,6 +767,7 @@ export default function PcmProjectPage() {
   const [allUsers, setAllUsers] = React.useState<User[]>([])
   const [members, setMembers] = React.useState<User[]>([])
   const [checklistItems, setChecklistItems] = React.useState<ChecklistItem[]>([])
+  const [initialDataLoaded, setInitialDataLoaded] = React.useState(false)
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [prompts, setPrompts] = React.useState<ProjectPrompt[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
@@ -791,7 +889,9 @@ export default function PcmProjectPage() {
   )
   const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANNING")
   const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PLANNING")
-  const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "workflow" | "ga">("description")
+  const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "checklists" | "workflow" | "ga">("description")
+  const [vsVlChecklistTab, setVsVlChecklistTab] = React.useState<"amazon" | "images">("amazon")
+  const [vsVlDreamrobotChecklistTab, setVsVlDreamrobotChecklistTab] = React.useState<"vs" | "vl">("vs")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
   const [editingMstChecklistKey, setEditingMstChecklistKey] = React.useState<string | null>(null)
@@ -834,6 +934,13 @@ export default function PcmProjectPage() {
   const [vsVlDescriptionEdits, setVsVlDescriptionEdits] = React.useState<Record<string, string>>({})
   const [vsVlAssigneeOpen, setVsVlAssigneeOpen] = React.useState<Record<string, boolean>>({})
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
+  const [vsVlAmazonCommentEdits, setVsVlAmazonCommentEdits] = React.useState<Record<string, string>>({})
+  // VS/VL Checklist CRUD state
+  const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({ task: "", comment: "", time: "", automatizohet: "" })
+  const [newVsVlImagesRow, setNewVsVlImagesRow] = React.useState({ task: "", comment: "", time: "" })
+  const [savingVsVlChecklist, setSavingVsVlChecklist] = React.useState(false)
+  const [editingVsVlChecklistId, setEditingVsVlChecklistId] = React.useState<string | null>(null)
+  const [editingVsVlChecklistRow, setEditingVsVlChecklistRow] = React.useState({ task: "", comment: "", time: "", automatizohet: "" })
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
   const [programName, setProgramName] = React.useState("")
   const [mstTab, setMstTab] = React.useState<"description" | "tasks" | "checklists" | "members" | "ga" | "final">(
@@ -968,6 +1075,7 @@ export default function PcmProjectPage() {
       if (isVsVlProject(p)) {
         setVsVlPhase(VS_VL_PHASES[0])
       }
+      setInitialDataLoaded(true)
     }
     void load()
   }, [apiFetch, projectId])
@@ -1049,6 +1157,64 @@ export default function PcmProjectPage() {
 
   // Load VS/VL acceptance questions from database (separate from MST)
   const isVsVlForEffect = React.useMemo(() => isVsVlProject(project), [project])
+  const vsVlAmazonChecklistItems = React.useMemo(
+    () => {
+      const filtered = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === VS_VL_AMAZON_CHECKLIST_PATH
+      )
+      // Deduplicate by ID
+      const seen = new Set<string>()
+      return filtered.filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+    },
+    [checklistItems]
+  )
+  const vsVlImagesChecklistItems = React.useMemo(
+    () => {
+      const filtered = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === VS_VL_IMAGES_CHECKLIST_PATH
+      )
+      // Deduplicate by ID
+      const seen = new Set<string>()
+      return filtered.filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+    },
+    [checklistItems]
+  )
+  const vsVlDreamrobotVsChecklistItems = React.useMemo(
+    () => {
+      const filtered = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
+      )
+      const seen = new Set<string>()
+      return filtered.filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+    },
+    [checklistItems]
+  )
+  const vsVlDreamrobotVlChecklistItems = React.useMemo(
+    () => {
+      const filtered = checklistItems.filter(
+        (item) => item.item_type === "CHECKBOX" && item.path === VS_VL_DREAMROBOT_VL_CHECKLIST_PATH
+      )
+      const seen = new Set<string>()
+      return filtered.filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+    },
+    [checklistItems]
+  )
   React.useEffect(() => {
     if (!isVsVlForEffect || !project) return
 
@@ -1064,6 +1230,228 @@ export default function PcmProjectPage() {
     })
     setVsVlAcceptanceChecks(vsVlChecked)
   }, [checklistItems, isVsVlForEffect, project])
+
+  // Initialize VS/VL Amazon checklist items
+  React.useEffect(() => {
+    if (!isVsVlForEffect || !project?.id || !initialDataLoaded) return
+    const existingTitles = new Set(
+      vsVlAmazonChecklistItems.map((item) => (item.title || "").trim())
+    )
+    const missing = VS_VL_AMAZON_CHECKLIST_ITEMS.filter(
+      (row) => !existingTitles.has(row.task)
+    )
+    if (!missing.length) return
+    void (async () => {
+      let position = Math.max(0, ...vsVlAmazonChecklistItems.map((item) => item.position ?? 0))
+      for (const row of missing) {
+        position += 1
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: VS_VL_AMAZON_CHECKLIST_PATH,
+            title: row.task,
+            keyword: row.time || null,
+            description: row.comment || null,
+            category: "AMAZON",
+            position,
+            is_checked: false,
+          }),
+        })
+        if (!res.ok) {
+          console.error("Failed to create VS/VL Amazon checklist item:", row.task)
+          continue
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => {
+          // Avoid duplicates by checking if ID already exists
+          if (prev.some((p) => p.id === created.id)) return prev
+          return [...prev, created]
+        })
+      }
+    })()
+  }, [apiFetch, isVsVlForEffect, project?.id, vsVlAmazonChecklistItems, initialDataLoaded])
+
+  // Initialize VS/VL Images checklist items
+  React.useEffect(() => {
+    if (!isVsVlForEffect || !project?.id || !initialDataLoaded) return
+    const existingTitles = new Set(
+      vsVlImagesChecklistItems.map((item) => (item.title || "").trim())
+    )
+    const missing = VS_VL_IMAGES_CHECKLIST_ITEMS.filter(
+      (row) => !existingTitles.has(row.task)
+    )
+    if (!missing.length) return
+    void (async () => {
+      let position = Math.max(0, ...vsVlImagesChecklistItems.map((item) => item.position ?? 0))
+      for (const row of missing) {
+        position += 1
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: VS_VL_IMAGES_CHECKLIST_PATH,
+            title: row.task,
+            keyword: row.time || null,
+            description: row.comment || null,
+            category: "IMAGES",
+            position,
+            is_checked: false,
+          }),
+        })
+        if (!res.ok) {
+          console.error("Failed to create VS/VL Images checklist item:", row.task)
+          continue
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => {
+          // Avoid duplicates by checking if ID already exists
+          if (prev.some((p) => p.id === created.id)) return prev
+          return [...prev, created]
+        })
+      }
+    })()
+  }, [apiFetch, isVsVlForEffect, project?.id, vsVlImagesChecklistItems, initialDataLoaded])
+
+  // Initialize VS/VL Dreamrobot VS checklist items
+  React.useEffect(() => {
+    if (!isVsVlForEffect || !project?.id || !initialDataLoaded) return
+    const existingTitles = new Set(
+      vsVlDreamrobotVsChecklistItems.map((item) => (item.title || "").trim())
+    )
+    const missing = VS_VL_DREAMROBOT_VS_CHECKLIST_ITEMS.filter(
+      (row) => !existingTitles.has(row.task)
+    )
+    if (!missing.length) return
+    void (async () => {
+      let position = Math.max(0, ...vsVlDreamrobotVsChecklistItems.map((item) => item.position ?? 0))
+      for (const row of missing) {
+        position += 1
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: VS_VL_DREAMROBOT_VS_CHECKLIST_PATH,
+            title: row.task,
+            keyword: row.time || null,
+            description: row.comment || null,
+            category: "DREAMROBOT_VS",
+            position,
+            is_checked: false,
+          }),
+        })
+        if (!res.ok) {
+          console.error("Failed to create VS/VL Dreamrobot VS checklist item:", row.task)
+          continue
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => {
+          if (prev.some((p) => p.id === created.id)) return prev
+          return [...prev, created]
+        })
+      }
+    })()
+  }, [apiFetch, isVsVlForEffect, project?.id, vsVlDreamrobotVsChecklistItems, initialDataLoaded])
+
+  // Initialize VS/VL Dreamrobot VL checklist items
+  React.useEffect(() => {
+    if (!isVsVlForEffect || !project?.id || !initialDataLoaded) return
+    const existingTitles = new Set(
+      vsVlDreamrobotVlChecklistItems.map((item) => (item.title || "").trim())
+    )
+    const missing = VS_VL_DREAMROBOT_VL_CHECKLIST_ITEMS.filter(
+      (row) => !existingTitles.has(row.task)
+    )
+    if (!missing.length) return
+    void (async () => {
+      let position = Math.max(0, ...vsVlDreamrobotVlChecklistItems.map((item) => item.position ?? 0))
+      for (const row of missing) {
+        position += 1
+        const res = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: project.id,
+            item_type: "CHECKBOX",
+            path: VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
+            title: row.task,
+            keyword: row.time || null,
+            description: row.comment || null,
+            category: "DREAMROBOT_VL",
+            position,
+            is_checked: false,
+          }),
+        })
+        if (!res.ok) {
+          console.error("Failed to create VS/VL Dreamrobot VL checklist item:", row.task)
+          continue
+        }
+        const created = (await res.json()) as ChecklistItem
+        setChecklistItems((prev) => {
+          if (prev.some((p) => p.id === created.id)) return prev
+          return [...prev, created]
+        })
+      }
+    })()
+  }, [apiFetch, isVsVlForEffect, project?.id, vsVlDreamrobotVlChecklistItems, initialDataLoaded])
+
+  React.useEffect(() => {
+    if (!vsVlAmazonChecklistItems.length) return
+    setVsVlAmazonCommentEdits((prev) => {
+      const next = { ...prev }
+      vsVlAmazonChecklistItems.forEach((item) => {
+        if (next[item.id] === undefined) {
+          next[item.id] = item.comment ?? ""
+        }
+      })
+      return next
+    })
+  }, [vsVlAmazonChecklistItems])
+
+  React.useEffect(() => {
+    if (!vsVlImagesChecklistItems.length) return
+    setVsVlAmazonCommentEdits((prev) => {
+      const next = { ...prev }
+      vsVlImagesChecklistItems.forEach((item) => {
+        if (next[item.id] === undefined) {
+          next[item.id] = item.comment ?? ""
+        }
+      })
+      return next
+    })
+  }, [vsVlImagesChecklistItems])
+
+  React.useEffect(() => {
+    if (!vsVlDreamrobotVsChecklistItems.length) return
+    setVsVlAmazonCommentEdits((prev) => {
+      const next = { ...prev }
+      vsVlDreamrobotVsChecklistItems.forEach((item) => {
+        if (next[item.id] === undefined) {
+          next[item.id] = item.comment ?? ""
+        }
+      })
+      return next
+    })
+  }, [vsVlDreamrobotVsChecklistItems])
+
+  React.useEffect(() => {
+    if (!vsVlDreamrobotVlChecklistItems.length) return
+    setVsVlAmazonCommentEdits((prev) => {
+      const next = { ...prev }
+      vsVlDreamrobotVlChecklistItems.forEach((item) => {
+        if (next[item.id] === undefined) {
+          next[item.id] = item.comment ?? ""
+        }
+      })
+      return next
+    })
+  }, [vsVlDreamrobotVlChecklistItems])
 
   React.useEffect(() => {
     const meetingItems = checklistItems.filter(
@@ -1090,7 +1478,11 @@ export default function PcmProjectPage() {
 
   const vsVlTabs = React.useMemo(() => {
     const tabs =
-      vsVlPhase === "PLANNING" ? [{ id: "description", label: "Description" }] : [{ id: "tasks", label: "Tasks" }]
+      vsVlPhase === "PLANNING" ? [{ id: "description", label: "Description" }] : [{ id: "tasks", label: "Tasks (Detyrat)" }]
+
+    if (vsVlPhase === "AMAZON" || vsVlPhase === "CHECK" || vsVlPhase === "DREAMROBOT") {
+      tabs.push({ id: "checklists", label: "Checklists" })
+    }
 
     if (isVsAmazonProject(project) && vsVlPhase !== "PLANNING") {
       tabs.push({ id: "workflow", label: "Workflow" })
@@ -1417,6 +1809,164 @@ export default function PcmProjectPage() {
       )
       toast.error("Failed to update checklist")
     }
+  }
+
+  const saveVsVlAmazonComment = async (item: ChecklistItem, nextValue: string) => {
+    if (!item.id) return
+    const trimmed = nextValue.trim()
+    const previous = item.comment ?? ""
+    if (trimmed === previous) return
+    setChecklistItems((prev) =>
+      prev.map((entry) => (entry.id === item.id ? { ...entry, comment: trimmed || null } : entry))
+    )
+    setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: trimmed }))
+    const res = await apiFetch(`/checklist-items/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: trimmed || null }),
+    })
+    if (!res.ok) {
+      toast.error("Failed to save checklist comment")
+      setChecklistItems((prev) =>
+        prev.map((entry) => (entry.id === item.id ? { ...entry, comment: previous || null } : entry))
+      )
+      setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: previous }))
+    }
+  }
+
+  // VS/VL Checklist CRUD functions
+  const addVsVlAmazonChecklistRow = async () => {
+    if (!project) return
+    const task = newVsVlAmazonRow.task.trim()
+    if (!task) {
+      toast.error("Task is required.")
+      return
+    }
+    setSavingVsVlChecklist(true)
+    try {
+      const maxPosition = vsVlAmazonChecklistItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0)
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: VS_VL_AMAZON_CHECKLIST_PATH,
+          title: task,
+          keyword: newVsVlAmazonRow.time.trim() || null,
+          description: newVsVlAmazonRow.comment.trim() || null,
+          category: newVsVlAmazonRow.automatizohet.trim() || null,
+          is_checked: false,
+          position: maxPosition + 1,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add checklist row")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev
+        return [...prev, created]
+      })
+      setNewVsVlAmazonRow({ task: "", comment: "", time: "", automatizohet: "" })
+      toast.success("Checklist row added")
+    } finally {
+      setSavingVsVlChecklist(false)
+    }
+  }
+
+  const addVsVlImagesChecklistRow = async () => {
+    if (!project) return
+    const task = newVsVlImagesRow.task.trim()
+    if (!task) {
+      toast.error("Task is required.")
+      return
+    }
+    setSavingVsVlChecklist(true)
+    try {
+      const maxPosition = vsVlImagesChecklistItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0)
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          item_type: "CHECKBOX",
+          path: VS_VL_IMAGES_CHECKLIST_PATH,
+          title: task,
+          keyword: newVsVlImagesRow.time.trim() || null,
+          description: newVsVlImagesRow.comment.trim() || null,
+          category: "IMAGES",
+          is_checked: false,
+          position: maxPosition + 1,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to add checklist row")
+        return
+      }
+      const created = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev
+        return [...prev, created]
+      })
+      setNewVsVlImagesRow({ task: "", comment: "", time: "" })
+      toast.success("Checklist row added")
+    } finally {
+      setSavingVsVlChecklist(false)
+    }
+  }
+
+  const startEditVsVlChecklistRow = (item: ChecklistItem) => {
+    setEditingVsVlChecklistId(item.id)
+    setEditingVsVlChecklistRow({
+      task: item.title || "",
+      comment: item.description || "",
+      time: item.keyword || "",
+      automatizohet: item.category || "",
+    })
+  }
+
+  const cancelEditVsVlChecklistRow = () => {
+    setEditingVsVlChecklistId(null)
+    setEditingVsVlChecklistRow({ task: "", comment: "", time: "", automatizohet: "" })
+  }
+
+  const saveEditVsVlChecklistRow = async (itemId: string) => {
+    setSavingVsVlChecklist(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editingVsVlChecklistRow.task.trim() || null,
+          description: editingVsVlChecklistRow.comment.trim() || null,
+          keyword: editingVsVlChecklistRow.time.trim() || null,
+          category: editingVsVlChecklistRow.automatizohet.trim() || null,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update checklist row")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setChecklistItems((prev) => prev.map((item) => (item.id === itemId ? updated : item)))
+      setEditingVsVlChecklistId(null)
+      setEditingVsVlChecklistRow({ task: "", comment: "", time: "", automatizohet: "" })
+      toast.success("Checklist row updated")
+    } finally {
+      setSavingVsVlChecklist(false)
+    }
+  }
+
+  const deleteVsVlChecklistRow = async (itemId: string) => {
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist row")
+      return
+    }
+    setChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+    toast.success("Checklist row deleted")
   }
 
   const patchMeetingChecklistItem = async (
@@ -1926,6 +2476,12 @@ export default function PcmProjectPage() {
       const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
       return aTime - bTime
     })
+    const vsVlAmazonChecklistMap = new Map(
+      vsVlAmazonChecklistItems.map((item) => [item.title || "", item])
+    )
+    const vsVlImagesChecklistMap = new Map(
+      vsVlImagesChecklistItems.map((item) => [item.title || "", item])
+    )
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
 
@@ -2318,6 +2874,691 @@ export default function PcmProjectPage() {
           renderGaNotes()
         ) : vsVlTab === "workflow" ? (
           <VsWorkflow projectId={projectId} apiFetch={apiFetch} phase={vsVlPhase} />
+        ) : vsVlTab === "checklists" ? (
+          <Card>
+            <div className="p-4 space-y-4">
+              {/* Sub-tabs for Amazon and Images checklists (Images only in AMAZON phase) */}
+              {vsVlPhase === "AMAZON" && (
+                <div className="border-b flex gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setVsVlChecklistTab("amazon")}
+                    className={[
+                      "relative pb-2 text-sm font-medium",
+                      vsVlChecklistTab === "amazon" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    Amazon Checklist
+                    {vsVlChecklistTab === "amazon" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVsVlChecklistTab("images")}
+                    className={[
+                      "relative pb-2 text-sm font-medium",
+                      vsVlChecklistTab === "images" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    Images Checklist
+                    {vsVlChecklistTab === "images" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                  </button>
+                </div>
+              )}
+
+              {/* Sub-tabs for Dreamrobot phase checklists */}
+              {vsVlPhase === "DREAMROBOT" && (
+                <div className="border-b flex gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setVsVlDreamrobotChecklistTab("vs")}
+                    className={[
+                      "relative pb-2 text-sm font-medium",
+                      vsVlDreamrobotChecklistTab === "vs" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    VS Dreamrobot Checklist
+                    {vsVlDreamrobotChecklistTab === "vs" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVsVlDreamrobotChecklistTab("vl")}
+                    className={[
+                      "relative pb-2 text-sm font-medium",
+                      vsVlDreamrobotChecklistTab === "vl" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    VL Dreamrobot Checklist
+                    {vsVlDreamrobotChecklistTab === "vl" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                  </button>
+                </div>
+              )}
+
+              {vsVlPhase === "DREAMROBOT" ? (
+                vsVlDreamrobotChecklistTab === "vs" ? (
+                  <div className="space-y-4">
+                    {/* VS Dreamrobot Checklist Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                        <div>NO</div>
+                        <div>TASK</div>
+                        <div>COMMENT</div>
+                        <div>CHECK</div>
+                        <div>TIME</div>
+                        <div>KOMENT</div>
+                        <div className="text-right">ACTIONS</div>
+                      </div>
+                      <div className="divide-y max-h-[500px] overflow-y-auto">
+                        {vsVlDreamrobotVsChecklistItems
+                          .slice()
+                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                          .map((item, index) => {
+                            const isEditing = editingVsVlChecklistId === item.id
+                            const checked = item.is_checked ?? false
+                            const commentValue =
+                              vsVlAmazonCommentEdits[item.id] !== undefined
+                                ? vsVlAmazonCommentEdits[item.id]
+                                : item.comment ?? ""
+                            return (
+                              <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                                <div className="text-slate-500 pt-1">{index + 1}</div>
+                                <div className="font-medium whitespace-pre-wrap">
+                                  {isEditing ? (
+                                    <Textarea
+                                      value={editingVsVlChecklistRow.task}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                      className="text-xs min-h-[60px]"
+                                    />
+                                  ) : (
+                                    item.title || "-"
+                                  )}
+                                </div>
+                                <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
+                                  {isEditing ? (
+                                    <Textarea
+                                      value={editingVsVlChecklistRow.comment}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                      className="text-xs min-h-[60px]"
+                                    />
+                                  ) : (
+                                    item.description || "-"
+                                  )}
+                                </div>
+                                <div className="pt-1">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                  />
+                                </div>
+                                <div className="text-slate-500">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.time}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.keyword || "-"
+                                  )}
+                                </div>
+                                <div>
+                                  <Input
+                                    value={commentValue}
+                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                    placeholder="Koment"
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                                <div className="flex gap-1 justify-end">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                        disabled={savingVsVlChecklist}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={cancelEditVsVlChecklistRow}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => startEditVsVlChecklistRow(item)}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        {vsVlDreamrobotVsChecklistItems.length === 0 && (
+                          <div className="px-3 py-6 text-center text-sm text-slate-400">
+                            No checklist items yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* VL Dreamrobot Checklist Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                        <div>NO</div>
+                        <div>TASK</div>
+                        <div>COMMENT</div>
+                        <div>CHECK</div>
+                        <div>TIME</div>
+                        <div>KOMENT</div>
+                        <div className="text-right">ACTIONS</div>
+                      </div>
+                      <div className="divide-y max-h-[500px] overflow-y-auto">
+                        {vsVlDreamrobotVlChecklistItems
+                          .slice()
+                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                          .map((item, index) => {
+                            const isEditing = editingVsVlChecklistId === item.id
+                            const checked = item.is_checked ?? false
+                            const commentValue =
+                              vsVlAmazonCommentEdits[item.id] !== undefined
+                                ? vsVlAmazonCommentEdits[item.id]
+                                : item.comment ?? ""
+                            return (
+                              <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                                <div className="text-slate-500 pt-1">{index + 1}</div>
+                                <div className="font-medium whitespace-pre-wrap">
+                                  {isEditing ? (
+                                    <Textarea
+                                      value={editingVsVlChecklistRow.task}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                      className="text-xs min-h-[60px]"
+                                    />
+                                  ) : (
+                                    item.title || "-"
+                                  )}
+                                </div>
+                                <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
+                                  {isEditing ? (
+                                    <Textarea
+                                      value={editingVsVlChecklistRow.comment}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                      className="text-xs min-h-[60px]"
+                                    />
+                                  ) : (
+                                    item.description || "-"
+                                  )}
+                                </div>
+                                <div className="pt-1">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                  />
+                                </div>
+                                <div className="text-slate-500">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.time}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.keyword || "-"
+                                  )}
+                                </div>
+                                <div>
+                                  <Input
+                                    value={commentValue}
+                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                    placeholder="Koment"
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                                <div className="flex gap-1 justify-end">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                        disabled={savingVsVlChecklist}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={cancelEditVsVlChecklistRow}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => startEditVsVlChecklistRow(item)}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        {vsVlDreamrobotVlChecklistItems.length === 0 && (
+                          <div className="px-3 py-6 text-center text-sm text-slate-400">
+                            No checklist items yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              ) : (vsVlChecklistTab === "amazon" || vsVlPhase === "CHECK") ? (
+                <div className="space-y-4">
+                  {/* Warning notes */}
+                  <div className="text-sm text-red-600 space-y-1">
+                    {VS_VL_AMAZON_CHECKLIST_NOTES.map((note, idx) => (
+                      <div key={idx}>!!! {note}</div>
+                    ))}
+                  </div>
+
+                  {/* Amazon Checklist Table */}
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                      <div>NO</div>
+                      <div>TASK</div>
+                      <div>COMMENT</div>
+                      <div>CHECK</div>
+                      <div>TIME</div>
+                      <div>AUTOMATIZOHET</div>
+                      <div>KOMENT</div>
+                      <div className="text-right">ACTIONS</div>
+                    </div>
+                    {/* Add new row */}
+                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                      <div className="text-slate-400">+</div>
+                      <div>
+                        <Input
+                          value={newVsVlAmazonRow.task}
+                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, task: e.target.value }))}
+                          placeholder="Task"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Input
+                          value={newVsVlAmazonRow.comment}
+                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, comment: e.target.value }))}
+                          placeholder="Comment"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div />
+                      <div>
+                        <Input
+                          value={newVsVlAmazonRow.time}
+                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, time: e.target.value }))}
+                          placeholder="Time"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Input
+                          value={newVsVlAmazonRow.automatizohet}
+                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, automatizohet: e.target.value }))}
+                          placeholder="PO/JO"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void addVsVlAmazonChecklistRow()}
+                          disabled={savingVsVlChecklist || !newVsVlAmazonRow.task.trim()}
+                          className="h-7 text-xs"
+                        >
+                          {savingVsVlChecklist ? "..." : "Add"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="divide-y max-h-[500px] overflow-y-auto">
+                      {vsVlAmazonChecklistItems
+                        .slice()
+                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                        .map((item, index) => {
+                          const isEditing = editingVsVlChecklistId === item.id
+                          const checked = item.is_checked ?? false
+                          const commentValue =
+                            vsVlAmazonCommentEdits[item.id] !== undefined
+                              ? vsVlAmazonCommentEdits[item.id]
+                              : item.comment ?? ""
+                          return (
+                            <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                              <div className="text-slate-500 pt-1">{index + 1}</div>
+                              <div className="font-medium">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.task}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.title || "-"
+                                )}
+                              </div>
+                              <div className="text-slate-600 text-[11px]">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.comment}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.description || "-"
+                                )}
+                              </div>
+                              <div className="pt-1">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                />
+                              </div>
+                              <div className="text-slate-500">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.time}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.keyword || "-"
+                                )}
+                              </div>
+                              <div className="text-slate-600 text-center">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.automatizohet}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, automatizohet: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.category || "-"
+                                )}
+                              </div>
+                              <div>
+                                <Input
+                                  value={commentValue}
+                                  onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                  onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                  placeholder="Koment"
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="flex gap-1 justify-end">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                      disabled={savingVsVlChecklist}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={cancelEditVsVlChecklistRow}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => startEditVsVlChecklistRow(item)}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                      className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      {vsVlAmazonChecklistItems.length === 0 && (
+                        <div className="px-3 py-6 text-center text-sm text-slate-400">
+                          No checklist items yet. Add one above.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Images Checklist Table */}
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                      <div>NO</div>
+                      <div>TASK</div>
+                      <div>COMMENT</div>
+                      <div>CHECK</div>
+                      <div>TIME</div>
+                      <div>KOMENT</div>
+                      <div className="text-right">ACTIONS</div>
+                    </div>
+                    {/* Add new row */}
+                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                      <div className="text-slate-400">+</div>
+                      <div>
+                        <Input
+                          value={newVsVlImagesRow.task}
+                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, task: e.target.value }))}
+                          placeholder="Task"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Input
+                          value={newVsVlImagesRow.comment}
+                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, comment: e.target.value }))}
+                          placeholder="Comment"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div />
+                      <div>
+                        <Input
+                          value={newVsVlImagesRow.time}
+                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, time: e.target.value }))}
+                          placeholder="Time"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void addVsVlImagesChecklistRow()}
+                          disabled={savingVsVlChecklist || !newVsVlImagesRow.task.trim()}
+                          className="h-7 text-xs"
+                        >
+                          {savingVsVlChecklist ? "..." : "Add"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="divide-y max-h-[500px] overflow-y-auto">
+                      {vsVlImagesChecklistItems
+                        .slice()
+                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                        .map((item, index) => {
+                          const isEditing = editingVsVlChecklistId === item.id
+                          const checked = item.is_checked ?? false
+                          const commentValue =
+                            vsVlAmazonCommentEdits[item.id] !== undefined
+                              ? vsVlAmazonCommentEdits[item.id]
+                              : item.comment ?? ""
+                          return (
+                            <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                              <div className="text-slate-500 pt-1">{index + 1}</div>
+                              <div className="font-medium">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.task}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.title || "-"
+                                )}
+                              </div>
+                              <div className="text-slate-600 text-[11px]">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.comment}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.description || "-"
+                                )}
+                              </div>
+                              <div className="pt-1">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                />
+                              </div>
+                              <div className="text-slate-500">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingVsVlChecklistRow.time}
+                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                    className="h-7 text-xs"
+                                  />
+                                ) : (
+                                  item.keyword || "-"
+                                )}
+                              </div>
+                              <div>
+                                <Input
+                                  value={commentValue}
+                                  onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                  onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                  placeholder="Koment"
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="flex gap-1 justify-end">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                      disabled={savingVsVlChecklist}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={cancelEditVsVlChecklistRow}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => startEditVsVlChecklistRow(item)}
+                                      className="h-6 px-2 text-[10px]"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                      className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      {vsVlImagesChecklistItems.length === 0 && (
+                        <div className="px-3 py-6 text-center text-sm text-slate-400">
+                          No checklist items yet. Add one above.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
         ) : vsVlPhase === "PLANNING" ? (
 
           <Card>
