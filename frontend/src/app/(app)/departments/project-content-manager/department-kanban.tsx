@@ -2077,101 +2077,106 @@ export default function DepartmentKanban() {
 
   return (
     <div className="min-h-screen">
-      <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50/30 to-stone-50 p-6 shadow-lg print:hidden dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950/30">
-        <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
-        <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
-        <div className="relative space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
-                Department
-              </div>
-              <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
-                {departmentDisplayName}
-              </div>
-              <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
-            </div>
-            <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-              <button
-                type="button"
-                onClick={() => setViewMode("department")}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  viewMode === "department"
-                    ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                    : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                ].join(" ")}
-              >
-                Department
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("mine")}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  viewMode === "mine"
-                    ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                    : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                ].join(" ")}
-              >
-                My View
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-            <div className="flex flex-wrap gap-2">
-              {TABS.map((tab) => {
-                const isActive = tab.id === activeTab
-                const badgeTone =
-                  tab.tone === "blue"
-                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
-                    : tab.tone === "red"
-                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200"
-                      : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-200"
-                const badgeClass = isActive
-                  ? "bg-white/90 text-stone-900 dark:bg-stone-100 dark:text-stone-900"
-                  : badgeTone
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={[
-                      "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
-                      isActive
-                        ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                        : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
-                    ].join(" ")}
-                  >
-                    <span className="uppercase tracking-wide">{tab.label}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {activeTab === "projects" ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="text-lg font-semibold">Active Projects</div>
-                  {user?.role === "ADMIN" && (
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox
-                        checked={showTemplates}
-                        onCheckedChange={(checked) => setShowTemplates(checked === true)}
-                      />
-                      <span className="text-muted-foreground">Show Templates</span>
-                    </label>
-                  )}
+      <div className="sticky top-0 z-[100] print:hidden ">
+        <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
+          <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
+          <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
+          <div className="relative space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
+                  Department
                 </div>
-                {canManage ? (
-                  <Dialog open={createProjectOpen} onOpenChange={handleProjectDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="rounded-xl">+ New Project</Button>
-                    </DialogTrigger>
+                <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
+                  {departmentDisplayName}
+                </div>
+                <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
+              </div>
+              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("department")}
+                  className={[
+                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    viewMode === "department"
+                      ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                      : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                  ].join(" ")}
+                >
+                  Department
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("mine")}
+                  className={[
+                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    viewMode === "mine"
+                      ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                      : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
+                  ].join(" ")}
+                >
+                  My View
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div className="flex flex-wrap gap-2">
+                {TABS.map((tab) => {
+                  const isActive = tab.id === activeTab
+                  const badgeTone =
+                    tab.tone === "blue"
+                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+                      : tab.tone === "red"
+                        ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200"
+                        : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                  const badgeClass = isActive
+                    ? "bg-white text-stone-900 dark:bg-stone-100 dark:text-stone-900"
+                    : badgeTone
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveTab(tab.id)}
+                      className={[
+                        "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
+                        isActive
+                          ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
+                          : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
+                      ].join(" ")}
+                    >
+                      <span className="uppercase tracking-wide">{tab.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="p-6 print:hidden">
+        {activeTab === "projects" ? (
+            <div className="space-y-4">
+              <div className="sticky top-[200px] z-[90] -mx-6 border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="text-lg font-semibold">Active Projects</div>
+                    {user?.role === "ADMIN" && (
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={showTemplates}
+                          onCheckedChange={(checked) => setShowTemplates(checked === true)}
+                        />
+                        <span className="text-muted-foreground">Show Templates</span>
+                      </label>
+                    )}
+                  </div>
+                  {canManage ? (
+                    <Dialog open={createProjectOpen} onOpenChange={handleProjectDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="rounded-xl">+ New Project</Button>
+                      </DialogTrigger>
                     <DialogContent className="sm:max-w-2xl">
                       <DialogHeader>
                         <DialogTitle>Add Project</DialogTitle>
@@ -2312,7 +2317,8 @@ export default function DepartmentKanban() {
                       </div>
                     </DialogContent>
                   </Dialog>
-                ) : null}
+                    ) : null}
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 {filteredProjects.map((project) => {
@@ -3889,7 +3895,6 @@ export default function DepartmentKanban() {
               </div>
             </DialogContent>
           </Dialog>
-        </div>
       </div>
       <div className="hidden print:block">
         <div className="px-6 py-4">
