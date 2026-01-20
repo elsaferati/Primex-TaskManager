@@ -1988,14 +1988,21 @@ export default function PcmProjectPage() {
     setEditingVsVlChecklistRow({ task: "", comment: "", time: "" })
   }
 
-  const saveEditVsVlChecklistRow = async (itemId: string) => {
+  const saveEditVsVlChecklistRow = async (item: ChecklistItem) => {
+    const itemId = item.id
+    if (!itemId) return
+    const nextTitle = editingVsVlChecklistRow.task.trim() || item.title || ""
+    if (!nextTitle.trim()) {
+      toast.error("Task is required.")
+      return
+    }
     setSavingVsVlChecklist(true)
     try {
       const res = await apiFetch(`/checklist-items/${itemId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: editingVsVlChecklistRow.task.trim() || null,
+          title: nextTitle.trim(),
           description: editingVsVlChecklistRow.comment.trim() || null,
           keyword: editingVsVlChecklistRow.time.trim() || null,
         }),
@@ -3074,7 +3081,7 @@ export default function PcmProjectPage() {
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                        onClick={() => void saveEditVsVlChecklistRow(item)}
                                         disabled={savingVsVlChecklist}
                                         className="h-6 px-2 text-[10px]"
                                       >
@@ -3202,7 +3209,7 @@ export default function PcmProjectPage() {
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                        onClick={() => void saveEditVsVlChecklistRow(item)}
                                         disabled={savingVsVlChecklist}
                                         className="h-6 px-2 text-[10px]"
                                       >
@@ -3401,7 +3408,7 @@ export default function PcmProjectPage() {
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                      onClick={() => void saveEditVsVlChecklistRow(item)}
                                       disabled={savingVsVlChecklist}
                                       className="h-6 px-2 text-[10px]"
                                     >
@@ -3570,7 +3577,7 @@ export default function PcmProjectPage() {
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => void saveEditVsVlChecklistRow(item.id)}
+                                      onClick={() => void saveEditVsVlChecklistRow(item)}
                                       disabled={savingVsVlChecklist}
                                       className="h-6 px-2 text-[10px]"
                                     >
