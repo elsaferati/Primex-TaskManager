@@ -19,6 +19,8 @@ const AuthContext = React.createContext<AuthContextValue | null>(null)
 
 const ACCESS_TOKEN_KEY = "primex_access_token"
 const FETCH_TIMEOUT_MS = 8000
+// Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
+const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -29,6 +31,34 @@ function setStoredToken(token: string | null) {
   if (typeof window === "undefined") return
   if (!token) window.localStorage.removeItem(ACCESS_TOKEN_KEY)
   else window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
+}
+
+/**
+ * Decode JWT token to get expiration time
+ * Returns expiration timestamp in milliseconds, or null if invalid
+ */
+function getTokenExpiration(token: string): number | null {
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(atob(parts[1]))
+    const exp = payload.exp
+    if (typeof exp !== "number") return null
+    return exp * 1000 // Convert to milliseconds
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check if token is about to expire (within buffer time)
+ */
+function isTokenExpiringSoon(token: string): boolean {
+  const expiration = getTokenExpiration(token)
+  if (!expiration) return true // If we can't parse it, assume it's expired
+  const now = Date.now()
+  const timeUntilExpiration = expiration - now
+  return timeUntilExpiration < TOKEN_REFRESH_BUFFER_MS
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FETCH_TIMEOUT_MS) {
@@ -106,6 +136,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     void boot()
   }, [])
+
+  // Proactive token refresh - refresh token before it expires
+  React.useEffect(() => {
+    if (!token || !user) return
+
+    const checkAndRefresh = async () => {
+      if (isTokenExpiringSoon(token)) {
+        const refreshed = await refreshAccessToken()
+        if (refreshed) {
+          try {
+            const me = await fetchMe(refreshed)
+            setStoredToken(refreshed)
+            setToken(refreshed)
+            setUser(me)
+          } catch {
+            // If refresh fails, token will be refreshed on next API call
+          }
+        }
+      }
+    }
+
+    // Check immediately
+    void checkAndRefresh()
+
+    // Check every minute
+    const interval = setInterval(() => {
+      void checkAndRefresh()
+    }, 60 * 1000) // Check every minute
+
+    return () => clearInterval(interval)
+  }, [token, user])
 
   React.useEffect(() => {
     if (!token || !user) return

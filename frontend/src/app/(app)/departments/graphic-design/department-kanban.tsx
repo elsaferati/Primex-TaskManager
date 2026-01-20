@@ -595,10 +595,11 @@ export default function DepartmentKanban() {
   const isMineView = viewMode === "mine" && Boolean(user?.id)
 
   const filteredProjects = React.useMemo(() => {
+    let filtered = projects.filter((p) => p.project_type !== "GENERAL")
     if (viewMode === "mine" && user?.id) {
-      return projects.filter((p) => p.manager_id === user.id)
+      filtered = filtered.filter((p) => p.manager_id === user.id)
     }
-    return projects
+    return filtered
   }, [projects, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
