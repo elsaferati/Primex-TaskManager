@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
@@ -690,47 +691,46 @@ interface VsVlChecklistRow {
   task: string
   comment: string
   time: string
-  automatizohet?: string
 }
 
 const VS_VL_AMAZON_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
-  { task: "Fill data for missing Attributes in Produktdaten file (Ausbau, Beurteilung, Servierempfehlung, Temperature, Story, Geschmack)", comment: "Search for information on different websites: Wein Wolf, Vinello, and also on ChatGPT. Search by product name and producent (marke).", time: "1 H", automatizohet: "" },
-  { task: "Transfer the missing data into the automated Excel file (with vlookup) and add for 4 child products.", comment: "", time: "2.5 H", automatizohet: "PO" },
-  { task: "Check the Geschmack", comment: "If there is a Geschmack that isn't available in the dropdown, use ChatGPT to find the closest match.", time: "30 min", automatizohet: "" },
-  { task: "Check how many characters the STORY has.", comment: "By adding an empty column after the Story column and using the LEN formula, it must not have more than 500 characters.", time: "2 min", automatizohet: "" },
-  { task: "Check if there are any repeated words in Ausbau.", comment: "Delete if you find duplicate words", time: "15 min", automatizohet: "" },
-  { task: "Price Calculation (normal price / feinkost price)", comment: "Create an excel file with two columns, in column A put Artikel Nr. only for parents and in column B put the price you find in Produktdaten. When we have same article numbers, we should use the highest price.", time: "10 min", automatizohet: "PO" },
-  { task: "Price for 01- products, should always be -3 Euro for products with price under 50 Euro", comment: "Filter 01- products, and to price column, check for products with price under 50 Euro, and minus them (-3 Euro)", time: "10 min", automatizohet: "PO" },
-  { task: "Fill in column K by looking at the category in column (AV). For Wein Wolf projekt ONLY BLANKS", comment: "IDs can be found in the Browse Nodes Amazon Excel file. Path: Y:\\20_VS\\99_TEMPLATE\\General", time: "1.5 H", automatizohet: "" },
-  { task: "If the product is beer, write \"beer\" in column A. If the product is sirup, write \"grocery\" in column A.", comment: "", time: "", automatizohet: "" },
-  { task: "Check column A for wine and spirits", comment: "If column AV mentions 'wein', put 'wine' in column A; otherwise, put 'spirits'.", time: "20 min", automatizohet: "" },
-  { task: "Check the product name: [name of the vinery] [name of the wine] [Weisswein (Rotwein ...)] [colour] [süss (trocken ...)] [BIO (vegan ...)] [country] [inkl. FeinWert E-Book]", comment: "Replace Weißwein with Weisswein in product name. All product names should include the manufacturer. No (- / \" ) etc in the title/product name.", time: "2 H", automatizohet: "" },
-  { task: "Create keywords, fill column (BK)", comment: "Add the product name + 2015-2025. Add for 4 child products. Do not write 01,03,16,12, liters (ex. (1 x 0.75l) and inkl. FeinWert E-Book", time: "40 min", automatizohet: "" },
-  { task: "Remove \"brand\" from Keywords", comment: "If you have \"ST. Laurent\" and \"Gavi\" written in the keywords, delete it.", time: "2 min", automatizohet: "" },
-  { task: "Products that are alcohol-free need to have separate columns filled out.", comment: "Amazon Template - Produktdaten (BY)- (AZ); (BZ) - (BA); (CA) - (BB); (CC) - (BC); (CD) - (BE); (CE) - (BF); (GF) - (AX)", time: "1H", automatizohet: "PO" },
-  { task: "Alcohol free product & expiration date", comment: "For alcohol-free products, fill: Column NB with JA, Column NI with Expiration on Package, Column ND with 720 (2 years).", time: "3-5 min", automatizohet: "PO" },
-  { task: "For alcohol-free products (alkoholfrei): Add ingredients in column IB", comment: "All alcohol-free wines and spirits must include the \"Ingredients (Zutaten)\" information in the Amazon file.", time: "", automatizohet: "" },
-  { task: "Country", comment: "Mexico should be german Spelling = Mexiko, USA = Vereinigte Staaten, Schottland = Vereinigtes Königreich", time: "2 min", automatizohet: "" },
-  { task: "For products from Israel: Ask Juliane to confirm", comment: "Amazon does not allow products from Israel.", time: "", automatizohet: "" },
-  { task: "Check for the versluss (cap/closure) of wein (FC column)", comment: "If it's missing, search for it on the website.", time: "10 min", automatizohet: "" },
-  { task: "Change Beschreibung with Story", comment: "Copy the text from the Story section (BC) into the Description field (I), but do not remove the 'Inverkehrbringer/Hersteller:' part at the end.", time: "1 H", automatizohet: "" },
-  { task: "Verkaufsvolumen and Flüssigkeitsvolumen Should be displayed at 0.357 l with 0.38 l", comment: "(Column HE)= 0,38 (Column HL)= 0,38", time: "5 min", automatizohet: "" },
-  { task: "If it is Magnum (1.5 liters) only create 01. This is only for MAGNUM!", comment: "Leave only parent and 01", time: "1 H", automatizohet: "" },
-  { task: "Where there is 'Bio' in column IH, add 'bio' at the end after the article number", comment: "Filter bio in Article Number, then filter country, and in product name replace country with BIO+Country. EXAMPLE: \"Italien\" with \"BIO Italien\"", time: "2 H", automatizohet: "PO" },
-  { task: "Check if a product includes 2 or more bottles.", comment: "If it does, keep only the parent and 01 children", time: "30 min", automatizohet: "PO" },
-  { task: "If the product is in a can (dose), delete the whole product", comment: "They don't sell cans (dose).", time: "10 min", automatizohet: "" },
-  { task: "Holzkiste Products", comment: "For products with wooden box, check their photos. If the photo shows the wooden box, replace it with a photo with a white background.", time: "2.5 H", automatizohet: "" },
-  { task: "For \"Bag in Box\" products: Delete the entire product", comment: "These are not sold on Amazon.", time: "", automatizohet: "" },
-  { task: "Delete the products - the entire item - when a product has no photo.", comment: "", time: "5 min", automatizohet: "PO" },
-  { task: "Delete products that have the same article number and more than 1.5 liters on column (CK)", comment: "", time: "2 H", automatizohet: "PO" },
-  { task: "Check if have duplicate on product name", comment: "Check for name in wein wolf website and in excel file produkt daten ohne filter", time: "1.5 H", automatizohet: "" },
-  { task: "No more than one space", comment: "", time: "", automatizohet: "" },
-  { task: "For alcohol free product fill column (IS) (Alkoholgehalt) 0.01%", comment: "", time: "2-3 min", automatizohet: "" },
-  { task: "Marke/ Hersteller", comment: "Marke and Hersteller name is always FeinWert (column C and column H)", time: "1 min", automatizohet: "" },
-  { task: "Check if there are any products on Amazon (Inventory) that are identical to any product in our list.", comment: "Delete the product on Amazon if it does not include the Inkl. Feinwert Ebook and 4 variations.", time: "2.5 H", automatizohet: "" },
-  { task: "Delete the first 5 rows that are examples and created sheets.", comment: "", time: "1 min", automatizohet: "" },
-  { task: "Upload Spreadsheet on Amazon", comment: "If there are no duplicates, upload our final list to Amazon.", time: "5 min", automatizohet: "" },
-  { task: "Fix errors after 24 hours, after the list uploaded", comment: "", time: "2.5-3 H", automatizohet: "" },
+  { task: "Fill data for missing Attributes in Produktdaten file (Ausbau, Beurteilung, Servierempfehlung, Temperature, Story, Geschmack)", comment: "Search for information on different websites: Wein Wolf, Vinello, and also on ChatGPT. Search by product name and producent (marke).", time: "1 H" },
+  { task: "Transfer the missing data into the automated Excel file (with vlookup) and add for 4 child products.", comment: "", time: "2.5 H" },
+  { task: "Check the Geschmack", comment: "If there is a Geschmack that isn't available in the dropdown, use ChatGPT to find the closest match.", time: "30 min" },
+  { task: "Check how many characters the STORY has.", comment: "By adding an empty column after the Story column and using the LEN formula, it must not have more than 500 characters.", time: "2 min" },
+  { task: "Check if there are any repeated words in Ausbau.", comment: "Delete if you find duplicate words", time: "15 min" },
+  { task: "Price Calculation (normal price / feinkost price)", comment: "Create an excel file with two columns, in column A put Artikel Nr. only for parents and in column B put the price you find in Produktdaten. When we have same article numbers, we should use the highest price.", time: "10 min" },
+  { task: "Price for 01- products, should always be -3 Euro for products with price under 50 Euro", comment: "Filter 01- products, and to price column, check for products with price under 50 Euro, and minus them (-3 Euro)", time: "10 min" },
+  { task: "Fill in column K by looking at the category in column (AV). For Wein Wolf projekt ONLY BLANKS", comment: "IDs can be found in the Browse Nodes Amazon Excel file. Path: Y:\\20_VS\\99_TEMPLATE\\General", time: "1.5 H" },
+  { task: "If the product is beer, write \"beer\" in column A. If the product is sirup, write \"grocery\" in column A.", comment: "", time: "" },
+  { task: "Check column A for wine and spirits", comment: "If column AV mentions 'wein', put 'wine' in column A; otherwise, put 'spirits'.", time: "20 min" },
+  { task: "Check the product name: [name of the vinery] [name of the wine] [Weisswein (Rotwein ...)] [colour] [süss (trocken ...)] [BIO (vegan ...)] [country] [inkl. FeinWert E-Book]", comment: "Replace Weißwein with Weisswein in product name. All product names should include the manufacturer. No (- / \" ) etc in the title/product name.", time: "2 H" },
+  { task: "Create keywords, fill column (BK)", comment: "Add the product name + 2015-2025. Add for 4 child products. Do not write 01,03,16,12, liters (ex. (1 x 0.75l) and inkl. FeinWert E-Book", time: "40 min" },
+  { task: "Remove \"brand\" from Keywords", comment: "If you have \"ST. Laurent\" and \"Gavi\" written in the keywords, delete it.", time: "2 min" },
+  { task: "Products that are alcohol-free need to have separate columns filled out.", comment: "Amazon Template - Produktdaten (BY)- (AZ); (BZ) - (BA); (CA) - (BB); (CC) - (BC); (CD) - (BE); (CE) - (BF); (GF) - (AX)", time: "1H" },
+  { task: "Alcohol free product & expiration date", comment: "For alcohol-free products, fill: Column NB with JA, Column NI with Expiration on Package, Column ND with 720 (2 years).", time: "3-5 min" },
+  { task: "For alcohol-free products (alkoholfrei): Add ingredients in column IB", comment: "All alcohol-free wines and spirits must include the \"Ingredients (Zutaten)\" information in the Amazon file.", time: "" },
+  { task: "Country", comment: "Mexico should be german Spelling = Mexiko, USA = Vereinigte Staaten, Schottland = Vereinigtes Königreich", time: "2 min" },
+  { task: "For products from Israel: Ask Juliane to confirm", comment: "Amazon does not allow products from Israel.", time: "" },
+  { task: "Check for the versluss (cap/closure) of wein (FC column)", comment: "If it's missing, search for it on the website.", time: "10 min" },
+  { task: "Change Beschreibung with Story", comment: "Copy the text from the Story section (BC) into the Description field (I), but do not remove the 'Inverkehrbringer/Hersteller:' part at the end.", time: "1 H" },
+  { task: "Verkaufsvolumen and Flüssigkeitsvolumen Should be displayed at 0.357 l with 0.38 l", comment: "(Column HE)= 0,38 (Column HL)= 0,38", time: "5 min" },
+  { task: "If it is Magnum (1.5 liters) only create 01. This is only for MAGNUM!", comment: "Leave only parent and 01", time: "1 H" },
+  { task: "Where there is 'Bio' in column IH, add 'bio' at the end after the article number", comment: "Filter bio in Article Number, then filter country, and in product name replace country with BIO+Country. EXAMPLE: \"Italien\" with \"BIO Italien\"", time: "2 H" },
+  { task: "Check if a product includes 2 or more bottles.", comment: "If it does, keep only the parent and 01 children", time: "30 min" },
+  { task: "If the product is in a can (dose), delete the whole product", comment: "They don't sell cans (dose).", time: "10 min" },
+  { task: "Holzkiste Products", comment: "For products with wooden box, check their photos. If the photo shows the wooden box, replace it with a photo with a white background.", time: "2.5 H" },
+  { task: "For \"Bag in Box\" products: Delete the entire product", comment: "These are not sold on Amazon.", time: "" },
+  { task: "Delete the products - the entire item - when a product has no photo.", comment: "", time: "5 min" },
+  { task: "Delete products that have the same article number and more than 1.5 liters on column (CK)", comment: "", time: "2 H" },
+  { task: "Check if have duplicate on product name", comment: "Check for name in wein wolf website and in excel file produkt daten ohne filter", time: "1.5 H" },
+  { task: "No more than one space", comment: "", time: "" },
+  { task: "For alcohol free product fill column (IS) (Alkoholgehalt) 0.01%", comment: "", time: "2-3 min" },
+  { task: "Marke/ Hersteller", comment: "Marke and Hersteller name is always FeinWert (column C and column H)", time: "1 min" },
+  { task: "Check if there are any products on Amazon (Inventory) that are identical to any product in our list.", comment: "Delete the product on Amazon if it does not include the Inkl. Feinwert Ebook and 4 variations.", time: "2.5 H" },
+  { task: "Delete the first 5 rows that are examples and created sheets.", comment: "", time: "1 min" },
+  { task: "Upload Spreadsheet on Amazon", comment: "If there are no duplicates, upload our final list to Amazon.", time: "5 min" },
+  { task: "Fix errors after 24 hours, after the list uploaded", comment: "", time: "2.5-3 H" },
 ]
 
 const VS_VL_IMAGES_CHECKLIST_ITEMS: VsVlChecklistRow[] = [
@@ -960,11 +960,16 @@ export default function PcmProjectPage() {
   const [vsVlEditMode, setVsVlEditMode] = React.useState<Record<string, boolean>>({})
   const [vsVlAmazonCommentEdits, setVsVlAmazonCommentEdits] = React.useState<Record<string, string>>({})
   // VS/VL Checklist CRUD state
-  const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({ task: "", comment: "", time: "", automatizohet: "" })
+  const [newVsVlAmazonRow, setNewVsVlAmazonRow] = React.useState({
+    task: "",
+    comment: "",
+    time: "",
+    ko2: false,
+  })
   const [newVsVlImagesRow, setNewVsVlImagesRow] = React.useState({ task: "", comment: "", time: "" })
   const [savingVsVlChecklist, setSavingVsVlChecklist] = React.useState(false)
   const [editingVsVlChecklistId, setEditingVsVlChecklistId] = React.useState<string | null>(null)
-  const [editingVsVlChecklistRow, setEditingVsVlChecklistRow] = React.useState({ task: "", comment: "", time: "", automatizohet: "" })
+  const [editingVsVlChecklistRow, setEditingVsVlChecklistRow] = React.useState({ task: "", comment: "", time: "" })
   const [creatingVsVlTask, setCreatingVsVlTask] = React.useState(false)
   const [programName, setProgramName] = React.useState("")
   const [mstTab, setMstTab] = React.useState<"description" | "tasks" | "checklists" | "members" | "ga" | "final">(
@@ -1863,6 +1868,29 @@ export default function PcmProjectPage() {
     }
   }
 
+  const toggleVsVlAmazonKo2 = async (item: ChecklistItem, next: boolean) => {
+    if (!item.id) return
+    const previous = item.time ?? null
+    const nextValue = next ? "1" : ""
+    setChecklistItems((prev) =>
+      prev.map((entry) => (entry.id === item.id ? { ...entry, time: nextValue } : entry))
+    )
+    const res = await apiFetch(`/checklist-items/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ time: nextValue }),
+    })
+    if (!res.ok) {
+      toast.error("Failed to save KO2")
+      setChecklistItems((prev) =>
+        prev.map((entry) => (entry.id === item.id ? { ...entry, time: previous } : entry))
+      )
+      return
+    }
+    const updated = (await res.json()) as ChecklistItem
+    setChecklistItems((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)))
+  }
+
   // VS/VL Checklist CRUD functions
   const addVsVlAmazonChecklistRow = async () => {
     if (!project) return
@@ -1884,7 +1912,7 @@ export default function PcmProjectPage() {
           title: task,
           keyword: newVsVlAmazonRow.time.trim() || null,
           description: newVsVlAmazonRow.comment.trim() || null,
-          category: newVsVlAmazonRow.automatizohet.trim() || null,
+          time: newVsVlAmazonRow.ko2 ? "1" : "",
           is_checked: false,
           position: maxPosition + 1,
         }),
@@ -1898,7 +1926,7 @@ export default function PcmProjectPage() {
         if (prev.some((p) => p.id === created.id)) return prev
         return [...prev, created]
       })
-      setNewVsVlAmazonRow({ task: "", comment: "", time: "", automatizohet: "" })
+      setNewVsVlAmazonRow({ task: "", comment: "", time: "", ko2: false })
       toast.success("Checklist row added")
     } finally {
       setSavingVsVlChecklist(false)
@@ -1952,13 +1980,12 @@ export default function PcmProjectPage() {
       task: item.title || "",
       comment: item.description || "",
       time: item.keyword || "",
-      automatizohet: item.category || "",
     })
   }
 
   const cancelEditVsVlChecklistRow = () => {
     setEditingVsVlChecklistId(null)
-    setEditingVsVlChecklistRow({ task: "", comment: "", time: "", automatizohet: "" })
+    setEditingVsVlChecklistRow({ task: "", comment: "", time: "" })
   }
 
   const saveEditVsVlChecklistRow = async (itemId: string) => {
@@ -1971,7 +1998,6 @@ export default function PcmProjectPage() {
           title: editingVsVlChecklistRow.task.trim() || null,
           description: editingVsVlChecklistRow.comment.trim() || null,
           keyword: editingVsVlChecklistRow.time.trim() || null,
-          category: editingVsVlChecklistRow.automatizohet.trim() || null,
         }),
       })
       if (!res.ok) {
@@ -1981,7 +2007,7 @@ export default function PcmProjectPage() {
       const updated = (await res.json()) as ChecklistItem
       setChecklistItems((prev) => prev.map((item) => (item.id === itemId ? updated : item)))
       setEditingVsVlChecklistId(null)
-      setEditingVsVlChecklistRow({ task: "", comment: "", time: "", automatizohet: "" })
+      setEditingVsVlChecklistRow({ task: "", comment: "", time: "" })
       toast.success("Checklist row updated")
     } finally {
       setSavingVsVlChecklist(false)
@@ -2513,6 +2539,10 @@ export default function PcmProjectPage() {
     )
     const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]))
     const dependencyOptions = tasks
+    const showVsVlKo2 = vsVlPhase === "CHECK"
+    const vsVlChecklistGridCols = showVsVlKo2
+      ? "grid-cols-[40px_1fr_1fr_60px_70px_1fr_60px_80px]"
+      : "grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px]"
 
     const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
       const res = await apiFetch(`/tasks/${taskId}`, {
@@ -3012,7 +3042,7 @@ export default function PcmProjectPage() {
                                     item.description || "-"
                                   )}
                                 </div>
-                                <div className="pt-1">
+                                <div className="flex items-center justify-center">
                                   <Checkbox
                                     checked={checked}
                                     onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
@@ -3140,7 +3170,7 @@ export default function PcmProjectPage() {
                                     item.description || "-"
                                   )}
                                 </div>
-                                <div className="pt-1">
+                                <div className="flex items-center justify-center">
                                   <Checkbox
                                     checked={checked}
                                     onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
@@ -3231,18 +3261,18 @@ export default function PcmProjectPage() {
 
                   {/* Amazon Checklist Table */}
                   <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                    <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60`}>
                       <div>NO</div>
                       <div>TASK</div>
                       <div>COMMENT</div>
                       <div>CHECK</div>
                       <div>TIME</div>
-                      <div>AUTOMATIZOHET</div>
                       <div>KOMENT</div>
+                      {showVsVlKo2 ? <div>KO2</div> : null}
                       <div className="text-right">ACTIONS</div>
                     </div>
                     {/* Add new row */}
-                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                    <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30`}>
                       <div className="text-slate-400">+</div>
                       <div>
                         <Input
@@ -3269,15 +3299,17 @@ export default function PcmProjectPage() {
                           className="h-7 text-xs"
                         />
                       </div>
-                      <div>
-                        <Input
-                          value={newVsVlAmazonRow.automatizohet}
-                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, automatizohet: e.target.value }))}
-                          placeholder="PO/JO"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div />
+                      <div className="flex items-center justify-center" />
+                      {showVsVlKo2 ? (
+                        <div>
+                          <Checkbox
+                            checked={newVsVlAmazonRow.ko2}
+                            onCheckedChange={(next) =>
+                              setNewVsVlAmazonRow((prev) => ({ ...prev, ko2: Boolean(next) }))
+                            }
+                          />
+                        </div>
+                      ) : null}
                       <div className="flex justify-end">
                         <Button
                           size="sm"
@@ -3297,12 +3329,13 @@ export default function PcmProjectPage() {
                         .map((item, index) => {
                           const isEditing = editingVsVlChecklistId === item.id
                           const checked = item.is_checked ?? false
+                          const ko2Checked = item.time === "1" || item.time === "true"
                           const commentValue =
                             vsVlAmazonCommentEdits[item.id] !== undefined
                               ? vsVlAmazonCommentEdits[item.id]
                               : item.comment ?? ""
                           return (
-                            <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_80px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                            <div key={item.id} className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50`}>
                               <div className="text-slate-500 pt-1">{index + 1}</div>
                               <div className="font-medium">
                                 {isEditing ? (
@@ -3326,7 +3359,7 @@ export default function PcmProjectPage() {
                                   item.description || "-"
                                 )}
                               </div>
-                              <div className="pt-1">
+                              <div className="flex items-center justify-center">
                                 <Checkbox
                                   checked={checked}
                                   onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
@@ -3343,17 +3376,6 @@ export default function PcmProjectPage() {
                                   item.keyword || "-"
                                 )}
                               </div>
-                              <div className="text-slate-600 text-center">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.automatizohet}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, automatizohet: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.category || "-"
-                                )}
-                              </div>
                               <div>
                                 <Input
                                   value={commentValue}
@@ -3363,6 +3385,16 @@ export default function PcmProjectPage() {
                                   className="h-7 text-xs"
                                 />
                               </div>
+                              {showVsVlKo2 ? (
+                                <div className="flex items-center justify-center">
+                                  <Checkbox
+                                    checked={ko2Checked}
+                                    onCheckedChange={(next) =>
+                                      void toggleVsVlAmazonKo2(item, Boolean(next))
+                                    }
+                                  />
+                                </div>
+                              ) : null}
                               <div className="flex gap-1 justify-end">
                                 {isEditing ? (
                                   <>
@@ -3448,7 +3480,7 @@ export default function PcmProjectPage() {
                           className="h-7 text-xs"
                         />
                       </div>
-                      <div />
+                      <div className="flex items-center justify-center" />
                       <div>
                         <Input
                           value={newVsVlImagesRow.time}
@@ -3506,7 +3538,7 @@ export default function PcmProjectPage() {
                                   item.description || "-"
                                 )}
                               </div>
-                              <div className="pt-1">
+                              <div className="flex items-center justify-center">
                                 <Checkbox
                                   checked={checked}
                                   onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
@@ -6978,3 +7010,4 @@ export default function PcmProjectPage() {
     </div>
   )
 }
+
