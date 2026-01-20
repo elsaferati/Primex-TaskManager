@@ -225,220 +225,221 @@ export default function GaKaTasksPage() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-0 bg-gradient-to-r from-slate-50 via-slate-100 to-slate-50">
-        <CardHeader className="gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg">Admin Tasks</CardTitle>
-             
+      <div className="space-y-6">
+        <Card className="sticky top-0 z-40 border-0 bg-gradient-to-r from-slate-50 via-slate-100 to-slate-50 shadow-sm">
+          <CardHeader className="gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg">Admin Tasks</CardTitle>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline" className="border-slate-200 bg-white">
+                  GA tasks: {gaTasks.length}
+                </Badge>
+                <Badge variant="outline" className="border-slate-200 bg-white">
+                  Filtered: {sortedTasks.length}
+                </Badge>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline" className="border-slate-200 bg-white">
-                GA tasks: {gaTasks.length}
-              </Badge>
-              <Badge variant="outline" className="border-slate-200 bg-white">
-                Filtered: {sortedTasks.length}
-              </Badge>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="min-w-[160px]">
+                <Label className="text-xs text-muted-foreground">View</Label>
+                <Select value={viewFilter} onValueChange={(value) => setViewFilter(value as "all" | "tasks" | "system")}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tasks + System</SelectItem>
+                    <SelectItem value="tasks">Tasks only</SelectItem>
+                    <SelectItem value="system">System only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-[160px]">
+                <Label className="text-xs text-muted-foreground">Priority</Label>
+                <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as "all" | TaskPriority)}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All priorities</SelectItem>
+                    {PRIORITY_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-[160px]">
+                <Label className="text-xs text-muted-foreground">Day</Label>
+                <Select value={dayFilter} onValueChange={setDayFilter}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DAY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-[160px]">
+                <Label className="text-xs text-muted-foreground">Due date</Label>
+                <Input
+                  type="date"
+                  className="h-9"
+                  value={dateFilter}
+                  onChange={(event) => setDateFilter(event.target.value)}
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="ghost"
+                  className="h-9 text-xs text-slate-600"
+                  onClick={() => {
+                    setViewFilter("all")
+                    setPriorityFilter("all")
+                    setDayFilter("all")
+                    setDateFilter("")
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="min-w-[160px]">
-              <Label className="text-xs text-muted-foreground">View</Label>
-              <Select value={viewFilter} onValueChange={(value) => setViewFilter(value as "all" | "tasks" | "system")}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tasks + System</SelectItem>
-                  <SelectItem value="tasks">Tasks only</SelectItem>
-                  <SelectItem value="system">System only</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-[160px]">
-              <Label className="text-xs text-muted-foreground">Priority</Label>
-              <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as "all" | TaskPriority)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All priorities</SelectItem>
-                  {PRIORITY_OPTIONS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-[160px]">
-              <Label className="text-xs text-muted-foreground">Day</Label>
-              <Select value={dayFilter} onValueChange={setDayFilter}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DAY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-[160px]">
-              <Label className="text-xs text-muted-foreground">Due date</Label>
-              <Input
-                type="date"
-                className="h-9"
-                value={dateFilter}
-                onChange={(event) => setDateFilter(event.target.value)}
-              />
-            </div>
-            <div className="flex items-end">
-              <Button
-                variant="ghost"
-                className="h-9 text-xs text-slate-600"
-                onClick={() => {
-                  setViewFilter("all")
-                  setPriorityFilter("all")
-                  setDayFilter("all")
-                  setDateFilter("")
-                }}
-              >
-                Clear filters
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-      {viewFilter !== "system" ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="text-base">Tasks</CardTitle>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">+ Add Task</Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>Add GA Task</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Textarea
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      placeholder="Optional details..."
-                      rows={4}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={taskPriority} onValueChange={(value) => setTaskPriority(value as TaskPriority)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PRIORITY_OPTIONS.map((value) => (
-                          <SelectItem key={value} value={value}>
-                            {value}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+          </CardHeader>
+        </Card>
+        {viewFilter !== "system" ? (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-base">Tasks</CardTitle>
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">+ Add Task</Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Add GA Task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Finish period</Label>
-                      <Select
-                        value={finishPeriod}
-                        onValueChange={(value) =>
-                          setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                        }
-                      >
+                      <Label>Title</Label>
+                      <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Textarea
+                        value={description}
+                        onChange={(event) => setDescription(event.target.value)}
+                        placeholder="Optional details..."
+                        rows={4}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Priority</Label>
+                      <Select value={taskPriority} onValueChange={(value) => setTaskPriority(value as TaskPriority)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="All day" />
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
-                          <SelectItem value="AM">AM</SelectItem>
-                          <SelectItem value="PM">PM</SelectItem>
+                          {PRIORITY_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Due date (optional)</Label>
-                      <Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Finish period</Label>
+                        <Select
+                          value={finishPeriod}
+                          onValueChange={(value) =>
+                            setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="All day" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
+                            <SelectItem value="AM">AM</SelectItem>
+                            <SelectItem value="PM">PM</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Due date (optional)</Label>
+                        <Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button disabled={creating || !title.trim()} onClick={() => void submitTask()}>
+                        {creating ? "Saving..." : "Save task"}
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button disabled={creating || !title.trim()} onClick={() => void submitTask()}>
-                      {creating ? "Saving..." : "Save task"}
-                    </Button>
-                  </div>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              {loadingTasks ? (
+                <div className="text-sm text-muted-foreground">Loading tasks...</div>
+              ) : sortedTasks.length ? (
+                <div className="space-y-2">
+                  {sortedTasks.map((task) => {
+                    const department = task.department_id ? departmentMap.get(task.department_id) : null
+                    const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                    const assigneeEmail = assignee && "email" in assignee ? assignee.email || "" : ""
+                    const assigneeLabel = assignee?.full_name || assignee?.username || assigneeEmail || "-"
+                    return (
+                      <Link
+                        key={task.id}
+                        href={`/tasks/${task.id}`}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm hover:border-slate-300"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-slate-900">{task.title}</span>
+                            {task.status ? (
+                              <Badge variant="secondary" className="uppercase">
+                                {task.status}
+                              </Badge>
+                            ) : null}
+                            {task.priority ? (
+                              <Badge variant="outline" className="border-slate-200 text-slate-700">
+                                {task.priority}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Department: {department ? formatDepartmentName(department.name) : "-"} - Assignee: {assigneeLabel}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">Due: {formatDate(task.due_date)}</div>
+                      </Link>
+                    )
+                  })}
                 </div>
-              </DialogContent>
-            </Dialog>
-          </CardHeader>
-          <CardContent>
-            {loadingTasks ? (
-              <div className="text-sm text-muted-foreground">Loading tasks...</div>
-            ) : sortedTasks.length ? (
-              <div className="space-y-2">
-                {sortedTasks.map((task) => {
-                  const department = task.department_id ? departmentMap.get(task.department_id) : null
-                  const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                  const assigneeEmail = assignee && "email" in assignee ? assignee.email || "" : ""
-                  const assigneeLabel = assignee?.full_name || assignee?.username || assigneeEmail || "-"
-                  return (
-                    <Link
-                      key={task.id}
-                      href={`/tasks/${task.id}`}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm hover:border-slate-300"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-slate-900">{task.title}</span>
-                          {task.status ? (
-                            <Badge variant="secondary" className="uppercase">
-                              {task.status}
-                            </Badge>
-                          ) : null}
-                          {task.priority ? (
-                            <Badge variant="outline" className="border-slate-200 text-slate-700">
-                              {task.priority}
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Department: {department ? formatDepartmentName(department.name) : "-"} - Assignee: {assigneeLabel}
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground">Due: {formatDate(task.due_date)}</div>
-                    </Link>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">No tasks found.</div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
+              ) : (
+                <div className="text-sm text-muted-foreground">No tasks found.</div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
 
       {viewFilter !== "tasks" ? (
         <SystemTasksView
           scopeFilter="GA"
-          headingTitle="Kosove &amp; Gane Admin System Tasks"
+          headingTitle="Admin System Tasks"
           headingDescription="System tasks scoped for Kosove and Gane admins."
           showSystemActions={false}
           showFilters={false}
