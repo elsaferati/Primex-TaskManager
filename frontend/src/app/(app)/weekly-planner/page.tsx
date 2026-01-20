@@ -109,6 +109,7 @@ export default function WeeklyPlannerPage() {
   const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
   const [manualTaskFastType, setManualTaskFastType] = React.useState<string>("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
+  const canDeleteProjects = user?.role === "ADMIN"
 
   // Drag-to-scroll refs and state
   const scrollContainerRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
@@ -206,6 +207,7 @@ export default function WeeklyPlannerPage() {
   }, [])
 
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
 
   const deleteTask = React.useCallback(async (taskId: string, taskTitle?: string) => {
     if (!taskId) return
@@ -241,6 +243,41 @@ export default function WeeklyPlannerPage() {
       toast.error("Failed to delete task")
     } finally {
       setDeletingTaskId(null)
+    }
+  }, [apiFetch, departmentId, isThisWeek])
+
+  const deleteProject = React.useCallback(async (projectId: string, projectTitle?: string) => {
+    if (!projectId) return
+
+    const confirmed = window.confirm(
+      projectTitle
+        ? `Are you sure you want to delete the project "${projectTitle}"?\n\nThis action cannot be undone.`
+        : "Are you sure you want to delete this project?\n\nThis action cannot be undone."
+    )
+    if (!confirmed) return
+
+    setDeletingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error("Failed to delete project")
+        return
+      }
+      toast.success("Project deleted")
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      const params = new URLSearchParams()
+      if (departmentId !== ALL_DEPARTMENTS_VALUE) {
+        params.set("department_id", departmentId)
+      }
+      params.set("is_this_week", isThisWeek.toString())
+      const tableRes = await apiFetch(`/planners/weekly-table?${params.toString()}`)
+      if (tableRes.ok) {
+        setData(await tableRes.json())
+      }
+    } catch {
+      toast.error("Failed to delete project")
+    } finally {
+      setDeletingProjectId(null)
     }
   }, [apiFetch, departmentId, isThisWeek])
 
@@ -1296,18 +1333,34 @@ export default function WeeklyPlannerPage() {
                                       <div
                                         key={project.project_id}
                                         className={[
-                                          "p-2 rounded-md transition-colors",
+                                          "group p-2 rounded-md transition-colors",
                                           project.is_late
                                             ? "bg-red-50 dark:bg-red-950/20 border-2 border-red-500 hover:bg-red-100 dark:hover:bg-red-950/30"
                                             : "bg-primary/5 border border-primary/20 hover:bg-primary/10",
                                         ].join(" ")}
                                       >
-                                        <div className="font-medium text-sm flex items-center gap-2">
-                                          {project.project_title}
-                                          {project.is_late && (
-                                            <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
-                                              LATE
-                                            </span>
+                                        <div className="font-medium text-sm flex items-start justify-between gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <span>{project.project_title}</span>
+                                            {project.is_late && (
+                                              <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
+                                                LATE
+                                              </span>
+                                            )}
+                                          </div>
+                                          {canDeleteProjects && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                void deleteProject(project.project_id, project.project_title)
+                                              }}
+                                              disabled={deletingProjectId === project.project_id}
+                                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
+                                              title="Delete project"
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </button>
                                           )}
                                         </div>
                                         {project.tasks && project.tasks.length > 0 && dept.department_name !== "Development" && (
