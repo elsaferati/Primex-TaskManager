@@ -18,14 +18,15 @@ import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, User } from "@/lib/types"
 
-const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
+const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"] as const
 const PHASE_LABELS: Record<string, string> = {
   MEETINGS: "Meetings",
   PLANNING: "Planning",
   DEVELOPMENT: "Development",
   TESTING: "Testing",
   DOCUMENTATION: "Documentation",
-  MBYLLUR: "Closed",
+  CLOSED: "Closed",
+  MBYLLUR: "Closed", // legacy
 }
 
 const TABS = [
@@ -227,6 +228,7 @@ export default function DevelopmentProjectPage() {
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const [showClosedDetails, setShowClosedDetails] = React.useState(false)
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -324,7 +326,12 @@ export default function DevelopmentProjectPage() {
   }, [apiFetch, projectId])
 
   React.useEffect(() => {
-    if (project?.current_phase) setViewedPhase(project.current_phase)
+    if (!project?.current_phase) return
+    if (project.current_phase === "CLOSED") {
+      setViewedPhase("DOCUMENTATION")
+      return
+    }
+    setViewedPhase(project.current_phase)
   }, [project?.current_phase])
 
   React.useEffect(() => {
@@ -339,7 +346,8 @@ export default function DevelopmentProjectPage() {
   React.useEffect(() => {
     if (!createOpen) return
     if (newTaskPhase) return
-    const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
+    const rawPhase = project?.current_phase || "MEETINGS"
+    const phaseValue = viewedPhase || (rawPhase === "CLOSED" ? "DOCUMENTATION" : rawPhase)
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
@@ -896,9 +904,16 @@ export default function DevelopmentProjectPage() {
         return
       }
       const updated = (await res.json()) as Project
+      const nextPhase = updated.current_phase || "MEETINGS"
       setProject(updated)
-      setViewedPhase(updated.current_phase || "MEETINGS")
-      toast.success("Phase advanced")
+      if (nextPhase === "CLOSED") {
+        // Keep the user viewing the phase they just completed, even though the project is now closed.
+        setViewedPhase(currentPhase)
+        toast.success("Project closed")
+      } else {
+        setViewedPhase(nextPhase)
+        toast.success("Phase advanced")
+      }
     } finally {
       setAdvancingPhase(false)
     }
@@ -962,7 +977,8 @@ export default function DevelopmentProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
-  const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
+  const rawPhaseValue = project?.current_phase || "MEETINGS"
+  const phaseValue = viewedPhase || (rawPhaseValue === "CLOSED" ? "DOCUMENTATION" : rawPhaseValue)
   const visibleTabs = React.useMemo(() => {
     if (phaseValue === "MEETINGS") {
       return [
@@ -1024,7 +1040,7 @@ export default function DevelopmentProjectPage() {
     : baseTitle
   const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
-  const canClosePhase = phase !== "MBYLLUR" && phase !== "CLOSED" && phaseIndex < PHASES.length - 1
+  const canClosePhase = phaseIndex !== -1 && phaseIndex < PHASES.length - 1 && phase !== "MBYLLUR"
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
   const savePrompt = async (type: "GA_PROMPT" | "ZHVILLIM_PROMPT") => {
     if (!project) return
@@ -1062,6 +1078,70 @@ export default function DevelopmentProjectPage() {
       if (isGa) setSavingGaPrompt(false)
       else setSavingDevPrompt(false)
     }
+  }
+
+  if (project.current_phase === "CLOSED" && !showClosedDetails) {
+    const totalTasks = tasks.length
+    const doneTasks = tasks.filter((t) => t.status === "DONE").length
+    const openTasks = totalTasks - doneTasks
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-blue-50/30 to-white">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+          <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+            <div className="p-6">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors mb-4 inline-flex items-center gap-1.5 font-medium"
+              >
+                <span className="text-sky-500">←</span> Back to Projects
+              </button>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-slate-800 tracking-tight">{title}</h1>
+                <Badge className="bg-slate-100 text-slate-700 border-slate-200 px-3 py-1.5 text-sm font-medium rounded-lg">
+                  Closed
+                </Badge>
+              </div>
+              <div className="mt-2 text-sm text-slate-600">
+                This project has been completed and is now read-only.
+              </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Button
+                  onClick={() => setShowClosedDetails(true)}
+                  className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-6 py-2.5 font-medium transition-all"
+                >
+                  View details
+                </Button>
+                <Button variant="outline" onClick={() => router.back()} className="rounded-xl">
+                  Back to Projects
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-5">
+                <div className="text-xs text-slate-500">Tasks</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-800">{totalTasks}</div>
+              </div>
+            </Card>
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-5">
+                <div className="text-xs text-slate-500">Done</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-800">{doneTasks}</div>
+              </div>
+            </Card>
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-5">
+                <div className="text-xs text-slate-500">Open</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-800">{openTasks}</div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

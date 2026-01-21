@@ -369,6 +369,7 @@ export default function ProjectPage() {
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const [showClosedDetails, setShowClosedDetails] = React.useState(false)
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -513,8 +514,15 @@ export default function ProjectPage() {
   }, [apiFetch, projectId])
 
   React.useEffect(() => {
-    if (project?.current_phase) setViewedPhase(project.current_phase)
-  }, [project?.current_phase])
+    if (!project?.current_phase) return
+    if (project.current_phase === "CLOSED") {
+      const titleUpper = (project.title || project.name || "").toUpperCase()
+      const isMst = project.project_type === "MST" || titleUpper.includes("MST")
+      setViewedPhase(isMst ? "FINAL" : "DOCUMENTATION")
+      return
+    }
+    setViewedPhase(project.current_phase)
+  }, [project?.current_phase, project?.name, project?.project_type, project?.title])
 
   React.useEffect(() => {
     if (!prompts.length) return
@@ -1624,9 +1632,16 @@ export default function ProjectPage() {
         return
       }
       const updated = (await res.json()) as Project
+      const nextPhase = updated.current_phase || "MEETINGS"
       setProject(updated)
-      setViewedPhase(updated.current_phase || "MEETINGS")
-      toast.success("Phase advanced")
+      if (nextPhase === "CLOSED") {
+        // When closing the final phase, keep the user viewing the phase they just completed.
+        setViewedPhase(currentPhase)
+        toast.success("Project closed")
+      } else {
+        setViewedPhase(nextPhase)
+        toast.success("Phase advanced")
+      }
     } finally {
       setAdvancingPhase(false)
     }
@@ -2029,17 +2044,67 @@ export default function ProjectPage() {
   const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
     ? `${baseTitle} - ${project.total_products}`
     : baseTitle
+
+  if (project.current_phase === "CLOSED" && !showClosedDetails) {
+    const totalTasks = tasks.length
+    const doneTasks = tasks.filter((t) => t.status === "DONE").length
+    const openTasks = totalTasks - doneTasks
+    return (
+      <div className="space-y-6">
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur print:static pt-6 pb-4 border-b border-slate-200">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                &larr; Back to Projects
+              </button>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="text-3xl font-semibold">{title}</div>
+                <Badge variant="secondary">Closed</Badge>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-6">
+          <div className="text-lg font-semibold text-slate-900">Project closed</div>
+          <div className="mt-2 text-sm text-muted-foreground">
+            This project has been completed and is now read-only.
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button onClick={() => setShowClosedDetails(true)}>View details</Button>
+            <Button variant="outline" onClick={() => router.back()}>
+              Back to Projects
+            </Button>
+          </div>
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg border p-4">
+              <div className="text-xs text-muted-foreground">Tasks</div>
+              <div className="mt-1 text-2xl font-semibold">{totalTasks}</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-xs text-muted-foreground">Done</div>
+              <div className="mt-1 text-2xl font-semibold">{doneTasks}</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-xs text-muted-foreground">Open</div>
+              <div className="mt-1 text-2xl font-semibold">{openTasks}</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    )
+  }
   const phase = project.current_phase || "MEETINGS"
 
-  const phaseSteps: string[] = isDevelopmentProject
-    ? isMstProject
-      ? [...MST_PHASES]
-      : [...GENERAL_PHASES]
-    : isMstProject
-      ? [...MST_PHASES, "CLOSED"]
-      : [...GENERAL_PHASES, "CLOSED"]
+  const basePhaseSteps: string[] = isMstProject ? [...MST_PHASES] : [...GENERAL_PHASES]
+  // Always include CLOSED so navigation/locking works correctly after the final phase is closed.
+  const phaseSteps: string[] = [...basePhaseSteps, "CLOSED"]
   const phaseIndex = phaseSteps.indexOf(phase)
-  const canClosePhase = phase !== "CLOSED"
+  const canClosePhase = phaseIndex !== -1 && phaseIndex < phaseSteps.length - 1
   const userMap = new Map(
     [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
   )
@@ -2166,13 +2231,15 @@ export default function ProjectPage() {
         </div>
 
         <div className="flex justify-end mt-4">
-          <Button
-            variant="outline"
-            disabled={!canClosePhase || advancingPhase}
-            onClick={() => void advancePhase()}
-          >
-            {advancingPhase ? "Closing..." : "Close Phase"}
-          </Button>
+          {canClosePhase ? (
+            <Button
+              variant="outline"
+              disabled={advancingPhase}
+              onClick={() => void advancePhase()}
+            >
+              {advancingPhase ? "Closing..." : "Close Phase"}
+            </Button>
+          ) : null}
         </div>
 
         <div className="mt-4 border-t border-slate-200 pt-4">
