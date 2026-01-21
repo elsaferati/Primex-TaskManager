@@ -5,7 +5,7 @@ import io
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from reportlab.lib.pagesizes import letter
@@ -17,9 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.models.checklist import Checklist
+from app.models.checklist_item import ChecklistItem
+from app.models.project import Project
 from app.models.task import Task
 from app.models.task_status import TaskStatus
 from app.models.user import User
+from app.models.enums import UserRole, ChecklistItemType
 
 
 router = APIRouter()
@@ -270,5 +274,79 @@ async def export_tasks_pdf(
         bio,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="tasks_export.pdf"'},
+    )
+
+
+@router.get("/checklists.xlsx")
+async def export_checklist_xlsx(
+    checklist_id: uuid.UUID,
+    include_ko2: bool = False,
+    path: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    checklist = (
+        await db.execute(select(Checklist).where(Checklist.id == checklist_id))
+    ).scalar_one_or_none()
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
+
+    if checklist.project_id is not None:
+        project = (
+            await db.execute(select(Project).where(Project.id == checklist.project_id))
+        ).scalar_one_or_none()
+        if project is not None and project.department_id is not None:
+            ensure_department_access(user, project.department_id)
+    elif checklist.task_id is not None:
+        task = (
+            await db.execute(select(Task).where(Task.id == checklist.task_id))
+        ).scalar_one_or_none()
+        if task is not None and task.department_id is not None:
+            ensure_department_access(user, task.department_id)
+    elif checklist.group_key and user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    items_stmt = (
+        select(ChecklistItem)
+        .where(ChecklistItem.checklist_id == checklist.id)
+        .where(ChecklistItem.item_type == ChecklistItemType.CHECKBOX)
+    )
+    if path:
+        items_stmt = items_stmt.where(ChecklistItem.path == path)
+    items = (
+        await db.execute(items_stmt.order_by(ChecklistItem.position, ChecklistItem.id))
+    ).scalars().all()
+
+    headers = ["NO", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
+    if include_ko2:
+        headers.append("KO2")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = checklist.title or "Checklist"
+    ws.append(headers)
+
+    for idx, item in enumerate(items, start=1):
+        row = [
+            idx,
+            item.title or "",
+            item.description or "",
+            "yes" if item.is_checked else "",
+            item.keyword or "",
+            item.comment or "",
+        ]
+        if include_ko2:
+            row.append("yes" if str(item.time or "").lower() in {"1", "true", "yes"} else "")
+        ws.append(row)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = checklist.title or "checklist_export"
+    safe_filename = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in filename)
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{safe_filename}.xlsx\"'},
     )
 
