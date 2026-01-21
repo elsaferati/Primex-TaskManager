@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          clean: false # KJO ESHTE PIKA KYÇE: Mos e fshi folderin nese eshte i zene
 
       - name: Create Env Files
         shell: cmd
@@ -35,8 +37,10 @@ jobs:
           npm install
           npm run build
 
-      - name: Restart Services
+      - name: Start/Restart Services with PM2
         shell: cmd
         run: |
-          pm2 restart all
+          pm2 delete all || ver > nul
+          pm2 start "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend
+          pm2 start "npm.cmd run start -- -p 3000 -H 0.0.0.0" --name frontend
           pm2 save
