@@ -5,9 +5,10 @@ import io
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
@@ -18,7 +19,7 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
-from app.models.checklist_item import ChecklistItem
+from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.project import Project
 from app.models.task import Task
 from app.models.task_status import TaskStatus
@@ -282,6 +283,8 @@ async def export_checklist_xlsx(
     checklist_id: uuid.UUID,
     include_ko2: bool = False,
     path: str | None = None,
+    format: str | None = None,
+    exclude_path: list[str] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -311,33 +314,143 @@ async def export_checklist_xlsx(
         .where(ChecklistItem.checklist_id == checklist.id)
         .where(ChecklistItem.item_type == ChecklistItemType.CHECKBOX)
     )
+    if format == "mst":
+        items_stmt = items_stmt.where(ChecklistItem.path.is_not(None), ChecklistItem.title.is_not(None))
     if path:
         items_stmt = items_stmt.where(ChecklistItem.path == path)
+    if exclude_path:
+        items_stmt = items_stmt.where(~ChecklistItem.path.in_(exclude_path))
     items = (
         await db.execute(items_stmt.order_by(ChecklistItem.position, ChecklistItem.id))
     ).scalars().all()
 
-    headers = ["NO", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
-    if include_ko2:
-        headers.append("KO2")
+    if format == "mst":
+        headers = ["NO", "PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA", "CHECK", "INCL", "KOMENT"]
+    else:
+        headers = ["NO", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
+        if include_ko2:
+            headers.append("KO2")
+
+    assignee_initials: dict[uuid.UUID, str] = {}
+    if format == "mst" and items:
+        item_ids = [item.id for item in items if item.id is not None]
+        if item_ids:
+            assignees = (
+                await db.execute(
+                    select(ChecklistItemAssignee.checklist_item_id, User.full_name, User.username)
+                    .join(User, User.id == ChecklistItemAssignee.user_id)
+                    .where(ChecklistItemAssignee.checklist_item_id.in_(item_ids))
+                )
+            ).all()
+            initials_map: dict[uuid.UUID, list[str]] = {}
+            for item_id, full_name, username in assignees:
+                label = full_name or username or ""
+                initials = "".join(part[0] for part in label.split() if part).upper()
+                if not initials:
+                    continue
+                initials_map.setdefault(item_id, []).append(initials)
+            assignee_initials = {
+                item_id: ", ".join(sorted(set(values)))
+                for item_id, values in initials_map.items()
+                if values
+            }
 
     wb = Workbook()
     ws = wb.active
     ws.title = checklist.title or "Checklist"
-    ws.append(headers)
+    title = (checklist.title or "Checklist").upper()
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    title_cell = ws.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
+    header_row = 3
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    if format == "mst":
+        column_widths = {
+            "NO": 3,
+            "PATH": 22,
+            "DETYRAT": 28,
+            "KEYWORDS": 20,
+            "PERSHKRIMI": 36,
+            "KATEGORIA": 16,
+            "CHECK": 8,
+            "INCL": 10,
+            "KOMENT": 24,
+        }
+    else:
+        column_widths = {
+            "NO": 3,
+            "TASK": 36,
+            "COMMENT": 46,
+            "CHECK": 8,
+            "TIME": 10,
+            "KOMENT": 24,
+            "KO2": 6,
+        }
+    for col_idx, header in enumerate(headers, start=1):
+        width = column_widths.get(header, 16)
+        ws.column_dimensions[ws.cell(row=header_row, column=col_idx).column_letter].width = width
+
+    data_row = header_row + 1
     for idx, item in enumerate(items, start=1):
-        row = [
-            idx,
-            item.title or "",
-            item.description or "",
-            "yes" if item.is_checked else "",
-            item.keyword or "",
-            item.comment or "",
-        ]
-        if include_ko2:
-            row.append("yes" if str(item.time or "").lower() in {"1", "true", "yes"} else "")
-        ws.append(row)
+        if format == "mst":
+            incl_value = assignee_initials.get(item.id) or (item.owner or "")
+            row_values = [
+                idx,
+                item.path or "",
+                item.title or "",
+                item.keyword or "",
+                item.description or "",
+                item.category or "",
+                "yes" if item.is_checked else "",
+                incl_value,
+                item.comment or "",
+            ]
+        else:
+            row_values = [
+                idx,
+                item.title or "",
+                item.description or "",
+                "yes" if item.is_checked else "",
+                item.keyword or "",
+                item.comment or "",
+            ]
+            if include_ko2:
+                row_values.append("yes" if str(item.time or "").lower() in {"1", "true", "yes"} else "")
+        for col_idx, value in enumerate(row_values, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        data_row += 1
+
+    ws.freeze_panes = ws["B4"]
+    ws.print_title_rows = "3:3"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.fitToPage = True
+
+    last_row = data_row - 1
+    last_col = len(headers)
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{ws.cell(row=header_row, column=last_col).column_letter}{last_row}"
+        thin = Side(style="thin", color="000000")
+        thick = Side(style="medium", color="000000")
+        for r in range(header_row, last_row + 1):
+            for c in range(1, last_col + 1):
+                left = thick if c == 1 else thin
+                right = thick if c == last_col else thin
+                top = thick if r == header_row else thin
+                bottom = thick if r == last_row else thin
+                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = "Initials: ____"
 
     bio = io.BytesIO()
     wb.save(bio)

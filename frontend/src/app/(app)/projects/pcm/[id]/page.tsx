@@ -909,6 +909,7 @@ export default function PcmProjectPage() {
   const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "checklists" | "workflow" | "ga">("description")
   const [vsVlChecklistTab, setVsVlChecklistTab] = React.useState<"amazon" | "images">("amazon")
   const [exportingVsVlChecklist, setExportingVsVlChecklist] = React.useState(false)
+  const [exportingMstChecklist, setExportingMstChecklist] = React.useState(false)
   const [vsVlDreamrobotChecklistTab, setVsVlDreamrobotChecklistTab] = React.useState<"vs" | "vl">("vs")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
@@ -1940,6 +1941,47 @@ export default function PcmProjectPage() {
       URL.revokeObjectURL(url)
     } finally {
       setExportingVsVlChecklist(false)
+    }
+  }
+
+  const exportMstChecklist = async () => {
+    const checklistId = mstChecklistItems[0]?.checklist_id
+    if (!checklistId) {
+      toast.error("No checklist items to export.")
+      return
+    }
+    setExportingMstChecklist(true)
+    try {
+      const params = new URLSearchParams()
+      params.set("checklist_id", checklistId)
+      params.set("format", "mst")
+      Array.from(MST_EXCLUDED_PATHS).forEach((value) => {
+        params.append("exclude_path", value)
+      })
+      const res = await apiFetch(`/exports/checklists.xlsx?${params.toString()}`)
+      if (!res.ok) {
+        let detail = "Failed to export checklist."
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const projectTitle = (project?.title || project?.name || "mst").replace(/\s+/g, "_")
+      link.href = url
+      link.download = `${projectTitle}_mst_checklist.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExportingMstChecklist(false)
     }
   }
 
@@ -5988,7 +6030,20 @@ export default function PcmProjectPage() {
             {mstTab === "checklists" ? (
               <Card>
                 <div className="p-4 space-y-4">
-                  <div className="text-lg font-semibold">Checklists</div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-lg font-semibold">Checklists</div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void exportMstChecklist()}
+                      disabled={exportingMstChecklist || mstChecklistItems.length === 0}
+                      className="h-8 rounded-xl border-slate-200 text-xs"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      {exportingMstChecklist ? "Exporting..." : "Export Excel"}
+                    </Button>
+                  </div>
                   <div className="text-sm text-red-600 space-y-1">
                     <div>!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER</div>
                     <div>!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA</div>
