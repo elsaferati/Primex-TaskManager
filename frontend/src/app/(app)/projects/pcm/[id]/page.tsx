@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight, Plus } from "lucide-react"
+import { Check, Pencil, Trash2, Calendar, Users, FileText, Link2, MessageSquare, ListChecks, Lock, ChevronRight, Plus, Download } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -908,6 +908,7 @@ export default function PcmProjectPage() {
   const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PLANNING")
   const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "checklists" | "workflow" | "ga">("description")
   const [vsVlChecklistTab, setVsVlChecklistTab] = React.useState<"amazon" | "images">("amazon")
+  const [exportingVsVlChecklist, setExportingVsVlChecklist] = React.useState(false)
   const [vsVlDreamrobotChecklistTab, setVsVlDreamrobotChecklistTab] = React.useState<"vs" | "vl">("vs")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
@@ -1895,6 +1896,51 @@ export default function PcmProjectPage() {
     }
     const updated = (await res.json()) as ChecklistItem
     setChecklistItems((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)))
+  }
+
+  const exportVsVlChecklist = async (
+    items: ChecklistItem[],
+    path: string,
+    filenameSuffix: string
+  ) => {
+    const checklistId = items[0]?.checklist_id
+    if (!checklistId) {
+      toast.error("No checklist items to export.")
+      return
+    }
+    setExportingVsVlChecklist(true)
+    try {
+      const params = new URLSearchParams()
+      params.set("checklist_id", checklistId)
+      params.set("path", path)
+      if (path === VS_VL_AMAZON_CHECKLIST_PATH && vsVlPhase === "CHECK") {
+        params.set("include_ko2", "1")
+      }
+      const res = await apiFetch(`/exports/checklists.xlsx?${params.toString()}`)
+      if (!res.ok) {
+        let detail = "Failed to export checklist."
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const projectTitle = (project?.title || project?.name || "vs-vl").replace(/\s+/g, "_")
+      link.href = url
+      link.download = `${projectTitle}_${filenameSuffix}_checklist.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExportingVsVlChecklist(false)
+    }
   }
 
   // VS/VL Checklist CRUD functions
@@ -2977,57 +3023,109 @@ export default function PcmProjectPage() {
             <div className="p-4 space-y-4">
               {/* Sub-tabs for Amazon and Images checklists (Images only in AMAZON phase) */}
               {vsVlPhase === "AMAZON" && (
-                <div className="border-b flex gap-4">
-                  <button
+                <div className="border-b flex items-center justify-between gap-4">
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setVsVlChecklistTab("amazon")}
+                      className={[
+                        "relative pb-2 text-sm font-medium",
+                        vsVlChecklistTab === "amazon" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      Amazon Checklist
+                      {vsVlChecklistTab === "amazon" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVsVlChecklistTab("images")}
+                      className={[
+                        "relative pb-2 text-sm font-medium",
+                        vsVlChecklistTab === "images" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      Images Checklist
+                      {vsVlChecklistTab === "images" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                    </button>
+                  </div>
+                  <Button
                     type="button"
-                    onClick={() => setVsVlChecklistTab("amazon")}
-                    className={[
-                      "relative pb-2 text-sm font-medium",
-                      vsVlChecklistTab === "amazon" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      void exportVsVlChecklist(
+                        vsVlChecklistTab === "amazon" ? vsVlAmazonChecklistItems : vsVlImagesChecklistItems,
+                        vsVlChecklistTab === "amazon" ? VS_VL_AMAZON_CHECKLIST_PATH : VS_VL_IMAGES_CHECKLIST_PATH,
+                        vsVlChecklistTab === "amazon" ? "amazon" : "images"
+                      )
+                    }
+                    disabled={
+                      exportingVsVlChecklist ||
+                      (vsVlChecklistTab === "amazon"
+                        ? vsVlAmazonChecklistItems.length === 0
+                        : vsVlImagesChecklistItems.length === 0)
+                    }
+                    className="h-8 rounded-xl border-slate-200 text-xs"
                   >
-                    Amazon Checklist
-                    {vsVlChecklistTab === "amazon" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVsVlChecklistTab("images")}
-                    className={[
-                      "relative pb-2 text-sm font-medium",
-                      vsVlChecklistTab === "images" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    Images Checklist
-                    {vsVlChecklistTab === "images" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                  </button>
+                    <Download className="mr-2 h-4 w-4" />
+                    {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                  </Button>
                 </div>
               )}
 
               {/* Sub-tabs for Dreamrobot phase checklists */}
               {vsVlPhase === "DREAMROBOT" && (
-                <div className="border-b flex gap-4">
-                  <button
+                <div className="border-b flex items-end justify-between gap-4">
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setVsVlDreamrobotChecklistTab("vs")}
+                      className={[
+                        "relative pb-2 text-sm font-medium",
+                        vsVlDreamrobotChecklistTab === "vs" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      VS Dreamrobot Checklist
+                      {vsVlDreamrobotChecklistTab === "vs" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVsVlDreamrobotChecklistTab("vl")}
+                      className={[
+                        "relative pb-2 text-sm font-medium",
+                        vsVlDreamrobotChecklistTab === "vl" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      VL Dreamrobot Checklist
+                      {vsVlDreamrobotChecklistTab === "vl" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                    </button>
+                  </div>
+                  <Button
                     type="button"
-                    onClick={() => setVsVlDreamrobotChecklistTab("vs")}
-                    className={[
-                      "relative pb-2 text-sm font-medium",
-                      vsVlDreamrobotChecklistTab === "vs" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      void exportVsVlChecklist(
+                        vsVlDreamrobotChecklistTab === "vs"
+                          ? vsVlDreamrobotVsChecklistItems
+                          : vsVlDreamrobotVlChecklistItems,
+                        vsVlDreamrobotChecklistTab === "vs"
+                          ? VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
+                          : VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
+                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl"
+                      )
+                    }
+                    disabled={
+                      exportingVsVlChecklist ||
+                      (vsVlDreamrobotChecklistTab === "vs"
+                        ? vsVlDreamrobotVsChecklistItems.length === 0
+                        : vsVlDreamrobotVlChecklistItems.length === 0)
+                    }
+                    className="h-8 rounded-xl border-slate-200 text-xs"
                   >
-                    VS Dreamrobot Checklist
-                    {vsVlDreamrobotChecklistTab === "vs" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVsVlDreamrobotChecklistTab("vl")}
-                    className={[
-                      "relative pb-2 text-sm font-medium",
-                      vsVlDreamrobotChecklistTab === "vl" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    VL Dreamrobot Checklist
-                    {vsVlDreamrobotChecklistTab === "vl" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                  </button>
+                    <Download className="mr-2 h-4 w-4" />
+                    {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                  </Button>
                 </div>
               )}
 
@@ -3371,6 +3469,27 @@ export default function PcmProjectPage() {
                 )
               ) : (vsVlChecklistTab === "amazon" || vsVlPhase === "CHECK") ? (
                 <div className="space-y-4">
+                  {vsVlPhase === "CHECK" && (
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          void exportVsVlChecklist(
+                            vsVlAmazonChecklistItems,
+                            VS_VL_AMAZON_CHECKLIST_PATH,
+                            "amazon"
+                          )
+                        }
+                        disabled={exportingVsVlChecklist || vsVlAmazonChecklistItems.length === 0}
+                        className="h-8 rounded-xl border-slate-200 text-xs"
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                      </Button>
+                    </div>
+                  )}
                   {/* Warning notes */}
                   <div className="text-sm text-red-600 space-y-1">
                     {VS_VL_AMAZON_CHECKLIST_NOTES.map((note, idx) => (
