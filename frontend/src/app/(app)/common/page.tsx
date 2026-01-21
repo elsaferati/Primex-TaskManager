@@ -201,10 +201,13 @@ export default function CommonViewPage() {
   const [externalMeetingChecklistLoading, setExternalMeetingChecklistLoading] = React.useState(false)
   const [externalChecklistEditingId, setExternalChecklistEditingId] = React.useState<string | null>(null)
   const [externalChecklistEditTitle, setExternalChecklistEditTitle] = React.useState("")
+  const [externalChecklistEditPrefix, setExternalChecklistEditPrefix] = React.useState<string>("")
   const [externalChecklistSavingId, setExternalChecklistSavingId] = React.useState<string | null>(null)
   const [externalChecklistDeletingId, setExternalChecklistDeletingId] = React.useState<string | null>(null)
   const [externalChecklistAddTitle, setExternalChecklistAddTitle] = React.useState("")
+  const [externalChecklistAddOrder, setExternalChecklistAddOrder] = React.useState("")
   const [externalChecklistAdding, setExternalChecklistAdding] = React.useState(false)
+  const [externalChecklistImageError, setExternalChecklistImageError] = React.useState(false)
   const [editingRowId, setEditingRowId] = React.useState<string | null>(null)
   const [editDraft, setEditDraft] = React.useState({
     day: "",
@@ -347,8 +350,12 @@ export default function CommonViewPage() {
 
   const startEditExternalChecklistItem = React.useCallback(
     (itemId: string, currentTitle: string) => {
+      const match = (currentTitle || "").match(/^(\d+(?:\.\d+)*)\.\s*(.*)$/)
+      const prefix = match?.[1] || ""
+      const titleOnly = (match?.[2] ?? currentTitle ?? "").trim()
       setExternalChecklistEditingId(itemId)
-      setExternalChecklistEditTitle(currentTitle || "")
+      setExternalChecklistEditPrefix(prefix)
+      setExternalChecklistEditTitle(titleOnly)
     },
     []
   )
@@ -356,6 +363,7 @@ export default function CommonViewPage() {
   const cancelEditExternalChecklistItem = React.useCallback(() => {
     setExternalChecklistEditingId(null)
     setExternalChecklistEditTitle("")
+    setExternalChecklistEditPrefix("")
   }, [])
 
   const saveExternalChecklistItemTitle = React.useCallback(
@@ -365,20 +373,22 @@ export default function CommonViewPage() {
       if (!nextTitle) return
       setExternalChecklistSavingId(itemId)
       try {
+        const patchedTitle = externalChecklistEditPrefix ? `${externalChecklistEditPrefix}. ${nextTitle}` : nextTitle
         const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: nextTitle }),
+          body: JSON.stringify({ title: patchedTitle }),
         })
         if (!res?.ok) return
         await reloadExternalChecklist()
         setExternalChecklistEditingId(null)
         setExternalChecklistEditTitle("")
+        setExternalChecklistEditPrefix("")
       } finally {
         setExternalChecklistSavingId(null)
       }
     },
-    [apiFetch, externalChecklistEditTitle, isAdmin, reloadExternalChecklist]
+    [apiFetch, externalChecklistEditPrefix, externalChecklistEditTitle, isAdmin, reloadExternalChecklist]
   )
 
   const deleteExternalChecklistItem = React.useCallback(
@@ -405,23 +415,53 @@ export default function CommonViewPage() {
     if (!checklistId || !title) return
     setExternalChecklistAdding(true)
     try {
+      const orderNum = Number(externalChecklistAddOrder)
+      const hasOrder = externalChecklistAddOrder.trim() !== "" && Number.isFinite(orderNum) && orderNum > 0
+      let position: number | undefined
+      if (hasOrder && externalMeetingChecklist?.items?.length) {
+        // Translate "Order #" (1-based, main items only) into DB integer position (which includes subpoints).
+        const sorted = externalMeetingChecklist.items
+          .slice()
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        const isSubpoint = (t: string) => /^\d+\.\d+/.test((t || "").trim())
+        const mainItems = sorted.filter((it) => !isSubpoint(it.title || ""))
+        const insertIdx = Math.floor(orderNum) - 1
+        if (insertIdx <= 0) {
+          position = (mainItems[0]?.position ?? 0)
+        } else if (insertIdx >= mainItems.length) {
+          const maxPos = sorted.reduce((m, it) => Math.max(m, it.position ?? 0), 0)
+          position = maxPos + 1
+        } else {
+          position = (mainItems[insertIdx]?.position ?? 0)
+        }
+      }
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           checklist_id: checklistId,
           item_type: "CHECKBOX",
+          position,
           title,
           is_checked: false,
         }),
       })
       if (!res?.ok) return
       setExternalChecklistAddTitle("")
+      setExternalChecklistAddOrder("")
       await reloadExternalChecklist()
     } finally {
       setExternalChecklistAdding(false)
     }
-  }, [apiFetch, externalChecklistAddTitle, externalMeetingChecklist?.id, isAdmin, reloadExternalChecklist])
+  }, [
+    apiFetch,
+    externalChecklistAddOrder,
+    externalChecklistAddTitle,
+    externalMeetingChecklist?.id,
+    externalMeetingChecklist?.items,
+    isAdmin,
+    reloadExternalChecklist,
+  ])
 
   // Reset checklist when panel closes
   React.useEffect(() => {
@@ -433,13 +473,7 @@ export default function CommonViewPage() {
     }
   }, [externalMeetingsOpen])
 
-  const allChecklistItemsChecked = React.useMemo(() => {
-    if (!externalMeetingChecklist || !externalMeetingChecklist.items?.length) return false
-    const items = externalMeetingChecklist.items
-    return items.every((item) => externalMeetingChecklistItems.get(item.id) === true)
-  }, [externalMeetingChecklist, externalMeetingChecklistItems])
-
-  const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId) && allChecklistItemsChecked
+  const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
 
   React.useEffect(() => {
     let mounted = true
@@ -1227,10 +1261,6 @@ export default function CommonViewPage() {
       console.error("Department is required to create a meeting.")
       return
     }
-    if (!allChecklistItemsChecked) {
-      alert("Please check all checklist items before creating the meeting.")
-      return
-    }
     setCreatingExternalMeeting(true)
     try {
       const startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
@@ -1295,7 +1325,6 @@ export default function CommonViewPage() {
     formatTime,
     toISODate,
     externalMeetingChecklist,
-    allChecklistItemsChecked,
   ])
 
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
@@ -1937,6 +1966,34 @@ export default function CommonViewPage() {
           cursor: not-allowed;
         }
 
+        .external-checklist-media {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          background: #ffffff;
+          padding: 10px;
+          margin-bottom: 12px;
+        }
+        .external-checklist-media-title {
+          font-size: 12px;
+          font-weight: 700;
+          color: #0f172a;
+          margin-bottom: 8px;
+        }
+        .external-checklist-media img {
+          width: 100%;
+          height: auto;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+          display: block;
+          background: #f8fafc;
+        }
+        .external-checklist-media-hint {
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 8px;
+          line-height: 1.4;
+        }
+
         .no-print { display: inline-flex; }
         .hide-in-print { display: none !important; }
         .hide-when-all-days { display: none !important; }
@@ -2111,7 +2168,8 @@ export default function CommonViewPage() {
         }
         .external-meetings-grid {
           display: grid;
-          grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+          /* Make the left panel wider so checklist titles have room */
+          grid-template-columns: minmax(360px, 640px) minmax(0, 1fr);
           gap: 16px;
           margin-top: 14px;
         }
@@ -3590,15 +3648,7 @@ export default function CommonViewPage() {
                       : externalMeetingChecklistOpen
                         ? "Hide Checklist"
                         : "Show Checklist"}
-                    {!externalMeetingChecklistLoading &&
-                      externalMeetingChecklist &&
-                      externalMeetingChecklist.items &&
-                      externalMeetingChecklist.items.length > 0 &&
-                      !allChecklistItemsChecked && (
-                        <span style={{ marginLeft: "8px", color: "#dc2626", fontSize: "12px" }}>
-                          (All items must be checked)
-                        </span>
-                      )}
+                    {/* Checklist is optional for creating meetings; no blocking warning here. */}
                   </button>
                   {externalMeetingChecklistOpen && !externalMeetingChecklistLoading && (
                     <>
@@ -3607,12 +3657,40 @@ export default function CommonViewPage() {
                           <div style={{ marginBottom: "12px", fontWeight: "600", fontSize: "14px", color: "#1e293b" }}>
                             {externalMeetingChecklist.title || "Checklist"}
                           </div>
+                          <div className="external-checklist-media">
+                            <div className="external-checklist-media-title">Meeting options (reference)</div>
+                            {!externalChecklistImageError ? (
+                              <a href="/external-meeting-options.png" target="_blank" rel="noreferrer">
+                                <img
+                                  src="/external-meeting-options.png"
+                                  alt="Teams meeting options reference"
+                                  onError={() => setExternalChecklistImageError(true)}
+                                />
+                              </a>
+                            ) : (
+                              <div className="external-checklist-media-hint">
+                                Add the image file to: <code>frontend/public/external-meeting-options.png</code>
+                                <br />
+                                Then refresh the page.
+                              </div>
+                            )}
+                          </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                            {externalMeetingChecklist.items
-                              .slice()
-                              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                              .map((item, idx) => {
+                            {(() => {
+                              const sorted = externalMeetingChecklist.items
+                                .slice()
+                                .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                              let mainCounter = 0
+                              return sorted.map((item, idx) => {
                                 const isChecked = externalMeetingChecklistItems.get(item.id) ?? false
+                                const rawTitle = item.title || ""
+                                const match = rawTitle.match(/^(\d+(?:\.\d+)*)\.\s*(.*)$/)
+                                const prefix = match?.[1] || ""
+                                const titleOnly = (match?.[2] ?? rawTitle).trim()
+                                const isSubpoint = /^\d+\.\d+/.test(prefix)
+                                if (!isSubpoint) mainCounter += 1
+                                const displayNr = prefix || String(mainCounter)
+                                const displayTitle = titleOnly
                                 return (
                                   <div
                                     key={item.id}
@@ -3637,7 +3715,7 @@ export default function CommonViewPage() {
                                         marginTop: "2px",
                                       }}
                                     >
-                                      {idx + 1}.
+                                      {displayNr}.
                                     </span>
                                     <input
                                       type="checkbox"
@@ -3674,7 +3752,7 @@ export default function CommonViewPage() {
                                         </div>
                                       ) : (
                                         <span style={{ fontSize: "13px", lineHeight: "1.5", color: "#334155" }}>
-                                          {item.title || ""}
+                                          {displayTitle}
                                         </span>
                                       )}
                                     </div>
@@ -3683,7 +3761,7 @@ export default function CommonViewPage() {
                                         <button
                                           className="btn-surface"
                                           type="button"
-                                          onClick={() => startEditExternalChecklistItem(item.id, item.title || "")}
+                                          onClick={() => startEditExternalChecklistItem(item.id, rawTitle)}
                                           disabled={externalChecklistDeletingId === item.id || externalChecklistSavingId === item.id}
                                         >
                                           Edit
@@ -3700,11 +3778,21 @@ export default function CommonViewPage() {
                                     ) : null}
                                   </div>
                                 )
-                              })}
+                              })
+                            })()}
                           </div>
                           {isAdmin ? (
                             <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
                               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                <input
+                                  className="input"
+                                  type="number"
+                                  min={1}
+                                  placeholder="Order #"
+                                  value={externalChecklistAddOrder}
+                                  onChange={(e) => setExternalChecklistAddOrder(e.target.value)}
+                                  style={{ width: "110px" }}
+                                />
                                 <input
                                   className="input"
                                   type="text"
@@ -3717,7 +3805,13 @@ export default function CommonViewPage() {
                                   className="btn-surface"
                                   type="button"
                                   onClick={() => void addExternalChecklistItem()}
-                                  disabled={externalChecklistAdding || !externalChecklistAddTitle.trim() || !externalMeetingChecklist?.id}
+                                  disabled={
+                                    externalChecklistAdding ||
+                                    !externalChecklistAddTitle.trim() ||
+                                    !externalMeetingChecklist?.id ||
+                                    (externalChecklistAddOrder.trim() !== "" &&
+                                      (!Number.isFinite(Number(externalChecklistAddOrder)) || Number(externalChecklistAddOrder) <= 0))
+                                  }
                                 >
                                   {externalChecklistAdding ? "Adding..." : "Add"}
                                 </button>
