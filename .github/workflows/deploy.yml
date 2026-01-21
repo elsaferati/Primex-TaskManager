@@ -8,19 +8,17 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - name: Kill Locked Processes
-        shell: cmd
-        continue-on-error: true # Injoro nese nuk ka procese hapur
-        run: |
-          pm2 stop all
-          pm2 delete all
-          taskkill /F /IM python.exe /T
-          taskkill /F /IM node.exe /T
-
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           clean: false 
+
+      - name: Kill Processes (Silent)
+        shell: cmd
+        run: |
+          pm2 stop all || ver > nul
+          taskkill /F /IM python.exe /T || ver > nul
+          taskkill /F /IM node.exe /T || ver > nul
 
       - name: Create Env Files
         shell: cmd
@@ -35,9 +33,9 @@ jobs:
         shell: cmd
         run: |
           cd backend
-          python -m pip install -r requirements.txt
-          python -m pip install psycopg2-binary pydantic[email]
-          python -m alembic upgrade head
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install psycopg2-binary pydantic[email]
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
 
       - name: Update Frontend
         shell: cmd
@@ -49,6 +47,9 @@ jobs:
       - name: Start Services with PM2
         shell: cmd
         run: |
-          pm2 start "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend
-          pm2 start "node node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0" --name frontend
+          pm2 delete all || ver > nul
+          cd backend
+          pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          cd ../frontend
+          pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
           pm2 save
