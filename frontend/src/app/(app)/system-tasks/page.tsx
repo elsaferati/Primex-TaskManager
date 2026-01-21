@@ -1177,12 +1177,270 @@ export function SystemTasksView({
   }
 
   const handlePrint = React.useCallback(() => {
-    setPrinting(true)
-    window.requestAnimationFrame(() => {
-      window.print()
-      setTimeout(() => setPrinting(false), 300)
-    })
-  }, [])
+    const escapeHtml = (value: unknown) => {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+    }
+
+    const rows = sections[0]?.templates ?? []
+    if (rows.length === 0) {
+      toast("No system tasks to print for the current filters.")
+      return
+    }
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    const effectiveTitle = headingTitle ?? (scopeFilter === "GA" ? "Admin System Tasks" : "System Tasks")
+    const now = new Date()
+    const printedAt = now.toLocaleString()
+
+    const activeFilters: string[] = []
+    if (searchQuery.trim()) activeFilters.push(`Search: "${searchQuery.trim()}"`)
+    if (!allFrequenciesSelected) activeFilters.push(`Frequency: ${frequencyLabel}`)
+    if (!allPrioritiesSelected) activeFilters.push(`Priority: ${priorityLabel}`)
+    const filterLine = activeFilters.length ? activeFilters.join(" | ") : "All"
+
+    const frequencyOrder: SystemTaskFrequency[] = ["DAILY", "WEEKLY", "MONTHLY", "3_MONTHS", "6_MONTHS", "YEARLY"]
+    const grouped = new Map<SystemTaskFrequency, SystemTaskTemplate[]>()
+    for (const f of frequencyOrder) grouped.set(f, [])
+    const inactive: SystemTaskTemplate[] = []
+    for (const template of rows) {
+      if (template.is_active === false) {
+        inactive.push(template)
+        continue
+      }
+      grouped.get(template.frequency)?.push(template)
+    }
+
+    const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
+      const priorityValue = normalizePriority(template.priority)
+      const department = template.department_id ? departmentMap.get(template.department_id) : null
+      const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+      const departmentLabel =
+        scope === "GA"
+          ? "GA"
+          : scope === "ALL"
+            ? "ALL"
+            : department
+              ? formatDepartmentName(department.name)
+              : "-"
+      const ownerLabel = assigneeSummary(template.assignees)
+      const frequencyLabelResolved =
+        FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency
+
+      return `
+        <tr>
+          <td class="num">${rowNumber}</td>
+          <td class="title">${escapeHtml(template.title)}</td>
+          <td>${escapeHtml(departmentLabel)}</td>
+          <td>${escapeHtml(ownerLabel)}</td>
+          <td>${escapeHtml(frequencyLabelResolved)}</td>
+          <td class="center">${escapeHtml(template.finish_period || "-")}</td>
+          <td class="center">
+            <span class="pill ${priorityValue === "HIGH" ? "pill-high" : "pill-normal"}">${escapeHtml(
+              PRIORITY_LABELS[priorityValue]
+            )}</span>
+          </td>
+          <td class="center">${template.is_active === false ? "No" : "Yes"}</td>
+        </tr>
+      `
+    }
+
+    let tableBody = ""
+    let counter = 0
+    for (const frequency of frequencyOrder) {
+      const list = grouped.get(frequency) ?? []
+      if (!list.length) continue
+      const label = FREQUENCY_OPTIONS.find((o) => o.value === frequency)?.label ?? frequency
+      tableBody += `
+        <tr class="group-row">
+          <td colspan="8">${escapeHtml(label)}</td>
+        </tr>
+      `
+      for (const template of list) {
+        counter += 1
+        tableBody += renderTemplateRow(template, counter)
+      }
+    }
+
+    if (inactive.length) {
+      tableBody += `
+        <tr class="inactive-row">
+          <td colspan="8">Inactive Tasks</td>
+        </tr>
+      `
+      for (const template of inactive) {
+        counter += 1
+        tableBody += renderTemplateRow(template, counter)
+      }
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(effectiveTitle)}</title>
+          <style>
+            @media print {
+              @page { margin: 12mm; }
+              body { margin: 0; }
+            }
+
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 10pt;
+              color: #0f172a;
+            }
+
+            .header {
+              text-align: center;
+              margin-bottom: 14px;
+              padding-bottom: 10px;
+              border-bottom: 2px solid #0f172a;
+            }
+
+            .header h1 {
+              margin: 0;
+              font-size: 16pt;
+              letter-spacing: 0.2px;
+            }
+
+            .meta {
+              margin-top: 6px;
+              font-size: 9pt;
+              color: #475569;
+              display: flex;
+              justify-content: space-between;
+              gap: 12px;
+              flex-wrap: wrap;
+            }
+
+            .meta .filters {
+              flex: 1;
+              text-align: left;
+              word-break: break-word;
+            }
+
+            .meta .printedAt {
+              white-space: nowrap;
+              text-align: right;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+            }
+
+            thead th {
+              background: #f1f5f9;
+              border: 1px solid #0f172a;
+              padding: 8px 6px;
+              font-size: 9pt;
+              text-align: left;
+            }
+
+            tbody td {
+              border: 1px solid #0f172a;
+              padding: 6px;
+              vertical-align: top;
+              font-size: 9pt;
+              word-break: break-word;
+            }
+
+            tr { page-break-inside: avoid; }
+
+            .num { width: 36px; text-align: center; font-weight: bold; }
+            .title { width: 38%; font-weight: 600; }
+            .center { text-align: center; }
+
+            .group-row td {
+              background: #e2e8f0;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 0.6px;
+              font-size: 8pt;
+              color: #334155;
+            }
+
+            .inactive-row td {
+              background: #f8fafc;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 0.6px;
+              font-size: 8pt;
+              color: #94a3b8;
+            }
+
+            .pill {
+              display: inline-block;
+              padding: 2px 8px;
+              border-radius: 999px;
+              border: 1px solid #cbd5e1;
+              font-size: 8pt;
+              font-weight: 700;
+            }
+
+            .pill-normal { background: #ffedd5; border-color: #fdba74; color: #9a3412; }
+            .pill-high { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${escapeHtml(effectiveTitle)}</h1>
+            <div class="meta">
+              <div class="filters"><strong>Filters:</strong> ${escapeHtml(filterLine)}</div>
+              <div class="printedAt"><strong>Printed:</strong> ${escapeHtml(printedAt)}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px;">No.</th>
+                <th>Task Title</th>
+                <th style="width:16%;">Department</th>
+                <th style="width:16%;">Owner</th>
+                <th style="width:12%;">Frequency</th>
+                <th style="width:9%;">Finish</th>
+                <th style="width:10%;">Priority</th>
+                <th style="width:7%;">Active</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableBody}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+
+    setTimeout(() => {
+      printWindow.print()
+    }, 250)
+  }, [
+    allFrequenciesSelected,
+    allPrioritiesSelected,
+    assigneeSummary,
+    departmentMap,
+    frequencyLabel,
+    headingTitle,
+    priorityLabel,
+    scopeFilter,
+    searchQuery,
+    sections,
+  ])
 
   const importTemplatesFromFile = async (file: File) => {
     if (!canCreate) return
