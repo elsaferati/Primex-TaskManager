@@ -2204,7 +2204,7 @@ export default function DepartmentKanban() {
           </div>
         </div>
       </div>
-      <div className="px-6 pb-6 print:hidden">
+      <div className="px-6 pb-6 pt-4 print:hidden">
         {activeTab === "projects" ? (
             <div className="space-y-4">
 <div className="sticky top-[200px] z-[90] -mx-6 rounded-b-2xl border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
@@ -2226,7 +2226,7 @@ export default function DepartmentKanban() {
                       <DialogTrigger asChild>
                         <Button className="rounded-xl">+ New Project</Button>
                       </DialogTrigger>
-                    <DialogContent className="sm:max-w-2xl">
+                    <DialogContent className="sm:max-w-2xl z-[110]">
                       <DialogHeader>
                         <DialogTitle>Add Project</DialogTitle>
                       </DialogHeader>
@@ -2296,7 +2296,7 @@ export default function DepartmentKanban() {
                                   : `${projectMemberIds.length} member${projectMemberIds.length === 1 ? "" : "s"} selected`}
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="sm:max-w-md">
+                            <DialogContent className="sm:max-w-md z-[110]">
                               <DialogHeader>
                                 <DialogTitle>Select Project Members</DialogTitle>
                               </DialogHeader>
@@ -2785,7 +2785,7 @@ export default function DepartmentKanban() {
                     <DialogTrigger asChild>
                       <Button variant="outline">+ Add Task</Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-2xl">
+                    <DialogContent className="sm:max-w-2xl z-[110]">
                       <DialogHeader>
                         <DialogTitle>Add System Task</DialogTitle>
                       </DialogHeader>
@@ -3068,7 +3068,7 @@ export default function DepartmentKanban() {
                         + Add Task
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                    <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                       <DialogHeader>
                         <DialogTitle className="text-slate-800">New Task</DialogTitle>
                       </DialogHeader>
@@ -3167,7 +3167,7 @@ export default function DepartmentKanban() {
               </div>
               {!isReadOnly ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
-                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                     <DialogHeader>
                       <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                     </DialogHeader>
@@ -3330,7 +3330,7 @@ export default function DepartmentKanban() {
                     <DialogTrigger asChild>
                       <Button variant="outline">+ Add Note</Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-lg">
+                    <DialogContent className="sm:max-w-lg z-[110]">
                       <DialogHeader>
                         <DialogTitle>Add GA/KA Note</DialogTitle>
                       </DialogHeader>
@@ -3467,7 +3467,7 @@ export default function DepartmentKanban() {
                   if (!open) setGaNoteTaskOpenId(null)
                 }}
               >
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="sm:max-w-md z-[110]">
                   <DialogHeader>
                     <DialogTitle>Create Task from Note</DialogTitle>
                   </DialogHeader>
@@ -3658,7 +3658,7 @@ export default function DepartmentKanban() {
           {activeTab === "meetings" ? (
             <div className="space-y-4">
               <div className="text-xl font-semibold">Meetings</div>
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4">
                 <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
                   <div className="text-sm font-semibold">External Meetings</div>
                   {!isReadOnly ? (
@@ -3777,123 +3777,12 @@ export default function DepartmentKanban() {
                     )}
                   </div>
                 </Card>
-
-                <Card className="rounded-2xl border-stone-200/70 bg-white/80 p-5 shadow-sm space-y-4 dark:border-stone-800/70 dark:bg-stone-900/70">
-                  <div className="text-sm font-semibold">Internal Meetings</div>
-                  <div>
-                    <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {INTERNAL_MEETING.team.join(", ")}
-                    </div>
-                  </div>
-                  <div className="inline-flex rounded-full border border-stone-200/70 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-stone-800/70 dark:bg-stone-950/40">
-                    {(Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>).map((slot) => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => setInternalSlot(slot)}
-                        className={[
-                          "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                          internalSlot === slot
-                            ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                            : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                        ].join(" ")}
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="space-y-3">
-                    <div className="text-sm font-semibold">{INTERNAL_MEETING.slots[internalSlot].label}</div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input
-                        value={newInternalMeetingItem}
-                        onChange={(e) => setNewInternalMeetingItem(e.target.value)}
-                        placeholder="Add checklist item..."
-                        className="min-w-[220px] flex-1"
-                      />
-                      <Button
-                        variant="outline"
-                        disabled={!newInternalMeetingItem.trim() || addingInternalMeetingItem}
-                        onClick={() => void addInternalMeetingItem()}
-                      >
-                        {addingInternalMeetingItem ? "Adding..." : "Add"}
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      {internalMeetingItems
-                        .filter((item) => (item.day || internalSlot) === internalSlot)
-                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                        .map((item, idx) => {
-                          const isEditing = editingInternalMeetingItemId === item.id
-                          return (
-                            <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-stone-200/70 bg-white/80 px-3 py-2 dark:border-stone-800/70 dark:bg-stone-900/70">
-                              <Checkbox
-                                checked={Boolean(item.is_checked)}
-                                onCheckedChange={(checked) => toggleInternalMeetingItem(item.id, Boolean(checked))}
-                              />
-                              <div className="flex-1">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingInternalMeetingItem}
-                                    onChange={(e) => setEditingInternalMeetingItem(e.target.value)}
-                                    placeholder="Checklist item"
-                                  />
-                                ) : (
-                                  <div className="text-sm text-muted-foreground">
-                                    {idx + 1}. {item.title || ""}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {isEditing ? (
-                                  <>
-                                    <Button size="sm" variant="outline" onClick={() => void saveInternalMeetingItem()}>
-                                      Save
-                                    </Button>
-                                    <Button size="sm" variant="ghost" onClick={cancelEditInternalMeetingItem}>
-                                      Cancel
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() => startEditInternalMeetingItem(item)}
-                                      aria-label="Edit internal meeting item"
-                                      title="Edit"
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      className="text-red-600 border-red-200 hover:bg-red-50"
-                                      onClick={() => void deleteInternalMeetingItem(item.id)}
-                                      aria-label="Delete internal meeting item"
-                                      title="Delete"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      {!internalMeetingItems.some((item) => (item.day || internalSlot) === internalSlot) ? (
-                        <div className="text-sm text-muted-foreground">No checklist items yet.</div>
-                      ) : null}
-                    </div>
-                  </div>
-                </Card>
               </div>
             </div>
           ) : null}
 
           <Dialog open={showTitleWarning} onOpenChange={setShowTitleWarning}>
-            <DialogContent className="sm:max-w-md border-red-200 bg-white shadow-xl">
+            <DialogContent className="sm:max-w-md border-red-200 bg-white shadow-xl z-[110]">
               <DialogHeader>
                 <DialogTitle className="text-slate-900 flex items-center gap-3">
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white text-lg shadow-sm">

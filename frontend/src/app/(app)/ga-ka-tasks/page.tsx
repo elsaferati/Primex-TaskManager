@@ -672,6 +672,9 @@ export default function GaKaTasksPage() {
                     <thead>
                       <tr className="border-b border-slate-200">
                         <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          NO.
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
                           Task Title
                         </th>
                         <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
@@ -691,7 +694,7 @@ export default function GaKaTasksPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {sortedTasks.map((task) => {
+                      {sortedTasks.map((task, index) => {
                         const department = task.department_id ? departmentMap.get(task.department_id) : null
                         const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         return (
@@ -699,6 +702,9 @@ export default function GaKaTasksPage() {
                             key={task.id}
                             className="hover:bg-slate-50 transition-colors"
                           >
+                            <td className="py-3 px-4">
+                              <span className="text-sm text-slate-700">{index + 1}</span>
+                            </td>
                             <td className="py-3 px-4">
                               <Link
                                 href={`/tasks/${task.id}`}
@@ -838,6 +844,7 @@ export default function GaKaTasksPage() {
           headingDescription="System tasks scoped for Kosove and Gane admins."
           showSystemActions={false}
           showFilters={false}
+          allowMarkAsDone={true}
           externalPriorityFilter={priorityFilter}
           externalDayFilter={dayFilter}
           externalDateFilter={dateFilter}

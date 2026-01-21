@@ -315,6 +315,7 @@ type SystemTasksViewProps = {
   headingDescription?: string
   showSystemActions?: boolean
   showFilters?: boolean
+  allowMarkAsDone?: boolean
   externalPriorityFilter?: TaskPriority | "all"
   externalDayFilter?: string | "all"
   externalDateFilter?: string | null
@@ -326,6 +327,7 @@ export function SystemTasksView({
   headingDescription,
   showSystemActions = true,
   showFilters = true,
+  allowMarkAsDone = false,
   externalPriorityFilter = "all",
   externalDayFilter = "all",
   externalDateFilter = null,
@@ -336,6 +338,7 @@ export function SystemTasksView({
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<AssigneeUser[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [updatingTaskIds, setUpdatingTaskIds] = React.useState<Set<string>>(new Set())
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -422,6 +425,46 @@ export function SystemTasksView({
   React.useEffect(() => {
     void load()
   }, [load])
+
+  const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
+    if (!template.id) return
+    const taskId = template.id
+    const currentStatus = template.status || "TODO"
+    const newStatus = currentStatus === "DONE" ? "TODO" : "DONE"
+    
+    setUpdatingTaskIds((prev) => new Set(prev).add(taskId))
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task status"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      // Update the template status in local state
+      setTemplates((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+      )
+      toast.success(`Task marked as ${newStatus}`)
+    } catch (error) {
+      toast.error("Failed to update task status")
+    } finally {
+      setUpdatingTaskIds((prev) => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+    }
+  }, [apiFetch])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2328,6 +2371,21 @@ export function SystemTasksView({
 
                               <div className="text-right">
                                 <div className="flex flex-col items-end gap-2">
+                                  {allowMarkAsDone && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={updatingTaskIds.has(template.id)}
+                                      onClick={() => void toggleTaskStatus(template)}
+                                      className="h-7 text-xs"
+                                    >
+                                      {updatingTaskIds.has(template.id)
+                                        ? "Updating..."
+                                        : template.status === "DONE"
+                                          ? "Mark as TODO"
+                                          : "Mark done"}
+                                    </Button>
+                                  )}
                                   {canEdit && (
                                     <Button
                                       variant="ghost"
