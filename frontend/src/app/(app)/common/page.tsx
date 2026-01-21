@@ -3689,7 +3689,12 @@ export default function CommonViewPage() {
                                 const titleOnly = (match?.[2] ?? rawTitle).trim()
                                 const isSubpoint = /^\d+\.\d+/.test(prefix)
                                 if (!isSubpoint) mainCounter += 1
-                                const displayNr = prefix || String(mainCounter)
+                                // Always anchor numbering to the current mainCounter:
+                                // - main items: 1,2,3...
+                                // - subpoints: <current-main>.<sub> (so 9.1 becomes 10.1 if a new main item was inserted)
+                                const displayNr = isSubpoint
+                                  ? `${mainCounter}${prefix.replace(/^\d+/, "")}`
+                                  : String(mainCounter)
                                 const displayTitle = titleOnly
                                 return (
                                   <div
@@ -3761,7 +3766,7 @@ export default function CommonViewPage() {
                                         <button
                                           className="btn-surface"
                                           type="button"
-                                          onClick={() => startEditExternalChecklistItem(item.id, rawTitle)}
+                                          onClick={() => startEditExternalChecklistItem(item.id, `${displayNr}. ${displayTitle}`)}
                                           disabled={externalChecklistDeletingId === item.id || externalChecklistSavingId === item.id}
                                         >
                                           Edit
