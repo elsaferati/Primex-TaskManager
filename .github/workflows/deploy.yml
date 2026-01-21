@@ -1,4 +1,4 @@
-name: Primex Auto Deploy Final
+name: Primex Auto Deploy
 
 on:
   push:
@@ -26,6 +26,7 @@ jobs:
           cd backend
           python -m pip install -r requirements.txt
           python -m pip install psycopg2-binary pydantic[email]
+          python -m alembic upgrade head
 
       - name: Update Frontend
         shell: cmd
@@ -34,10 +35,8 @@ jobs:
           npm install
           npm run build
 
-      - name: Start/Restart Services with PM2
+      - name: Restart Services
         shell: cmd
         run: |
-          pm2 delete all || ver > nul
-          pm2 start "python" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-          pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
+          pm2 restart all
           pm2 save
