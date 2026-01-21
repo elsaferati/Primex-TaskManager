@@ -37,7 +37,7 @@ export function Topbar() {
   if (!user) return null
 
   return (
-    <header className="flex h-14 items-center justify-between border-b px-4">
+    <header className="flex h-14 items-center justify-between border-b px-4 print:hidden">
       <div className="text-sm text-muted-foreground">Ctrl+K to search</div>
       <div className="flex items-center gap-2">
         <Sheet>

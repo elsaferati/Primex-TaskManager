@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
-import { Pencil, Trash2 } from "lucide-react"
+import { Pencil, Printer, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -517,6 +517,19 @@ function formatMeetingPrintLabel(meeting: Meeting) {
   if (Number.isNaN(date.getTime())) return meeting.title || "Meeting"
   const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   return `${timeLabel} ${meeting.title || "Meeting"}`
+}
+
+function periodFromDate(value?: string | null) {
+  if (!value) return "AM"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "AM"
+  return date.getHours() >= 12 ? "PM" : "AM"
+}
+
+function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: string | null) {
+  if (finishPeriod === "PM") return "PM"
+  if (finishPeriod === "AM") return "AM"
+  return periodFromDate(dateValue)
 }
 
 function toMeetingInputValue(value?: string | null) {
@@ -1095,6 +1108,166 @@ export default function DepartmentKanban() {
     return weekRangeLabel
   }, [printRange, todayDate, weekRangeLabel])
 
+  const allTodayPrintBaseUsers = React.useMemo(() => {
+    if (viewMode === "department") {
+      if (selectedUserId !== "__all__") {
+        const selected = departmentUsers.find((member) => member.id === selectedUserId)
+        return selected ? [selected] : []
+      }
+      return departmentUsers.filter((member) => {
+        const username = member.username?.toLowerCase()
+        const fullName = member.full_name?.toLowerCase()
+        return username !== "admin" && fullName !== "admin"
+      })
+    }
+    if (user) {
+      return [
+        {
+          id: user.id,
+          full_name: user.full_name,
+          username: user.username,
+        },
+      ]
+    }
+    return []
+  }, [departmentUsers, selectedUserId, user, viewMode])
+
+  const allTodayPrintItems = React.useMemo(() => {
+    const items: Array<{
+      userId: string
+      period: "AM" | "PM"
+      label: string
+      category: "PRJK" | "FT" | "SYS" | "EXM" | "GA"
+      fastType?: string
+    }> = []
+    for (const task of todayProjectTasks) {
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      const projectLabel = project?.title || project?.name || "Project"
+      const period = resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at)
+      const userId = task.assigned_to || task.assigned_to_user_id || task.created_by || "__unassigned__"
+      items.push({
+        userId,
+        period,
+        label: `${projectLabel}: ${task.title}`,
+        category: "PRJK",
+      })
+    }
+    for (const task of todayNoProjectTasks) {
+      const period = resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at)
+      const userId = task.assigned_to || task.assigned_to_user_id || task.created_by || "__unassigned__"
+      const fastType = noProjectTypeLabel(task)
+      items.push({
+        userId,
+        period,
+        label: task.title,
+        category: "FT",
+        fastType,
+      })
+    }
+    for (const task of todaySystemTasks) {
+      const period = resolvePeriod(task.finish_period, task.created_at)
+      const userId = task.default_assignee_id || "__unassigned__"
+      items.push({
+        userId,
+        period,
+        label: `${task.title || "System task"}`,
+        category: "SYS",
+      })
+    }
+    for (const note of todayOpenNotes) {
+      const period = periodFromDate(note.created_at)
+      const userId = note.created_by || "__unassigned__"
+      items.push({
+        userId,
+        period,
+        label: `${note.note_type || "GA"}: ${note.content || "Note"}`,
+        category: "GA",
+      })
+    }
+    for (const meeting of todayMeetings) {
+      const period = periodFromDate(meeting.starts_at)
+      const userId = meeting.created_by || "__unassigned__"
+      items.push({
+        userId,
+        period,
+        label: `${formatMeetingPrintLabel(meeting)}`,
+        category: "EXM",
+      })
+    }
+    return items
+  }, [projects, todayMeetings, todayNoProjectTasks, todayOpenNotes, todayProjectTasks, todaySystemTasks])
+
+  const allTodayPrintHasUnassigned = React.useMemo(
+    () => allTodayPrintItems.some((item) => item.userId === "__unassigned__"),
+    [allTodayPrintItems]
+  )
+
+  const allTodayPrintColumns = React.useMemo(() => {
+    const baseIds = new Set(allTodayPrintBaseUsers.map((member) => member.id))
+    const extraIds = Array.from(
+      new Set(
+        allTodayPrintItems
+          .map((item) => item.userId)
+          .filter((userId) => userId !== "__unassigned__" && !baseIds.has(userId))
+      )
+    )
+    const extraColumns = extraIds
+      .map((userId) => {
+        const lookup = userMap.get(userId)
+        return {
+          id: userId,
+          label: lookup?.full_name || lookup?.username || "Unknown",
+        }
+      })
+      .filter((column) => {
+        if (column.label === "Unknown") return false
+        const label = column.label.toLowerCase()
+        return label !== "admin"
+      })
+    const columns = allTodayPrintBaseUsers.map((member) => ({
+      id: member.id,
+      label: member.full_name || member.username || "-",
+    }))
+      .concat(extraColumns)
+    if (allTodayPrintHasUnassigned) {
+      columns.push({ id: "__unassigned__", label: "Unassigned" })
+    }
+    return columns
+  }, [allTodayPrintBaseUsers, allTodayPrintHasUnassigned, allTodayPrintItems, userMap])
+
+  const allTodayPrintByUser = React.useMemo(() => {
+    const categories = ["PRJK", "FT", "SYS", "EXM", "GA"] as const
+    const map = new Map<
+      string,
+      Record<string, Array<{ period: "AM" | "PM"; label: string; fastType?: string }>>
+    >()
+    const ensure = (userId: string) => {
+      if (!map.has(userId)) {
+        const emptyBuckets = categories.reduce<
+          Record<string, Array<{ period: "AM" | "PM"; label: string; fastType?: string }>>
+        >((acc, category) => {
+          acc[category] = []
+          return acc
+        }, {})
+        map.set(userId, { ...emptyBuckets })
+      }
+      return map.get(userId)!
+    }
+    for (const column of allTodayPrintColumns) {
+      ensure(column.id)
+    }
+    for (const item of allTodayPrintItems) {
+      const bucket = ensure(item.userId)
+      bucket[item.category].push({ period: item.period, label: item.label, fastType: item.fastType })
+    }
+    for (const bucket of map.values()) {
+      for (const category of categories) {
+        bucket[category].sort((a, b) => a.label.localeCompare(b.label))
+      }
+    }
+    return map
+  }, [allTodayPrintColumns, allTodayPrintItems])
+
   const projectTaskGroups = React.useMemo(() => {
     const map = new Map<string, Task[]>()
     for (const task of projectTasks) {
@@ -1158,6 +1331,17 @@ export default function DepartmentKanban() {
       todayMeetings.length,
       todaySystemTasks.length,
     ]
+  )
+  const showAllTodayPrint = activeTab === "all" && viewMode === "department"
+  const allTodayPrintCategories = React.useMemo(
+    () => [
+      { id: "PRJK", label: "PRJK" },
+      { id: "FT", label: "FT" },
+      { id: "SYS", label: "SYS" },
+      { id: "EXM", label: "EXM" },
+      { id: "GA", label: "GA" },
+    ],
+    []
   )
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -2498,19 +2682,29 @@ export default function DepartmentKanban() {
                     {formatToday()}
                   </div>
                   {viewMode === "department" && departmentUsers.length ? (
-                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
-                        <SelectValue placeholder="All users" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All users</SelectItem>
-                        {departmentUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.full_name || u.username || "-"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <>
+                      <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                        <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectValue placeholder="All users" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">All users</SelectItem>
+                          {departmentUsers.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || "-"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="outline"
+                        className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                        onClick={() => window.print()}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        Print
+                      </Button>
+                    </>
                   ) : null}
                   {viewMode === "mine" ? (
                     <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
@@ -2525,10 +2719,11 @@ export default function DepartmentKanban() {
                         </SelectContent>
                       </Select>
                       <Button
-                        variant="ghost"
-                        className="h-8 rounded-lg px-3 text-sm text-slate-700 hover:bg-slate-100"
+                        variant="outline"
+                        className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
                         onClick={() => window.print()}
                       >
+                        <Printer className="mr-2 h-4 w-4" />
                         Print
                       </Button>
                     </div>
@@ -3838,70 +4033,231 @@ export default function DepartmentKanban() {
       <div className="hidden print:block">
         <div className="px-6 py-4">
           <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">Weekly Task Report</div>
+          <div className="mt-4 text-2xl font-bold text-slate-900">
+            {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
+          </div>
           <div className="mt-1 text-sm text-slate-700">
             Department: {departmentDisplayName}
           </div>
+          {showAllTodayPrint ? (
+            <div className="text-sm text-slate-700">
+              Users: {selectedUserId === "__all__"
+                ? "All users"
+                : allTodayPrintColumns[0]?.label || "Selected user"}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-700">
+              User: {user?.full_name || user?.username || "-"}
+            </div>
+          )}
           <div className="text-sm text-slate-700">
-            User: {user?.full_name || user?.username || "-"}
-          </div>
-          <div className="text-sm text-slate-700">
-            {printRange === "today" ? "Date" : "Week"}: {printRangeLabel}
+            {showAllTodayPrint
+              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
+              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
           </div>
         </div>
         <div className="px-6 pb-6">
-          <table className="w-full border border-slate-900 text-[11px]">
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
-                {printDates.map((date) => (
-                  <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                    {formatPrintDay(date)}
-                  </th>
-                ))}
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {printRowsByRange.map((row) => {
-                const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
-                return (
-                  <tr key={row.id}>
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                      {row.label}
-                      <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
-                        {total}
-                      </span>
-                    </td>
-                    {row.itemsByDay.map((items, idx) => (
-                      <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
-                        {items.length ? (
-                          <div className="space-y-1">
-                            {items.map((item, itemIndex) => (
-                              <div
-                                key={`${row.id}-${idx}-${itemIndex}`}
-                                className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                              >
-                                <div className="flex items-start gap-1 leading-tight">
-                                  <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                  <span>{item}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="italic text-slate-600">No data available.</div>
-                        )}
+          {showAllTodayPrint ? (
+            <table className="w-full border border-slate-900 text-[11px]">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Type</th>
+                  {allTodayPrintColumns.map((column) => (
+                    <th key={column.id} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allTodayPrintCategories.map((category, categoryIndex) => (
+                  <tr key={category.id}>
+                    {categoryIndex === 0 ? (
+                      <td
+                        rowSpan={allTodayPrintCategories.length}
+                        className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase"
+                      >
+                        {formatPrintDay(todayDate)}
                       </td>
-                    ))}
-                    <td className="border border-slate-900 px-2 py-2 align-top" />
-                    <td className="border border-slate-900 px-2 py-2 align-top" />
+                    ) : null}
+                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                      {category.label}
+                    </td>
+                    {allTodayPrintColumns.map((column) => {
+                      const bucket = allTodayPrintByUser.get(column.id)
+                      const items = bucket ? bucket[category.id] : []
+                      const amItems = items.filter((item) => item.period === "AM")
+                      const pmItems = items.filter((item) => item.period === "PM")
+                      return (
+                        <td key={`${column.id}-${category.id}`} className="border border-slate-900 px-2 py-2 align-top">
+                          {items.length ? (
+                            <div className="space-y-2">
+                              <div>
+                                <div className="text-[10px] font-semibold uppercase text-slate-600">AM</div>
+                                {amItems.length ? (
+                                  <div className="space-y-1 mt-1">
+                                    {amItems.map((item, itemIndex) => {
+                                      const fastType = item.fastType?.toUpperCase() || "NORMAL"
+                                      const fastBadgeClass =
+                                        fastType === "BLLOK" || fastType === "BLL"
+                                          ? "bg-rose-100 text-rose-700 border-rose-200"
+                                          : fastType === "1H"
+                                            ? "bg-amber-100 text-amber-700 border-amber-200"
+                                            : fastType === "R1"
+                                              ? "bg-blue-100 text-blue-700 border-blue-200"
+                                              : fastType === "GA"
+                                                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                                : fastType === "PERSONAL"
+                                                  ? "bg-violet-100 text-violet-700 border-violet-200"
+                                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                                      const fastBadgeLabel =
+                                        fastType === "BLLOK" || fastType === "BLL"
+                                          ? "BLL"
+                                          : fastType === "PERSONAL"
+                                            ? "P"
+                                            : fastType
+                                      return (
+                                        <div
+                                          key={`${column.id}-${category.id}-am-${itemIndex}`}
+                                          className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                        >
+                                          <div className="flex items-start gap-1 leading-tight">
+                                            <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                            {category.id === "FT" ? (
+                                              <>
+                                                <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
+                                                  {fastBadgeLabel}
+                                                </span>
+                                                <span className="ml-1">{item.label}</span>
+                                              </>
+                                            ) : (
+                                              <span>{item.label}</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="italic text-slate-600">-</div>
+                                )}
+                              </div>
+                              <div className="border-t border-slate-200 pt-2">
+                                <div className="text-[10px] font-semibold uppercase text-slate-600">PM</div>
+                                {pmItems.length ? (
+                                  <div className="space-y-1 mt-1">
+                                    {pmItems.map((item, itemIndex) => {
+                                      const fastType = item.fastType?.toUpperCase() || "NORMAL"
+                                      const fastBadgeClass =
+                                        fastType === "BLLOK" || fastType === "BLL"
+                                          ? "bg-rose-100 text-rose-700 border-rose-200"
+                                          : fastType === "1H"
+                                            ? "bg-amber-100 text-amber-700 border-amber-200"
+                                            : fastType === "R1"
+                                              ? "bg-blue-100 text-blue-700 border-blue-200"
+                                              : fastType === "GA"
+                                                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                                : fastType === "PERSONAL"
+                                                  ? "bg-violet-100 text-violet-700 border-violet-200"
+                                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                                      const fastBadgeLabel =
+                                        fastType === "BLLOK" || fastType === "BLL"
+                                          ? "BLL"
+                                          : fastType === "PERSONAL"
+                                            ? "P"
+                                            : fastType
+                                      return (
+                                        <div
+                                          key={`${column.id}-${category.id}-pm-${itemIndex}`}
+                                          className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                        >
+                                          <div className="flex items-start gap-1 leading-tight">
+                                            <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                            {category.id === "FT" ? (
+                                              <>
+                                                <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
+                                                  {fastBadgeLabel}
+                                                </span>
+                                                <span className="ml-1">{item.label}</span>
+                                              </>
+                                            ) : (
+                                              <span>{item.label}</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="italic text-slate-600">-</div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="italic text-slate-600">-</div>
+                          )}
+                        </td>
+                      )
+                    })}
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full border border-slate-900 text-[11px]">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
+                  {printDates.map((date) => (
+                    <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                      {formatPrintDay(date)}
+                    </th>
+                  ))}
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printRowsByRange.map((row) => {
+                  const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
+                  return (
+                    <tr key={row.id}>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                        {row.label}
+                        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
+                          {total}
+                        </span>
+                      </td>
+                      {row.itemsByDay.map((items, idx) => (
+                        <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
+                          {items.length ? (
+                            <div className="space-y-1">
+                              {items.map((item, itemIndex) => (
+                                <div
+                                  key={`${row.id}-${idx}-${itemIndex}`}
+                                  className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                >
+                                  <div className="flex items-start gap-1 leading-tight">
+                                    <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                    <span>{item}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="italic text-slate-600">No data available.</div>
+                          )}
+                        </td>
+                      ))}
+                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
       <style jsx global>{`
