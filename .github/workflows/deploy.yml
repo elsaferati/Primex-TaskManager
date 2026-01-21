@@ -1,34 +1,43 @@
-name: Primex Auto Deploy
- 
+name: Primex Auto Deploy Final
+
 on:
   push:
     branches: [ main ]
- 
+
 jobs:
   deploy:
     runs-on: self-hosted
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
- 
+
+      - name: Create Env Files
+        shell: cmd
+        run: |
+          echo NEXT_PUBLIC_API_URL=https://api-flow.primexeu.com > frontend/.env.local
+          echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend/.env
+          echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend/.env
+          echo REDIS_URL=redis://localhost:6379/0 >> backend/.env
+          echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
+
       - name: Update Backend
         shell: cmd
         run: |
           cd backend
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
- 
+          python -m pip install -r requirements.txt
+          python -m pip install psycopg2-binary pydantic[email]
+
       - name: Update Frontend
         shell: cmd
         run: |
           cd frontend
           npm install
           npm run build
- 
-      - name: Start Services with PM2
+
+      - name: Start/Restart Services with PM2
         shell: cmd
         run: |
           pm2 delete all || ver > nul
-          pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend
-          pm2 start "npm.cmd run start -- -p 3000" --name frontend
+          pm2 start "python" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
           pm2 save
-          
