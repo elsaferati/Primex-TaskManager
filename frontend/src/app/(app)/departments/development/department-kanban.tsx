@@ -450,6 +450,8 @@ export default function DepartmentKanban() {
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
+  const printedAt = React.useMemo(() => new Date(), [])
+  const printInitials = initials(user?.full_name || user?.username || "")
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
@@ -4391,35 +4393,42 @@ export default function DepartmentKanban() {
         </Dialog>
       </div>
       <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">
-            {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
-          </div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentName}
-          </div>
-          {showAllTodayPrint ? (
-            <div className="text-sm text-slate-700">
-              Users: {selectedUserId === "__all__"
-                ? "All users"
-                : allTodayPrintColumns[0]?.label || "Selected user"}
+        <div className="print-page px-6 pb-6">
+          <div className="print-header">
+            <div />
+            <div className="print-title">
+              {showAllTodayPrint ? "ALL TODAY REPORT" : "WEEKLY TASK REPORT"}
             </div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              User: {user?.full_name || user?.username || "-"}
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
-          )}
-          <div className="text-sm text-slate-700">
-            {showAllTodayPrint
-              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
-              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
           </div>
-        </div>
-        <div className="px-6 pb-6">
+          <div className="print-meta">
+            <div>Department: {departmentName}</div>
+            {showAllTodayPrint ? (
+              <div>
+                Users: {selectedUserId === "__all__"
+                  ? "All users"
+                  : allTodayPrintColumns[0]?.label || "Selected user"}
+              </div>
+            ) : (
+              <div>User: {user?.full_name || user?.username || "-"}</div>
+            )}
+            <div>
+              {showAllTodayPrint
+                ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
+                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
+            </div>
+          </div>
           {showAllTodayPrint ? (
             <>
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
@@ -4605,7 +4614,7 @@ export default function DepartmentKanban() {
             ) : null}
             </>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nr</th>
@@ -4654,6 +4663,10 @@ export default function DepartmentKanban() {
               </tbody>
             </table>
           )}
+          <div className="print-footer">
+            <div className="print-page-count" />
+            <div className="print-initials">Initials: {printInitials}</div>
+          </div>
         </div>
       </div>
       <style jsx global>{`
@@ -4665,7 +4678,67 @@ export default function DepartmentKanban() {
             display: none !important;
           }
           @page {
-            margin: 12mm;
+            margin: 0.36in 0.08in 0.51in 0.2in;
+          }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 8px;
+            margin-bottom: 8px;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-meta {
+            font-size: 11px;
+            color: #334155;
+            margin-bottom: 12px;
+            display: grid;
+            gap: 2px;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.3in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.08in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            grid-column: 2;
+            text-align: center;
+          }
+          .print-page-count::before {
+            content: "Page " counter(page) " / " counter(pages);
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
+          }
+          .weekly-report-table thead {
+            display: table-header-group;
+          }
+          .weekly-report-table {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
         }
       `}</style>
