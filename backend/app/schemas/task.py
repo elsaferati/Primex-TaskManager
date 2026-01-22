@@ -43,6 +43,7 @@ class TaskOut(BaseModel):
     is_personal: bool
     is_active: bool
     user_comment: str | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -70,6 +71,7 @@ class TaskCreate(BaseModel):
     is_1h_report: bool | None = None
     is_r1: bool | None = None
     is_personal: bool | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -94,4 +96,5 @@ class TaskUpdate(BaseModel):
     is_1h_report: bool | None = None
     is_r1: bool | None = None
     is_personal: bool | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
 

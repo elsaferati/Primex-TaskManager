@@ -16,6 +16,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
@@ -247,6 +248,56 @@ async def list_system_tasks(
     ]
 
 
+@router.get("/templates", response_model=list[SystemTaskTemplateOut])
+async def list_system_task_templates(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[SystemTaskTemplateOut]:
+    ensure_manager_or_admin(user)
+    templates = (await db.execute(select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc()))).scalars().all()
+    if not templates:
+        return []
+
+    template_ids = [t.id for t in templates]
+    role_rows = []
+    if template_ids:
+        role_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentRole.template_id, SystemTaskTemplateAlignmentRole.role)
+                .where(SystemTaskTemplateAlignmentRole.template_id.in_(template_ids))
+            )
+        ).all()
+    roles_map: dict[uuid.UUID, list[str]] = {}
+    for tid, role in role_rows:
+        roles_map.setdefault(tid, []).append(role)
+
+    return [
+        SystemTaskTemplateOut(
+            id=t.id,
+            title=t.title,
+            description=t.description,
+            internal_notes=t.internal_notes,
+            department_id=t.department_id,
+            default_assignee_id=t.default_assignee_id,
+            assignees=None,
+            scope=SystemTaskScope(t.scope),
+            frequency=FrequencyType(t.frequency),
+            day_of_week=t.day_of_week,
+            days_of_week=t.days_of_week,
+            day_of_month=t.day_of_month,
+            month_of_year=t.month_of_year,
+            priority=TaskPriority(t.priority) if t.priority else None,
+            finish_period=TaskFinishPeriod(t.finish_period) if t.finish_period else None,
+            requires_alignment=bool(getattr(t, "requires_alignment", False)),
+            alignment_time=getattr(t, "alignment_time", None),
+            alignment_roles=roles_map.get(t.id),
+            is_active=t.is_active,
+            created_at=t.created_at,
+        )
+        for t in templates
+    ]
+
+
 @router.post("", response_model=SystemTaskOut, status_code=status.HTTP_201_CREATED)
 async def create_system_task_template(
     payload: SystemTaskTemplateCreate,
@@ -322,11 +373,24 @@ async def create_system_task_template(
         month_of_year=payload.month_of_year,
         priority=_enum_value(priority_value),
         finish_period=_enum_value(payload.finish_period),
+        requires_alignment=payload.requires_alignment if payload.requires_alignment is not None else False,
+        alignment_time=payload.alignment_time,
         is_active=payload.is_active if payload.is_active is not None else True,
     )
 
     db.add(template)
     await db.flush()
+
+    # Alignment roles (currently: MANAGER). Stored on the template (applies to future occurrences).
+    if payload.requires_alignment:
+        if payload.alignment_time is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="alignment_time is required")
+        roles = payload.alignment_roles or []
+        cleaned = sorted({str(r).upper() for r in roles if str(r).strip()})
+        if not cleaned:
+            cleaned = ["MANAGER"]
+        values = [{"template_id": template.id, "role": role} for role in cleaned]
+        await db.execute(insert(SystemTaskTemplateAlignmentRole), values)
     task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
     if assignee_ids is not None:
         await _replace_task_assignees(db, task, assignee_ids)
@@ -474,8 +538,25 @@ async def update_system_task_template(
         template.priority = _enum_value(payload.priority)
     if "finish_period" in fields_set:
         template.finish_period = _enum_value(payload.finish_period)
+    if payload.requires_alignment is not None:
+        template.requires_alignment = payload.requires_alignment
+    if "alignment_time" in fields_set:
+        template.alignment_time = payload.alignment_time
     if payload.is_active is not None:
         template.is_active = payload.is_active
+
+    # Update alignment roles if provided.
+    if "alignment_roles" in fields_set or "requires_alignment" in fields_set:
+        await db.execute(delete(SystemTaskTemplateAlignmentRole).where(SystemTaskTemplateAlignmentRole.template_id == template.id))
+        if template.requires_alignment:
+            if template.alignment_time is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="alignment_time is required")
+            roles = payload.alignment_roles or []
+            cleaned = sorted({str(r).upper() for r in roles if str(r).strip()})
+            if not cleaned:
+                cleaned = ["MANAGER"]
+            values = [{"template_id": template.id, "role": role} for role in cleaned]
+            await db.execute(insert(SystemTaskTemplateAlignmentRole), values)
 
     await db.flush()
     task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)

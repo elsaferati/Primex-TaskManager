@@ -10,6 +10,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.services.system_task_schedule import should_reopen_system_task
+from app.services.system_task_occurrences import ensure_occurrences_in_range
 
 
 async def generate_system_tasks() -> int:
@@ -61,6 +62,10 @@ async def generate_system_tasks() -> int:
                 if active_value and should_reopen_system_task(task, tmpl, now):
                     task.status = TaskStatus.TODO
                     task.completed_at = None
+
+        # Ensure today's occurrences exist.
+        today = now.date()
+        await ensure_occurrences_in_range(db=db, start=today, end=today)
 
         await db.commit()
 

@@ -56,6 +56,9 @@ class Task(Base):
 
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Keeps the original planned end date when a task is postponed (due_date changed).
+    # Late/overdue is always computed against current due_date; this field is for reporting/history only.
+    original_due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     is_bllok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
