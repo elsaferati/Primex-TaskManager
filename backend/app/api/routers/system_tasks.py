@@ -28,7 +28,7 @@ from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
 from app.schemas.system_task_template import (
-    SystemTaskTemplateCreate,
+    SystemTaskTemplateCreate, SystemTaskTemplateOut,
     SystemTaskTemplateOut,
     SystemTaskTemplateUpdate,
 )

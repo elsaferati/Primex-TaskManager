@@ -731,7 +731,43 @@ async def weekly_table_planner(
                 continue
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
-    
+
+    # Prefetch active system task templates and resolve assignees for weekly planner display.
+    system_templates = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
+    ).scalars().all()
+    system_template_ids = [t.id for t in system_templates]
+    system_template_assignees: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in system_template_ids}
+    if system_template_ids:
+        sys_tasks = (
+            await db.execute(
+                select(Task.id, Task.system_template_origin_id, Task.assigned_to)
+                .where(Task.system_template_origin_id.in_(system_template_ids))
+            )
+        ).all()
+        sys_task_ids = [row[0] for row in sys_tasks]
+        task_assignee_rows = []
+        if sys_task_ids:
+            task_assignee_rows = (
+                await db.execute(
+                    select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(sys_task_ids))
+                )
+            ).all()
+        assignees_by_task: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for task_id, user_id in task_assignee_rows:
+            assignees_by_task.setdefault(task_id, set()).add(user_id)
+        for task_id, template_id, assigned_to in sys_tasks:
+            if template_id is None:
+                continue
+            explicit = assignees_by_task.get(task_id) or set()
+            if explicit:
+                system_template_assignees.setdefault(template_id, set()).update(explicit)
+            elif assigned_to is not None:
+                system_template_assignees.setdefault(template_id, set()).add(assigned_to)
+        for tmpl in system_templates:
+            if not system_template_assignees.get(tmpl.id) and tmpl.default_assignee_id is not None:
+                system_template_assignees.setdefault(tmpl.id, set()).add(tmpl.default_assignee_id)
+
     # Get projects with due dates and their members
     # Projects should show for members from Monday until due date
     # If overdue and not completed, show on Monday as late project

@@ -102,6 +102,8 @@ const initials = (name: string) => {
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
   const isAdmin = user?.role === "ADMIN"
+  const printedAt = React.useMemo(() => new Date(), [])
+  const printInitials = initials(user?.full_name || user?.username || "")
 
   // Utils
   const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -1997,7 +1999,14 @@ export default function CommonViewPage() {
         .no-print { display: inline-flex; }
         .hide-in-print { display: none !important; }
         .hide-when-all-days { display: none !important; }
+        .print-header,
+        .print-footer {
+          display: none;
+        }
         @media print {
+          @page {
+            margin: 0.36in 0.08in 0.51in 0.2in;
+          }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
           .swimlane-delete { display: none !important; }
@@ -2008,7 +2017,52 @@ export default function CommonViewPage() {
           body, html { background: white; }
           main { padding: 0 !important; }
           .view-container { padding: 0; background: white; }
-          .week-table-view { display: block !important; }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
+          .week-table-view { display: block !important; padding-bottom: 0.35in; }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.3in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.08in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            grid-column: 2;
+            text-align: center;
+          }
+          .print-page-count::before {
+            content: "Page " counter(page) " / " counter(pages);
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
+          }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
           .swimlane-row-nav { display: none !important; }
@@ -2480,18 +2534,25 @@ export default function CommonViewPage() {
         }
         .week-table th {
           border: 1px solid #111827;
-          background: #f8f9fa;
+          background: #dbeafe;
           padding: 8px 6px;
           text-align: center;
           font-weight: 700;
           vertical-align: middle;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+        }
+        .week-table thead tr:nth-child(2) th {
+          top: 30px;
+          z-index: 1;
         }
         .week-table-date-header {
-          background: #e9ecef !important;
+          background: #bfdbfe !important;
           font-size: 10px;
         }
         .week-table-subheader {
-          background: #f8f9fa !important;
+          background: #dbeafe !important;
           font-size: 9px;
           font-weight: 600;
         }
@@ -2576,6 +2637,11 @@ export default function CommonViewPage() {
           }
           .week-table {
             page-break-inside: avoid;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .week-table thead {
+            display: table-header-group;
           }
           .week-table th,
           .week-table td {
@@ -3879,6 +3945,19 @@ export default function CommonViewPage() {
       <div className="view-container">
         {allDaysSelected ? (
           <div className="week-table-view">
+            <div className="print-header">
+              <div />
+              <div className="print-title">COMMON VIEW - WEEK PLAN</div>
+              <div className="print-datetime">
+                {printedAt.toLocaleString("en-US", {
+                  month: "2-digit",
+                  day: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </div>
             <table className="week-table">
               <thead>
                 <tr>
@@ -4064,79 +4143,102 @@ export default function CommonViewPage() {
                   })}
               </tbody>
             </table>
+            <div className="print-footer">
+              <div className="print-page-count" />
+              <div className="print-initials">Initials: {printInitials}</div>
+            </div>
           </div>
         ) : null}
-        <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
-          {swimlaneRows
-            .filter((row) => showCard(row.id))
-            .map((row) => {
-              const cells = buildSwimlaneCells(row.items)
-              return (
-                <div key={row.id} className="swimlane-row">
-                  <div className={row.headerClass}>
-                    <span>{row.label}</span>
-                    <span className={row.badgeClass}>{row.count}</span>
-                  </div>
-                  <div className="swimlane-content-shell">
-                    <div className="swimlane-row-nav">
-                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "left")}>{"<"}</button>
-                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "right")}>{">"}</button>
+        <div className={`print-page ${allDaysSelected ? "hide-when-all-days" : ""}`}>
+          <div className="print-header">
+            <div />
+            <div className="print-title">COMMON VIEW</div>
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
+          <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
+            {swimlaneRows
+              .filter((row) => showCard(row.id))
+              .map((row) => {
+                const cells = buildSwimlaneCells(row.items)
+                return (
+                  <div key={row.id} className="swimlane-row">
+                    <div className={row.headerClass}>
+                      <span>{row.label}</span>
+                      <span className={row.badgeClass}>{row.count}</span>
                     </div>
-                    <div
-                      className="swimlane-content-scroll"
-                      ref={(node) => {
-                        swimlaneRowRefs.current[row.id] = node
-                      }}
-                    >
-                      <div className="swimlane-content">
-                        {cells.map((cell, index) =>
-                          cell ? (
-                            <div
-                              key={`${row.id}-${index}`}
-                              className={[
-                                "swimlane-cell",
-                                cell.accentClass || "",
-                                cell.placeholder ? "placeholder" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ")}
-                            >
-                              {!cell.placeholder && isAdmin && cell.entryId ? (
-                                <button
-                                  type="button"
-                                  className="swimlane-delete"
-                                  onClick={() => deleteCommonEntry(cell.entryId)}
-                                  aria-label="Delete entry"
-                                  title="Delete"
-                                >
-                                  ×
-                                </button>
-                              ) : null}
-                              <div className="swimlane-title">
-                                {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
-                                {cell.title}
-                              </div>
-                              {!cell.placeholder && cell.assignees?.length ? (
-                                <div className="swimlane-assignees">
-                                  {cell.assignees.map((name) => (
-                                    <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
-                                      {initials(name)}
-                                    </span>
-                                  ))}
+                    <div className="swimlane-content-shell">
+                      <div className="swimlane-row-nav">
+                        <button type="button" onClick={() => scrollSwimlaneRow(row.id, "left")}>{"<"}</button>
+                        <button type="button" onClick={() => scrollSwimlaneRow(row.id, "right")}>{">"}</button>
+                      </div>
+                      <div
+                        className="swimlane-content-scroll"
+                        ref={(node) => {
+                          swimlaneRowRefs.current[row.id] = node
+                        }}
+                      >
+                        <div className="swimlane-content">
+                          {cells.map((cell, index) =>
+                            cell ? (
+                              <div
+                                key={`${row.id}-${index}`}
+                                className={[
+                                  "swimlane-cell",
+                                  cell.accentClass || "",
+                                  cell.placeholder ? "placeholder" : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              >
+                                {!cell.placeholder && isAdmin && cell.entryId ? (
+                                  <button
+                                    type="button"
+                                    className="swimlane-delete"
+                                    onClick={() => deleteCommonEntry(cell.entryId)}
+                                    aria-label="Delete entry"
+                                    title="Delete"
+                                  >
+                                    A-
+                                  </button>
+                                ) : null}
+                                <div className="swimlane-title">
+                                  {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                  {cell.title}
                                 </div>
-                              ) : null}
-                              {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
-                            </div>
-                          ) : (
-                            <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
-                          )
-                        )}
+                                {!cell.placeholder && cell.assignees?.length ? (
+                                  <div className="swimlane-assignees">
+                                    {cell.assignees.map((name) => (
+                                      <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
+                                        {initials(name)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
+                              </div>
+                            ) : (
+                              <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
+                            )
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+          </div>
+          <div className="print-footer">
+            <div className="print-page-count" />
+            <div className="print-initials">Initials: {printInitials}</div>
+          </div>
         </div>
       </div>
 
