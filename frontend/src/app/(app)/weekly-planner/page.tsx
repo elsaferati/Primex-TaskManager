@@ -630,6 +630,14 @@ export default function WeeklyPlannerPage() {
     const selectedDept = departmentId !== ALL_DEPARTMENTS_VALUE 
       ? departments.find(d => d.id === departmentId)?.name || "All Departments"
       : "All Departments"
+    const printedAt = new Date()
+    const printInitials = (user?.full_name || user?.username || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "?"
 
     let printContent = `
       <!DOCTYPE html>
@@ -638,36 +646,51 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { margin: 1cm; }
+              @page { margin: 0.36in 0.08in 0.51in 0.2in; }
               body { margin: 0; padding: 0; }
             }
             body {
               font-family: Arial, sans-serif;
               font-size: 10pt;
-              margin: 20px;
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 20px;
-              border-bottom: 2px solid #000;
-              padding-bottom: 10px;
-            }
-            .header h1 {
               margin: 0;
-              font-size: 18pt;
+              padding: 0 0 0.35in 0;
             }
-            .header-info {
-              margin-top: 10px;
-              font-size: 11pt;
+            .print-header {
+              display: grid;
+              grid-template-columns: 1fr auto 1fr;
+              align-items: center;
+              margin-bottom: 12px;
+            }
+            .print-title {
+              margin: 0;
+              font-size: 16pt;
+              font-weight: 700;
+              text-transform: uppercase;
+              text-align: center;
+              color: #0f172a;
+            }
+            .print-datetime {
+              text-align: right;
+              font-size: 10pt;
+              color: #334155;
+            }
+            .print-meta {
+              text-align: center;
+              margin-bottom: 12px;
+              font-size: 10pt;
+              color: #334155;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 10px;
+              margin-top: 12px;
               page-break-inside: auto;
             }
+            thead {
+              display: table-header-group;
+            }
             th {
-              background-color: #f0f0f0;
+              background-color: #e2e8f0;
               border: 1px solid #000;
               padding: 8px;
               text-align: center;
@@ -727,15 +750,43 @@ export default function WeeklyPlannerPage() {
             .pm-row {
               border-top: 2px solid #000 !important;
             }
+            .print-footer {
+              position: fixed;
+              left: 0;
+              right: 0;
+              bottom: 0.3in;
+              display: grid;
+              grid-template-columns: 1fr auto 1fr;
+              padding-left: 0.2in;
+              padding-right: 0.08in;
+              font-size: 10pt;
+              color: #334155;
+            }
+            .print-page-count {
+              text-align: center;
+            }
+            .print-page-count::before {
+              content: "Page " counter(page) " / " counter(pages);
+            }
+            .print-initials {
+              text-align: right;
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <h1>Weekly Planner</h1>
-            <div class="header-info">
-              <strong>Week:</strong> ${weekRange} | 
-              <strong>Department:</strong> ${selectedDept}
-            </div>
+          <div class="print-header">
+            <div></div>
+            <div class="print-title">Weekly Planner</div>
+            <div class="print-datetime">${printedAt.toLocaleString("en-US", {
+              month: "2-digit",
+              day: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}</div>
+          </div>
+          <div class="print-meta">
+            <strong>Week:</strong> ${weekRange} | <strong>Department:</strong> ${selectedDept}
           </div>
     `
 
@@ -928,6 +979,11 @@ export default function WeeklyPlannerPage() {
     })
 
     printContent += `
+          <div class="print-footer">
+            <div></div>
+            <div class="print-page-count"></div>
+            <div class="print-initials">Initials: ${printInitials}</div>
+          </div>
         </body>
       </html>
     `

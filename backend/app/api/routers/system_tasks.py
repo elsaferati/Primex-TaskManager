@@ -20,7 +20,7 @@ from app.models.system_task_template_alignment_role import SystemTaskTemplateAli
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
-from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateUpdate
+from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateOut, SystemTaskTemplateUpdate
 from app.services.system_task_schedule import should_reopen_system_task
 
 

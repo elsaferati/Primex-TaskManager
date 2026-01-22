@@ -102,6 +102,8 @@ const initials = (name: string) => {
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
   const isAdmin = user?.role === "ADMIN"
+  const printedAt = React.useMemo(() => new Date(), [])
+  const printInitials = initials(user?.full_name || user?.username || "")
 
   // Utils
   const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -1997,7 +1999,14 @@ export default function CommonViewPage() {
         .no-print { display: inline-flex; }
         .hide-in-print { display: none !important; }
         .hide-when-all-days { display: none !important; }
+        .print-header,
+        .print-footer {
+          display: none;
+        }
         @media print {
+          @page {
+            margin: 0.36in 0.08in 0.51in 0.2in;
+          }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
           .swimlane-delete { display: none !important; }
@@ -2008,7 +2017,43 @@ export default function CommonViewPage() {
           body, html { background: white; }
           main { padding: 0 !important; }
           .view-container { padding: 0; background: white; }
-          .week-table-view { display: block !important; }
+          .week-table-view { display: block !important; padding-bottom: 0.35in; }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.3in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.08in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count::before {
+            content: "Page " counter(page) " / " counter(pages);
+          }
+          .print-initials {
+            text-align: right;
+          }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
           .swimlane-row-nav { display: none !important; }
@@ -2576,6 +2621,9 @@ export default function CommonViewPage() {
           }
           .week-table {
             page-break-inside: avoid;
+          }
+          .week-table thead {
+            display: table-header-group;
           }
           .week-table th,
           .week-table td {
@@ -3879,6 +3927,19 @@ export default function CommonViewPage() {
       <div className="view-container">
         {allDaysSelected ? (
           <div className="week-table-view">
+            <div className="print-header">
+              <div />
+              <div className="print-title">COMMON VIEW - WEEK PLAN</div>
+              <div className="print-datetime">
+                {printedAt.toLocaleString("en-US", {
+                  month: "2-digit",
+                  day: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </div>
             <table className="week-table">
               <thead>
                 <tr>
@@ -4064,6 +4125,10 @@ export default function CommonViewPage() {
                   })}
               </tbody>
             </table>
+            <div className="print-footer">
+              <div className="print-page-count" />
+              <div className="print-initials">Initials: {printInitials}</div>
+            </div>
           </div>
         ) : null}
         <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
