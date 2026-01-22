@@ -2017,6 +2017,10 @@ export default function CommonViewPage() {
           body, html { background: white; }
           main { padding: 0 !important; }
           .view-container { padding: 0; background: white; }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
           .week-table-view { display: block !important; padding-bottom: 0.35in; }
           .print-header {
             display: grid;
@@ -2048,10 +2052,15 @@ export default function CommonViewPage() {
             font-size: 10px;
             color: #334155;
           }
+          .print-page-count {
+            grid-column: 2;
+            text-align: center;
+          }
           .print-page-count::before {
             content: "Page " counter(page) " / " counter(pages);
           }
           .print-initials {
+            grid-column: 3;
             text-align: right;
           }
           .swimlane-board { gap: 12px; }
@@ -2525,18 +2534,25 @@ export default function CommonViewPage() {
         }
         .week-table th {
           border: 1px solid #111827;
-          background: #f8f9fa;
+          background: #dbeafe;
           padding: 8px 6px;
           text-align: center;
           font-weight: 700;
           vertical-align: middle;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+        }
+        .week-table thead tr:nth-child(2) th {
+          top: 30px;
+          z-index: 1;
         }
         .week-table-date-header {
-          background: #e9ecef !important;
+          background: #bfdbfe !important;
           font-size: 10px;
         }
         .week-table-subheader {
-          background: #f8f9fa !important;
+          background: #dbeafe !important;
           font-size: 9px;
           font-weight: 600;
         }
@@ -2621,6 +2637,8 @@ export default function CommonViewPage() {
           }
           .week-table {
             page-break-inside: avoid;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           .week-table thead {
             display: table-header-group;
@@ -4131,77 +4149,96 @@ export default function CommonViewPage() {
             </div>
           </div>
         ) : null}
-        <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
-          {swimlaneRows
-            .filter((row) => showCard(row.id))
-            .map((row) => {
-              const cells = buildSwimlaneCells(row.items)
-              return (
-                <div key={row.id} className="swimlane-row">
-                  <div className={row.headerClass}>
-                    <span>{row.label}</span>
-                    <span className={row.badgeClass}>{row.count}</span>
-                  </div>
-                  <div className="swimlane-content-shell">
-                    <div className="swimlane-row-nav">
-                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "left")}>{"<"}</button>
-                      <button type="button" onClick={() => scrollSwimlaneRow(row.id, "right")}>{">"}</button>
+        <div className={`print-page ${allDaysSelected ? "hide-when-all-days" : ""}`}>
+          <div className="print-header">
+            <div />
+            <div className="print-title">COMMON VIEW</div>
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
+          <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
+            {swimlaneRows
+              .filter((row) => showCard(row.id))
+              .map((row) => {
+                const cells = buildSwimlaneCells(row.items)
+                return (
+                  <div key={row.id} className="swimlane-row">
+                    <div className={row.headerClass}>
+                      <span>{row.label}</span>
+                      <span className={row.badgeClass}>{row.count}</span>
                     </div>
-                    <div
-                      className="swimlane-content-scroll"
-                      ref={(node) => {
-                        swimlaneRowRefs.current[row.id] = node
-                      }}
-                    >
-                      <div className="swimlane-content">
-                        {cells.map((cell, index) =>
-                          cell ? (
-                            <div
-                              key={`${row.id}-${index}`}
-                              className={[
-                                "swimlane-cell",
-                                cell.accentClass || "",
-                                cell.placeholder ? "placeholder" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ")}
-                            >
-                              {!cell.placeholder && isAdmin && cell.entryId ? (
-                                <button
-                                  type="button"
-                                  className="swimlane-delete"
-                                  onClick={() => deleteCommonEntry(cell.entryId)}
-                                  aria-label="Delete entry"
-                                  title="Delete"
-                                >
-                                  ×
-                                </button>
-                              ) : null}
-                              <div className="swimlane-title">
-                                {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
-                                {cell.title}
-                              </div>
-                              {!cell.placeholder && cell.assignees?.length ? (
-                                <div className="swimlane-assignees">
-                                  {cell.assignees.map((name) => (
-                                    <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
-                                      {initials(name)}
-                                    </span>
-                                  ))}
+                    <div className="swimlane-content-shell">
+                      <div className="swimlane-row-nav">
+                        <button type="button" onClick={() => scrollSwimlaneRow(row.id, "left")}>{"<"}</button>
+                        <button type="button" onClick={() => scrollSwimlaneRow(row.id, "right")}>{">"}</button>
+                      </div>
+                      <div
+                        className="swimlane-content-scroll"
+                        ref={(node) => {
+                          swimlaneRowRefs.current[row.id] = node
+                        }}
+                      >
+                        <div className="swimlane-content">
+                          {cells.map((cell, index) =>
+                            cell ? (
+                              <div
+                                key={`${row.id}-${index}`}
+                                className={[
+                                  "swimlane-cell",
+                                  cell.accentClass || "",
+                                  cell.placeholder ? "placeholder" : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              >
+                                {!cell.placeholder && isAdmin && cell.entryId ? (
+                                  <button
+                                    type="button"
+                                    className="swimlane-delete"
+                                    onClick={() => deleteCommonEntry(cell.entryId)}
+                                    aria-label="Delete entry"
+                                    title="Delete"
+                                  >
+                                    A-
+                                  </button>
+                                ) : null}
+                                <div className="swimlane-title">
+                                  {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                  {cell.title}
                                 </div>
-                              ) : null}
-                              {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
-                            </div>
-                          ) : (
-                            <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
-                          )
-                        )}
+                                {!cell.placeholder && cell.assignees?.length ? (
+                                  <div className="swimlane-assignees">
+                                    {cell.assignees.map((name) => (
+                                      <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
+                                        {initials(name)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
+                              </div>
+                            ) : (
+                              <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
+                            )
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+          </div>
+          <div className="print-footer">
+            <div className="print-page-count" />
+            <div className="print-initials">Initials: {printInitials}</div>
+          </div>
         </div>
       </div>
 
