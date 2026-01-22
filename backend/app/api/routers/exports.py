@@ -433,6 +433,12 @@ async def export_checklist_xlsx(
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
+    ws.page_margins.left = 0.2
+    ws.page_margins.right = 0.08
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
 
     last_row = data_row - 1
     last_col = len(headers)
