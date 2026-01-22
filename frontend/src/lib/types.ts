@@ -159,8 +159,39 @@ export interface Task {
   is_1h_report?: boolean
   is_r1?: boolean
   is_personal?: boolean
+  alignment_user_ids?: string[] | null
   created_at: string
   updated_at: string
+}
+
+export type DailyReportSystemOccurrenceStatus = "OPEN" | "DONE" | "NOT_DONE" | "SKIPPED"
+
+export interface DailyReportTaskItem {
+  task: Task
+  planned_start?: string | null
+  planned_end?: string | null
+  original_planned_end?: string | null
+  is_overdue: boolean
+  late_days?: number | null
+}
+
+export interface DailyReportSystemOccurrence {
+  template_id: string
+  title: string
+  occurrence_date: string
+  status: DailyReportSystemOccurrenceStatus
+  comment?: string | null
+  acted_at?: string | null
+  is_overdue: boolean
+  late_days?: number | null
+}
+
+export interface DailyReportResponse {
+  day: string
+  tasks_today: DailyReportTaskItem[]
+  tasks_overdue: DailyReportTaskItem[]
+  system_today: DailyReportSystemOccurrence[]
+  system_overdue: DailyReportSystemOccurrence[]
 }
 
 export type ChecklistItemType = "TITLE" | "COMMENT" | "CHECKBOX"

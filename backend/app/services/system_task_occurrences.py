@@ -26,9 +26,14 @@ async def _assignee_ids_for_template(db: AsyncSession, template_id: uuid.UUID) -
 
     We prefer explicit TaskAssignee rows (for the synced Task row), otherwise fall back to template.default_assignee_id.
     """
+    # Some DBs may contain multiple rows per template (historical data). Pick the newest.
     task = (
-        await db.execute(select(Task).where(Task.system_template_origin_id == template_id))
-    ).scalar_one_or_none()
+        await db.execute(
+            select(Task)
+            .where(Task.system_template_origin_id == template_id)
+            .order_by(Task.created_at.desc())
+        )
+    ).scalars().first()
     if task is None:
         tmpl = (await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))).scalar_one()
         return [tmpl.default_assignee_id] if tmpl.default_assignee_id is not None else []

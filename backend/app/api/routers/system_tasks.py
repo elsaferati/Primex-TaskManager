@@ -11,7 +11,14 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import SystemTaskScope, TaskPriority, TaskStatus, UserRole
+from app.models.enums import (
+    FrequencyType,
+    SystemTaskScope,
+    TaskFinishPeriod,
+    TaskPriority,
+    TaskStatus,
+    UserRole,
+)
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
@@ -20,7 +27,11 @@ from app.models.system_task_template_alignment_role import SystemTaskTemplateAli
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
-from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateUpdate
+from app.schemas.system_task_template import (
+    SystemTaskTemplateCreate,
+    SystemTaskTemplateOut,
+    SystemTaskTemplateUpdate,
+)
 from app.services.system_task_schedule import should_reopen_system_task
 
 
@@ -83,11 +94,14 @@ async def _sync_task_for_template(
     creator_id: uuid.UUID | None,
 ) -> tuple[Task, bool]:
     now = datetime.now(timezone.utc)
+    # Some DBs may contain multiple rows per template (historical data). Pick the newest.
     task = (
         await db.execute(
-            select(Task).where(Task.system_template_origin_id == template.id)
+            select(Task)
+            .where(Task.system_template_origin_id == template.id)
+            .order_by(Task.created_at.desc())
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     active_value = _task_is_active(template)
 
     if task is None:
@@ -212,6 +226,13 @@ async def list_system_tasks(
     task_stmt = task_stmt.order_by(Task.is_active.desc(), Task.created_at.desc())
 
     rows = (await db.execute(task_stmt)).all()
+    # De-dupe: keep only the newest task per template to avoid duplicates and crashes on legacy data.
+    dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
+    for task, tmpl in rows:
+        prev = dedup.get(tmpl.id)
+        if prev is None or (task.created_at and prev[0].created_at and task.created_at > prev[0].created_at):
+            dedup[tmpl.id] = (task, tmpl)
+    rows = list(dedup.values())
     task_ids = [task.id for task, _ in rows]
     assignee_map = await _assignees_for_tasks(db, task_ids)
     fallback_ids = [

@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { DailyReportResponse, Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 // --- CONSTANTS ---
 
@@ -413,6 +413,8 @@ export default function DepartmentKanban() {
     isTabId ? (normalizedTab as TabId) : "projects"
   )
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
+  const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
+  const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [multiSelect, setMultiSelect] = React.useState(false)
@@ -607,6 +609,7 @@ export default function DepartmentKanban() {
     })
   }, [templateProjects])
   const todayDate = React.useMemo(() => new Date(), [])
+  const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
     return Array.from({ length: 5 }, (_, index) => {
@@ -1037,6 +1040,44 @@ export default function DepartmentKanban() {
     [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
+
+  // Daily Report (overdue) for All Today (department view) - only for a selected user.
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (activeTab !== "all" || viewMode !== "department") {
+        setDailyReport(null)
+        return
+      }
+      if (!department?.id || selectedUserId === "__all__") {
+        setDailyReport(null)
+        return
+      }
+      setLoadingDailyReport(true)
+      try {
+        const qs = new URLSearchParams({
+          day: todayIso,
+          department_id: department.id,
+          user_id: selectedUserId,
+        })
+        const res = await apiFetch(`/reports/daily?${qs.toString()}`)
+        if (!res.ok) {
+          setDailyReport(null)
+          return
+        }
+        const payload = (await res.json()) as DailyReportResponse
+        if (!cancelled) setDailyReport(payload)
+      } catch {
+        if (!cancelled) setDailyReport(null)
+      } finally {
+        if (!cancelled) setLoadingDailyReport(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, viewMode])
   const allTodayPrintCategories = React.useMemo(
     () => [
       { id: "PRJK", label: "PRJK" },
@@ -1981,6 +2022,70 @@ export default function DepartmentKanban() {
                     </Card>
                   ))}
                 </div>
+
+                {/* Daily Report (Overdue) - shown only when a specific user is selected */}
+                <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Shows overdue items for the selected user (not for “All users”).
+                      </div>
+                    </div>
+                    {loadingDailyReport ? <div className="text-xs text-slate-500">Loading…</div> : null}
+                  </div>
+                  {selectedUserId === "__all__" ? (
+                    <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
+                  ) : dailyReport ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
+                        {dailyReport.tasks_overdue.length ? (
+                          <div className="mt-2 space-y-2">
+                            {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
+                              <div key={item.task.id} className="flex items-start justify-between gap-2">
+                                <div className="text-sm text-slate-800">{item.task.title}</div>
+                                <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                  late {item.late_days ?? 0}d
+                                </div>
+                              </div>
+                            ))}
+                            {dailyReport.tasks_overdue.length > 8 ? (
+                              <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
+                        {dailyReport.system_overdue.length ? (
+                          <div className="mt-2 space-y-2">
+                            {dailyReport.system_overdue.slice(0, 8).map((occ) => (
+                              <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
+                                <div className="text-sm text-slate-800">
+                                  {occ.title}{" "}
+                                  <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
+                                </div>
+                                <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                  late {occ.late_days ?? 0}d
+                                </div>
+                              </div>
+                            ))}
+                            {dailyReport.system_overdue.length > 8 ? (
+                              <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500">No report available.</div>
+                  )}
+                </Card>
                 <div className="space-y-4">
                   <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
@@ -2962,6 +3067,7 @@ export default function DepartmentKanban() {
         </div>
         <div className="px-6 pb-6">
           {showAllTodayPrint ? (
+            <>
             <table className="w-full border border-slate-900 text-[11px]">
               <thead>
                 <tr className="bg-slate-100">
@@ -3108,6 +3214,41 @@ export default function DepartmentKanban() {
                 ))}
               </tbody>
             </table>
+            {selectedUserId !== "__all__" && dailyReport && (dailyReport.tasks_overdue.length || dailyReport.system_overdue.length) ? (
+              <div className="mt-6">
+                <div className="text-sm font-semibold text-slate-900">Daily Report (Overdue)</div>
+                <div className="text-xs text-slate-700 mt-1">
+                  Late items for the selected user. (Planned date is preserved.)
+                </div>
+
+                {dailyReport.tasks_overdue.length ? (
+                  <div className="mt-3">
+                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue tasks</div>
+                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
+                      {dailyReport.tasks_overdue.slice(0, 20).map((item) => (
+                        <li key={item.task.id}>
+                          {item.task.title} — late {item.late_days ?? 0}d (planned end: {item.planned_end || "-"})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {dailyReport.system_overdue.length ? (
+                  <div className="mt-3">
+                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue system tasks</div>
+                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
+                      {dailyReport.system_overdue.slice(0, 20).map((occ) => (
+                        <li key={`${occ.template_id}-${occ.occurrence_date}`}>
+                          {occ.title} — late {occ.late_days ?? 0}d (was planned for: {occ.occurrence_date})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            </>
           ) : (
             <table className="w-full border border-slate-900 text-[11px]">
               <thead>

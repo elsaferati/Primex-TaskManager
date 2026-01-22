@@ -19,11 +19,14 @@ async def generate_system_tasks() -> int:
     async with SessionLocal() as db:
         templates = (await db.execute(select(SystemTaskTemplate))).scalars().all()
         for tmpl in templates:
+            # Some DBs may contain multiple rows per template (historical data). Pick the newest.
             task = (
                 await db.execute(
-                    select(Task).where(Task.system_template_origin_id == tmpl.id)
+                    select(Task)
+                    .where(Task.system_template_origin_id == tmpl.id)
+                    .order_by(Task.created_at.desc())
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
             active_value = tmpl.is_active and not (
                 tmpl.department_id is not None and tmpl.default_assignee_id is None
             )
