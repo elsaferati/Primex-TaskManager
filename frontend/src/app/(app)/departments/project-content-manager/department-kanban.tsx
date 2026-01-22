@@ -880,6 +880,7 @@ export default function DepartmentKanban() {
     [department, users]
   )
   const todayDate = React.useMemo(() => new Date(), [])
+  const printedAt = React.useMemo(() => new Date(), [])
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
     return Array.from({ length: 5 }, (_, index) => {
@@ -1107,6 +1108,7 @@ export default function DepartmentKanban() {
     }
     return weekRangeLabel
   }, [printRange, todayDate, weekRangeLabel])
+  const printInitials = initials(user?.full_name || user?.username || "")
 
   const allTodayPrintBaseUsers = React.useMemo(() => {
     if (viewMode === "department") {
@@ -2311,9 +2313,9 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen">
       <div className="sticky top-0 z-[100] print:hidden ">
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
-          <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
-          <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
+        <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-sky-50 via-blue-50 to-slate-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-slate-950 dark:via-slate-950 dark:to-blue-950">
+          <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
+          <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-blue-200/35 blur-3xl dark:bg-blue-900/20" />
           <div className="relative space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="space-y-1">
@@ -4031,233 +4033,234 @@ export default function DepartmentKanban() {
           </Dialog>
       </div>
       <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">
-            {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
-          </div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentDisplayName}
-          </div>
-          {showAllTodayPrint ? (
-            <div className="text-sm text-slate-700">
-              Users: {selectedUserId === "__all__"
-                ? "All users"
-                : allTodayPrintColumns[0]?.label || "Selected user"}
+        <div className="print-page">
+          <div className="print-meta">
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              User: {user?.full_name || user?.username || "-"}
+            <div className="print-title">
+              {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
             </div>
-          )}
-          <div className="text-sm text-slate-700">
-            {showAllTodayPrint
-              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
-              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
+            <div className="text-sm text-slate-700">
+              Department: {departmentDisplayName}
+            </div>
+            {showAllTodayPrint ? null : (
+              <div className="text-sm text-slate-700">
+                User: {user?.full_name || user?.username || "-"}
+              </div>
+            )}
+            {!showAllTodayPrint ? (
+              <div className="text-sm text-slate-700">
+                {printRange === "today" ? "Date" : "Week"}: {printRangeLabel}
+              </div>
+            ) : null}
+          </div>
+          <div className="print-table-wrap">
+            {showAllTodayPrint ? (
+              <table className="print-table w-full border border-slate-900 text-[11px]">
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Type</th>
+                    {allTodayPrintColumns.map((column) => (
+                      <th key={column.id} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                        {column.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allTodayPrintCategories.map((category) => (
+                    <tr key={category.id}>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                        {category.label}
+                      </td>
+                      {allTodayPrintColumns.map((column) => {
+                        const bucket = allTodayPrintByUser.get(column.id)
+                        const items = bucket ? bucket[category.id] : []
+                        const amItems = items.filter((item) => item.period === "AM")
+                        const pmItems = items.filter((item) => item.period === "PM")
+                        return (
+                          <td key={`${column.id}-${category.id}`} className="border border-slate-900 px-2 py-2 align-top">
+                            {items.length ? (
+                              <div className="space-y-2">
+                                <div>
+                                  <div className="text-[10px] font-semibold uppercase text-slate-600">AM</div>
+                                  {amItems.length ? (
+                                    <div className="space-y-1 mt-1">
+                                      {amItems.map((item, itemIndex) => {
+                                        const fastType = item.fastType?.toUpperCase() || "NORMAL"
+                                        const fastBadgeClass =
+                                          fastType === "BLLOK" || fastType === "BLL"
+                                            ? "bg-rose-100 text-rose-700 border-rose-200"
+                                            : fastType === "1H"
+                                              ? "bg-amber-100 text-amber-700 border-amber-200"
+                                              : fastType === "R1"
+                                                ? "bg-blue-100 text-blue-700 border-blue-200"
+                                                : fastType === "GA"
+                                                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                                  : fastType === "PERSONAL"
+                                                    ? "bg-violet-100 text-violet-700 border-violet-200"
+                                                    : "bg-slate-100 text-slate-700 border-slate-200"
+                                        const fastBadgeLabel =
+                                          fastType === "BLLOK" || fastType === "BLL"
+                                            ? "BLL"
+                                            : fastType === "PERSONAL"
+                                              ? "P"
+                                              : fastType
+                                        return (
+                                          <div
+                                            key={`${column.id}-${category.id}-am-${itemIndex}`}
+                                            className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                          >
+                                            <div className="flex items-start gap-1 leading-tight">
+                                              <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                              {category.id === "FT" ? (
+                                                <>
+                                                  <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
+                                                    {fastBadgeLabel}
+                                                  </span>
+                                                  <span className="ml-1">{item.label}</span>
+                                                </>
+                                              ) : (
+                                                <span>{item.label}</span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="italic text-slate-600">-</div>
+                                  )}
+                                </div>
+                                <div className="border-t border-slate-200 pt-2">
+                                  <div className="text-[10px] font-semibold uppercase text-slate-600">PM</div>
+                                  {pmItems.length ? (
+                                    <div className="space-y-1 mt-1">
+                                      {pmItems.map((item, itemIndex) => {
+                                        const fastType = item.fastType?.toUpperCase() || "NORMAL"
+                                        const fastBadgeClass =
+                                          fastType === "BLLOK" || fastType === "BLL"
+                                            ? "bg-rose-100 text-rose-700 border-rose-200"
+                                            : fastType === "1H"
+                                              ? "bg-amber-100 text-amber-700 border-amber-200"
+                                              : fastType === "R1"
+                                                ? "bg-blue-100 text-blue-700 border-blue-200"
+                                                : fastType === "GA"
+                                                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                                  : fastType === "PERSONAL"
+                                                    ? "bg-violet-100 text-violet-700 border-violet-200"
+                                                    : "bg-slate-100 text-slate-700 border-slate-200"
+                                        const fastBadgeLabel =
+                                          fastType === "BLLOK" || fastType === "BLL"
+                                            ? "BLL"
+                                            : fastType === "PERSONAL"
+                                              ? "P"
+                                              : fastType
+                                        return (
+                                          <div
+                                            key={`${column.id}-${category.id}-pm-${itemIndex}`}
+                                            className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                          >
+                                            <div className="flex items-start gap-1 leading-tight">
+                                              <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                              {category.id === "FT" ? (
+                                                <>
+                                                  <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
+                                                    {fastBadgeLabel}
+                                                  </span>
+                                                  <span className="ml-1">{item.label}</span>
+                                                </>
+                                              ) : (
+                                                <span>{item.label}</span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="italic text-slate-600">-</div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="italic text-slate-600">-</div>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <table className="print-table w-full border border-slate-900 text-[11px]">
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
+                    {printDates.map((date) => (
+                      <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                        {formatPrintDay(date)}
+                      </th>
+                    ))}
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printRowsByRange.map((row) => {
+                    const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
+                    return (
+                      <tr key={row.id}>
+                        <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                          {row.label}
+                          <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
+                            {total}
+                          </span>
+                        </td>
+                        {row.itemsByDay.map((items, idx) => (
+                          <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
+                            {items.length ? (
+                              <div className="space-y-1">
+                                {items.map((item, itemIndex) => (
+                                  <div
+                                    key={`${row.id}-${idx}-${itemIndex}`}
+                                    className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                  >
+                                    <div className="flex items-start gap-1 leading-tight">
+                                      <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                      <span>{item}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="italic text-slate-600">No data available.</div>
+                            )}
+                          </td>
+                        ))}
+                        <td className="border border-slate-900 px-2 py-2 align-top" />
+                        <td className="border border-slate-900 px-2 py-2 align-top" />
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
-        <div className="px-6 pb-6">
-          {showAllTodayPrint ? (
-            <table className="w-full border border-slate-900 text-[11px]">
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Type</th>
-                  {allTodayPrintColumns.map((column) => (
-                    <th key={column.id} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allTodayPrintCategories.map((category, categoryIndex) => (
-                  <tr key={category.id}>
-                    {categoryIndex === 0 ? (
-                      <td
-                        rowSpan={allTodayPrintCategories.length}
-                        className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase"
-                      >
-                        {formatPrintDay(todayDate)}
-                      </td>
-                    ) : null}
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                      {category.label}
-                    </td>
-                    {allTodayPrintColumns.map((column) => {
-                      const bucket = allTodayPrintByUser.get(column.id)
-                      const items = bucket ? bucket[category.id] : []
-                      const amItems = items.filter((item) => item.period === "AM")
-                      const pmItems = items.filter((item) => item.period === "PM")
-                      return (
-                        <td key={`${column.id}-${category.id}`} className="border border-slate-900 px-2 py-2 align-top">
-                          {items.length ? (
-                            <div className="space-y-2">
-                              <div>
-                                <div className="text-[10px] font-semibold uppercase text-slate-600">AM</div>
-                                {amItems.length ? (
-                                  <div className="space-y-1 mt-1">
-                                    {amItems.map((item, itemIndex) => {
-                                      const fastType = item.fastType?.toUpperCase() || "NORMAL"
-                                      const fastBadgeClass =
-                                        fastType === "BLLOK" || fastType === "BLL"
-                                          ? "bg-rose-100 text-rose-700 border-rose-200"
-                                          : fastType === "1H"
-                                            ? "bg-amber-100 text-amber-700 border-amber-200"
-                                            : fastType === "R1"
-                                              ? "bg-blue-100 text-blue-700 border-blue-200"
-                                              : fastType === "GA"
-                                                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                                                : fastType === "PERSONAL"
-                                                  ? "bg-violet-100 text-violet-700 border-violet-200"
-                                                  : "bg-slate-100 text-slate-700 border-slate-200"
-                                      const fastBadgeLabel =
-                                        fastType === "BLLOK" || fastType === "BLL"
-                                          ? "BLL"
-                                          : fastType === "PERSONAL"
-                                            ? "P"
-                                            : fastType
-                                      return (
-                                        <div
-                                          key={`${column.id}-${category.id}-am-${itemIndex}`}
-                                          className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                        >
-                                          <div className="flex items-start gap-1 leading-tight">
-                                            <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                            {category.id === "FT" ? (
-                                              <>
-                                                <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
-                                                  {fastBadgeLabel}
-                                                </span>
-                                                <span className="ml-1">{item.label}</span>
-                                              </>
-                                            ) : (
-                                              <span>{item.label}</span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                ) : (
-                                  <div className="italic text-slate-600">-</div>
-                                )}
-                              </div>
-                              <div className="border-t border-slate-200 pt-2">
-                                <div className="text-[10px] font-semibold uppercase text-slate-600">PM</div>
-                                {pmItems.length ? (
-                                  <div className="space-y-1 mt-1">
-                                    {pmItems.map((item, itemIndex) => {
-                                      const fastType = item.fastType?.toUpperCase() || "NORMAL"
-                                      const fastBadgeClass =
-                                        fastType === "BLLOK" || fastType === "BLL"
-                                          ? "bg-rose-100 text-rose-700 border-rose-200"
-                                          : fastType === "1H"
-                                            ? "bg-amber-100 text-amber-700 border-amber-200"
-                                            : fastType === "R1"
-                                              ? "bg-blue-100 text-blue-700 border-blue-200"
-                                              : fastType === "GA"
-                                                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                                                : fastType === "PERSONAL"
-                                                  ? "bg-violet-100 text-violet-700 border-violet-200"
-                                                  : "bg-slate-100 text-slate-700 border-slate-200"
-                                      const fastBadgeLabel =
-                                        fastType === "BLLOK" || fastType === "BLL"
-                                          ? "BLL"
-                                          : fastType === "PERSONAL"
-                                            ? "P"
-                                            : fastType
-                                      return (
-                                        <div
-                                          key={`${column.id}-${category.id}-pm-${itemIndex}`}
-                                          className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                        >
-                                          <div className="flex items-start gap-1 leading-tight">
-                                            <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                            {category.id === "FT" ? (
-                                              <>
-                                                <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
-                                                  {fastBadgeLabel}
-                                                </span>
-                                                <span className="ml-1">{item.label}</span>
-                                              </>
-                                            ) : (
-                                              <span>{item.label}</span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                ) : (
-                                  <div className="italic text-slate-600">-</div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="italic text-slate-600">-</div>
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full border border-slate-900 text-[11px]">
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
-                  {printDates.map((date) => (
-                    <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                      {formatPrintDay(date)}
-                    </th>
-                  ))}
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {printRowsByRange.map((row) => {
-                  const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
-                  return (
-                    <tr key={row.id}>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                        {row.label}
-                        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
-                          {total}
-                        </span>
-                      </td>
-                      {row.itemsByDay.map((items, idx) => (
-                        <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
-                          {items.length ? (
-                            <div className="space-y-1">
-                              {items.map((item, itemIndex) => (
-                                <div
-                                  key={`${row.id}-${idx}-${itemIndex}`}
-                                  className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                >
-                                  <div className="flex items-start gap-1 leading-tight">
-                                    <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                    <span>{item}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="italic text-slate-600">No data available.</div>
-                          )}
-                        </td>
-                      ))}
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
+        <div className="print-footer">
+          <div className="print-footer-center">
+            <span className="print-page-count" />
+          </div>
+          <div className="print-footer-right">Initials: {printInitials}</div>
         </div>
       </div>
       <style jsx global>{`
@@ -4269,7 +4272,65 @@ export default function DepartmentKanban() {
             display: none !important;
           }
           @page {
-            margin: 12mm;
+            margin: 0.36in 0.08in 0.51in 0.2in;
+          }
+          .print-page {
+            padding-bottom: 0.35in;
+          }
+          .print-meta {
+            margin-top: 4px;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-title {
+            margin-top: 8px;
+            margin-bottom: 8px;
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            text-align: center;
+            text-transform: uppercase;
+          }
+          .print-table-wrap {
+            margin-top: 12px;
+          }
+          .print-table {
+            border-collapse: collapse;
+          }
+          .print-table thead th {
+            background: #e2e8f0;
+          }
+          .print-table thead th,
+          .print-table thead tr {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .print-table thead {
+            display: table-header-group;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.3in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.08in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-footer-center {
+            text-align: center;
+          }
+          .print-footer-right {
+            text-align: right;
+          }
+          .print-page-count::before {
+            content: "Page " counter(page) " / " counter(pages);
           }
         }
       `}</style>
