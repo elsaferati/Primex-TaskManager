@@ -8,11 +8,16 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
+      # THIS STEP AUTOMATICALLY PULLS THE LATEST CODE
+      # You do not need a separate "git pull" command.
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           clean: false 
+          fetch-depth: 0
 
+      # 1. Stop everything so we can update files without "File Locked" errors
+      # (Replacing 'pm2 restart' with this is safer for Windows)
       - name: Kill Processes (Silent)
         shell: cmd
         run: |
@@ -20,6 +25,7 @@ jobs:
           taskkill /F /IM python.exe /T || ver > nul
           taskkill /F /IM node.exe /T || ver > nul
 
+      # 2. Create Env Files (Connects the config to the live URL)
       - name: Create Env Files
         shell: cmd
         run: |
@@ -29,6 +35,7 @@ jobs:
           echo REDIS_URL=redis://localhost:6379/0 >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
 
+      # 3. Update Backend Dependencies and Database
       - name: Update Backend
         shell: cmd
         run: |
@@ -37,6 +44,7 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install psycopg2-binary pydantic[email]
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
 
+      # 4. Install and Rebuild Frontend
       - name: Update Frontend
         shell: cmd
         run: |
@@ -44,6 +52,7 @@ jobs:
           npm install
           npm run build
 
+      # 5. Start Services Fresh
       - name: Start Services with PM2
         shell: cmd
         run: |
