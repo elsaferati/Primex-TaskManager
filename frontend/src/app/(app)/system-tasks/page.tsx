@@ -2484,20 +2484,20 @@ export function SystemTasksView({
         <div
           id="system-task-table"
           className={cn(
-            "relative w-full rounded-lg border bg-white shadow-sm",
+            "relative w-full rounded-lg border bg-white shadow-sm print:rounded-none print:border-slate-900 print:shadow-none",
             printing && "print:border-0 print:shadow-none"
           )}
         >
           {/* SCROLL WRAPPER for responsive table */}
-          <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain">
+          <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain print:max-h-none print:overflow-visible">
             {/* STICKY HEADER ROW */}
-            <div className="min-w-[1000px] xl:min-w-0">
+            <div className="min-w-[1000px] xl:min-w-0 print:min-w-0">
               <div className="sticky top-0 z-30 print:static">
-                <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4">
+                <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
                   <div
                     className={cn(
                       GRID_CLASS,
-                      "text-[11px] font-bold uppercase tracking-wider text-slate-500"
+                      "text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
                     )}
                   >
                     <div>No.</div>
@@ -2513,7 +2513,7 @@ export function SystemTasksView({
               </div>
 
               {/* TABLE BODY */}
-              <div className="p-4 space-y-2 bg-slate-50">
+              <div className="p-4 space-y-2 bg-slate-50 print:bg-white print:p-0 print:space-y-0">
                 {(() => {
                   let globalIndex = 0
                   return sections.map((section) => (
@@ -2561,17 +2561,17 @@ export function SystemTasksView({
                           <React.Fragment key={template.id}>
                             {/* Dividers */}
                             {showInactiveDivider && (
-                              <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400">
+                              <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400 print:border print:border-slate-900 print:bg-slate-100 print:text-slate-700 print:rounded-none">
                                 Inactive Tasks
                               </div>
                             )}
                             {showPriorityDivider && (
-                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-red-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400">
+                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-red-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400 print:border print:border-slate-900 print:bg-slate-100 print:text-slate-700 print:rounded-none">
                                 High Priority
                               </div>
                             )}
                             {showFrequencyDivider && (
-                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              <div className="col-span-full rounded border-l-4 border-l-transparent bg-slate-100 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 print:border print:border-slate-900 print:bg-slate-100 print:text-slate-700 print:rounded-none">
                                 {frequencyLabel}
                               </div>
                             )}
@@ -2580,7 +2580,7 @@ export function SystemTasksView({
                             <div
                               className={cn(
                                 GRID_CLASS,
-                                "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
+                                "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50 print:gap-0 print:divide-x print:divide-slate-900 print:border-slate-900 print:border-l-slate-900 print:rounded-none print:shadow-none print:px-2 print:[&>*]:px-2 print:[&>*]:py-2",
                                 PRIORITY_BORDER_STYLES[priorityValue],
                                 isInactive && "opacity-60 grayscale"
                               )}
