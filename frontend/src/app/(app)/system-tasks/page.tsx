@@ -104,6 +104,30 @@ const FINISH_PERIOD_LABELS: Record<TaskFinishPeriod, string> = {
   PM: "PM",
 }
 
+function timeInputValue(value?: string | null) {
+  if (!value) return ""
+  const match = String(value).match(/^(\d{2}:\d{2})/)
+  if (match) return match[1]
+  return String(value).slice(0, 5)
+}
+
+function userDisplayLabel(user?: User | UserLookup | null) {
+  if (!user) return ""
+  return user.full_name || user.username || ("email" in user ? user.email : "") || ""
+}
+
+function userInitials(label: string) {
+  const trimmed = label.trim()
+  if (!trimmed) return "--"
+  const base = trimmed.includes("@") ? trimmed.split("@")[0] : trimmed
+  const tokens = base.match(/[A-Za-z0-9]+/g) || []
+  if (tokens.length === 0) return base.slice(0, 2).toUpperCase()
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase()
+  const first = tokens[0][0] || ""
+  const last = tokens[tokens.length - 1][0] || ""
+  return `${first}${last}`.toUpperCase()
+}
+
 const INTERNAL_NOTE_FIELDS = [
   { key: "REGJ", label: "REGJ", placeholder: "0" },
   { key: "PATH", label: "PATH", placeholder: "S:\\03_HOMEFACE\\04_PLAN PRODUTION\\2023" },
@@ -370,6 +394,9 @@ export function SystemTasksView({
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
+  const [requiresAlignment, setRequiresAlignment] = React.useState(false)
+  const [alignmentTime, setAlignmentTime] = React.useState("")
+  const [alignmentManagerIds, setAlignmentManagerIds] = React.useState<string[]>([])
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [editTemplate, setEditTemplate] = React.useState<SystemTaskTemplate | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
@@ -389,6 +416,9 @@ export function SystemTasksView({
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
   const [editIsActive, setEditIsActive] = React.useState(true)
+  const [editRequiresAlignment, setEditRequiresAlignment] = React.useState(false)
+  const [editAlignmentTime, setEditAlignmentTime] = React.useState("")
+  const [editAlignmentManagerIds, setEditAlignmentManagerIds] = React.useState<string[]>([])
   const [editShowWeekendDays, setEditShowWeekendDays] = React.useState(false)
 
   const canEdit = showSystemActions && user?.role !== "STAFF"
@@ -397,12 +427,49 @@ export function SystemTasksView({
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
-      const [templatesRes, departmentsRes] = await Promise.all([
+      const [templatesRes, departmentsRes, templateMetaRes] = await Promise.all([
         apiFetch("/system-tasks"),
         apiFetch("/departments"),
+        apiFetch("/system-tasks/templates"),
       ])
       if (templatesRes.ok) {
-        setTemplates((await templatesRes.json()) as SystemTaskTemplate[])
+        const rows = (await templatesRes.json()) as SystemTaskTemplate[]
+        let metaById = new Map<
+          string,
+          {
+            requires_alignment?: boolean | null
+            alignment_time?: string | null
+            alignment_roles?: string[] | null
+            alignment_user_ids?: string[] | null
+          }
+        >()
+        if (templateMetaRes.ok) {
+          const metas = (await templateMetaRes.json()) as Array<{
+            id: string
+            requires_alignment?: boolean | null
+            alignment_time?: string | null
+            alignment_roles?: string[] | null
+            alignment_user_ids?: string[] | null
+          }>
+          metaById = new Map(
+            metas.map((m) => [
+              m.id,
+              {
+                requires_alignment: m.requires_alignment ?? false,
+                alignment_time: m.alignment_time ?? null,
+                alignment_roles: m.alignment_roles ?? null,
+                alignment_user_ids: m.alignment_user_ids ?? null,
+              },
+            ])
+          )
+        }
+        setTemplates(
+          rows.map((row) => {
+            const templateId = row.template_id ?? row.id
+            const meta = metaById.get(templateId)
+            return meta ? { ...row, ...meta } : row
+          })
+        )
       } else {
         console.error("Failed to load system tasks", templatesRes.status)
       }
@@ -526,6 +593,9 @@ export function SystemTasksView({
         : EMPTY_VALUE
     )
     setEditIsActive(editTemplate.is_active)
+    setEditRequiresAlignment(Boolean(editTemplate.requires_alignment))
+    setEditAlignmentTime(timeInputValue(editTemplate.alignment_time))
+    setEditAlignmentManagerIds(editTemplate.alignment_user_ids ?? [])
     setEditAssigneeQuery("")
     setEditAssigneeError(null)
   }, [editTemplate])
@@ -846,6 +916,10 @@ export function SystemTasksView({
     const finalDeptId = departmentId
     const scope = resolveScope(finalDeptId)
     const weeklyDays = frequency === "WEEKLY" ? normalizeDayValues(daysOfWeek) : []
+    if (requiresAlignment && !alignmentTime) {
+      toast.error("BZ time is required when BZ is enabled.")
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -858,6 +932,10 @@ export function SystemTasksView({
         priority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         internal_notes: buildInternalNotes(internalNotes),
+        requires_alignment: requiresAlignment,
+        alignment_time: requiresAlignment ? alignmentTime : null,
+        alignment_roles: requiresAlignment ? ["MANAGER"] : [],
+        alignment_user_ids: requiresAlignment ? alignmentManagerIds : [],
         day_of_week: weeklyDays.length ? weeklyDays[0] : null,
         days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
@@ -902,6 +980,9 @@ export function SystemTasksView({
       setFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setInternalNotes({})
       setIsActive(true)
+      setRequiresAlignment(false)
+      setAlignmentTime("")
+      setAlignmentManagerIds([])
       await load()
       toast.success("System task created")
     } finally {
@@ -935,6 +1016,10 @@ export function SystemTasksView({
     const finalDeptId = editDepartmentId
     const scope = resolveScope(finalDeptId)
     const weeklyDays = editFrequency === "WEEKLY" ? normalizeDayValues(editDaysOfWeek) : []
+    if (editRequiresAlignment && !editAlignmentTime) {
+      toast.error("BZ time is required when BZ is enabled.")
+      return
+    }
     setEditSaving(true)
     try {
       const payload = {
@@ -947,6 +1032,10 @@ export function SystemTasksView({
         priority: editPriority,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
         internal_notes: buildInternalNotes(editInternalNotes),
+        requires_alignment: editRequiresAlignment,
+        alignment_time: editRequiresAlignment ? editAlignmentTime : null,
+        alignment_roles: editRequiresAlignment ? ["MANAGER"] : [],
+        alignment_user_ids: editRequiresAlignment ? editAlignmentManagerIds : [],
         day_of_week: weeklyDays.length ? weeklyDays[0] : null,
         days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
@@ -1836,6 +1925,83 @@ export function SystemTasksView({
                         </Select>
                       </div>
                     </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          checked={requiresAlignment}
+                          onCheckedChange={(value) => setRequiresAlignment(Boolean(value))}
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm font-semibold text-slate-900">Requires BZ</div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            If enabled, the task should be BZ with managers at the specified time.
+                          </div>
+                          {requiresAlignment ? (
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>BZ time</Label>
+                                <Input
+                                  type="time"
+                                  value={alignmentTime}
+                                  onChange={(event) => setAlignmentTime(event.target.value)}
+                                />
+                                <div className="text-[12px] text-slate-500">Required.</div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>BZ me (managers)</Label>
+                                <div className="rounded-md border border-slate-200 bg-white p-2">
+                                  <div className="flex flex-wrap gap-2">
+                                    {alignmentManagerIds.map((id) => {
+                                      const manager = users.find((u) => u.id === id)
+                                      const label = userDisplayLabel(manager) || id
+                                      const initials = userInitials(label)
+                                      return (
+                                        <span
+                                          key={id}
+                                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                                          title={label}
+                                        >
+                                          {initials}
+                                          <button
+                                            type="button"
+                                            className="text-slate-500 hover:text-slate-900"
+                                            onClick={() => setAlignmentManagerIds((prev) => prev.filter((x) => x !== id))}
+                                            aria-label={`Remove ${label}`}
+                                          >
+                                            ×
+                                          </button>
+                                        </span>
+                                      )
+                                    })}
+                                    <Select
+                                      value={EMPTY_VALUE}
+                                      onValueChange={(value) => {
+                                        if (value === EMPTY_VALUE) return
+                                        setAlignmentManagerIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-8 w-48">
+                                        <SelectValue placeholder="Add manager" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={EMPTY_VALUE}>Select…</SelectItem>
+                                        {users
+                                          .filter((u) => u.role === "MANAGER")
+                                          .map((manager) => (
+                                            <SelectItem key={manager.id} value={manager.id}>
+                                              {manager.full_name || manager.username || ("email" in manager ? manager.email : "")}
+                                            </SelectItem>
+                                          ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
                     {frequency === "WEEKLY" ? (
                       <div className="space-y-2">
                         <Label>Days of week</Label>
@@ -2135,6 +2301,83 @@ export function SystemTasksView({
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          checked={editRequiresAlignment}
+                          onCheckedChange={(value) => setEditRequiresAlignment(Boolean(value))}
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm font-semibold text-slate-900">Requires BZ</div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            If enabled, the task should be BZ with managers at the specified time.
+                          </div>
+                          {editRequiresAlignment ? (
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>BZ time</Label>
+                                <Input
+                                  type="time"
+                                  value={editAlignmentTime}
+                                  onChange={(event) => setEditAlignmentTime(event.target.value)}
+                                />
+                                <div className="text-[12px] text-slate-500">Required.</div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>BZ me (managers)</Label>
+                                <div className="rounded-md border border-slate-200 bg-white p-2">
+                                  <div className="flex flex-wrap gap-2">
+                                    {editAlignmentManagerIds.map((id) => {
+                                      const manager = users.find((u) => u.id === id)
+                                      const label = userDisplayLabel(manager) || id
+                                      const initials = userInitials(label)
+                                      return (
+                                        <span
+                                          key={id}
+                                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                                          title={label}
+                                        >
+                                          {initials}
+                                          <button
+                                            type="button"
+                                            className="text-slate-500 hover:text-slate-900"
+                                            onClick={() => setEditAlignmentManagerIds((prev) => prev.filter((x) => x !== id))}
+                                            aria-label={`Remove ${label}`}
+                                          >
+                                            ×
+                                          </button>
+                                        </span>
+                                      )
+                                    })}
+                                    <Select
+                                      value={EMPTY_VALUE}
+                                      onValueChange={(value) => {
+                                        if (value === EMPTY_VALUE) return
+                                        setEditAlignmentManagerIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-8 w-48">
+                                        <SelectValue placeholder="Add manager" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={EMPTY_VALUE}>Select…</SelectItem>
+                                        {users
+                                          .filter((u) => u.role === "MANAGER")
+                                          .map((manager) => (
+                                            <SelectItem key={manager.id} value={manager.id}>
+                                              {manager.full_name || manager.username || ("email" in manager ? manager.email : "")}
+                                            </SelectItem>
+                                          ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                     {editFrequency === "WEEKLY" ? (
@@ -2594,6 +2837,31 @@ export function SystemTasksView({
                                   <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                     {template.title}
                                   </div>
+                                  {template.requires_alignment ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="h-5 text-[10px] uppercase border-blue-200 text-blue-700"
+                                      title="Requires BZ"
+                                    >
+                                      {(() => {
+                                        const ids = template.alignment_user_ids ?? []
+                                        const names = ids
+                                          .map((id) => userDisplayLabel(userMap.get(id)) || id)
+                                          .filter((value): value is string => Boolean(value))
+                                        const display =
+                                          names.length <= 2
+                                            ? (names.join(", ") || "--")
+                                            : `${names[0]}, ${names[1]} +${names.length - 2}`
+                                        const title =
+                                          names.length ? `BZ with: ${names.join(", ")}` : "BZ managers not set"
+                                        return (
+                                          <span title={title}>
+                                            BZ {timeInputValue(template.alignment_time) || "--:--"} ({display})
+                                          </span>
+                                        )
+                                      })()}
+                                    </Badge>
+                                  ) : null}
                                   <Badge variant="secondary" className="h-5 text-[10px] uppercase">
                                     {template.status || "TODO"}
                                   </Badge>

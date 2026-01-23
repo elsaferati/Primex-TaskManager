@@ -24,6 +24,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
@@ -57,6 +58,20 @@ def _user_to_assignee(user: User) -> TaskAssigneeOut:
         username=user.username,
         full_name=user.full_name,
     )
+
+
+async def _validate_alignment_user_ids(db: AsyncSession, user_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    if not user_ids:
+        return []
+    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    if len(users) != len(set(user_ids)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alignment user not found")
+    for u in users:
+        if u.role != UserRole.MANAGER:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Alignment users must be MANAGERs")
+    # stable unique
+    seen: set[uuid.UUID] = set()
+    return [uid for uid in user_ids if not (uid in seen or seen.add(uid))]
 
 
 async def _assignees_for_tasks(
@@ -292,6 +307,19 @@ async def list_system_task_templates(
     for tid, role in role_rows:
         roles_map.setdefault(tid, []).append(role)
 
+    alignment_user_rows = []
+    if template_ids:
+        alignment_user_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id).where(
+                    SystemTaskTemplateAlignmentUser.template_id.in_(template_ids)
+                )
+            )
+        ).all()
+    alignment_users_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for tid, uid in alignment_user_rows:
+        alignment_users_map.setdefault(tid, []).append(uid)
+
     return [
         SystemTaskTemplateOut(
             id=t.id,
@@ -312,6 +340,7 @@ async def list_system_task_templates(
             requires_alignment=bool(getattr(t, "requires_alignment", False)),
             alignment_time=getattr(t, "alignment_time", None),
             alignment_roles=roles_map.get(t.id),
+            alignment_user_ids=alignment_users_map.get(t.id),
             is_active=t.is_active,
             created_at=t.created_at,
         )
@@ -402,7 +431,7 @@ async def create_system_task_template(
     db.add(template)
     await db.flush()
 
-    # Alignment roles (currently: MANAGER). Stored on the template (applies to future occurrences).
+    # Alignment roles/users. Stored on the template (applies to future occurrences).
     if payload.requires_alignment:
         if payload.alignment_time is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="alignment_time is required")
@@ -412,6 +441,12 @@ async def create_system_task_template(
             cleaned = ["MANAGER"]
         values = [{"template_id": template.id, "role": role} for role in cleaned]
         await db.execute(insert(SystemTaskTemplateAlignmentRole), values)
+        alignment_user_ids = await _validate_alignment_user_ids(db, payload.alignment_user_ids or [])
+        if alignment_user_ids:
+            await db.execute(
+                insert(SystemTaskTemplateAlignmentUser),
+                [{"template_id": template.id, "user_id": uid} for uid in alignment_user_ids],
+            )
     task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
     if assignee_ids is not None:
         await _replace_task_assignees(db, task, assignee_ids)
@@ -567,8 +602,13 @@ async def update_system_task_template(
         template.is_active = payload.is_active
 
     # Update alignment roles if provided.
-    if "alignment_roles" in fields_set or "requires_alignment" in fields_set:
+    if (
+        "alignment_roles" in fields_set
+        or "alignment_user_ids" in fields_set
+        or "requires_alignment" in fields_set
+    ):
         await db.execute(delete(SystemTaskTemplateAlignmentRole).where(SystemTaskTemplateAlignmentRole.template_id == template.id))
+        await db.execute(delete(SystemTaskTemplateAlignmentUser).where(SystemTaskTemplateAlignmentUser.template_id == template.id))
         if template.requires_alignment:
             if template.alignment_time is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="alignment_time is required")
@@ -578,6 +618,12 @@ async def update_system_task_template(
                 cleaned = ["MANAGER"]
             values = [{"template_id": template.id, "role": role} for role in cleaned]
             await db.execute(insert(SystemTaskTemplateAlignmentRole), values)
+            alignment_user_ids = await _validate_alignment_user_ids(db, payload.alignment_user_ids or [])
+            if alignment_user_ids:
+                await db.execute(
+                    insert(SystemTaskTemplateAlignmentUser),
+                    [{"template_id": template.id, "user_id": uid} for uid in alignment_user_ids],
+                )
 
     await db.flush()
     task, _ = await _sync_task_for_template(db=db, template=template, creator_id=user.id)

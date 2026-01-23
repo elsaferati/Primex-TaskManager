@@ -27,6 +27,7 @@ class SystemTaskTemplateOut(BaseModel):
     requires_alignment: bool = False
     alignment_time: time | None = None
     alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool
     created_at: datetime
 
@@ -49,6 +50,7 @@ class SystemTaskTemplateCreate(BaseModel):
     requires_alignment: bool | None = None
     alignment_time: time | None = None
     alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
 
 
@@ -70,5 +72,6 @@ class SystemTaskTemplateUpdate(BaseModel):
     requires_alignment: bool | None = None
     alignment_time: time | None = None
     alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
 

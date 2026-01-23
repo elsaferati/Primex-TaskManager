@@ -36,6 +36,10 @@ export interface SystemTaskTemplate {
   month_of_year?: number | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
+  requires_alignment?: boolean | null
+  alignment_time?: string | null
+  alignment_roles?: string[] | null
+  alignment_user_ids?: string[] | null
   status?: string | null
   is_active: boolean
   user_comment?: string | null
