@@ -384,6 +384,41 @@ function noProjectTypeLabel(task: Task) {
   return "Normal"
 }
 
+function fastSubtypeLabel(task: Task) {
+  const base = noProjectTypeLabel(task)
+  if (base === "BLLOK") return "BLL"
+  if (base === "Personal") return "P"
+  return base
+}
+
+function systemFrequencyLabel(freq?: string | null) {
+  if (!freq) return "-"
+  switch (freq) {
+    case "DAILY":
+      return "Daily"
+    case "WEEKLY":
+      return "Weekly"
+    case "MONTHLY":
+      return "Monthly"
+    case "3_MONTHS":
+      return "Every 3 months"
+    case "6_MONTHS":
+      return "Every 6 months"
+    case "YEARLY":
+      return "Yearly"
+    default:
+      return freq
+  }
+}
+
+function reportStatusLabel(status?: Task["status"] | null) {
+  if (!status) return "-"
+  if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "TODO") return "To Do"
+  if (status === "DONE") return "Done"
+  return status
+}
+
 function formatMeetingPrintLabel(meeting: Meeting) {
   if (!meeting.starts_at) return meeting.title || "Meeting"
   const date = new Date(meeting.starts_at)
@@ -415,6 +450,8 @@ export default function DepartmentKanban() {
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
+  const printedAt = React.useMemo(() => new Date(), [])
+  const printInitials = initials(user?.full_name || user?.username || "")
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
@@ -467,6 +504,7 @@ export default function DepartmentKanban() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [updatingTask, setUpdatingTask] = React.useState(false)
@@ -494,6 +532,7 @@ export default function DepartmentKanban() {
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -916,6 +955,82 @@ export default function DepartmentKanban() {
     todayNotesPrint,
     todayProjectPrint,
     todaySystemPrint,
+  ])
+  const weeklyTaskReportRows = React.useMemo(() => {
+    const start = printRange === "today" ? todayDate : weekDates[0]
+    const end = printRange === "today" ? todayDate : weekDates[weekDates.length - 1]
+    if (!start || !end) return []
+
+    const startKey = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()
+    const endKey = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime()
+    const isInRange = (date: Date | null) => {
+      if (!date) return false
+      const key = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+      return key >= startKey && key <= endKey
+    }
+
+    const rows: {
+      typeLabel: string
+      subtype: string
+      period: string
+      title: string
+      description: string
+      status: string
+    }[] = []
+
+    for (const task of projectTasks) {
+      const taskDate = toDate(task.due_date || task.start_date || task.created_at)
+      if (!isInRange(taskDate)) continue
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      const subtype = project?.title || project?.name || "-"
+      rows.push({
+        typeLabel: "PRJK",
+        subtype,
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: reportStatusLabel(task.status),
+      })
+    }
+
+    for (const task of visibleNoProjectTasks) {
+      const taskDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      if (!isInRange(taskDate)) continue
+      rows.push({
+        typeLabel: "FAST",
+        subtype: fastSubtypeLabel(task),
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: reportStatusLabel(task.status),
+      })
+    }
+
+    for (const tmpl of visibleSystemTemplates) {
+      const occursInRange =
+        printRange === "today"
+          ? shouldShowTemplate(tmpl, todayDate)
+          : weekDates.some((date) => shouldShowTemplate(tmpl, date))
+      if (!occursInRange) continue
+      rows.push({
+        typeLabel: "SYSTEM",
+        subtype: systemFrequencyLabel(String(tmpl.frequency || "")),
+        period: resolvePeriod(tmpl.finish_period, null),
+        title: tmpl.title || "-",
+        description: tmpl.description || "-",
+        status: "-",
+      })
+    }
+
+    return rows
+  }, [
+    printRange,
+    projectTasks,
+    projects,
+    todayDate,
+    visibleNoProjectTasks,
+    visibleSystemTemplates,
+    weekDates,
   ])
   const printRangeLabel = React.useMemo(() => {
     if (printRange === "today") {
@@ -1641,6 +1756,7 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
+    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }
@@ -1649,14 +1765,16 @@ export default function DepartmentKanban() {
     setEditingTaskId(null)
     setEditTaskTitle("")
     setEditTaskDescription("")
+    setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
   }
 
   const updateNoProjectTask = async () => {
-    if (!editingTaskId || !editTaskTitle.trim()) return
+    if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
     setUpdatingTask(true)
     try {
+      const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1664,6 +1782,7 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: editTaskTitle.trim(),
           description: editTaskDescription.trim() || null,
+          start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
         }),
@@ -1690,7 +1809,7 @@ export default function DepartmentKanban() {
   }
 
   const submitNoProjectTask = async () => {
-    if (!noProjectTitle.trim() || !department) return
+    if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
     setCreatingNoProject(true)
     try {
       let gaNoteId: string | null = null
@@ -1719,6 +1838,7 @@ export default function DepartmentKanban() {
         gaNoteId = createdNote.id
         setGaNotes((prev) => [createdNote, ...prev])
       }
+      const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
         const payload = {
           title: noProjectTitle.trim(),
@@ -1733,6 +1853,7 @@ export default function DepartmentKanban() {
           is_r1: noProjectType === "r1",
           is_personal: noProjectType === "personal",
           ga_note_origin_id: gaNoteId,
+          start_date: startDate,
           due_date: dueDate,
         }
       const assigneeIds =
@@ -1793,6 +1914,7 @@ export default function DepartmentKanban() {
       setNoProjectDescription("")
       setNoProjectType("normal")
       setNoProjectAssignee("__unassigned__")
+      setNoProjectStartDate("")
       setNoProjectDueDate("")
       setNoProjectFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -3294,7 +3416,7 @@ export default function DepartmentKanban() {
                         <Label className="text-slate-700">Description</Label>
                         <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                       </div>
-                      <div className="grid gap-4 md:grid-cols-3">
+                      <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label className="text-slate-700">Assign to</Label>
                           <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
@@ -3334,12 +3456,22 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-slate-700">Due date</Label>
+                          <Label className="text-slate-700">Start date</Label>
+                          <Input
+                            type="date"
+                            required
+                            value={noProjectStartDate}
+                            onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
                             type="date"
                             value={noProjectDueDate}
                             onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
-                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                       </div>
@@ -3348,7 +3480,7 @@ export default function DepartmentKanban() {
                           Cancel
                         </Button>
                         <Button
-                          disabled={!noProjectTitle.trim() || creatingNoProject}
+                          disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
                           onClick={() => void submitNoProjectTask()}
                           className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                         >
@@ -3397,12 +3529,22 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-slate-700">Due date</Label>
+                          <Label className="text-slate-700">Start date</Label>
+                          <Input
+                            type="date"
+                            required
+                            value={editTaskStartDate}
+                            onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
-                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                       </div>
@@ -3411,7 +3553,7 @@ export default function DepartmentKanban() {
                           Cancel
                         </Button>
                         <Button
-                          disabled={!editTaskTitle.trim() || updatingTask}
+                          disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask}
                           onClick={() => void updateNoProjectTask()}
                           className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                         >
@@ -4251,35 +4393,42 @@ export default function DepartmentKanban() {
         </Dialog>
       </div>
       <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">
-            {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
-          </div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentName}
-          </div>
-          {showAllTodayPrint ? (
-            <div className="text-sm text-slate-700">
-              Users: {selectedUserId === "__all__"
-                ? "All users"
-                : allTodayPrintColumns[0]?.label || "Selected user"}
+        <div className="print-page px-6 pb-6">
+          <div className="print-header">
+            <div />
+            <div className="print-title">
+              {showAllTodayPrint ? "ALL TODAY REPORT" : "WEEKLY TASK REPORT"}
             </div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              User: {user?.full_name || user?.username || "-"}
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
-          )}
-          <div className="text-sm text-slate-700">
-            {showAllTodayPrint
-              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
-              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
           </div>
-        </div>
-        <div className="px-6 pb-6">
+          <div className="print-meta">
+            <div>Department: {departmentName}</div>
+            {showAllTodayPrint ? (
+              <div>
+                Users: {selectedUserId === "__all__"
+                  ? "All users"
+                  : allTodayPrintColumns[0]?.label || "Selected user"}
+              </div>
+            ) : (
+              <div>User: {user?.full_name || user?.username || "-"}</div>
+            )}
+            <div>
+              {showAllTodayPrint
+                ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
+                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
+            </div>
+          </div>
           {showAllTodayPrint ? (
             <>
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
@@ -4465,59 +4614,59 @@ export default function DepartmentKanban() {
             ) : null}
             </>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
-                  {printDates.map((date) => (
-                    <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                      {formatPrintDay(date)}
-                    </th>
-                  ))}
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nr</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Lloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
                 </tr>
               </thead>
               <tbody>
-                {printRowsByRange.map((row) => {
-                  const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
-                  return (
-                    <tr key={row.id}>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                        {row.label}
-                        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
-                          {total}
-                        </span>
+                {weeklyTaskReportRows.length ? (
+                  weeklyTaskReportRows.map((row, index) => (
+                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.status}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">
+                        <input
+                          type="text"
+                          aria-label="Koment"
+                          className="h-4 w-full border-b border-slate-400 bg-transparent"
+                        />
                       </td>
-                      {row.itemsByDay.map((items, idx) => (
-                        <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
-                          {items.length ? (
-                            <div className="space-y-1">
-                              {items.map((item, itemIndex) => (
-                                <div
-                                  key={`${row.id}-${idx}-${itemIndex}`}
-                                  className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                >
-                                  <div className="flex items-start gap-1 leading-tight">
-                                    <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                    <span>{item}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="italic text-slate-600">No data available.</div>
-                          )}
-                        </td>
-                      ))}
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
                     </tr>
-                  )
-                })}
+                  ))
+                ) : (
+                  <tr>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                      No data available.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}
+          <div className="print-footer">
+            <div className="print-page-count" />
+            <div className="print-initials">Initials: {printInitials}</div>
+          </div>
         </div>
       </div>
       <style jsx global>{`
@@ -4529,7 +4678,67 @@ export default function DepartmentKanban() {
             display: none !important;
           }
           @page {
-            margin: 12mm;
+            margin: 0.36in 0.08in 0.51in 0.2in;
+          }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 8px;
+            margin-bottom: 8px;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-meta {
+            font-size: 11px;
+            color: #334155;
+            margin-bottom: 12px;
+            display: grid;
+            gap: 2px;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.3in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.08in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            grid-column: 2;
+            text-align: center;
+          }
+          .print-page-count::before {
+            content: "Page " counter(page) " / " counter(pages);
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
+          }
+          .weekly-report-table thead {
+            display: table-header-group;
+          }
+          .weekly-report-table {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
         }
       `}</style>

@@ -643,6 +643,7 @@ export default function DepartmentKanban() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [updatingTask, setUpdatingTask] = React.useState(false)
@@ -678,6 +679,7 @@ export default function DepartmentKanban() {
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -1840,6 +1842,7 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
+    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }
@@ -1848,14 +1851,16 @@ export default function DepartmentKanban() {
     setEditingTaskId(null)
     setEditTaskTitle("")
     setEditTaskDescription("")
+    setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
   }
 
   const updateNoProjectTask = async () => {
-    if (!editingTaskId || !editTaskTitle.trim()) return
+    if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
     setUpdatingTask(true)
     try {
+      const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1863,6 +1868,7 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: editTaskTitle.trim(),
           description: editTaskDescription.trim() || null,
+          start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
         }),
@@ -1889,7 +1895,7 @@ export default function DepartmentKanban() {
   }
 
   const submitNoProjectTask = async () => {
-    if (!noProjectTitle.trim() || !department) return
+    if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
     setCreatingNoProject(true)
     try {
       let gaNoteId: string | null = null
@@ -1918,6 +1924,7 @@ export default function DepartmentKanban() {
         gaNoteId = createdNote.id
         setGaNotes((prev) => [createdNote, ...prev])
       }
+      const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
         const payload = {
           title: noProjectTitle.trim(),
@@ -1932,6 +1939,7 @@ export default function DepartmentKanban() {
           is_r1: noProjectType === "r1",
           is_personal: noProjectType === "personal",
           ga_note_origin_id: gaNoteId,
+          start_date: startDate,
           due_date: dueDate,
         }
       const assigneeIds =
@@ -1984,6 +1992,7 @@ export default function DepartmentKanban() {
       setNoProjectDescription("")
       setNoProjectType("normal")
       setNoProjectAssignee("__unassigned__")
+      setNoProjectStartDate("")
       setNoProjectDueDate("")
       setNoProjectFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -3401,7 +3410,7 @@ export default function DepartmentKanban() {
                           <Label className="text-slate-700">Description</Label>
                           <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                         </div>
-                        <div className="grid gap-4 md:grid-cols-3">
+                        <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-2">
                             <Label className="text-slate-700">Assign to</Label>
                             <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
@@ -3441,12 +3450,22 @@ export default function DepartmentKanban() {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-slate-700">Due date</Label>
+                            <Label className="text-slate-700">Start date</Label>
+                            <Input
+                              type="date"
+                              required
+                              value={noProjectStartDate}
+                              onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                              className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-slate-700">Due date (optional)</Label>
                             <Input
                               type="date"
                               value={noProjectDueDate}
                               onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
-                              className="border-slate-200 focus:border-slate-400 rounded-xl"
+                              className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                             />
                           </div>
                         </div>
@@ -3455,7 +3474,7 @@ export default function DepartmentKanban() {
                             Cancel
                           </Button>
                           <Button
-                            disabled={!noProjectTitle.trim() || creatingNoProject}
+                            disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
                             onClick={() => void submitNoProjectTask()}
                             className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                           >
@@ -3505,12 +3524,22 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-slate-700">Due date</Label>
+                          <Label className="text-slate-700">Start date</Label>
+                          <Input
+                            type="date"
+                            required
+                            value={editTaskStartDate}
+                            onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
-                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                       </div>
@@ -3519,7 +3548,7 @@ export default function DepartmentKanban() {
                           Cancel
                         </Button>
                         <Button
-                          disabled={!editTaskTitle.trim() || updatingTask}
+                          disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask}
                           onClick={() => void updateNoProjectTask()}
                           className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                         >

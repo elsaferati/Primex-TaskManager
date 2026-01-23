@@ -462,6 +462,7 @@ export default function DepartmentKanban() {
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -471,6 +472,7 @@ export default function DepartmentKanban() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [updatingTask, setUpdatingTask] = React.useState(false)
@@ -1294,7 +1296,7 @@ export default function DepartmentKanban() {
   }
 
   const submitNoProjectTask = async () => {
-    if (!noProjectTitle.trim() || !department) return
+    if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
     setCreatingNoProject(true)
     try {
       let gaNoteId: string | null = null
@@ -1306,6 +1308,7 @@ export default function DepartmentKanban() {
           setGaNotes((prev) => [createdNote, ...prev])
         }
       }
+      const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
         const payload = {
           title: noProjectTitle.trim(),
@@ -1320,6 +1323,7 @@ export default function DepartmentKanban() {
           is_r1: noProjectType === "r1",
           is_personal: noProjectType === "personal",
           ga_note_origin_id: gaNoteId,
+          start_date: startDate,
           due_date: dueDate,
         }
       const assigneeIds = noProjectAssignee === "__all__" ? departmentUsers.map((u) => u.id) : noProjectAssignee === "__unassigned__" ? [null] : [noProjectAssignee]
@@ -1346,6 +1350,8 @@ export default function DepartmentKanban() {
       setNoProjectOpen(false)
       setNoProjectTitle("")
       setNoProjectDescription("")
+      setNoProjectStartDate("")
+      setNoProjectDueDate("")
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -1383,6 +1389,7 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
+    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }
@@ -1391,14 +1398,16 @@ export default function DepartmentKanban() {
     setEditingTaskId(null)
     setEditTaskTitle("")
     setEditTaskDescription("")
+    setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
   }
 
   const updateNoProjectTask = async () => {
-    if (!editingTaskId || !editTaskTitle.trim()) return
+    if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
     setUpdatingTask(true)
     try {
+      const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1406,6 +1415,7 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: editTaskTitle.trim(),
           description: editTaskDescription.trim() || null,
+          start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
         }),
@@ -2383,7 +2393,114 @@ export default function DepartmentKanban() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
-                  {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value) => setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
+                  {!isReadOnly && (
+                    <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="rounded-xl bg-slate-900 text-white">Create Task</Button>
+                      </DialogTrigger>
+                      <DialogContent className="rounded-2xl sm:max-w-xl">
+                        <DialogHeader>
+                          <DialogTitle>New Task</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Category</Label>
+                            <Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}>
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {NO_PROJECT_TYPES.map((t) => (
+                                  <SelectItem key={t.id} value={t.id}>
+                                    {t.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Title</Label>
+                            <Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Description</Label>
+                            <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Assignee</Label>
+                              <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                                  <SelectItem value="__all__">Everyone</SelectItem>
+                                  {departmentUsers.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Finish by</Label>
+                              <Select
+                                value={noProjectFinishPeriod}
+                                onValueChange={(value) =>
+                                  setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                                }
+                              >
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Start date</Label>
+                              <Input
+                                className="rounded-xl w-full"
+                                type="date"
+                                required
+                                value={noProjectStartDate}
+                                onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Due date (optional)</Label>
+                              <Input
+                                className="rounded-xl w-full"
+                                type="date"
+                                value={noProjectDueDate}
+                                onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" onClick={() => setNoProjectOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            className="rounded-xl"
+                            disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
+                            onClick={() => void submitNoProjectTask()}
+                          >
+                            {creatingNoProject ? "Creating..." : "Create"}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                 </div>
               {!isReadOnly ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
@@ -2400,7 +2517,7 @@ export default function DepartmentKanban() {
                         <Label>Description</Label>
                         <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label>Finish by</Label>
                           <Select
@@ -2423,9 +2540,19 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Due Date</Label>
+                          <Label>Start date</Label>
                           <Input
-                            className="rounded-xl"
+                            className="rounded-xl w-full"
+                            type="date"
+                            required
+                            value={editTaskStartDate}
+                            onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Due date (optional)</Label>
+                          <Input
+                            className="rounded-xl w-full"
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
@@ -2436,7 +2563,7 @@ export default function DepartmentKanban() {
                         <Button variant="ghost" onClick={cancelEditTask}>
                           Cancel
                         </Button>
-                        <Button disabled={!editTaskTitle.trim() || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
+                        <Button disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
                           {updatingTask ? "Updating..." : "Update"}
                         </Button>
                       </div>
