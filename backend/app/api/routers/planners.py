@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -641,9 +641,11 @@ async def weekly_table_planner(
     
     departments = (await db.execute(dept_stmt.order_by(Department.name))).scalars().all()
     
-    # Identify Design and PCM departments that should show all tasks
+    # Identify departments with special weekly planner logic
     design_dept_names = {"Graphic Design", "Project Content Manager"}
     design_dept_ids = {dept.id for dept in departments if dept.name in design_dept_names}
+    dev_dept_names = {"Development"}
+    dev_dept_ids = {dept.id for dept in departments if dept.name in dev_dept_names}
     
     # Get all users - filter by department if a specific department is selected
     users_stmt = select(User).where(User.is_active == True)
@@ -651,33 +653,37 @@ async def weekly_table_planner(
         users_stmt = users_stmt.where(User.department_id == department_id)
     all_users = (await db.execute(users_stmt.order_by(User.full_name))).scalars().all()
     
-    # Get active projects (not completed, not templates)
-    # For Design/PCM, we need all projects to show all tasks
-    project_stmt = select(Project).where(
-        Project.completed_at.is_(None),
-        Project.is_template == False,
-    )
+    # Get projects (not templates). Completed projects are included for weekly overlap logic.
+    # For Design/PCM, we need all projects to show all tasks.
+    project_stmt = select(Project).where(Project.is_template == False)
     if department_id is not None and department_id not in design_dept_ids:
         project_stmt = project_stmt.where(Project.department_id == department_id)
     projects = (await db.execute(project_stmt.order_by(Project.created_at))).scalars().all()
     project_map = {p.id: p for p in projects}
     
-    # Get all active tasks (not completed)
-    # For Design/PCM, we need all tasks from all departments
-    task_stmt = select(Task).where(Task.completed_at.is_(None), Task.is_active == True)
+    # Get active tasks. Completed tasks from Development are included for per-day range logic.
+    # For Design/PCM, we need all tasks from all departments.
+    task_stmt = select(Task).where(Task.is_active == True)
     if department_id is not None and department_id not in design_dept_ids:
         task_stmt = task_stmt.where(Task.department_id == department_id)
+    if dev_dept_ids:
+        task_stmt = task_stmt.where(or_(Task.completed_at.is_(None), Task.department_id.in_(dev_dept_ids)))
+    else:
+        task_stmt = task_stmt.where(Task.completed_at.is_(None))
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
     # Filter tasks for the selected week (planning only):
     # - show tasks ONLY if they belong to the selected week
     # - show tasks ONLY on their planned days
     # - NEVER carry over tasks from previous weeks
-    # - NEVER include unscheduled tasks (no due_date)
+    # - NEVER include unscheduled tasks (no due_date), except Development project tasks
     def _planned_range(task: Task) -> tuple[date | None, date | None]:
         if task.due_date is None:
             return None, None
         due = task.due_date.date()
+        if task.project_id is None and task.system_template_origin_id is None:
+            # Fast tasks should only show on their due date.
+            return due, due
         if task.start_date is not None:
             start = task.start_date.date()
             # Only treat start_date as planning start if it forms a valid interval.
@@ -686,8 +692,17 @@ async def weekly_table_planner(
         # Default: single-day planned task on due date.
         return due, due
 
+    def _task_active_range(task: Task) -> tuple[date | None, date | None]:
+        if task.department_id in dev_dept_ids and task.project_id is not None:
+            start = task.created_at.date()
+            end = task.completed_at.date() if task.completed_at else week_end
+            if end < start:
+                return None, None
+            return start, end
+        return _planned_range(task)
+
     def _overlaps_week(task: Task) -> bool:
-        start, end = _planned_range(task)
+        start, end = _task_active_range(task)
         if start is None or end is None:
             return False
         return start <= working_days[-1] and end >= working_days[0]
@@ -772,10 +787,7 @@ async def weekly_table_planner(
     # Projects should show for members from Monday until due date
     # If overdue and not completed, show on Monday as late project
     logger = logging.getLogger(__name__)
-    projects_with_due_dates = [
-        p for p in projects
-        if p.due_date is not None and p.completed_at is None
-    ]
+    projects_with_due_dates = [p for p in projects if p.due_date is not None]
     logger.debug(f"Total projects in department: {len(projects)}")
     logger.debug(f"Projects with due dates (not completed): {len(projects_with_due_dates)}")
     for p in projects_with_due_dates:
@@ -858,7 +870,7 @@ async def weekly_table_planner(
                 for t in dept_tasks:
                     if t.id not in user_task_ids:
                         continue
-                    start, end = _planned_range(t)
+                    start, end = _task_active_range(t)
                     if start is None or end is None:
                         continue
                     if start <= day_date <= end:
@@ -869,7 +881,7 @@ async def weekly_table_planner(
                 # If overdue (due_date < Monday) and not completed, show on Monday as late project
                 user_projects_with_due: set[uuid.UUID] = set()
                 user_late_projects: set[uuid.UUID] = set()
-                for project in projects_with_due_dates:
+                for project in projects_with_due_dates if dept.id in design_dept_ids else []:
                     # Check if user is a member of this project
                     if project.id not in project_members_map:
                         logger.debug(f"Project {project.title} (id={project.id}) has no members in map - skipping")
@@ -888,7 +900,10 @@ async def weekly_table_planner(
                     # For Design/PCM, we already have all projects in the projects list, so no need to filter
                     
                     project_due_date = project.due_date.date()
-                    project_start_date = project.start_date.date() if project.start_date else project.created_at.date()
+                    project_start_date = project.created_at.date()
+                    project_end_date = project_due_date
+                    if project.completed_at is not None:
+                        project_end_date = min(project_end_date, project.completed_at.date())
                     monday_of_week = working_days[0]
                     week_end = working_days[-1]
                     
@@ -901,27 +916,16 @@ async def weekly_table_planner(
                         f"dept={dept.name}"
                     )
                     
-                    # Determine if project should show on this day (planning-only: never show overdue/late)
+                    # Determine if project should show on this day (created -> due, stop on completion)
                     should_show = False
-                    
-                    if project_due_date < monday_of_week:
-                        # Never show overdue projects in Weekly Planner
-                        should_show = False
+                    effective_start = max(project_start_date, monday_of_week)
+
+                    if project_start_date <= week_end:
+                        if day_date >= effective_start and day_date <= project_end_date and day_date <= week_end:
+                            should_show = True
+                            logger.debug(f"Project {project.title} showing from {effective_start} to {project_end_date} on {day_date}")
                     else:
-                        # Determine the effective start date for this week
-                        # If start_date is before this week, start from Monday
-                        # If start_date is within this week, start from start_date
-                        # If start_date is after this week, don't show yet
-                        effective_start = max(project_start_date, monday_of_week)
-                        
-                        # Show from effective start until due date (within current week)
-                        # Only check if start_date is not after the week_end
-                        if project_start_date <= week_end:
-                            if day_date >= effective_start and day_date <= project_due_date and day_date <= week_end:
-                                should_show = True
-                                logger.debug(f"Project {project.title} showing from {effective_start} to {project_due_date} on {day_date}")
-                        else:
-                            logger.debug(f"Project {project.title} start_date {project_start_date} is after week_end {week_end} - not showing")
+                        logger.debug(f"Project {project.title} start_date {project_start_date} is after week_end {week_end} - not showing")
                     
                     if should_show:
                         user_projects_with_due.add(project.id)
@@ -956,58 +960,13 @@ async def weekly_table_planner(
                 am_fast_tasks: list[WeeklyTableTaskEntry] = []
                 pm_fast_tasks: list[WeeklyTableTaskEntry] = []
 
-                # System task occurrences for this user/day (planning-only, derived from templates)
-                for tmpl in system_templates:
-                    if str(getattr(tmpl, "scope", "")).upper() != "ALL":
-                        # Only include department-scoped templates in their department section
-                        if str(getattr(tmpl, "scope", "")).upper() != "DEPARTMENT":
-                            continue
-                        if tmpl.department_id != dept.id:
-                            continue
-                    # Assigned to this user?
-                    if dept_user.id not in system_template_assignees.get(tmpl.id, set()):
-                        continue
-                    if not matches_template_date(tmpl, day_date):
-                        continue
-
-                    entry = WeeklyTableTaskEntry(
-                        task_id=None,
-                        title=tmpl.title,
-                        daily_products=None,
-                        fast_task_type=None,
-                        is_bllok=False,
-                        is_1h_report=False,
-                        is_r1=False,
-                        is_personal=False,
-                        ga_note_origin_id=None,
-                    )
-                    is_pm_tmpl = tmpl.finish_period and str(tmpl.finish_period).upper() == "PM"
-                    if is_pm_tmpl:
-                        pm_system_tasks.append(entry)
-                    else:
-                        am_system_tasks.append(entry)
-                
                 for task in user_tasks:
                     # Handle finish_period: None or empty defaults to AM
                     is_pm = task.finish_period and str(task.finish_period).upper() == "PM"
                     
                     # System tasks (have system_template_origin_id)
                     if task.system_template_origin_id is not None:
-                        entry = WeeklyTableTaskEntry(
-                            task_id=task.id,
-                            title=task.title,
-                            daily_products=task.daily_products,
-                            fast_task_type=get_fast_task_type(task),
-                            is_bllok=task.is_bllok,
-                            is_1h_report=task.is_1h_report,
-                            is_r1=task.is_r1,
-                            is_personal=task.is_personal,
-                            ga_note_origin_id=task.ga_note_origin_id,
-                        )
-                        if is_pm:
-                            pm_system_tasks.append(entry)
-                        else:
-                            am_system_tasks.append(entry)
+                        continue
                     # Fast tasks (no project_id and no system_template_origin_id)
                     elif task.project_id is None:
                         entry = WeeklyTableTaskEntry(

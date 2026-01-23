@@ -12,8 +12,17 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { Plus, Save, X, Printer } from "lucide-react"
+import { ChevronDown, Plus, Save, X, Printer } from "lucide-react"
 import { useAuth } from "@/lib/auth"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -101,13 +110,12 @@ export default function WeeklyPlannerPage() {
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
   const [manualTaskType, setManualTaskType] = React.useState<"project" | "fast">("fast")
   const [manualTaskTitle, setManualTaskTitle] = React.useState("")
-  const [manualTaskDay, setManualTaskDay] = React.useState<string[]>([])
   const [manualTaskDays, setManualTaskDays] = React.useState<string[]>([])
-  const [manualTaskUserId, setManualTaskUserId] = React.useState("")
   const [manualTaskUserIds, setManualTaskUserIds] = React.useState<string[]>([])
   const [manualTaskPeriod, setManualTaskPeriod] = React.useState<"AM" | "PM">("AM")
   const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
   const [manualTaskFastType, setManualTaskFastType] = React.useState<string>("")
+  const [manualTaskProjectId, setManualTaskProjectId] = React.useState("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
   const canDeleteProjects = user?.role === "ADMIN"
 
@@ -346,13 +354,12 @@ export default function WeeklyPlannerPage() {
     if (!manualTaskOpen) {
       // Reset all form state when dialog closes
       setManualTaskTitle("")
-      setManualTaskDay("")
       setManualTaskDays([])
-      setManualTaskUserId("")
       setManualTaskUserIds([])
       setManualTaskPeriod("AM")
       setManualTaskDepartmentId("")
       setManualTaskFastType("")
+      setManualTaskProjectId("")
       setManualTaskType("fast")
       return
     }
@@ -363,7 +370,8 @@ export default function WeeklyPlannerPage() {
 
   React.useEffect(() => {
     if (!manualTaskDepartmentId) return
-    setManualTaskUserId("")
+    setManualTaskUserIds([])
+    setManualTaskProjectId("")
   }, [manualTaskDepartmentId])
 
   const availableDays = React.useMemo(() => {
@@ -392,6 +400,29 @@ export default function WeeklyPlannerPage() {
     return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [departments])
 
+  const isProjectClosed = React.useCallback((project: Project) => {
+    const statusValue = (project.status || "").toUpperCase()
+    const phaseValue = (project.current_phase || "").toUpperCase()
+    if (project.completed_at) return true
+    if (statusValue === "CLOSED" || statusValue === "MBYLLUR" || statusValue === "LOST" || statusValue === "CANCELLED") return true
+    if (phaseValue === "CLOSED" || phaseValue === "MBYLLUR") return true
+    return false
+  }, [])
+
+  const projectLabel = React.useCallback((project: Project) => {
+    return project.title || project.name || "Untitled project"
+  }, [])
+
+  const availableProjects = React.useMemo(() => {
+    if (!manualTaskDepartmentId) return []
+    return projects
+      .filter((project) => project.department_id === manualTaskDepartmentId)
+      .filter((project) => !project.is_template)
+      .filter((project) => !isProjectClosed(project))
+      .slice()
+      .sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)))
+  }, [manualTaskDepartmentId, projects, isProjectClosed, projectLabel])
+
   const manualTaskDepartmentValue =
     departmentId !== ALL_DEPARTMENTS_VALUE ? departmentId : manualTaskDepartmentId
 
@@ -406,12 +437,12 @@ export default function WeeklyPlannerPage() {
     }
     if (manualTaskType === "fast") {
       // Fast Task validation
-      if (!manualTaskDay) {
-        toast.error("Select a day.")
+      if (manualTaskDays.length === 0) {
+        toast.error("Select at least one day.")
         return
       }
-      if (!manualTaskUserId) {
-        toast.error("Select a member.")
+      if (manualTaskUserIds.length === 0) {
+        toast.error("Select at least one member.")
         return
       }
       if (!manualTaskFastType) {
@@ -422,6 +453,10 @@ export default function WeeklyPlannerPage() {
       // Project validation
       if (manualTaskDays.length === 0) {
         toast.error("Select at least one day.")
+        return
+      }
+      if (!manualTaskProjectId) {
+        toast.error("Select a project.")
         return
       }
       if (manualTaskUserIds.length === 0) {
@@ -439,53 +474,53 @@ export default function WeeklyPlannerPage() {
     setIsCreatingManualTask(true)
     try {
       if (manualTaskType === "fast") {
-        // Create single fast task
-        const dueDateIso = new Date(manualTaskDay).toISOString()
-        const taskPayload: any = {
-          title: manualTaskTitle.trim(),
-          project_id: null,
-          department_id: departmentValue,
-          assigned_to: manualTaskUserId,
-          status: "TODO",
-          priority: "NORMAL",
-          finish_period: manualTaskPeriod,
-          due_date: dueDateIso,
-        }
-        
-        // Set fast task type flags
-        if (manualTaskFastType === "BLL") {
-          taskPayload.is_bllok = true
-        } else if (manualTaskFastType === "R1") {
-          taskPayload.is_r1 = true
-        } else if (manualTaskFastType === "1H") {
-          taskPayload.is_1h_report = true
-        } else if (manualTaskFastType === "GA") {
-          // GA tasks need a ga_note_origin_id, but for manual tasks we'll just mark it
-          // The backend will handle this - we can leave it null and the badge will show based on other logic
-          // Actually, let's check if we need to create a GA note first or if we can just set a flag
-          // For now, we'll leave ga_note_origin_id as null and the frontend will show GA badge based on fast_task_type
-          // But wait, the backend might need it. Let me check the schema again - it's optional, so null should be fine
-        } else if (manualTaskFastType === "P:") {
-          taskPayload.is_personal = true
+        // Create fast tasks for multiple days and members
+        const tasksToCreate: Promise<Response>[] = []
+
+        for (const day of manualTaskDays) {
+          for (const userId of manualTaskUserIds) {
+            const dueDateIso = new Date(day).toISOString()
+            const taskPayload: any = {
+              title: manualTaskTitle.trim(),
+              project_id: null,
+              department_id: departmentValue,
+              assigned_to: userId,
+              status: "TODO",
+              priority: "NORMAL",
+              finish_period: manualTaskPeriod,
+              due_date: dueDateIso,
+            }
+
+            // Set fast task type flags
+            if (manualTaskFastType === "BLL") {
+              taskPayload.is_bllok = true
+            } else if (manualTaskFastType === "R1") {
+              taskPayload.is_r1 = true
+            } else if (manualTaskFastType === "1H") {
+              taskPayload.is_1h_report = true
+            } else if (manualTaskFastType === "GA") {
+              // Leave ga_note_origin_id null for manual creation.
+            } else if (manualTaskFastType === "P:") {
+              taskPayload.is_personal = true
+            }
+
+            tasksToCreate.push(
+              apiFetch("/tasks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(taskPayload),
+              })
+            )
+          }
         }
 
-        const res = await apiFetch("/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(taskPayload),
-        })
-        if (!res.ok) {
-          let detail = "Failed to create task"
-          try {
-            const data = await res.json()
-            if (typeof data?.detail === "string") detail = data.detail
-          } catch {
-            // ignore
-          }
-          toast.error(detail)
+        const results = await Promise.all(tasksToCreate)
+        const failed = results.filter(r => !r.ok)
+        if (failed.length > 0) {
+          toast.error(`Failed to create ${failed.length} task(s).`)
           return
         }
-        toast.success("Fast task added to weekly planner.")
+        toast.success(`Created ${tasksToCreate.length} fast task(s).`)
       } else {
         // Create project tasks for multiple days and members
         const tasksToCreate: Promise<Response>[] = []
@@ -499,7 +534,7 @@ export default function WeeklyPlannerPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   title: manualTaskTitle.trim(),
-                  project_id: null,
+                  project_id: manualTaskProjectId,
                   department_id: departmentValue,
                   assigned_to: userId,
                   status: "TODO",
@@ -523,13 +558,12 @@ export default function WeeklyPlannerPage() {
       
       setManualTaskOpen(false)
       setManualTaskTitle("")
-      setManualTaskDay("")
       setManualTaskDays([])
-      setManualTaskUserId("")
       setManualTaskUserIds([])
       setManualTaskPeriod("AM")
       setManualTaskDepartmentId("")
       setManualTaskFastType("")
+      setManualTaskProjectId("")
       setManualTaskType("fast")
       await loadPlanner()
     } catch (error) {
@@ -595,12 +629,22 @@ export default function WeeklyPlannerPage() {
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
 
+  const fastTaskBadgeStyles: Record<string, string> = {
+    BLL: "border-red-200 bg-red-50 text-red-700",
+    R1: "border-indigo-200 bg-indigo-50 text-indigo-700",
+    "1H": "border-amber-200 bg-amber-50 text-amber-700",
+    GA: "border-sky-200 bg-sky-50 text-sky-700",
+    "P:": "border-emerald-200 bg-emerald-50 text-emerald-700",
+    N: "border-slate-200 bg-slate-50 text-slate-700",
+  }
+
   const getTaskStatusBadge = React.useCallback((task: {
     is_bllok?: boolean
     is_1h_report?: boolean
     is_r1?: boolean
     is_personal?: boolean
     ga_note_origin_id?: string | null
+    fast_task_type?: string | null
   }): { label: string; className: string } | null => {
     if (task.is_bllok) {
       return { label: "BLL", className: "border-red-200 bg-red-50 text-red-700" }
@@ -619,6 +663,25 @@ export default function WeeklyPlannerPage() {
     }
     return null // NORMAL = no badge
   }, [])
+
+  const getFastTaskBadge = React.useCallback((task: {
+    is_bllok?: boolean
+    is_1h_report?: boolean
+    is_r1?: boolean
+    is_personal?: boolean
+    ga_note_origin_id?: string | null
+    fast_task_type?: string | null
+  }): { label: string; className: string } => {
+    const badge = getTaskStatusBadge(task)
+    if (badge) return badge
+    if (task.fast_task_type) {
+      return {
+        label: task.fast_task_type,
+        className: fastTaskBadgeStyles[task.fast_task_type] || "border-slate-200 bg-slate-50 text-slate-700",
+      }
+    }
+    return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
+  }, [getTaskStatusBadge, fastTaskBadgeStyles])
 
   const handlePrint = React.useCallback(() => {
     if (!data) return
@@ -738,6 +801,7 @@ export default function WeeklyPlannerPage() {
             .badge-1h { background-color: #fef3c7; color: #92400e; }
             .badge-ga { background-color: #dbeafe; color: #1e40af; }
             .badge-p { background-color: #d1fae5; color: #065f46; }
+            .badge-n { background-color: #f1f5f9; color: #475569; }
             .products {
               color: #2563eb;
               font-weight: bold;
@@ -862,7 +926,8 @@ export default function WeeklyPlannerPage() {
                                      badge.label === "R1" ? "badge-r1" :
                                      badge.label === "1H" ? "badge-1h" :
                                      badge.label === "GA" ? "badge-ga" :
-                                     badge.label === "P:" ? "badge-p" : ""
+                                     badge.label === "P:" ? "badge-p" :
+                                     badge.label === "N" ? "badge-n" : ""
                     printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
                   }
                   printContent += `</div>`
@@ -881,13 +946,14 @@ export default function WeeklyPlannerPage() {
               printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
               fastTasks.forEach((task) => {
                 printContent += `<div class="task-item">${task.title}`
-                const badge = getTaskStatusBadge(task) || (task.fast_task_type ? { label: task.fast_task_type, className: "" } : null)
+                const badge = getFastTaskBadge(task)
                 if (badge) {
                   const badgeClass = badge.label === "BLL" ? "badge-bll" :
                                    badge.label === "R1" ? "badge-r1" :
                                    badge.label === "1H" ? "badge-1h" :
                                    badge.label === "GA" ? "badge-ga" :
-                                   badge.label === "P:" ? "badge-p" : ""
+                                   badge.label === "P:" ? "badge-p" :
+                                   badge.label === "N" ? "badge-n" : ""
                   printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
                 }
                 printContent += `</div>`
@@ -931,8 +997,9 @@ export default function WeeklyPlannerPage() {
                     const badgeClass = badge.label === "BLL" ? "badge-bll" :
                                      badge.label === "R1" ? "badge-r1" :
                                      badge.label === "1H" ? "badge-1h" :
-                                     badge.label === "GA" ? "badge-ga" :
-                                     badge.label === "P:" ? "badge-p" : ""
+                                   badge.label === "GA" ? "badge-ga" :
+                                   badge.label === "P:" ? "badge-p" :
+                                   badge.label === "N" ? "badge-n" : ""
                     printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
                   }
                   printContent += `</div>`
@@ -951,13 +1018,14 @@ export default function WeeklyPlannerPage() {
               printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
               fastTasks.forEach((task) => {
                 printContent += `<div class="task-item">${task.title}`
-                const badge = getTaskStatusBadge(task) || (task.fast_task_type ? { label: task.fast_task_type, className: "" } : null)
+                const badge = getFastTaskBadge(task)
                 if (badge) {
                   const badgeClass = badge.label === "BLL" ? "badge-bll" :
                                    badge.label === "R1" ? "badge-r1" :
                                    badge.label === "1H" ? "badge-1h" :
                                    badge.label === "GA" ? "badge-ga" :
-                                   badge.label === "P:" ? "badge-p" : ""
+                                   badge.label === "P:" ? "badge-p" :
+                                   badge.label === "N" ? "badge-n" : ""
                   printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
                 }
                 printContent += `</div>`
@@ -997,14 +1065,6 @@ export default function WeeklyPlannerPage() {
       printWindow.print()
     }, 250)
   }, [data, departmentId, departments, getTaskStatusBadge])
-
-  const fastTaskBadgeStyles: Record<string, string> = {
-    BLL: "border-red-200 bg-red-50 text-red-700",
-    R1: "border-indigo-200 bg-indigo-50 text-indigo-700",
-    "1H": "border-amber-200 bg-amber-50 text-amber-700",
-    GA: "border-sky-200 bg-sky-50 text-sky-700",
-    "P:": "border-emerald-200 bg-emerald-50 text-emerald-700",
-  }
 
   return (
     <div className="space-y-4">
@@ -1105,11 +1165,10 @@ export default function WeeklyPlannerPage() {
               <Select value={manualTaskType} onValueChange={(v) => {
                 setManualTaskType(v as "project" | "fast")
                 // Reset fields when switching type
-                setManualTaskDay("")
                 setManualTaskDays([])
-                setManualTaskUserId("")
                 setManualTaskUserIds([])
                 setManualTaskFastType("")
+                setManualTaskProjectId("")
               }}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1144,25 +1203,11 @@ export default function WeeklyPlannerPage() {
                       <SelectItem value="1H">1H</SelectItem>
                       <SelectItem value="GA">GA</SelectItem>
                       <SelectItem value="P:">P:</SelectItem>
+                      <SelectItem value="N">N</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Day</Label>
-                    <Select value={manualTaskDay} onValueChange={setManualTaskDay}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select day" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableDays.map((day) => (
-                          <SelectItem key={day.value} value={day.value}>
-                            {day.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div className="space-y-2">
                     <Label>AM / PM</Label>
                     <Select value={manualTaskPeriod} onValueChange={(v) => setManualTaskPeriod(v as "AM" | "PM")}>
@@ -1177,30 +1222,20 @@ export default function WeeklyPlannerPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Member</Label>
-                  <Select value={manualTaskUserId} onValueChange={setManualTaskUserId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select member" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableUsers.map((entry) => (
-                        <SelectItem key={entry.id} value={entry.id}>
-                          {entry.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-2">
                   <Label>Days (Select multiple)</Label>
-                  <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
-                    {availableDays.map((day) => (
-                      <div key={day.value} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`day-${day.value}`}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        {manualTaskDays.length > 0 ? `Days (${manualTaskDays.length})` : "Select days"}
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56 max-h-64 z-[120]">
+                      <DropdownMenuLabel>Days</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {availableDays.map((day) => (
+                        <DropdownMenuCheckboxItem
+                          key={day.value}
                           checked={manualTaskDays.includes(day.value)}
                           onCheckedChange={(checked) => {
                             if (checked) {
@@ -1209,16 +1244,127 @@ export default function WeeklyPlannerPage() {
                               setManualTaskDays(manualTaskDays.filter(d => d !== day.value))
                             }
                           }}
-                        />
-                        <label
-                          htmlFor={`day-${day.value}`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
                         >
                           {day.label}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          setManualTaskDays([])
+                        }}
+                      >
+                        Clear days
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="space-y-2">
+                  <Label>Members (Select multiple)</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        {manualTaskUserIds.length > 0 ? `Members (${manualTaskUserIds.length})` : "Select members"}
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-64 max-h-64 z-[120]">
+                      <DropdownMenuLabel>Members</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {availableUsers.map((entry) => (
+                        <DropdownMenuCheckboxItem
+                          key={entry.id}
+                          checked={manualTaskUserIds.includes(entry.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setManualTaskUserIds([...manualTaskUserIds, entry.id])
+                            } else {
+                              setManualTaskUserIds(manualTaskUserIds.filter(id => id !== entry.id))
+                            }
+                          }}
+                        >
+                          {entry.name}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          setManualTaskUserIds([])
+                        }}
+                      >
+                        Clear members
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Project</Label>
+                  <Select
+                    value={manualTaskProjectId}
+                    onValueChange={setManualTaskProjectId}
+                    disabled={!manualTaskDepartmentValue}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={manualTaskDepartmentValue ? "Select project" : "Select department first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableProjects.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          No active projects
+                        </SelectItem>
+                      ) : (
+                        availableProjects.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {projectLabel(project)}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Days (Select multiple)</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        {manualTaskDays.length > 0 ? `Days (${manualTaskDays.length})` : "Select days"}
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56 max-h-64 z-[120]">
+                      <DropdownMenuLabel>Days</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {availableDays.map((day) => (
+                        <DropdownMenuCheckboxItem
+                          key={day.value}
+                          checked={manualTaskDays.includes(day.value)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setManualTaskDays([...manualTaskDays, day.value])
+                            } else {
+                              setManualTaskDays(manualTaskDays.filter(d => d !== day.value))
+                            }
+                          }}
+                        >
+                          {day.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          setManualTaskDays([])
+                        }}
+                      >
+                        Clear days
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
                 <div className="space-y-2">
                   <Label>AM / PM</Label>
@@ -1234,11 +1380,19 @@ export default function WeeklyPlannerPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Members (Select multiple)</Label>
-                  <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
-                    {availableUsers.map((entry) => (
-                      <div key={entry.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`user-${entry.id}`}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        {manualTaskUserIds.length > 0 ? `Members (${manualTaskUserIds.length})` : "Select members"}
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-64 max-h-64 z-[120]">
+                      <DropdownMenuLabel>Members</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {availableUsers.map((entry) => (
+                        <DropdownMenuCheckboxItem
+                          key={entry.id}
                           checked={manualTaskUserIds.includes(entry.id)}
                           onCheckedChange={(checked) => {
                             if (checked) {
@@ -1247,16 +1401,21 @@ export default function WeeklyPlannerPage() {
                               setManualTaskUserIds(manualTaskUserIds.filter(id => id !== entry.id))
                             }
                           }}
-                        />
-                        <label
-                          htmlFor={`user-${entry.id}`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
                         >
                           {entry.name}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          setManualTaskUserIds([])
+                        }}
+                      >
+                        Clear members
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </>
             )}
@@ -1520,10 +1679,7 @@ export default function WeeklyPlannerPage() {
                                       <div className="space-y-1">
                                         <div className="text-xs font-medium text-muted-foreground mb-1">Fast Tasks</div>
                                     {fastTasksList.map((task, idx) => {
-                                          const statusBadge = getTaskStatusBadge(task) || (task.fast_task_type ? {
-                                            label: task.fast_task_type,
-                                            className: fastTaskBadgeStyles[task.fast_task_type] || "border-slate-200 bg-slate-50 text-slate-700"
-                                          } : null)
+                                          const statusBadge = getFastTaskBadge(task)
                                           return (
                                             <div
                                               key={task.task_id || idx}
