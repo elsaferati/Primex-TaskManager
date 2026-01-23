@@ -419,6 +419,87 @@ function reportStatusLabel(status?: Task["status"] | null) {
   return status
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+function dayKey(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+}
+
+function systemFrequencyReportLabel(freq?: SystemTaskTemplate["frequency"] | string | null) {
+  if (!freq) return "-"
+  switch (freq) {
+    case "DAILY":
+      return "Daily"
+    case "WEEKLY":
+      return "Weekly"
+    case "MONTHLY":
+      return "Monthly"
+    case "YEARLY":
+      return "Yearly"
+    case "3_MONTHS":
+      return "3 months"
+    case "6_MONTHS":
+      return "6 months"
+    default:
+      return String(freq)
+  }
+}
+
+function formatSystemOccurrenceStatus(status?: string | null) {
+  if (!status) return "-"
+  if (status === "NOT_DONE") return "Not Done"
+  if (status === "DONE") return "Done"
+  if (status === "OPEN") return "Open"
+  if (status === "SKIPPED") return "Skipped"
+  return status
+}
+
+function formatAlignmentTime(value?: string | null) {
+  if (!value) return "-"
+  const match = String(value).match(/^(\d{2}:\d{2})/)
+  return match ? match[1] : String(value)
+}
+
+function formatAlignmentUsers(userIds: string[] | null | undefined, userMap: Map<string, UserLookup>) {
+  if (!userIds || userIds.length === 0) return "-"
+  return userIds
+    .map((id) => {
+      const user = userMap.get(id)
+      return user?.full_name || user?.username || id
+    })
+    .join(", ")
+}
+
+function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefined, today: Date) {
+  const completedDate = completedAt ? toDate(completedAt) : null
+  if (completedDate && isSameDay(completedDate, today)) return "T"
+  if (!baseDate) return "-"
+  if (isSameDay(baseDate, today)) return "T"
+  const delta = Math.floor((dayKey(today) - dayKey(baseDate)) / MS_PER_DAY)
+  if (delta === 1) return "Y"
+  if (delta > 1) return String(delta)
+  return "-"
+}
+
+function fastReportSubtype(task: Task) {
+  const base = noProjectTypeLabel(task)
+  if (base === "BLLOK") return "BLL"
+  if (base === "Personal") return "P"
+  if (base === "Normal") return "NORMAL"
+  return base
+}
+
+function taskStatusLabel(task: Task) {
+  if (task.status) return reportStatusLabel(task.status)
+  if (task.completed_at) return "Done"
+  return "-"
+}
+
+function reportPriorityLabel(priority?: TaskPriority | string | null) {
+  if (!priority) return "-"
+  return PRIORITY_LABELS[normalizePriority(priority)]
+}
+
 function formatMeetingPrintLabel(meeting: Meeting) {
   if (!meeting.starts_at) return meeting.title || "Meeting"
   const date = new Date(meeting.starts_at)
@@ -480,6 +561,7 @@ export default function DepartmentKanban() {
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
+  const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [multiSelect, setMultiSelect] = React.useState(false)
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
   const [creatingSystem, setCreatingSystem] = React.useState(false)
@@ -831,6 +913,130 @@ export default function DepartmentKanban() {
       }),
     [visibleMeetings, todayDate]
   )
+  const dailyReportFastTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
+    return visibleNoProjectTasks.filter((task) => {
+      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      if (completedDate && !completedToday) return false
+      if (!baseDate) return completedToday
+      const baseKey = dayKey(baseDate)
+      return baseKey <= todayKey || completedToday
+    })
+  }, [todayDate, visibleNoProjectTasks])
+  const dailyReportProjectTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
+    return projectTasks.filter((task) => {
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      if (completedDate && !completedToday) return false
+      if (!baseDate) return completedToday
+      const baseKey = dayKey(baseDate)
+      return baseKey <= todayKey || completedToday
+    })
+  }, [projectTasks, todayDate])
+  const systemTemplateById = React.useMemo(() => {
+    const map = new Map<string, SystemTaskTemplate>()
+    for (const tmpl of visibleSystemTemplates) {
+      map.set(tmpl.id, tmpl)
+      if (tmpl.template_id) {
+        map.set(tmpl.template_id, tmpl)
+      }
+    }
+    return map
+  }, [visibleSystemTemplates])
+  const dailyUserReportRows = React.useMemo(() => {
+    const rows: Array<{
+      typeLabel: string
+      subtype: string
+      period: string
+      title: string
+      description: string
+      status: string
+      bz: string
+      kohaBz: string
+      tyo: string
+    }> = []
+
+    if (dailyReport?.system_overdue?.length) {
+      for (const occ of dailyReport.system_overdue) {
+        const tmpl = systemTemplateById.get(occ.template_id) || null
+        const baseDate = toDate(occ.occurrence_date)
+        const alignmentEnabled = Boolean(tmpl?.requires_alignment)
+        rows.push({
+          typeLabel: "SYSTEM TASK",
+          subtype: tmpl ? systemFrequencyReportLabel(tmpl.frequency) : "System",
+          period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
+          title: occ.title || "-",
+          description: tmpl?.description || "-",
+          status: formatSystemOccurrenceStatus(occ.status),
+          bz: alignmentEnabled ? formatAlignmentUsers(tmpl?.alignment_user_ids, userMap) : "-",
+          kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
+          tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+        })
+      }
+    }
+
+    for (const tmpl of todaySystemTasks) {
+      const alignmentEnabled = Boolean(tmpl.requires_alignment)
+      rows.push({
+        typeLabel: "SYSTEM TASK",
+        subtype: systemFrequencyReportLabel(tmpl.frequency),
+        period: resolvePeriod(tmpl.finish_period, todayIso),
+        title: tmpl.title || "-",
+        description: tmpl.description || "-",
+        status: tmpl.status ? (STATUS_LABELS[tmpl.status] || tmpl.status) : "-",
+        bz: alignmentEnabled ? formatAlignmentUsers(tmpl.alignment_user_ids, userMap) : "-",
+        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
+        tyo: "T",
+      })
+    }
+
+    for (const task of dailyReportFastTasks) {
+      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      rows.push({
+        typeLabel: "FAST TASK",
+        subtype: fastReportSubtype(task),
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: taskStatusLabel(task),
+        bz: "-",
+        kohaBz: "-",
+        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+      })
+    }
+
+    for (const task of dailyReportProjectTasks) {
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      rows.push({
+        typeLabel: "PRJK",
+        subtype: project?.title || project?.name || "-",
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: taskStatusLabel(task),
+        bz: "-",
+        kohaBz: "-",
+        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+      })
+    }
+
+    return rows
+  }, [
+    dailyReport,
+    dailyReportFastTasks,
+    dailyReportProjectTasks,
+    projects,
+    systemTemplateById,
+    todayDate,
+    todayIso,
+    todaySystemTasks,
+    userMap,
+  ])
   const weekProjectTasks = React.useMemo(() => {
     return weekDates.map((date) => {
       return projectTasks
@@ -972,6 +1178,7 @@ export default function DepartmentKanban() {
     const rows: {
       typeLabel: string
       subtype: string
+      priority: string
       period: string
       title: string
       description: string
@@ -986,6 +1193,7 @@ export default function DepartmentKanban() {
       rows.push({
         typeLabel: "PRJK",
         subtype,
+        priority: reportPriorityLabel(task.priority),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         description: task.description || "-",
@@ -999,6 +1207,7 @@ export default function DepartmentKanban() {
       rows.push({
         typeLabel: "FAST",
         subtype: fastSubtypeLabel(task),
+        priority: reportPriorityLabel(task.priority),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         description: task.description || "-",
@@ -1015,6 +1224,7 @@ export default function DepartmentKanban() {
       rows.push({
         typeLabel: "SYSTEM",
         subtype: systemFrequencyLabel(String(tmpl.frequency || "")),
+        priority: reportPriorityLabel(tmpl.priority),
         period: resolvePeriod(tmpl.finish_period, null),
         title: tmpl.title || "-",
         description: tmpl.description || "-",
@@ -1269,15 +1479,17 @@ export default function DepartmentKanban() {
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
 
-  // Daily Report (overdue) for All Today (department view) - only for a selected user.
+  // Daily Report (overdue) for All Today (department view) and My View (current user).
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
-      if (activeTab !== "all" || viewMode !== "department") {
+      if (activeTab !== "all") {
         setDailyReport(null)
         return
       }
-      if (!department?.id || selectedUserId === "__all__") {
+      const targetUserId =
+        viewMode === "department" ? (selectedUserId !== "__all__" ? selectedUserId : null) : user?.id
+      if (!department?.id || !targetUserId) {
         setDailyReport(null)
         return
       }
@@ -1286,7 +1498,7 @@ export default function DepartmentKanban() {
         const qs = new URLSearchParams({
           day: todayIso,
           department_id: department.id,
-          user_id: selectedUserId,
+          user_id: targetUserId,
         })
         const res = await apiFetch(`/reports/daily?${qs.toString()}`)
         if (!res.ok) {
@@ -1305,7 +1517,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, viewMode])
+  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isReadOnly = viewMode === "mine"
@@ -2722,12 +2934,25 @@ export default function DepartmentKanban() {
                     </Button>
                   </>
                 ) : null}
-                {viewMode === "mine" ? (
-                  <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                    <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                    <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                      <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                        <SelectValue placeholder="This Week" />
+                  {viewMode === "mine" ? (
+                    <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                      <Button
+                        variant="outline"
+                        className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                        onClick={() =>
+                          setShowDailyUserReport((prev) => {
+                            const next = !prev
+                            if (next) setPrintRange("today")
+                            return next
+                          })
+                        }
+                      >
+                        {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
+                      </Button>
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                      <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                        <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                          <SelectValue placeholder="This Week" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="today">Today</SelectItem>
@@ -2760,7 +2985,71 @@ export default function DepartmentKanban() {
               ))}
             </div>
 
-            {/* Daily Report (Overdue) - shown only when a specific user is selected */}
+            {viewMode === "mine" && showDailyUserReport ? (
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Daily Report</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      System, fast, and project tasks for today.
+                    </div>
+                  </div>
+                  {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                    <thead className="sticky top-0 z-10 bg-slate-50">
+                      <tr>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Lloji</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailyUserReportRows.length ? (
+                        dailyUserReportRows.map((row, index) => (
+                          <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{index + 1}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.title}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.status}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">
+                              <input
+                                type="text"
+                                aria-label="Koment"
+                                className="h-4 w-full border-b border-slate-300 bg-transparent"
+                              />
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
+                            No data available.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            ) : null}
+
+            {viewMode === "department" ? (
             <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -2825,6 +3114,7 @@ export default function DepartmentKanban() {
                 <div className="mt-3 text-sm text-slate-500">No report available.</div>
               )}
             </Card>
+            ) : null}
             <div className="space-y-4">
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
                 <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
@@ -4397,7 +4687,11 @@ export default function DepartmentKanban() {
           <div className="print-header">
             <div />
             <div className="print-title">
-              {showAllTodayPrint ? "ALL TODAY REPORT" : "WEEKLY TASK REPORT"}
+              {showAllTodayPrint
+                ? "ALL TODAY REPORT"
+                : printRange === "today" && showDailyUserReport
+                  ? "DAILY TASK REPORT"
+                  : "WEEKLY TASK REPORT"}
             </div>
             <div className="print-datetime">
               {printedAt.toLocaleString("en-US", {
@@ -4613,13 +4907,63 @@ export default function DepartmentKanban() {
               </div>
             ) : null}
             </>
+          ) : printRange === "today" && showDailyUserReport ? (
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Lloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyUserReportRows.length ? (
+                  dailyUserReportRows.map((row, index) => (
+                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.status}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">
+                        <input
+                          type="text"
+                          aria-label="Koment"
+                          className="h-4 w-full border-b border-slate-400 bg-transparent"
+                        />
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                      No data available.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           ) : (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nr</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Lloji</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Prioriteti</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
@@ -4634,9 +4978,10 @@ export default function DepartmentKanban() {
                 {weeklyTaskReportRows.length ? (
                   weeklyTaskReportRows.map((row, index) => (
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.priority}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.title}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
@@ -4655,7 +5000,7 @@ export default function DepartmentKanban() {
                   ))
                 ) : (
                   <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
                       No data available.
                     </td>
                   </tr>
@@ -4665,11 +5010,19 @@ export default function DepartmentKanban() {
           )}
           <div className="print-footer">
             <div className="print-page-count" />
-            <div className="print-initials">Initials: {printInitials}</div>
+            <div className="print-initials">PUNOI: {printInitials}</div>
           </div>
         </div>
       </div>
       <style jsx global>{`
+        .daily-report-table th,
+        .daily-report-table td {
+          vertical-align: bottom;
+        }
+        .daily-report-table thead tr {
+          border-top: 2px solid #e2e8f0;
+          border-bottom: 2px solid #e2e8f0;
+        }
         @media print {
           body {
             background: white;
@@ -4678,7 +5031,7 @@ export default function DepartmentKanban() {
             display: none !important;
           }
           @page {
-            margin: 0.36in 0.08in 0.51in 0.2in;
+            margin: 0.36in 0.1in 0.51in 0.1in;
           }
           .print-page {
             position: relative;
@@ -4688,8 +5041,8 @@ export default function DepartmentKanban() {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-top: 8px;
-            margin-bottom: 8px;
+            margin-top: 0.15in;
+            margin-bottom: 0.15in;
           }
           .print-title {
             font-size: 16px;
@@ -4714,11 +5067,11 @@ export default function DepartmentKanban() {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: 0.3in;
+            bottom: 0.2in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.2in;
-            padding-right: 0.08in;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
             font-size: 10px;
             color: #334155;
           }
@@ -4735,6 +5088,19 @@ export default function DepartmentKanban() {
           }
           .weekly-report-table thead {
             display: table-header-group;
+          }
+          .weekly-report-table th,
+          .weekly-report-table td,
+          .daily-report-table th,
+          .daily-report-table td {
+            vertical-align: bottom;
+          }
+          .weekly-report-table thead th {
+            border-width: 2px;
+          }
+          .daily-report-table thead tr {
+            border-top: 2px solid #cbd5f5;
+            border-bottom: 2px solid #cbd5f5;
           }
           .weekly-report-table {
             -webkit-print-color-adjust: exact;
