@@ -858,6 +858,29 @@ export default function DepartmentKanban() {
       kohaBz: string
       tyo: string
     }> = []
+    const systemAmRows: typeof rows = []
+    const systemPmRows: typeof rows = []
+    const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
+    const projectRows: typeof rows = []
+    let fastIndex = 0
+
+    const pushSystemRow = (row: (typeof rows)[number]) => {
+      if (row.period === "PM") {
+        systemPmRows.push(row)
+        return
+      }
+      systemAmRows.push(row)
+    }
+
+    const fastTypeOrder = (task: Task) => {
+      const label = noProjectTypeLabel(task)
+      if (label === "BLLOK") return 0
+      if (label === "1H") return 1
+      if (label === "Personal") return 2
+      if (label === "R1") return 3
+      if (label === "Normal") return 4
+      return 5
+    }
 
     const todayTemplateIds = new Set(
       todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
@@ -891,7 +914,7 @@ export default function DepartmentKanban() {
         (tmpl?.alignment_roles && tmpl.alignment_roles.length)
       )
       const bzUsers = formatAlignmentUsers(tmpl?.alignment_user_ids, userMap)
-      rows.push({
+      pushSystemRow({
         typeLabel: "SYS",
         subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
         period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
@@ -918,7 +941,7 @@ export default function DepartmentKanban() {
         (tmpl.alignment_roles && tmpl.alignment_roles.length)
       )
       const bzUsers = formatAlignmentUsers(tmpl.alignment_user_ids, userMap)
-      rows.push({
+      pushSystemRow({
         typeLabel: "SYS",
         subtype: systemFrequencyShortLabel(tmpl.frequency),
         period: resolvePeriod(tmpl.finish_period, todayIso),
@@ -939,11 +962,33 @@ export default function DepartmentKanban() {
 
     for (const task of dailyReportFastTasks) {
       const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
-      rows.push({
-        typeLabel: "FT",
-        subtype: fastReportSubtypeShort(task),
-        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
-        title: task.title || "-",
+      fastRows.push({
+        order: fastTypeOrder(task),
+        index: fastIndex,
+        row: {
+          typeLabel: "FT",
+          subtype: fastReportSubtypeShort(task),
+          period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
+          title: task.title || "-",
+          description: task.description || "-",
+          status: taskStatusLabel(task),
+          bz: "-",
+          kohaBz: "-",
+          tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        },
+      })
+      fastIndex += 1
+    }
+
+    for (const task of dailyReportProjectTasks) {
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      const projectLabel = project?.title || project?.name || "-"
+      projectRows.push({
+        typeLabel: "PRJK",
+        subtype: "-",
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: `${projectLabel} - ${task.title || "-"}`,
         description: task.description || "-",
         status: taskStatusLabel(task),
         bz: "-",
@@ -952,21 +997,12 @@ export default function DepartmentKanban() {
       })
     }
 
-    for (const task of dailyReportProjectTasks) {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
-      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      rows.push({
-        typeLabel: "PRJK",
-        subtype: project?.title || project?.name || "-",
-        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-        title: task.title || "-",
-        description: task.description || "-",
-        status: taskStatusLabel(task),
-        bz: "-",
-        kohaBz: "-",
-        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
-      })
-    }
+    fastRows
+      .sort((a, b) => a.order - b.order || a.index - b.index)
+      .forEach((entry) => rows.push(entry.row))
+    rows.push(...systemAmRows)
+    rows.push(...projectRows)
+    rows.push(...systemPmRows)
 
     return rows
   }, [
@@ -2346,8 +2382,8 @@ export default function DepartmentKanban() {
                           <col className="w-[60px]" />
                           <col className="w-[40px]" />
                           <col className="w-[52px]" />
-                          <col className="w-[140px]" />
                           <col className="w-[48px]" />
+                          <col className="w-[140px]" />
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50">
                           <tr>
@@ -2360,23 +2396,24 @@ export default function DepartmentKanban() {
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                           </tr>
                         </thead>
                         <tbody>
                           {dailyUserReportRows.length ? (
                             dailyUserReportRows.map((row, index) => (
                               <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                                <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{index + 1}</td>
+                                <td className="border border-slate-200 px-2 py-2 align-top">{index + 1}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.title}</td>
+                                <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.status}</td>
+                                <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                                <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
                                 <td className="border border-slate-200 px-2 py-2 align-top">
                                   <input
                                     type="text"
@@ -2384,7 +2421,6 @@ export default function DepartmentKanban() {
                                     className="h-4 w-full border-b border-slate-300 bg-transparent"
                                   />
                                 </td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
                               </tr>
                             ))
                           ) : (
@@ -3567,7 +3603,7 @@ export default function DepartmentKanban() {
         <div className="px-6 pb-6">
           {showAllTodayPrint ? (
             <>
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
@@ -3757,51 +3793,51 @@ export default function DepartmentKanban() {
                 <col className="w-[56px]" />
                 <col className="w-[150px]" />
                 <col className="w-[110px]" />
-                <col className="w-[60px]" />
-                <col className="w-[40px]" />
-                <col className="w-[52px]" />
-                <col className="w-[140px]" />
-                <col className="w-[48px]" />
-              </colgroup>
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+              <col className="w-[60px]" />
+              <col className="w-[40px]" />
+              <col className="w-[52px]" />
+              <col className="w-[48px]" />
+              <col className="w-[140px]" />
+            </colgroup>
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dailyUserReportRows.length ? (
-                  dailyUserReportRows.map((row, index) => (
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyUserReportRows.length ? (
+                dailyUserReportRows.map((row, index) => (
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.status}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">
-                        <input
-                          type="text"
-                          aria-label="Koment"
-                          className="h-4 w-full border-b border-slate-400 bg-transparent"
-                        />
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
-                    </tr>
-                  ))
-                ) : (
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">
+                      <input
+                        type="text"
+                        aria-label="Koment"
+                        className="h-4 w-full border-b border-slate-400 bg-transparent"
+                      />
+                    </td>
+                  </tr>
+                ))
+              ) : (
                   <tr>
                     <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
                       No data available.
@@ -3811,7 +3847,7 @@ export default function DepartmentKanban() {
               </tbody>
             </table>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
@@ -3875,6 +3911,14 @@ export default function DepartmentKanban() {
         .daily-report-table thead tr {
           border-top: 2px solid #e2e8f0;
           border-bottom: 2px solid #e2e8f0;
+        }
+        .daily-report-table thead th {
+          border-width: 2px;
+          border-color: #cbd5e1;
+        }
+        .weekly-report-table thead th {
+          border-width: 2px;
+          border-color: #0f172a;
         }
       `}</style>
       <style dangerouslySetInnerHTML={{
