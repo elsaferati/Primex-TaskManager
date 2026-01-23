@@ -28,7 +28,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4">
       <div className="text-lg font-semibold">Dashboard</div>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3 bg-red">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Open tasks</CardTitle>
@@ -49,12 +49,12 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 bg-red-100">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Quick links</CardTitle>
+            <CardTitle className="text-2xl">Quick links</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <CardContent className="space-y-2 text-sm bg-red">
             <Link className="block underline" href="/weekly-planner">
               Weekly Planner
             </Link>
