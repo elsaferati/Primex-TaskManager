@@ -2837,31 +2837,6 @@ export function SystemTasksView({
                                   <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                     {template.title}
                                   </div>
-                                  {template.requires_alignment ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="h-5 text-[10px] uppercase border-blue-200 text-blue-700"
-                                      title="Requires BZ"
-                                    >
-                                      {(() => {
-                                        const ids = template.alignment_user_ids ?? []
-                                        const names = ids
-                                          .map((id) => userDisplayLabel(userMap.get(id)) || id)
-                                          .filter((value): value is string => Boolean(value))
-                                        const display =
-                                          names.length <= 2
-                                            ? (names.join(", ") || "--")
-                                            : `${names[0]}, ${names[1]} +${names.length - 2}`
-                                        const title =
-                                          names.length ? `BZ with: ${names.join(", ")}` : "BZ managers not set"
-                                        return (
-                                          <span title={title}>
-                                            BZ {timeInputValue(template.alignment_time) || "--:--"} ({display})
-                                          </span>
-                                        )
-                                      })()}
-                                    </Badge>
-                                  ) : null}
                                   <Badge variant="secondary" className="h-5 text-[10px] uppercase">
                                     {template.status || "TODO"}
                                   </Badge>
