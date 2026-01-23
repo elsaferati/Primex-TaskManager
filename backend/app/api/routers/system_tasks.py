@@ -93,6 +93,34 @@ async def _assignees_for_tasks(
     return assignees
 
 
+async def _alignment_maps_for_templates(
+    db: AsyncSession, template_ids: list[uuid.UUID]
+) -> tuple[dict[uuid.UUID, list[str]], dict[uuid.UUID, list[uuid.UUID]]]:
+    if not template_ids:
+        return {}, {}
+    role_rows = (
+        await db.execute(
+            select(SystemTaskTemplateAlignmentRole.template_id, SystemTaskTemplateAlignmentRole.role)
+            .where(SystemTaskTemplateAlignmentRole.template_id.in_(template_ids))
+        )
+    ).all()
+    roles_map: dict[uuid.UUID, list[str]] = {}
+    for tid, role in role_rows:
+        roles_map.setdefault(tid, []).append(role)
+
+    alignment_user_rows = (
+        await db.execute(
+            select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+            .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+        )
+    ).all()
+    alignment_users_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for tid, uid in alignment_user_rows:
+        alignment_users_map.setdefault(tid, []).append(uid)
+
+    return roles_map, alignment_users_map
+
+
 async def _replace_task_assignees(
     db: AsyncSession, task: Task, assignee_ids: list[uuid.UUID]
 ) -> None:
@@ -158,6 +186,8 @@ def _task_row_to_out(
     template: SystemTaskTemplate,
     assignees: list[TaskAssigneeOut],
     user_comment: str | None = None,
+    alignment_roles: list[str] | None = None,
+    alignment_user_ids: list[uuid.UUID] | None = None,
 ) -> SystemTaskOut:
     priority_value = task.priority or TaskPriority.NORMAL
     return SystemTaskOut(
@@ -180,6 +210,10 @@ def _task_row_to_out(
         status=task.status,
         is_active=task.is_active,
         user_comment=user_comment,
+        requires_alignment=bool(getattr(template, "requires_alignment", False)),
+        alignment_time=getattr(template, "alignment_time", None),
+        alignment_roles=alignment_roles,
+        alignment_user_ids=alignment_user_ids,
         created_at=task.created_at,
     )
 
@@ -277,9 +311,18 @@ async def list_system_tasks(
             )
         ).all()
         user_comment_map = {task_id: comment for task_id, comment in comment_rows}
-    
+
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
+
     return [
-        _task_row_to_out(task, template, assignee_map.get(task.id, []), user_comment_map.get(task.id))
+        _task_row_to_out(
+            task,
+            template,
+            assignee_map.get(task.id, []),
+            user_comment_map.get(task.id),
+            roles_map.get(template.id),
+            alignment_users_map.get(template.id),
+        )
         for task, template in rows
     ]
 
@@ -459,7 +502,15 @@ async def create_system_task_template(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    return _task_row_to_out(task, template, assignee_map.get(task.id, []))
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
+    return _task_row_to_out(
+        task,
+        template,
+        assignee_map.get(task.id, []),
+        None,
+        roles_map.get(template.id),
+        alignment_users_map.get(template.id),
+    )
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -637,4 +688,12 @@ async def update_system_task_template(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    return _task_row_to_out(task, template, assignee_map.get(task.id, []))
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
+    return _task_row_to_out(
+        task,
+        template,
+        assignee_map.get(task.id, []),
+        None,
+        roles_map.get(template.id),
+        alignment_users_map.get(template.id),
+    )

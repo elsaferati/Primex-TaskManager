@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 
 from pydantic import BaseModel, Field
 
@@ -29,4 +29,8 @@ class SystemTaskOut(BaseModel):
     status: TaskStatus
     is_active: bool
     user_comment: str | None = None
+    requires_alignment: bool | None = None
+    alignment_time: time | None = None
+    alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     created_at: datetime

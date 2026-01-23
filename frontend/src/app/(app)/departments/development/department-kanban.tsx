@@ -411,6 +411,26 @@ function systemFrequencyLabel(freq?: string | null) {
   }
 }
 
+function systemFrequencyShortLabel(freq?: SystemTaskTemplate["frequency"] | string | null) {
+  if (!freq) return "-"
+  switch (freq) {
+    case "DAILY":
+      return "D"
+    case "WEEKLY":
+      return "W"
+    case "MONTHLY":
+      return "M"
+    case "YEARLY":
+      return "Y"
+    case "3_MONTHS":
+      return "3M"
+    case "6_MONTHS":
+      return "6M"
+    default:
+      return String(freq)
+  }
+}
+
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
@@ -470,6 +490,19 @@ function formatAlignmentUsers(userIds: string[] | null | undefined, userMap: Map
     .join(", ")
 }
 
+function formatAlignmentInitials(userIds: string[] | null | undefined, userMap: Map<string, UserLookup>) {
+  if (!userIds || userIds.length === 0) return "-"
+  const values = userIds
+    .map((id) => {
+      const user = userMap.get(id)
+      const label = user?.full_name || user?.username || id
+      return initials(label)
+    })
+    .filter(Boolean)
+  if (!values.length) return "-"
+  return values.join("/")
+}
+
 function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefined, today: Date) {
   const completedDate = completedAt ? toDate(completedAt) : null
   if (completedDate && isSameDay(completedDate, today)) return "T"
@@ -486,6 +519,14 @@ function fastReportSubtype(task: Task) {
   if (base === "BLLOK") return "BLL"
   if (base === "Personal") return "P"
   if (base === "Normal") return "NORMAL"
+  return base
+}
+
+function fastReportSubtypeShort(task: Task) {
+  const base = noProjectTypeLabel(task)
+  if (base === "BLLOK") return "BLL"
+  if (base === "Personal") return "P:"
+  if (base === "Normal") return "N"
   return base
 }
 
@@ -960,35 +1001,79 @@ export default function DepartmentKanban() {
       tyo: string
     }> = []
 
+    const todayTemplateIds = new Set(
+      todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
+    )
+    const overdueByTemplate = new Map<string, DailyReportSystemOccurrence>()
     if (dailyReport?.system_overdue?.length) {
       for (const occ of dailyReport.system_overdue) {
-        const tmpl = systemTemplateById.get(occ.template_id) || null
-        const baseDate = toDate(occ.occurrence_date)
-        const alignmentEnabled = Boolean(tmpl?.requires_alignment)
-        rows.push({
-          typeLabel: "SYSTEM TASK",
-          subtype: tmpl ? systemFrequencyReportLabel(tmpl.frequency) : "System",
-          period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
-          title: occ.title || "-",
-          description: tmpl?.description || "-",
-          status: formatSystemOccurrenceStatus(occ.status),
-          bz: alignmentEnabled ? formatAlignmentUsers(tmpl?.alignment_user_ids, userMap) : "-",
-          kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
-          tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
-        })
+        if (todayTemplateIds.has(occ.template_id)) {
+          continue
+        }
+        const existing = overdueByTemplate.get(occ.template_id)
+        if (!existing) {
+          overdueByTemplate.set(occ.template_id, occ)
+          continue
+        }
+        const existingDate = toDate(existing.occurrence_date)
+        const nextDate = toDate(occ.occurrence_date)
+        if (!existingDate || (nextDate && dayKey(nextDate) > dayKey(existingDate))) {
+          overdueByTemplate.set(occ.template_id, occ)
+        }
       }
     }
 
-    for (const tmpl of todaySystemTasks) {
-      const alignmentEnabled = Boolean(tmpl.requires_alignment)
+    for (const occ of overdueByTemplate.values()) {
+      const tmpl = systemTemplateById.get(occ.template_id) || null
+      const baseDate = toDate(occ.occurrence_date)
+      const alignmentEnabled = Boolean(
+        tmpl?.requires_alignment ||
+        tmpl?.alignment_time ||
+        (tmpl?.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+        (tmpl?.alignment_roles && tmpl.alignment_roles.length)
+      )
+      const bzUsers = formatAlignmentUsers(tmpl?.alignment_user_ids, userMap)
       rows.push({
-        typeLabel: "SYSTEM TASK",
-        subtype: systemFrequencyReportLabel(tmpl.frequency),
+        typeLabel: "SYS",
+        subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
+        period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
+        title: occ.title || "-",
+        description: tmpl?.description || "-",
+        status: formatSystemOccurrenceStatus(occ.status),
+        bz: alignmentEnabled
+          ? bzUsers !== "-"
+            ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
+            : tmpl?.alignment_roles?.length
+              ? tmpl.alignment_roles.join(", ")
+            : "-"
+          : "-",
+        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
+        tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+      })
+    }
+
+    for (const tmpl of todaySystemTasks) {
+      const alignmentEnabled = Boolean(
+        tmpl.requires_alignment ||
+        tmpl.alignment_time ||
+        (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+        (tmpl.alignment_roles && tmpl.alignment_roles.length)
+      )
+      const bzUsers = formatAlignmentUsers(tmpl.alignment_user_ids, userMap)
+      rows.push({
+        typeLabel: "SYS",
+        subtype: systemFrequencyShortLabel(tmpl.frequency),
         period: resolvePeriod(tmpl.finish_period, todayIso),
         title: tmpl.title || "-",
         description: tmpl.description || "-",
         status: tmpl.status ? (STATUS_LABELS[tmpl.status] || tmpl.status) : "-",
-        bz: alignmentEnabled ? formatAlignmentUsers(tmpl.alignment_user_ids, userMap) : "-",
+        bz: alignmentEnabled
+          ? bzUsers !== "-"
+            ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
+            : tmpl.alignment_roles?.length
+              ? tmpl.alignment_roles.join(", ")
+            : "-"
+          : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
       })
@@ -997,8 +1082,8 @@ export default function DepartmentKanban() {
     for (const task of dailyReportFastTasks) {
       const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
       rows.push({
-        typeLabel: "FAST TASK",
-        subtype: fastReportSubtype(task),
+        typeLabel: "FT",
+        subtype: fastReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
         title: task.title || "-",
         description: task.description || "-",
@@ -2998,17 +3083,30 @@ export default function DepartmentKanban() {
                 </div>
                 <div className="mt-3 overflow-x-auto">
                   <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                    <colgroup>
+                      <col className="w-[36px]" />
+                      <col className="w-[44px]" />
+                      <col className="w-[56px]" />
+                      <col className="w-[56px]" />
+                      <col className="w-[150px]" />
+                      <col className="w-[110px]" />
+                      <col className="w-[60px]" />
+                      <col className="w-[40px]" />
+                      <col className="w-[52px]" />
+                      <col className="w-[140px]" />
+                      <col className="w-[48px]" />
+                    </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Lloji</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">NLL</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
                       </tr>
@@ -4909,17 +5007,30 @@ export default function DepartmentKanban() {
             </>
           ) : printRange === "today" && showDailyUserReport ? (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+              <colgroup>
+                <col className="w-[36px]" />
+                <col className="w-[44px]" />
+                <col className="w-[56px]" />
+                <col className="w-[56px]" />
+                <col className="w-[150px]" />
+                <col className="w-[110px]" />
+                <col className="w-[60px]" />
+                <col className="w-[40px]" />
+                <col className="w-[52px]" />
+                <col className="w-[140px]" />
+                <col className="w-[48px]" />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Lloji</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
                 </tr>
@@ -4958,18 +5069,31 @@ export default function DepartmentKanban() {
             </table>
           ) : (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+              <colgroup>
+                <col className="w-[36px]" />
+                <col className="w-[44px]" />
+                <col className="w-[56px]" />
+                <col className="w-[56px]" />
+                <col className="w-[150px]" />
+                <col className="w-[110px]" />
+                <col className="w-[60px]" />
+                <col className="w-[40px]" />
+                <col className="w-[52px]" />
+                <col className="w-[140px]" />
+                <col className="w-[48px]" />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Lloji</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Nenlloji</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Prioriteti</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Statusi</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">KohaBZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
                 </tr>
@@ -5018,6 +5142,8 @@ export default function DepartmentKanban() {
         .daily-report-table th,
         .daily-report-table td {
           vertical-align: bottom;
+          padding-bottom: 0;
+          padding-top: 15px;
         }
         .daily-report-table thead tr {
           border-top: 2px solid #e2e8f0;
@@ -5093,7 +5219,7 @@ export default function DepartmentKanban() {
           .weekly-report-table td,
           .daily-report-table th,
           .daily-report-table td {
-            vertical-align: bottom;
+            vertical-align: bottom !important;
           }
           .weekly-report-table thead th {
             border-width: 2px;
