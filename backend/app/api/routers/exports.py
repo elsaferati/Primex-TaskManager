@@ -1582,6 +1582,12 @@ async def export_common_xlsx(
     ws.auto_filter.ref = f"A4:{get_column_letter(last_col)}{last_row}"
 
     ws.freeze_panes = "C3"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
 
     bio = io.BytesIO()
     wb.save(bio)
