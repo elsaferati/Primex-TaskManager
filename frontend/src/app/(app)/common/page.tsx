@@ -228,6 +228,7 @@ export default function CommonViewPage() {
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
   const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
+  const [exportingExcel, setExportingExcel] = React.useState(false)
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
@@ -1071,6 +1072,34 @@ export default function CommonViewPage() {
     window.print()
   }
 
+  const handleExportExcel = async () => {
+    if (exportingExcel) return
+    setExportingExcel(true)
+    try {
+      const weekStartIso = toISODate(weekStart)
+      const res = await apiFetch(`/exports/common.xlsx?week_start=${encodeURIComponent(weekStartIso)}`)
+      if (!res?.ok) {
+        const detail = await res.text()
+        alert(detail || "Failed to export Excel.")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `common_view_${weekStartIso}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export common view Excel", err)
+      alert("Failed to export Excel.")
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const setWeek = (dateStr: string) => {
     const base = dateStr ? fromISODate(dateStr) : new Date()
     const monday = getMonday(base)
@@ -1446,7 +1475,7 @@ export default function CommonViewPage() {
       },
       {
         id: "blocked",
-        label: "Blocked",
+        label: "BLLOK",
         count: filtered.blocked.length,
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
@@ -3140,8 +3169,16 @@ export default function CommonViewPage() {
             <p>Daily/weekly view for key statuses and team priorities.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              className="btn-outline no-print"
+              type="button"
+              onClick={handleExportExcel}
+              disabled={exportingExcel}
+            >
+              {exportingExcel ? "Exporting..." : "Export Excel"}
+            </button>
             <button className="btn-primary no-print" type="button" onClick={handlePrint}>
-              Export / Print
+              Print
             </button>
             <button
               className={`btn-outline no-print ${meetingPanelOpen ? "active" : ""}`}

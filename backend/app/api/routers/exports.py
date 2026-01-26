@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import uuid
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -12,7 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -20,14 +21,58 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
+from app.models.common_entry import CommonEntry
+from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
 from app.models.user import User
-from app.models.enums import UserRole, ChecklistItemType
+from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType
 
 
 router = APIRouter()
+
+DATE_LABEL_RE = re.compile(r"Date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+DATE_RANGE_RE = re.compile(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+START_RE = re.compile(r"Start:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
+UNTIL_RE = re.compile(r"Until:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
+FROM_TO_RE = re.compile(r"From:\s*(\d{1,2}:\d{2})\s*-\s*To:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
+TIME_RANGE_RE = re.compile(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)")
+
+
+def _initials(label: str) -> str:
+    parts = [part for part in re.split(r"\s+", label.strip()) if part]
+    return "".join(part[0].upper() for part in parts)
+
+
+def _format_excel_date(d: date) -> str:
+    return f"{d.day:02d}-{d.month:02d}-{d.year}"
+
+
+def _day_code(d: date) -> str:
+    codes = ["H", "M", "MR", "E", "P", "S", "D"]
+    return codes[d.weekday()] if 0 <= d.weekday() < len(codes) else ""
+
+
+async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskAssignee.task_id, User)
+            .join(User, TaskAssignee.user_id == User.id)
+            .where(TaskAssignee.task_id.in_(task_ids))
+        )
+    ).all()
+    out: dict[uuid.UUID, list[str]] = {task_id: [] for task_id in task_ids}
+    for task_id, user in rows:
+        label = user.full_name or user.username or ""
+        if not label:
+            continue
+        out.setdefault(task_id, []).append(label)
+    return out
 
 
 async def _query_tasks(
@@ -467,5 +512,358 @@ async def export_checklist_xlsx(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{safe_filename}.xlsx\"'},
+    )
+
+
+@router.get("/common.xlsx")
+async def export_common_xlsx(
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    week_dates = [week_start + timedelta(days=i) for i in range(5)]
+    week_isos = [d.isoformat() for d in week_dates]
+    start_dt = datetime.combine(week_dates[0], time.min, tzinfo=timezone.utc)
+    end_dt = datetime.combine(week_dates[-1], time.max, tzinfo=timezone.utc)
+
+    entries_stmt = select(CommonEntry)
+    if user.role == UserRole.STAFF:
+        entries_stmt = entries_stmt.where(
+            or_(
+                CommonEntry.created_by_user_id == user.id,
+                CommonEntry.assigned_to_user_id == user.id,
+            )
+        )
+    entries_stmt = entries_stmt.where(
+        or_(
+            CommonEntry.entry_date.between(week_dates[0], week_dates[-1]),
+            and_(
+                CommonEntry.entry_date.is_(None),
+                CommonEntry.created_at >= start_dt,
+                CommonEntry.created_at <= end_dt,
+            ),
+        )
+    )
+    entries = (await db.execute(entries_stmt.order_by(CommonEntry.created_at.desc()))).scalars().all()
+
+    tasks: list[Task] = []
+    if user.role != UserRole.STAFF or user.department_id is not None:
+        tasks_stmt = select(Task)
+        if user.role == UserRole.STAFF:
+            tasks_stmt = tasks_stmt.where(Task.department_id == user.department_id)
+        tasks_stmt = tasks_stmt.where(
+            or_(
+                Task.due_date.between(start_dt, end_dt),
+                Task.start_date.between(start_dt, end_dt),
+                Task.created_at.between(start_dt, end_dt),
+            )
+        )
+        tasks = (await db.execute(tasks_stmt.order_by(Task.created_at.desc()))).scalars().all()
+
+    meetings: list[Meeting] = []
+    if user.role != UserRole.STAFF or user.department_id is not None:
+        meetings_stmt = select(Meeting)
+        if user.role == UserRole.STAFF:
+            meetings_stmt = meetings_stmt.where(Meeting.department_id == user.department_id)
+        meetings_stmt = meetings_stmt.where(
+            or_(
+                Meeting.starts_at.between(start_dt, end_dt),
+                Meeting.created_at.between(start_dt, end_dt),
+            )
+        )
+        meetings = (await db.execute(meetings_stmt.order_by(Meeting.created_at.desc()))).scalars().all()
+
+    task_ids = [t.id for t in tasks]
+    assignees_by_task = await _assignees_for_tasks(db, task_ids)
+
+    project_ids = {t.project_id for t in tasks if t.project_id is not None}
+    project_name_map: dict[uuid.UUID, str] = {}
+    if project_ids:
+        projects = (
+            await db.execute(select(Project).where(Project.id.in_(project_ids)))
+        ).scalars().all()
+        for project in projects:
+            base_title = (project.title or "").strip()
+            if not base_title:
+                continue
+            if project.project_type == "MST" and project.total_products is not None and project.total_products > 0:
+                title = f"{base_title} - {project.total_products}"
+            else:
+                title = base_title
+            project_name_map[project.id] = title
+
+    user_ids: set[uuid.UUID] = set()
+    for entry in entries:
+        if entry.assigned_to_user_id:
+            user_ids.add(entry.assigned_to_user_id)
+        if entry.created_by_user_id:
+            user_ids.add(entry.created_by_user_id)
+    for task in tasks:
+        if task.assigned_to:
+            user_ids.add(task.assigned_to)
+    for meeting in meetings:
+        if meeting.created_by:
+            user_ids.add(meeting.created_by)
+
+    if user_ids:
+        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    else:
+        users = []
+    user_map = {u.id: (u.full_name or u.username or "") for u in users}
+
+    data_by_day: dict[str, dict[str, list[str]]] = {
+        iso: {
+            "late": [],
+            "absent": [],
+            "leave": [],
+            "blocked": [],
+            "oneH": [],
+            "personal": [],
+            "external": [],
+            "r1": [],
+            "priority": [],
+            "problem": [],
+            "feedback": [],
+        }
+        for iso in week_isos
+    }
+
+    def add_for_day(iso: str, key: str, value: str) -> None:
+        if iso not in data_by_day:
+            return
+        if value:
+            data_by_day[iso][key].append(value)
+
+    def entry_date_from(entry: CommonEntry) -> date | None:
+        if entry.entry_date:
+            return entry.entry_date
+        if entry.description:
+            date_match = DATE_LABEL_RE.search(entry.description)
+            if date_match:
+                return date.fromisoformat(date_match.group(1))
+        return entry.created_at.date() if entry.created_at else None
+
+    for entry in entries:
+        person_id = entry.assigned_to_user_id or entry.created_by_user_id
+        person_name = user_map.get(person_id, "") if person_id else ""
+        person_label = person_name or entry.title or "Unknown"
+        entry_date = entry_date_from(entry)
+        if entry_date is None:
+            continue
+        entry_iso = entry_date.isoformat()
+
+        if entry.category == CommonCategory.delays:
+            note = entry.description or ""
+            start = "08:00"
+            until = "09:00"
+            start_match = START_RE.search(note)
+            if start_match:
+                start = start_match.group(1)
+            until_match = UNTIL_RE.search(note)
+            if until_match:
+                until = until_match.group(1)
+            add_for_day(entry_iso, "late", f"{_initials(person_label)} {start}-{until}")
+        elif entry.category == CommonCategory.absences:
+            note = entry.description or ""
+            from_time = "08:00"
+            to_time = "23:00"
+            from_to_match = FROM_TO_RE.search(note)
+            if from_to_match:
+                from_time = from_to_match.group(1)
+                to_time = from_to_match.group(2)
+            add_for_day(entry_iso, "absent", f"{_initials(person_label)} {from_time} - {to_time}")
+        elif entry.category == CommonCategory.annual_leave:
+            note = entry.description or ""
+            start_date = entry_date
+            end_date = entry_date
+            range_match = DATE_RANGE_RE.search(note)
+            if range_match:
+                start_date = date.fromisoformat(range_match.group(1))
+                end_date = date.fromisoformat(range_match.group(2))
+            else:
+                date_match = DATE_LABEL_RE.search(note)
+                if date_match:
+                    start_date = date.fromisoformat(date_match.group(1))
+                    end_date = start_date
+                else:
+                    date_matches = DATE_RE.findall(note)
+                    if date_matches:
+                        start_date = date.fromisoformat(date_matches[0])
+                        end_date = date.fromisoformat(date_matches[1]) if len(date_matches) > 1 else start_date
+
+            full_day = "Full day" in note
+            time_label = ""
+            time_match = TIME_RANGE_RE.search(note)
+            if not full_day and time_match:
+                time_label = f"{time_match.group(1)}-{time_match.group(2)} "
+            if full_day:
+                time_label = "Full day "
+
+            range_label = (
+                f"{_format_excel_date(start_date)}-{_format_excel_date(end_date)}"
+                if start_date != end_date
+                else _format_excel_date(start_date)
+            )
+            leave_text = f"{_initials(person_label)} {time_label}{range_label}".strip()
+            for day in week_dates:
+                if start_date <= day <= end_date:
+                    add_for_day(day.isoformat(), "leave", leave_text)
+        elif entry.category == CommonCategory.blocks:
+            note = entry.description or ""
+            detail = f"{_initials(person_label)}: {note}" if note else _initials(person_label)
+            add_for_day(entry_iso, "blocked", detail)
+        elif entry.category == CommonCategory.external_tasks:
+            add_for_day(entry_iso, "external", f"{entry.title} 14:00 ({_initials(person_label)})")
+        elif entry.category == CommonCategory.problems:
+            note = entry.description or ""
+            detail = f"{_initials(person_label)}: {note}" if note else _initials(person_label)
+            add_for_day(entry_iso, "problem", detail)
+        elif entry.category in {CommonCategory.complaints, CommonCategory.requests, CommonCategory.proposals}:
+            note = entry.description or ""
+            detail = f"{_initials(person_label)}: {note}" if note else _initials(person_label)
+            add_for_day(entry_iso, "feedback", detail)
+
+    priority_map: dict[tuple[uuid.UUID, date], set[str]] = {}
+    for task in tasks:
+        if task.completed_at is not None or task.status == TaskStatusEnum.DONE.value:
+            continue
+        task_date = task.due_date or task.start_date or task.created_at
+        if not task_date:
+            continue
+        day = task_date.date()
+        if day.isoformat() not in data_by_day:
+            continue
+        assignee_names = assignees_by_task.get(task.id, [])
+        if not assignee_names and task.assigned_to:
+            fallback = user_map.get(task.assigned_to, "")
+            if fallback:
+                assignee_names = [fallback]
+
+        if task.is_bllok:
+            owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
+            add_for_day(day.isoformat(), "blocked", f"{task.title} ({_initials(owner_label)})")
+        if task.is_1h_report:
+            owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
+            add_for_day(day.isoformat(), "oneH", f"{task.title} ({_initials(owner_label)})")
+        if task.is_personal:
+            owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
+            add_for_day(day.isoformat(), "personal", f"{task.title} ({_initials(owner_label)})")
+        if task.is_r1:
+            owner_label = assignee_names[0] if assignee_names else (user_map.get(task.assigned_to, "") if task.assigned_to else "Unknown")
+            add_for_day(day.isoformat(), "r1", f"{task.title} ({_initials(owner_label)})")
+
+        if task.project_id and task.project_id in project_name_map:
+            key = (task.project_id, day)
+            if key not in priority_map:
+                priority_map[key] = set()
+            for name in assignee_names:
+                if name:
+                    priority_map[key].add(name)
+
+    for meeting in meetings:
+        source = meeting.starts_at or meeting.created_at
+        if not source:
+            continue
+        day = source.date()
+        if day.isoformat() not in data_by_day:
+            continue
+        owner_label = user_map.get(meeting.created_by, "") if meeting.created_by else ""
+        time_label = source.strftime("%H:%M") if meeting.starts_at else "TBD"
+        owner_initials = _initials(owner_label) if owner_label else ""
+        owner_suffix = f" ({owner_initials})" if owner_initials else ""
+        add_for_day(day.isoformat(), "external", f"{meeting.title} {time_label}{owner_suffix}")
+
+    for day_iso, day_data in data_by_day.items():
+        priority_items = []
+        for (project_id, day), assignees in sorted(priority_map.items(), key=lambda item: project_name_map.get(item[0][0], "")):
+            if day.isoformat() != day_iso:
+                continue
+            assignee_initials = ", ".join(sorted({_initials(name) for name in assignees if name}))
+            label = project_name_map.get(project_id, "")
+            if assignee_initials:
+                label = f"{label} [{assignee_initials}]"
+            priority_items.append(label)
+        day_data["priority"] = [item for item in priority_items if item]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Common View"
+
+    ws.cell(row=2, column=1, value="NO")
+    ws.cell(row=2, column=2, value="LL")
+    for idx, day in enumerate(week_dates):
+        col = 3 + idx
+        ws.cell(row=1, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}")
+        ws.cell(row=2, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
+
+    row_specs = [
+        ("late", "Delays"),
+        ("absent", "Absences"),
+        ("leave", "Annual Leave"),
+        ("external", "External Meetings"),
+        ("blocked", "Blocked"),
+        ("oneH", "1H"),
+        ("personal", "Personal"),
+        ("r1", "R1"),
+        ("priority", "Projects"),
+        ("problem", "Problems"),
+        ("feedback", "Complaints/Requests/Proposals"),
+    ]
+
+    start_row = 3
+    for idx, (key, label) in enumerate(row_specs, start=1):
+        row_idx = start_row + idx - 1
+        ws.cell(row=row_idx, column=1, value=idx)
+        ws.cell(row=row_idx, column=2, value=label.upper())
+        for day_idx, iso in enumerate(week_isos):
+            entries = data_by_day[iso][key]
+            value = "\n".join(entries) if entries else ""
+            ws.cell(row=row_idx, column=3 + day_idx, value=value)
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 18
+    for col in range(3, 3 + len(week_dates)):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 28
+
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 20
+
+    header_font = Font(bold=True)
+    label_font = Font(bold=True)
+    for col in range(1, 3 + len(week_dates)):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        cell = ws.cell(row=2, column=col)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    last_row = start_row + len(row_specs) - 1
+    last_col = 2 + len(week_dates)
+    for row in range(start_row, last_row + 1):
+        ws.cell(row=row, column=1).font = label_font
+        ws.cell(row=row, column=2).font = label_font
+        for col in range(1, last_col + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(1, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == 1 else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = f"common_view_{week_dates[0].isoformat()}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
