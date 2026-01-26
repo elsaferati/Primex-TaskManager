@@ -578,6 +578,10 @@ export default function DepartmentKanban() {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
+  const printContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
+  const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
+  const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
@@ -748,6 +752,53 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
   }, [projectMembers])
+
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const container = printContainerRef.current
+      if (!container) return
+      const dpi = 96
+      const measuredHeight = printMeasureRef.current?.offsetHeight
+      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
+      const footerOffsetPx = 0.2 * dpi
+      const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
+      const markers = Array.from({ length: totalPages }, (_, index) => ({
+        page: index + 1,
+        total: totalPages,
+        top: pageHeightPx * (index + 1) - footerOffsetPx,
+      }))
+      setPrintPageMarkers(markers)
+      setPrintPageMinHeight(totalPages * pageHeightPx)
+    }
+    const handleAfterPrint = () => {
+      setPrintPageMarkers([])
+      setPrintPageMinHeight(null)
+    }
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    const mediaQuery = window.matchMedia("print")
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        handleBeforePrint()
+      } else {
+        handleAfterPrint()
+      }
+    }
+    if ("addEventListener" in mediaQuery) {
+      mediaQuery.addEventListener("change", handleMediaChange)
+    } else {
+      mediaQuery.addListener(handleMediaChange)
+    }
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+      if ("removeEventListener" in mediaQuery) {
+        mediaQuery.removeEventListener("change", handleMediaChange)
+      } else {
+        mediaQuery.removeListener(handleMediaChange)
+      }
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!projects.length) return
@@ -3358,13 +3409,17 @@ export default function DepartmentKanban() {
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                          AM/PM
+                        </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                          T/Y/O
+                        </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                       </tr>
                     </thead>
@@ -5101,7 +5156,12 @@ export default function DepartmentKanban() {
         </Dialog>
       </div>
       <div className="hidden print:block">
-        <div className="print-page px-6 pb-6">
+        <div
+          ref={printContainerRef}
+          className="print-page px-6 pb-6"
+          style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
+        >
+          <div ref={printMeasureRef} className="print-page-measure" />
           <div className="print-header">
             <div />
             <div className="print-title">
@@ -5134,7 +5194,7 @@ export default function DepartmentKanban() {
             )}
             <div>
               {showAllTodayPrint
-                ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
+                ? ""
                 : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
             </div>
           </div>
@@ -5330,14 +5390,14 @@ export default function DepartmentKanban() {
               <colgroup>
                 <col className="w-[36px]" />
                 <col className="w-[44px]" />
-                <col className="w-[56px]" />
-                <col className="w-[56px]" />
+                <col className="w-[30px]" />
+                <col className="w-[36px]" />
                 <col className="w-[150px]" />
                 <col className="w-[110px]" />
               <col className="w-[60px]" />
-              <col className="w-[40px]" />
+              <col className="w-[30px]" />
               <col className="w-[52px]" />
-              <col className="w-[48px]" />
+              <col className="w-[36px]" />
               <col className="w-[140px]" />
             </colgroup>
             <thead>
@@ -5346,14 +5406,19 @@ export default function DepartmentKanban() {
                   Nr
                 </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                    NLL
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                    <span className="block">AM/</span>
+                    <span className="block">PM</span>
+                  </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
               </tr>
             </thead>
@@ -5372,14 +5437,14 @@ export default function DepartmentKanban() {
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
                       <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">
                         <div className="flex items-center gap-2">
                           <input
@@ -5517,6 +5582,15 @@ export default function DepartmentKanban() {
               </tbody>
             </table>
           )}
+          {printPageMarkers.map((marker) => (
+            <div
+              key={`print-page-${marker.page}`}
+              className="print-page-marker"
+              style={{ top: `${marker.top}px` }}
+            >
+              Page {marker.page} / {marker.total}
+            </div>
+          ))}
           <div className="print-footer">
             <div className="print-page-count" />
             <div className="print-initials">PUNOI: {printInitials}</div>
@@ -5556,6 +5630,15 @@ export default function DepartmentKanban() {
             position: relative;
             padding-bottom: 0.35in;
           }
+          .print-page-measure {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: calc(11in - 0.36in - 0.51in);
+            width: 1px;
+            visibility: hidden;
+            pointer-events: none;
+          }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
@@ -5594,12 +5677,19 @@ export default function DepartmentKanban() {
             font-size: 10px;
             color: #334155;
           }
+          .print-page-marker {
+            position: absolute;
+            left: 0.1in;
+            right: 0.1in;
+            text-align: center;
+            font-size: 10px;
+            color: #334155;
+            z-index: 5;
+          }
           .print-page-count {
             grid-column: 2;
             text-align: center;
-          }
-          .print-page-count::before {
-            content: "Page " counter(page) " / " counter(pages);
+            display: none;
           }
           .print-initials {
             grid-column: 3;
@@ -5613,6 +5703,10 @@ export default function DepartmentKanban() {
           .daily-report-table th,
           .daily-report-table td {
             vertical-align: bottom !important;
+          }
+          .weekly-report-table,
+          .daily-report-table {
+            table-layout: fixed;
           }
           .weekly-report-table thead th {
             border-width: 2px;
