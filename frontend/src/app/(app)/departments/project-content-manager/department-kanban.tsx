@@ -1416,6 +1416,31 @@ export default function DepartmentKanban() {
     return weekRangeLabel
   }, [printRange, todayDate, weekRangeLabel])
   const printInitials = initials(user?.full_name || user?.username || "")
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+
+  // Calculate total pages for print footer
+  React.useEffect(() => {
+    const calculateTotalPages = () => {
+      const dpi = 96
+      const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi // A4 minus margins
+      const bodyHeight = Math.max(
+        document.body.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.scrollHeight
+      )
+      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
+      setPrintTotalPages(totalPages)
+    }
+    const handleAfterPrint = () => {
+      setPrintTotalPages(1)
+    }
+    window.addEventListener("beforeprint", calculateTotalPages)
+    window.addEventListener("afterprint", handleAfterPrint)
+    return () => {
+      window.removeEventListener("beforeprint", calculateTotalPages)
+      window.removeEventListener("afterprint", handleAfterPrint)
+    }
+  }, [])
 
   const allTodayPrintBaseUsers = React.useMemo(() => {
     if (viewMode === "department") {
@@ -4888,9 +4913,8 @@ export default function DepartmentKanban() {
           </div>
         </div>
         <div className="print-footer">
-          <div className="print-footer-center">
-            <span className="print-page-count" />
-          </div>
+          <span />
+          <div className="print-footer-center">1/{printTotalPages}</div>
           <div className="print-footer-right">PUNOI: {printInitials}</div>
         </div>
       </div>
@@ -4981,9 +5005,6 @@ export default function DepartmentKanban() {
           }
           .print-footer-right {
             text-align: right;
-          }
-          .print-page-count::before {
-            content: "Page " counter(page) " / " counter(pages);
           }
         }
       `}</style>

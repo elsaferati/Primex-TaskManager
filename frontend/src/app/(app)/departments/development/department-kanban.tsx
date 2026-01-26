@@ -573,7 +573,6 @@ export default function DepartmentKanban() {
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
   const printedAt = React.useMemo(() => new Date(), [])
-  const printInitials = initials(user?.full_name || user?.username || "")
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
@@ -582,6 +581,7 @@ export default function DepartmentKanban() {
   const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
@@ -769,10 +769,12 @@ export default function DepartmentKanban() {
       }))
       setPrintPageMarkers(markers)
       setPrintPageMinHeight(totalPages * pageHeightPx)
+      setPrintTotalPages(totalPages)
     }
     const handleAfterPrint = () => {
       setPrintPageMarkers([])
       setPrintPageMinHeight(null)
+      setPrintTotalPages(1)
     }
     window.addEventListener("beforeprint", handleBeforePrint)
     window.addEventListener("afterprint", handleAfterPrint)
@@ -5592,8 +5594,11 @@ export default function DepartmentKanban() {
             </div>
           ))}
           <div className="print-footer">
-            <div className="print-page-count" />
-            <div className="print-initials">PUNOI: {printInitials}</div>
+            <span />
+            <div className="print-page-count">1/{printTotalPages}</div>
+            <div className="print-initials">
+              PUNOI: <span className="print-signature-line" />
+            </div>
           </div>
         </div>
       </div>
@@ -5669,7 +5674,7 @@ export default function DepartmentKanban() {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: 0.2in;
+            bottom: 0.1in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             padding-left: 0.1in;
@@ -5685,15 +5690,23 @@ export default function DepartmentKanban() {
             font-size: 10px;
             color: #334155;
             z-index: 5;
+            display: none;
           }
           .print-page-count {
             grid-column: 2;
             text-align: center;
-            display: none;
           }
           .print-initials {
             grid-column: 3;
             text-align: right;
+          }
+          .print-signature-line {
+            display: inline-block;
+            min-width: 1.2in;
+            border-bottom: 1px solid #334155;
+            height: 0.6em;
+            margin-left: 0.1in;
+            vertical-align: bottom;
           }
           .weekly-report-table thead {
             display: table-header-group;

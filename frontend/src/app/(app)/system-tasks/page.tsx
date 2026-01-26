@@ -1607,6 +1607,11 @@ export function SystemTasksView({
               .print-footer .page-count {
                 grid-column: 2;
                 text-align: center;
+                font-size: 0;
+              }
+              .print-footer .page-count::before {
+                content: counter(page) " / " counter(pages);
+                font-size: 9pt;
               }
               .print-footer .punoi {
                 grid-column: 3;
@@ -1712,13 +1717,14 @@ export function SystemTasksView({
     const triggerPrint = () => {
       printWindow.focus()
       printWindow.print()
-      // Close the window after printing (works when user prints or cancels)
-      printWindow.close()
     }
 
     // Prefer onload so the footer/counters are ready for the preview.
     printWindow.onload = () => {
       setTimeout(triggerPrint, 100)
+    }
+    printWindow.onafterprint = () => {
+      printWindow.close()
     }
     // Fallback in case onload doesn't fire (rare for about:blank).
     setTimeout(() => {
