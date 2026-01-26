@@ -521,11 +521,21 @@ export default function DepartmentKanban() {
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
+  const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [multiSelect, setMultiSelect] = React.useState(false)
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
+  const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
+  const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
+  const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const printContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
+  const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
+  const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -659,6 +669,53 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
   }, [projectMembers])
+
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const container = printContainerRef.current
+      if (!container) return
+      const dpi = 96
+      const measuredHeight = printMeasureRef.current?.offsetHeight
+      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
+      const footerOffsetPx = 0.2 * dpi
+      const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
+      const markers = Array.from({ length: totalPages }, (_, index) => ({
+        page: index + 1,
+        total: totalPages,
+        top: pageHeightPx * (index + 1) - footerOffsetPx,
+      }))
+      setPrintPageMarkers(markers)
+      setPrintPageMinHeight(totalPages * pageHeightPx)
+    }
+    const handleAfterPrint = () => {
+      setPrintPageMarkers([])
+      setPrintPageMinHeight(null)
+    }
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    const mediaQuery = window.matchMedia("print")
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        handleBeforePrint()
+      } else {
+        handleAfterPrint()
+      }
+    }
+    if ("addEventListener" in mediaQuery) {
+      mediaQuery.addEventListener("change", handleMediaChange)
+    } else {
+      mediaQuery.addListener(handleMediaChange)
+    }
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+      if ("removeEventListener" in mediaQuery) {
+        mediaQuery.removeEventListener("change", handleMediaChange)
+      } else {
+        mediaQuery.removeListener(handleMediaChange)
+      }
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!projects.length) return
@@ -857,6 +914,11 @@ export default function DepartmentKanban() {
       bz: string
       kohaBz: string
       tyo: string
+      comment?: string | null
+      taskId?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      systemStatus?: string
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -885,6 +947,12 @@ export default function DepartmentKanban() {
     const todayTemplateIds = new Set(
       todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
     )
+    const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
+    if (dailyReport?.system_today?.length) {
+      for (const occ of dailyReport.system_today) {
+        systemTodayByTemplate.set(occ.template_id, occ)
+      }
+    }
     const overdueByTemplate = new Map<string, DailyReportResponse["system_overdue"][number]>()
     if (dailyReport?.system_overdue?.length) {
       for (const occ of dailyReport.system_overdue) {
@@ -930,10 +998,16 @@ export default function DepartmentKanban() {
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+        comment: occ.comment ?? null,
+        systemTemplateId: occ.template_id,
+        systemOccurrenceDate: occ.occurrence_date,
+        systemStatus: occ.status,
       })
     }
 
     for (const tmpl of todaySystemTasks) {
+      const templateId = tmpl.template_id || tmpl.id
+      const occ = systemTodayByTemplate.get(templateId) || null
       const alignmentEnabled = Boolean(
         tmpl.requires_alignment ||
         tmpl.alignment_time ||
@@ -944,10 +1018,10 @@ export default function DepartmentKanban() {
       pushSystemRow({
         typeLabel: "SYS",
         subtype: systemFrequencyShortLabel(tmpl.frequency),
-        period: resolvePeriod(tmpl.finish_period, todayIso),
-        title: tmpl.title || "-",
+        period: resolvePeriod(tmpl.finish_period, occ?.occurrence_date || todayIso),
+        title: occ?.title || tmpl.title || "-",
         description: tmpl.description || "-",
-        status: tmpl.status ? (STATUS_LABELS[tmpl.status] || tmpl.status) : "-",
+        status: formatSystemOccurrenceStatus(occ?.status || tmpl.status),
         bz: alignmentEnabled
           ? bzUsers !== "-"
             ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
@@ -957,6 +1031,10 @@ export default function DepartmentKanban() {
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
+        comment: occ?.comment ?? null,
+        systemTemplateId: templateId,
+        systemOccurrenceDate: occ?.occurrence_date || todayIso,
+        systemStatus: occ?.status || "OPEN",
       })
     }
 
@@ -975,6 +1053,8 @@ export default function DepartmentKanban() {
           bz: "-",
           kohaBz: "-",
           tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          comment: task.user_comment ?? null,
+          taskId: task.id,
         },
       })
       fastIndex += 1
@@ -994,6 +1074,8 @@ export default function DepartmentKanban() {
         bz: "-",
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        comment: task.user_comment ?? null,
+        taskId: task.id,
       })
     }
 
@@ -1141,6 +1223,7 @@ export default function DepartmentKanban() {
     todayProjectPrint,
     todaySystemPrint,
   ])
+  const printedAt = React.useMemo(() => new Date(), [])
   const printRangeLabel = React.useMemo(() => {
     if (printRange === "today") {
       const dateLabel = todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
@@ -1148,6 +1231,161 @@ export default function DepartmentKanban() {
     }
     return weekRangeLabel
   }, [printRange, todayDate, weekRangeLabel])
+  const printInitials = initials(user?.full_name || user?.username || "")
+  const exportDailyReport = async () => {
+    if (!department?.id || !user?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+        user_id: user.id,
+      })
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const initialsLabel = initials(user.full_name || user.username || "user")
+      link.href = url
+      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const setDailyReportCommentSaving = (key: string, value: boolean) => {
+    setSavingDailyReportComments((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const saveDailyReportTaskComment = async (
+    taskId: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: payloadComment }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+
+      setDailyReport((prev) => {
+        if (!prev) return prev
+        return prev
+      })
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const saveDailyReportSystemComment = async (
+    templateId: string,
+    occurrenceDate: string,
+    status: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: templateId,
+          occurrence_date: occurrenceDate,
+          status: status || "OPEN",
+          comment: payloadComment,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+
+      setDailyReport((prev) => {
+        if (!prev) return prev
+        const updateOccurrence = (occ: DailyReportResponse["system_today"][number]) =>
+          occ.template_id === templateId && occ.occurrence_date === occurrenceDate
+            ? { ...occ, comment: payloadComment }
+            : occ
+        return {
+          ...prev,
+          system_today: prev.system_today.map(updateOccurrence),
+          system_overdue: prev.system_overdue.map(updateOccurrence),
+        }
+      })
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const handleDailyReportMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = dailyReportScrollRef.current
+    if (!container) return
+    dailyReportDragRef.current = {
+      isDragging: true,
+      startX: event.pageX - container.offsetLeft,
+      startScrollLeft: container.scrollLeft,
+    }
+    setIsDraggingDailyReport(true)
+  }
+
+  const handleDailyReportMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = dailyReportScrollRef.current
+    if (!container || !dailyReportDragRef.current.isDragging) return
+    event.preventDefault()
+    const x = event.pageX - container.offsetLeft
+    const walk = x - dailyReportDragRef.current.startX
+    container.scrollLeft = dailyReportDragRef.current.startScrollLeft - walk
+  }
+
+  const handleDailyReportMouseEnd = () => {
+    if (!dailyReportDragRef.current.isDragging) return
+    dailyReportDragRef.current.isDragging = false
+    setIsDraggingDailyReport(false)
+  }
 
   const allTodayPrintBaseUsers = React.useMemo(() => {
     if (viewMode === "department") {
@@ -2368,9 +2606,28 @@ export default function DepartmentKanban() {
                           System, fast, and project tasks for today.
                         </div>
                       </div>
-                      {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                      <div className="flex items-center gap-3">
+                        {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                        <Button
+                          variant="outline"
+                          className="h-8 rounded-lg border-slate-300 bg-white px-3 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
+                          onClick={exportDailyReport}
+                          disabled={exportingDailyReport}
+                        >
+                          {exportingDailyReport ? "Exporting..." : "Export Excel"}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-3 overflow-x-auto">
+                    <div
+                      ref={dailyReportScrollRef}
+                      className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
+                        isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                      }`}
+                      onMouseDown={handleDailyReportMouseDown}
+                      onMouseMove={handleDailyReportMouseMove}
+                      onMouseUp={handleDailyReportMouseEnd}
+                      onMouseLeave={handleDailyReportMouseEnd}
+                    >
                       <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
                         <colgroup>
                           <col className="w-[36px]" />
@@ -2387,42 +2644,110 @@ export default function DepartmentKanban() {
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50">
                           <tr>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                            <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                              Nr
+                            </th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NLL</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                              <span className="block">AM/</span>
+                              <span className="block">PM</span>
+                            </th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                           </tr>
                         </thead>
                         <tbody>
                           {dailyUserReportRows.length ? (
-                            dailyUserReportRows.map((row, index) => (
-                              <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{index + 1}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
-                                <td className="border border-slate-200 px-2 py-2 align-top">
-                                  <input
-                                    type="text"
-                                    aria-label="Koment"
-                                    className="h-4 w-full border-b border-slate-300 bg-transparent"
-                                  />
-                                </td>
-                              </tr>
-                            ))
+                            dailyUserReportRows.map((row, index) => {
+                              const commentKey = row.taskId
+                                ? `task:${row.taskId}`
+                                : row.systemTemplateId && row.systemOccurrenceDate
+                                  ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+                                  : ""
+                              const previousValue = row.comment ?? ""
+                              const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
+                              const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
+                              return (
+                                <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                                  <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                                    {index + 1}
+                                  </td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        aria-label="Koment"
+                                        className="h-4 w-full border-b border-slate-300 bg-transparent"
+                                        value={commentValue}
+                                        onChange={(e) => {
+                                          if (!commentKey) return
+                                          const nextValue = e.target.value
+                                          setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
+                                        }}
+                                        onBlur={(e) => {
+                                          if (!commentKey) return
+                                          const nextValue = e.target.value
+                                          if (row.taskId) {
+                                            void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                            return
+                                          }
+                                          if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                            void saveDailyReportSystemComment(
+                                              row.systemTemplateId,
+                                              row.systemOccurrenceDate,
+                                              row.systemStatus || "OPEN",
+                                              nextValue,
+                                              previousValue,
+                                              commentKey
+                                            )
+                                          }
+                                        }}
+                                        disabled={!commentKey}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+                                        disabled={!commentKey || isSaving}
+                                        onClick={() => {
+                                          if (!commentKey) return
+                                          if (row.taskId) {
+                                            void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                            return
+                                          }
+                                          if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                            void saveDailyReportSystemComment(
+                                              row.systemTemplateId,
+                                              row.systemOccurrenceDate,
+                                              row.systemStatus || "OPEN",
+                                              commentValue,
+                                              previousValue,
+                                              commentKey
+                                            )
+                                          }
+                                        }}
+                                      >
+                                        {isSaving ? "Saving" : "Save"}
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })
                           ) : (
                             <tr>
                               <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
@@ -3571,36 +3896,48 @@ export default function DepartmentKanban() {
         </div>
       </div>
       <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">
-            {showAllTodayPrint
-              ? "All Today Report"
-              : printRange === "today" && showDailyUserReport
-                ? "Daily Task Report"
-                : "Weekly Task Report"}
-          </div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentName}
-          </div>
-          {showAllTodayPrint ? (
-            <div className="text-sm text-slate-700">
-              Users: {selectedUserId === "__all__"
-                ? "All users"
-                : allTodayPrintColumns[0]?.label || "Selected user"}
+        <div
+          ref={printContainerRef}
+          className="print-page px-6 pb-6"
+          style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
+        >
+          <div ref={printMeasureRef} className="print-page-measure" />
+          <div className="print-header">
+            <div />
+            <div className="print-title">
+              {showAllTodayPrint
+                ? "ALL TODAY REPORT"
+                : printRange === "today" && showDailyUserReport
+                  ? "DAILY TASK REPORT"
+                  : "PLANIFIKIMI JAVOR - PRMBL PLANIFIKIMI JAVOR"}
             </div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              User: {user?.full_name || user?.username || "-"}
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
-          )}
-          <div className="text-sm text-slate-700">
-            {showAllTodayPrint
-              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
-              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
           </div>
-        </div>
-        <div className="px-6 pb-6">
+          <div className="print-meta">
+            <div>Department: {departmentName}</div>
+            {showAllTodayPrint ? (
+              <div>
+                Users: {selectedUserId === "__all__"
+                  ? "All users"
+                  : allTodayPrintColumns[0]?.label || "Selected user"}
+              </div>
+            ) : (
+              <div>User: {user?.full_name || user?.username || "-"}</div>
+            )}
+            <div>
+              {showAllTodayPrint
+                ? ""
+                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
+            </div>
+          </div>
           {showAllTodayPrint ? (
             <>
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
@@ -3785,32 +4122,35 @@ export default function DepartmentKanban() {
             ) : null}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <colgroup>
                 <col className="w-[36px]" />
                 <col className="w-[44px]" />
-                <col className="w-[56px]" />
-                <col className="w-[56px]" />
+                <col className="w-[30px]" />
+                <col className="w-[36px]" />
                 <col className="w-[150px]" />
                 <col className="w-[110px]" />
               <col className="w-[60px]" />
               <col className="w-[40px]" />
               <col className="w-[52px]" />
-              <col className="w-[48px]" />
+              <col className="w-[30px]" />
               <col className="w-[140px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                    <span className="block">AM/</span>
+                    <span className="block">PM</span>
+                  </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
               </tr>
             </thead>
@@ -3818,7 +4158,7 @@ export default function DepartmentKanban() {
               {dailyUserReportRows.length ? (
                 dailyUserReportRows.map((row, index) => (
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
@@ -3900,6 +4240,20 @@ export default function DepartmentKanban() {
               </tbody>
             </table>
           )}
+          {printPageMarkers.map((marker) => (
+            <div
+              key={`print-page-${marker.page}`}
+              className="print-page-marker"
+              style={{ top: `${marker.top}px` }}
+            >
+              Page {marker.page} / {marker.total}
+            </div>
+          ))}
+          <div className="print-footer">
+            <div />
+            <div className="print-page-count" />
+            <div className="print-initials">PUNOI: {printInitials || "____"}</div>
+          </div>
         </div>
       </div>
       <style jsx global>{`
@@ -3920,13 +4274,98 @@ export default function DepartmentKanban() {
           border-width: 2px;
           border-color: #0f172a;
         }
+        .print-nr-cell {
+          font-weight: 700;
+        }
+        @media print {
+          .print-table thead th {
+            border-width: 2px;
+            border-color: #0f172a;
+          }
+          .print-table thead tr {
+            border-top: 2px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
+          }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 0.15in;
+            margin-bottom: 0.15in;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-meta {
+            font-size: 11px;
+            color: #334155;
+            margin-bottom: 16px;
+            display: grid;
+            gap: 2px;
+          }
+          .print-page-measure {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: calc(11in - 0.36in - 0.51in);
+            width: 1px;
+            visibility: hidden;
+            pointer-events: none;
+          }
+          .print-page-marker {
+            position: absolute;
+            left: 0.1in;
+            right: 0.1in;
+            text-align: center;
+            font-size: 10px;
+            color: #334155;
+            z-index: 5;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.2in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            display: none;
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
+          }
+          .weekly-report-table,
+          .daily-report-table,
+          .print-table {
+            table-layout: fixed;
+          }
+        }
       `}</style>
       <style dangerouslySetInnerHTML={{
         __html: `
         @media print {
           body { background: white; }
           aside { display: none !important; }
-          @page { margin: 12mm; }
+          @page { margin: 0.36in 0.1in 0.51in 0.1in; }
         }
       `}} />
     </div>
