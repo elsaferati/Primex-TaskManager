@@ -374,6 +374,7 @@ export function SystemTasksView({
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = React.useState("")
   const [printing, setPrinting] = React.useState(false)
+  const [exportingExcel, setExportingExcel] = React.useState(false)
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
@@ -1265,6 +1266,33 @@ export function SystemTasksView({
     link.click()
   }
 
+  const exportTemplatesExcel = async () => {
+    if (exportingExcel) return
+    setExportingExcel(true)
+    try {
+      const res = await apiFetch("/exports/system-tasks.xlsx?active_only=true")
+      if (!res?.ok) {
+        const detail = await res.text()
+        alert(detail || "Failed to export Excel.")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = "system_tasks_active.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export system tasks Excel", err)
+      alert("Failed to export Excel.")
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const handlePrint = React.useCallback(() => {
     const escapeHtml = (value: unknown) => {
       return String(value ?? "")
@@ -1828,6 +1856,15 @@ export function SystemTasksView({
                 className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
               >
                 Export All
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void exportTemplatesExcel()}
+                disabled={exportingExcel}
+                size="sm"
+                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+              >
+                {exportingExcel ? "Exporting..." : "Export Excel"}
               </Button>
               <Dialog open={createOpen} onOpenChange={setCreateOpen}>
                 <DialogTrigger asChild>
