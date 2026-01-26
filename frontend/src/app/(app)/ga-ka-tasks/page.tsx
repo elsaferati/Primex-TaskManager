@@ -1482,17 +1482,19 @@ export default function GaKaTasksPage() {
       </Dialog>
 
       {viewFilter !== "tasks" ? (
-        <SystemTasksView
-          scopeFilter="GA"
-          headingTitle="Admin System Tasks"
-          headingDescription="System tasks scoped for Kosove and Gane admins."
-          showSystemActions={false}
-          showFilters={false}
-          allowMarkAsDone={true}
-          externalPriorityFilter={priorityFilter}
-          externalDayFilter={dayFilter}
-          externalDateFilter={dateFilter}
-        />
+        <div className="print:hidden">
+          <SystemTasksView
+            scopeFilter="GA"
+            headingTitle="Admin System Tasks"
+            headingDescription="System tasks scoped for Kosove and Gane admins."
+            showSystemActions={false}
+            showFilters={false}
+            allowMarkAsDone={true}
+            externalPriorityFilter={priorityFilter}
+            externalDayFilter={dayFilter}
+            externalDateFilter={dateFilter}
+          />
+        </div>
       ) : null}
       <div className="hidden print:block">
         <div
@@ -1501,6 +1503,19 @@ export default function GaKaTasksPage() {
           style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
         >
           <div ref={printMeasureRef} className="print-page-measure" />
+          <div className="print-header">
+            <span />
+            <div className="print-title">Daily Report</div>
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
           <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
             <colgroup>
               <col className="w-[36px]" />
@@ -1573,6 +1588,20 @@ export default function GaKaTasksPage() {
               )}
             </tbody>
           </table>
+          {printPageMarkers.map((marker) => (
+            <div
+              key={`print-page-${marker.page}`}
+              className="print-page-marker"
+              style={{ top: `${marker.top}px` }}
+            >
+              {marker.page}/{marker.total}
+            </div>
+          ))}
+          <div className="print-footer">
+            <span />
+            <span />
+            <div className="print-initials">PUNOI: {printInitials || "—"}</div>
+          </div>
         </div>
       </div>
       <style jsx global>{`
@@ -1623,6 +1652,25 @@ export default function GaKaTasksPage() {
             position: relative;
             padding-bottom: 0.35in;
           }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 0.15in;
+            margin-bottom: 0.2in;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
           .print-page-measure {
             position: absolute;
             top: 0;
@@ -1631,6 +1679,31 @@ export default function GaKaTasksPage() {
             width: 1px;
             visibility: hidden;
             pointer-events: none;
+          }
+          .print-page-marker {
+            position: absolute;
+            left: 0.1in;
+            right: 0.1in;
+            text-align: center;
+            font-size: 10px;
+            color: #334155;
+            z-index: 5;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.2in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
           }
           .daily-report-table thead {
             display: table-header-group;
@@ -1641,6 +1714,8 @@ export default function GaKaTasksPage() {
           }
           .daily-report-table {
             table-layout: fixed;
+            border-width: 2px;
+            border-color: #0f172a;
           }
           .daily-report-table thead th {
             border-width: 2px !important;
