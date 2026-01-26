@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
@@ -789,12 +790,18 @@ async def export_common_xlsx(
     ws = wb.active
     ws.title = "Common View"
 
-    ws.cell(row=2, column=1, value="NO")
-    ws.cell(row=2, column=2, value="LL")
+    last_col = 2 + len(week_dates)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value="COMMON VIEW")
+    title_cell.font = Font(bold=True, size=14)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.cell(row=4, column=1, value="NO")
+    ws.cell(row=4, column=2, value="LL")
     for idx, day in enumerate(week_dates):
         col = 3 + idx
-        ws.cell(row=1, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}")
-        ws.cell(row=2, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
+        ws.cell(row=3, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}")
+        ws.cell(row=4, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
 
     row_specs = [
         ("late", "Delays"),
@@ -810,7 +817,7 @@ async def export_common_xlsx(
         ("feedback", "Complaints/Requests/Proposals"),
     ]
 
-    start_row = 3
+    start_row = 5
     for idx, (key, label) in enumerate(row_specs, start=1):
         row_idx = start_row + idx - 1
         ws.cell(row=row_idx, column=1, value=idx)
@@ -823,23 +830,24 @@ async def export_common_xlsx(
     ws.column_dimensions["A"].width = 5
     ws.column_dimensions["B"].width = 18
     for col in range(3, 3 + len(week_dates)):
-        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 28
+        ws.column_dimensions[get_column_letter(col)].width = 28
 
-    ws.row_dimensions[1].height = 22
-    ws.row_dimensions[2].height = 20
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[3].height = 22
+    ws.row_dimensions[4].height = 20
 
     header_font = Font(bold=True)
     label_font = Font(bold=True)
     for col in range(1, 3 + len(week_dates)):
-        cell = ws.cell(row=1, column=col)
+        cell = ws.cell(row=3, column=col)
         cell.font = header_font
         cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        cell = ws.cell(row=2, column=col)
+        cell = ws.cell(row=4, column=col)
         cell.font = header_font
         cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
     last_row = start_row + len(row_specs) - 1
-    last_col = 2 + len(week_dates)
     for row in range(start_row, last_row + 1):
         ws.cell(row=row, column=1).font = label_font
         ws.cell(row=row, column=2).font = label_font
@@ -856,6 +864,19 @@ async def export_common_xlsx(
             top = thick if r == 1 else thin
             bottom = thick if r == last_row else thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for r in (3, 4):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == 3 else thin
+            bottom = thick if r == 4 else thin
+            cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    ws.auto_filter.ref = f"A4:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "C3"
 
     bio = io.BytesIO()
     wb.save(bio)
