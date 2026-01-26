@@ -4266,6 +4266,7 @@ export default function DepartmentKanban() {
         .daily-report-table td {
           vertical-align: bottom;
           padding-bottom: 0;
+          padding-top: 15px;
         }
         .daily-report-table thead tr {
           border-top: 2px solid #e2e8f0;
@@ -4283,13 +4284,14 @@ export default function DepartmentKanban() {
           font-weight: 700;
         }
         @media print {
-          .print-table thead th {
-            border-width: 2px;
-            border-color: #0f172a;
+          body {
+            background: white;
           }
-          .print-table thead tr {
-            border-top: 2px solid #0f172a;
-            border-bottom: 2px solid #0f172a;
+          aside {
+            display: none !important;
+          }
+          @page {
+            margin: 0.36in 0.1in 0.51in 0.1in;
           }
           .print-page {
             position: relative;
@@ -4338,12 +4340,13 @@ export default function DepartmentKanban() {
             font-size: 10px;
             color: #334155;
             z-index: 5;
+            display: none;
           }
           .print-footer {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: 0.2in;
+            bottom: 0.1in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             padding-left: 0.1in;
@@ -4357,29 +4360,46 @@ export default function DepartmentKanban() {
           }
           .print-signature-line {
             display: inline-block;
-            width: 1.5in;
+            min-width: 1.2in;
             border-bottom: 1px solid #334155;
+            height: 0.6em;
+            margin-left: 0.1in;
             vertical-align: bottom;
           }
           .print-initials {
             grid-column: 3;
             text-align: right;
           }
+          .weekly-report-table thead {
+            display: table-header-group;
+          }
+          .weekly-report-table th,
+          .weekly-report-table td,
+          .daily-report-table th,
+          .daily-report-table td {
+            vertical-align: bottom !important;
+          }
           .weekly-report-table,
-          .daily-report-table,
-          .print-table {
+          .daily-report-table {
             table-layout: fixed;
+          }
+          .weekly-report-table thead th {
+            border-width: 2px;
+          }
+          .daily-report-table thead th {
+            border-width: 2px;
+            border-color: #0f172a;
+          }
+          .daily-report-table thead tr {
+            border-top: 2px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
+          }
+          .weekly-report-table {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
         }
       `}</style>
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        @media print {
-          body { background: white; }
-          aside { display: none !important; }
-          @page { margin: 0.36in 0.1in 0.51in 0.1in; }
-        }
-      `}} />
     </div>
   )
 }
