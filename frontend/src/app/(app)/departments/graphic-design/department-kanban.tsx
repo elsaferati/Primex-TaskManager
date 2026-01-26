@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { DailyReportResponse, Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 // --- CONSTANTS ---
 
@@ -118,10 +118,19 @@ const NO_PROJECT_TYPES = [
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
 
+function hasProjectId(projectId?: Task["project_id"]) {
+  if (projectId == null) return false
+  if (typeof projectId !== "string") return true
+  return projectId.trim().length > 0
+}
+
+function isNoProjectTask(task: Task) {
+  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+}
+
 function isFastNormalTask(task: Task) {
   return (
-    !task.project_id &&
-    !task.system_template_origin_id &&
+    isNoProjectTask(task) &&
     !task.ga_note_origin_id &&
     !task.is_bllok &&
     !task.is_1h_report &&
@@ -341,6 +350,103 @@ function noProjectTypeLabel(task: Task) {
   return "Normal"
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+function dayKey(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+}
+
+function systemFrequencyShortLabel(freq?: SystemTaskTemplate["frequency"] | string | null) {
+  if (!freq) return "-"
+  switch (freq) {
+    case "DAILY":
+      return "D"
+    case "WEEKLY":
+      return "W"
+    case "MONTHLY":
+      return "M"
+    case "YEARLY":
+      return "Y"
+    case "3_MONTHS":
+      return "3M"
+    case "6_MONTHS":
+      return "6M"
+    default:
+      return String(freq)
+  }
+}
+
+function reportStatusLabel(status?: Task["status"] | null) {
+  if (!status) return "-"
+  if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "TODO") return "To Do"
+  if (status === "DONE") return "Done"
+  return status
+}
+
+function formatSystemOccurrenceStatus(status?: string | null) {
+  if (!status) return "-"
+  if (status === "NOT_DONE") return "Not Done"
+  if (status === "DONE") return "Done"
+  if (status === "OPEN") return "Open"
+  if (status === "SKIPPED") return "Skipped"
+  return status
+}
+
+function formatAlignmentTime(value?: string | null) {
+  if (!value) return "-"
+  const match = String(value).match(/^(\d{2}:\d{2})/)
+  return match ? match[1] : String(value)
+}
+
+function formatAlignmentUsers(userIds: string[] | null | undefined, userMap: Map<string, UserLookup>) {
+  if (!userIds || userIds.length === 0) return "-"
+  return userIds
+    .map((id) => {
+      const user = userMap.get(id)
+      return user?.full_name || user?.username || id
+    })
+    .join(", ")
+}
+
+function formatAlignmentInitials(userIds: string[] | null | undefined, userMap: Map<string, UserLookup>) {
+  if (!userIds || userIds.length === 0) return "-"
+  const values = userIds
+    .map((id) => {
+      const user = userMap.get(id)
+      const label = user?.full_name || user?.username || id
+      return initials(label)
+    })
+    .filter(Boolean)
+  if (!values.length) return "-"
+  return values.join("/")
+}
+
+function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefined, today: Date) {
+  const completedDate = completedAt ? toDate(completedAt) : null
+  if (completedDate && isSameDay(completedDate, today)) return "T"
+  if (!baseDate) return "-"
+  if (isSameDay(baseDate, today)) return "T"
+  const delta = Math.floor((dayKey(today) - dayKey(baseDate)) / MS_PER_DAY)
+  if (delta === 1) return "Y"
+  if (delta > 1) return String(delta)
+  return "-"
+}
+
+function fastReportSubtypeShort(task: Task) {
+  const base = noProjectTypeLabel(task)
+  if (base === "BLLOK") return "BLL"
+  if (base === "Personal") return "P:"
+  if (base === "Normal") return "N"
+  return base
+}
+
+function taskStatusLabel(task: Task) {
+  if (task.status) return reportStatusLabel(task.status)
+  if (task.completed_at) return "Done"
+  return "-"
+}
+
 function formatMeetingPrintLabel(meeting: Meeting) {
   if (!meeting.starts_at) return meeting.title || "Meeting"
   const date = new Date(meeting.starts_at)
@@ -413,10 +519,24 @@ export default function DepartmentKanban() {
     isTabId ? (normalizedTab as TabId) : "projects"
   )
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
+  const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
+  const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
+  const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
+  const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [multiSelect, setMultiSelect] = React.useState(false)
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
+  const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
+  const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
+  const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const printContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
+  const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
+  const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -459,7 +579,9 @@ export default function DepartmentKanban() {
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
-  const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectAssignees, setNoProjectAssignees] = React.useState<string[]>([])
+  const [selectNoProjectAssigneesOpen, setSelectNoProjectAssigneesOpen] = React.useState(false)
+  const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -469,6 +591,7 @@ export default function DepartmentKanban() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [updatingTask, setUpdatingTask] = React.useState(false)
@@ -526,7 +649,7 @@ export default function DepartmentKanban() {
             (t) => !t.system_template_origin_id && (!t.project_id || !templateProjectIds.has(t.project_id))
           )
           setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isFastNormalTask))
+          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
@@ -548,6 +671,55 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
   }, [projectMembers])
+
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const container = printContainerRef.current
+      if (!container) return
+      const dpi = 96
+      const measuredHeight = printMeasureRef.current?.offsetHeight
+      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
+      const footerOffsetPx = 0.2 * dpi
+      const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
+      const markers = Array.from({ length: totalPages }, (_, index) => ({
+        page: index + 1,
+        total: totalPages,
+        top: pageHeightPx * (index + 1) - footerOffsetPx,
+      }))
+      setPrintPageMarkers(markers)
+      setPrintPageMinHeight(totalPages * pageHeightPx)
+      setPrintTotalPages(totalPages)
+    }
+    const handleAfterPrint = () => {
+      setPrintPageMarkers([])
+      setPrintPageMinHeight(null)
+      setPrintTotalPages(1)
+    }
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    const mediaQuery = window.matchMedia("print")
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        handleBeforePrint()
+      } else {
+        handleAfterPrint()
+      }
+    }
+    if ("addEventListener" in mediaQuery) {
+      mediaQuery.addEventListener("change", handleMediaChange)
+    } else {
+      mediaQuery.addListener(handleMediaChange)
+    }
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+      if ("removeEventListener" in mediaQuery) {
+        mediaQuery.removeEventListener("change", handleMediaChange)
+      } else {
+        mediaQuery.removeListener(handleMediaChange)
+      }
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!projects.length) return
@@ -598,6 +770,15 @@ export default function DepartmentKanban() {
         : [],
     [department, users]
   )
+  const noProjectAssigneeLabel = React.useMemo(() => {
+    if (noProjectAssignees.length === 0) return "Unassigned"
+    if (departmentUsers.length && noProjectAssignees.length === departmentUsers.length) return "All team"
+    if (noProjectAssignees.length === 1) {
+      const selected = departmentUsers.find((u) => u.id === noProjectAssignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${noProjectAssignees.length} selected`
+  }, [departmentUsers, noProjectAssignees])
   const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
   const mstTemplateOptions = React.useMemo(() => {
     return templateProjects.filter((p) => {
@@ -607,6 +788,7 @@ export default function DepartmentKanban() {
     })
   }, [templateProjects])
   const todayDate = React.useMemo(() => new Date(), [])
+  const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
     return Array.from({ length: 5 }, (_, index) => {
@@ -700,6 +882,235 @@ export default function DepartmentKanban() {
       }),
     [visibleMeetings, todayDate]
   )
+  const dailyReportFastTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
+    return visibleNoProjectTasks.filter((task) => {
+      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      if (completedDate && !completedToday) return false
+      if (!baseDate) return completedToday
+      const baseKey = dayKey(baseDate)
+      return baseKey <= todayKey || completedToday
+    })
+  }, [todayDate, visibleNoProjectTasks])
+  const dailyReportProjectTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
+    return projectTasks.filter((task) => {
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      if (completedDate && !completedToday) return false
+      if (!baseDate) return completedToday
+      const baseKey = dayKey(baseDate)
+      return baseKey <= todayKey || completedToday
+    })
+  }, [projectTasks, todayDate])
+  const systemTemplateById = React.useMemo(() => {
+    const map = new Map<string, SystemTaskTemplate>()
+    for (const tmpl of visibleSystemTemplates) {
+      map.set(tmpl.id, tmpl)
+      if (tmpl.template_id) {
+        map.set(tmpl.template_id, tmpl)
+      }
+    }
+    return map
+  }, [visibleSystemTemplates])
+  const dailyUserReportRows = React.useMemo(() => {
+    const rows: Array<{
+      typeLabel: string
+      subtype: string
+      period: string
+      title: string
+      description: string
+      status: string
+      bz: string
+      kohaBz: string
+      tyo: string
+      comment?: string | null
+      taskId?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      systemStatus?: string
+    }> = []
+    const systemAmRows: typeof rows = []
+    const systemPmRows: typeof rows = []
+    const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
+    const projectRows: typeof rows = []
+    let fastIndex = 0
+
+    const pushSystemRow = (row: (typeof rows)[number]) => {
+      if (row.period === "PM") {
+        systemPmRows.push(row)
+        return
+      }
+      systemAmRows.push(row)
+    }
+
+    const fastTypeOrder = (task: Task) => {
+      const label = noProjectTypeLabel(task)
+      if (label === "BLLOK") return 0
+      if (label === "1H") return 1
+      if (label === "Personal") return 2
+      if (label === "R1") return 3
+      if (label === "Normal") return 4
+      return 5
+    }
+
+    const todayTemplateIds = new Set(
+      todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
+    )
+    const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
+    if (dailyReport?.system_today?.length) {
+      for (const occ of dailyReport.system_today) {
+        systemTodayByTemplate.set(occ.template_id, occ)
+      }
+    }
+    const overdueByTemplate = new Map<string, DailyReportResponse["system_overdue"][number]>()
+    if (dailyReport?.system_overdue?.length) {
+      for (const occ of dailyReport.system_overdue) {
+        if (todayTemplateIds.has(occ.template_id)) {
+          continue
+        }
+        const existing = overdueByTemplate.get(occ.template_id)
+        if (!existing) {
+          overdueByTemplate.set(occ.template_id, occ)
+          continue
+        }
+        const existingDate = toDate(existing.occurrence_date)
+        const nextDate = toDate(occ.occurrence_date)
+        if (!existingDate || (nextDate && dayKey(nextDate) > dayKey(existingDate))) {
+          overdueByTemplate.set(occ.template_id, occ)
+        }
+      }
+    }
+
+    for (const occ of overdueByTemplate.values()) {
+      const tmpl = systemTemplateById.get(occ.template_id) || null
+      const baseDate = toDate(occ.occurrence_date)
+      const alignmentEnabled = Boolean(
+        tmpl?.requires_alignment ||
+        tmpl?.alignment_time ||
+        (tmpl?.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+        (tmpl?.alignment_roles && tmpl.alignment_roles.length)
+      )
+      const bzUsers = formatAlignmentUsers(tmpl?.alignment_user_ids, userMap)
+      pushSystemRow({
+        typeLabel: "SYS",
+        subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
+        period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
+        title: occ.title || "-",
+        description: tmpl?.description || "-",
+        status: formatSystemOccurrenceStatus(occ.status),
+        bz: alignmentEnabled
+          ? bzUsers !== "-"
+            ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
+            : tmpl?.alignment_roles?.length
+              ? tmpl.alignment_roles.join(", ")
+              : "-"
+          : "-",
+        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
+        tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+        comment: occ.comment ?? null,
+        systemTemplateId: occ.template_id,
+        systemOccurrenceDate: occ.occurrence_date,
+        systemStatus: occ.status,
+      })
+    }
+
+    for (const tmpl of todaySystemTasks) {
+      const templateId = tmpl.template_id || tmpl.id
+      const occ = systemTodayByTemplate.get(templateId) || null
+      const alignmentEnabled = Boolean(
+        tmpl.requires_alignment ||
+        tmpl.alignment_time ||
+        (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+        (tmpl.alignment_roles && tmpl.alignment_roles.length)
+      )
+      const bzUsers = formatAlignmentUsers(tmpl.alignment_user_ids, userMap)
+      pushSystemRow({
+        typeLabel: "SYS",
+        subtype: systemFrequencyShortLabel(tmpl.frequency),
+        period: resolvePeriod(tmpl.finish_period, occ?.occurrence_date || todayIso),
+        title: occ?.title || tmpl.title || "-",
+        description: tmpl.description || "-",
+        status: formatSystemOccurrenceStatus(occ?.status || tmpl.status),
+        bz: alignmentEnabled
+          ? bzUsers !== "-"
+            ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
+            : tmpl.alignment_roles?.length
+              ? tmpl.alignment_roles.join(", ")
+              : "-"
+          : "-",
+        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
+        tyo: "T",
+        comment: occ?.comment ?? null,
+        systemTemplateId: templateId,
+        systemOccurrenceDate: occ?.occurrence_date || todayIso,
+        systemStatus: occ?.status || "OPEN",
+      })
+    }
+
+    for (const task of dailyReportFastTasks) {
+      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      fastRows.push({
+        order: fastTypeOrder(task),
+        index: fastIndex,
+        row: {
+          typeLabel: "FT",
+          subtype: fastReportSubtypeShort(task),
+          period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
+          title: task.title || "-",
+          description: task.description || "-",
+          status: taskStatusLabel(task),
+          bz: "-",
+          kohaBz: "-",
+          tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          comment: task.user_comment ?? null,
+          taskId: task.id,
+        },
+      })
+      fastIndex += 1
+    }
+
+    for (const task of dailyReportProjectTasks) {
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      const projectLabel = project?.title || project?.name || "-"
+      projectRows.push({
+        typeLabel: "PRJK",
+        subtype: "-",
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: `${projectLabel} - ${task.title || "-"}`,
+        description: task.description || "-",
+        status: taskStatusLabel(task),
+        bz: "-",
+        kohaBz: "-",
+        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        comment: task.user_comment ?? null,
+        taskId: task.id,
+      })
+    }
+
+    fastRows
+      .sort((a, b) => a.order - b.order || a.index - b.index)
+      .forEach((entry) => rows.push(entry.row))
+    rows.push(...systemAmRows)
+    rows.push(...projectRows)
+    rows.push(...systemPmRows)
+
+    return rows
+  }, [
+    dailyReport,
+    dailyReportFastTasks,
+    dailyReportProjectTasks,
+    projects,
+    systemTemplateById,
+    todayDate,
+    todayIso,
+    todaySystemTasks,
+    userMap,
+  ])
   const weekProjectTasks = React.useMemo(() => {
     return weekDates.map((date) => {
       return projectTasks
@@ -825,6 +1236,7 @@ export default function DepartmentKanban() {
     todayProjectPrint,
     todaySystemPrint,
   ])
+  const printedAt = React.useMemo(() => new Date(), [])
   const printRangeLabel = React.useMemo(() => {
     if (printRange === "today") {
       const dateLabel = todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
@@ -832,6 +1244,161 @@ export default function DepartmentKanban() {
     }
     return weekRangeLabel
   }, [printRange, todayDate, weekRangeLabel])
+  const printInitials = initials(user?.full_name || user?.username || "")
+  const exportDailyReport = async () => {
+    if (!department?.id || !user?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+        user_id: user.id,
+      })
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const initialsLabel = initials(user.full_name || user.username || "user")
+      link.href = url
+      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const setDailyReportCommentSaving = (key: string, value: boolean) => {
+    setSavingDailyReportComments((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const saveDailyReportTaskComment = async (
+    taskId: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: payloadComment }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+
+      setDailyReport((prev) => {
+        if (!prev) return prev
+        return prev
+      })
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const saveDailyReportSystemComment = async (
+    templateId: string,
+    occurrenceDate: string,
+    status: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: templateId,
+          occurrence_date: occurrenceDate,
+          status: status || "OPEN",
+          comment: payloadComment,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+
+      setDailyReport((prev) => {
+        if (!prev) return prev
+        const updateOccurrence = (occ: DailyReportResponse["system_today"][number]) =>
+          occ.template_id === templateId && occ.occurrence_date === occurrenceDate
+            ? { ...occ, comment: payloadComment }
+            : occ
+        return {
+          ...prev,
+          system_today: prev.system_today.map(updateOccurrence),
+          system_overdue: prev.system_overdue.map(updateOccurrence),
+        }
+      })
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const handleDailyReportMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = dailyReportScrollRef.current
+    if (!container) return
+    dailyReportDragRef.current = {
+      isDragging: true,
+      startX: event.pageX - container.offsetLeft,
+      startScrollLeft: container.scrollLeft,
+    }
+    setIsDraggingDailyReport(true)
+  }
+
+  const handleDailyReportMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = dailyReportScrollRef.current
+    if (!container || !dailyReportDragRef.current.isDragging) return
+    event.preventDefault()
+    const x = event.pageX - container.offsetLeft
+    const walk = x - dailyReportDragRef.current.startX
+    container.scrollLeft = dailyReportDragRef.current.startScrollLeft - walk
+  }
+
+  const handleDailyReportMouseEnd = () => {
+    if (!dailyReportDragRef.current.isDragging) return
+    dailyReportDragRef.current.isDragging = false
+    setIsDraggingDailyReport(false)
+  }
 
   const allTodayPrintBaseUsers = React.useMemo(() => {
     if (viewMode === "department") {
@@ -1037,6 +1604,46 @@ export default function DepartmentKanban() {
     [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
+
+  // Daily Report (overdue) for All Today (department view) and My View (current user).
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (activeTab !== "all") {
+        setDailyReport(null)
+        return
+      }
+      const targetUserId =
+        viewMode === "department" ? (selectedUserId !== "__all__" ? selectedUserId : null) : user?.id
+      if (!department?.id || !targetUserId) {
+        setDailyReport(null)
+        return
+      }
+      setLoadingDailyReport(true)
+      try {
+        const qs = new URLSearchParams({
+          day: todayIso,
+          department_id: department.id,
+          user_id: targetUserId,
+        })
+        const res = await apiFetch(`/reports/daily?${qs.toString()}`)
+        if (!res.ok) {
+          setDailyReport(null)
+          return
+        }
+        const payload = (await res.json()) as DailyReportResponse
+        if (!cancelled) setDailyReport(payload)
+      } catch {
+        if (!cancelled) setDailyReport(null)
+      } finally {
+        if (!cancelled) setLoadingDailyReport(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
   const allTodayPrintCategories = React.useMemo(
     () => [
       { id: "PRJK", label: "PRJK" },
@@ -1253,7 +1860,7 @@ export default function DepartmentKanban() {
   }
 
   const submitNoProjectTask = async () => {
-    if (!noProjectTitle.trim() || !department) return
+    if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
     setCreatingNoProject(true)
     try {
       let gaNoteId: string | null = null
@@ -1265,6 +1872,7 @@ export default function DepartmentKanban() {
           setGaNotes((prev) => [createdNote, ...prev])
         }
       }
+      const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
         const payload = {
           title: noProjectTitle.trim(),
@@ -1279,9 +1887,10 @@ export default function DepartmentKanban() {
           is_r1: noProjectType === "r1",
           is_personal: noProjectType === "personal",
           ga_note_origin_id: gaNoteId,
+          start_date: startDate,
           due_date: dueDate,
         }
-      const assigneeIds = noProjectAssignee === "__all__" ? departmentUsers.map((u) => u.id) : noProjectAssignee === "__unassigned__" ? [null] : [noProjectAssignee]
+      const assigneeIds = noProjectAssignees.length ? noProjectAssignees : [null]
 
       const createdTasks: Task[] = []
       for (const assigneeId of assigneeIds) {
@@ -1295,16 +1904,19 @@ export default function DepartmentKanban() {
         }
       }
       if (createdTasks.length) {
-        // Only add to noProjectTasks if they meet fast task criteria
-        const fastTasks = createdTasks.filter(isFastNormalTask)
-        if (fastTasks.length) {
-          setNoProjectTasks((prev) => [...fastTasks, ...prev])
+        // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
+        const nonProjectTasks = createdTasks.filter(isNoProjectTask)
+        if (nonProjectTasks.length) {
+          setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
         }
         setDepartmentTasks((prev) => [...createdTasks, ...prev])
       }
       setNoProjectOpen(false)
       setNoProjectTitle("")
       setNoProjectDescription("")
+      setNoProjectAssignees([])
+      setNoProjectStartDate("")
+      setNoProjectDueDate("")
       toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
@@ -1342,6 +1954,7 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
+    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }
@@ -1350,14 +1963,16 @@ export default function DepartmentKanban() {
     setEditingTaskId(null)
     setEditTaskTitle("")
     setEditTaskDescription("")
+    setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
   }
 
   const updateNoProjectTask = async () => {
-    if (!editingTaskId || !editTaskTitle.trim()) return
+    if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
     setUpdatingTask(true)
     try {
+      const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1365,6 +1980,7 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: editTaskTitle.trim(),
           description: editTaskDescription.trim() || null,
+          start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
         }),
@@ -1485,8 +2101,8 @@ export default function DepartmentKanban() {
         if (taskRes.ok) {
           const createdTask = (await taskRes.json()) as Task
           setDepartmentTasks((prev) => [createdTask, ...prev])
-          // Only add to noProjectTasks if it meets fast task criteria
-          if (isFastNormalTask(createdTask)) {
+          // Add to noProjectTasks if it is a no-project task (GA notes can create these)
+          if (isNoProjectTask(createdTask)) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
           toast.success("Note and Task created")
@@ -1549,8 +2165,8 @@ export default function DepartmentKanban() {
       }
       const createdTask = (await res.json()) as Task
       setDepartmentTasks((prev) => [createdTask, ...prev])
-      // Only add to noProjectTasks if it meets fast task criteria
-      if (isFastNormalTask(createdTask)) {
+      // Add to noProjectTasks if it is a no-project task (GA notes can create these)
+      if (isNoProjectTask(createdTask)) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
@@ -1943,10 +2559,23 @@ export default function DepartmentKanban() {
                           Print
                         </Button>
                       </>
-                    ) : null}
-                    {viewMode === "mine" ? (
-                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                        <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                  ) : null}
+                  {viewMode === "mine" ? (
+                    <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                      <Button
+                        variant="outline"
+                        className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                        onClick={() =>
+                          setShowDailyUserReport((prev) => {
+                            const next = !prev
+                            if (next) setPrintRange("today")
+                            return next
+                          })
+                        }
+                      >
+                        {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
+                      </Button>
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
                         <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
                           <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
                             <SelectValue placeholder="This Week" />
@@ -1974,13 +2603,242 @@ export default function DepartmentKanban() {
                     { label: "GA NOTES", value: todayOpenNotes.length },
                     { label: "FAST TASKS", value: todayNoProjectTasks.length },
                     { label: "SYSTEM TASKS", value: todaySystemTasks.length },
-                  ].map((stat) => (
-                    <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
-                      <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
-                    </Card>
-                  ))}
-                </div>
+                ].map((stat) => (
+                  <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
+                    <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
+                  </Card>
+                ))}
+              </div>
+
+                {viewMode === "mine" && showDailyUserReport ? (
+                  <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">Daily Report</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          System, fast, and project tasks for today.
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                        <Button
+                          variant="outline"
+                          className="h-8 rounded-lg border-slate-300 bg-white px-3 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
+                          onClick={exportDailyReport}
+                          disabled={exportingDailyReport}
+                        >
+                          {exportingDailyReport ? "Exporting..." : "Export Excel"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div
+                      ref={dailyReportScrollRef}
+                      className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
+                        isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                      }`}
+                      onMouseDown={handleDailyReportMouseDown}
+                      onMouseMove={handleDailyReportMouseMove}
+                      onMouseUp={handleDailyReportMouseEnd}
+                      onMouseLeave={handleDailyReportMouseEnd}
+                    >
+                      <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                        <colgroup>
+                          <col className="w-[36px]" />
+                          <col className="w-[44px]" />
+                          <col className="w-[56px]" />
+                          <col className="w-[56px]" />
+                          <col className="w-[150px]" />
+                          <col className="w-[110px]" />
+                          <col className="w-[60px]" />
+                          <col className="w-[40px]" />
+                          <col className="w-[52px]" />
+                          <col className="w-[48px]" />
+                          <col className="w-[140px]" />
+                        </colgroup>
+                        <thead className="sticky top-0 z-10 bg-slate-50">
+                          <tr>
+                            <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                              Nr
+                            </th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NLL</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                              <span className="block">AM/</span>
+                              <span className="block">PM</span>
+                            </th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dailyUserReportRows.length ? (
+                            dailyUserReportRows.map((row, index) => {
+                              const commentKey = row.taskId
+                                ? `task:${row.taskId}`
+                                : row.systemTemplateId && row.systemOccurrenceDate
+                                  ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+                                  : ""
+                              const previousValue = row.comment ?? ""
+                              const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
+                              const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
+                              return (
+                                <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                                  <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                                    {index + 1}
+                                  </td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        aria-label="Koment"
+                                        className="h-4 w-full border-b border-slate-300 bg-transparent"
+                                        value={commentValue}
+                                        onChange={(e) => {
+                                          if (!commentKey) return
+                                          const nextValue = e.target.value
+                                          setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
+                                        }}
+                                        onBlur={(e) => {
+                                          if (!commentKey) return
+                                          const nextValue = e.target.value
+                                          if (row.taskId) {
+                                            void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                            return
+                                          }
+                                          if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                            void saveDailyReportSystemComment(
+                                              row.systemTemplateId,
+                                              row.systemOccurrenceDate,
+                                              row.systemStatus || "OPEN",
+                                              nextValue,
+                                              previousValue,
+                                              commentKey
+                                            )
+                                          }
+                                        }}
+                                        disabled={!commentKey}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+                                        disabled={!commentKey || isSaving}
+                                        onClick={() => {
+                                          if (!commentKey) return
+                                          if (row.taskId) {
+                                            void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                            return
+                                          }
+                                          if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                            void saveDailyReportSystemComment(
+                                              row.systemTemplateId,
+                                              row.systemOccurrenceDate,
+                                              row.systemStatus || "OPEN",
+                                              commentValue,
+                                              previousValue,
+                                              commentKey
+                                            )
+                                          }
+                                        }}
+                                      >
+                                        {isSaving ? "Saving" : "Save"}
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          ) : (
+                            <tr>
+                              <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
+                                No data available.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                ) : null}
+
+                {viewMode === "department" ? (
+                <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Shows overdue items for the selected user (not for “All users”).
+                      </div>
+                    </div>
+                    {loadingDailyReport ? <div className="text-xs text-slate-500">Loading…</div> : null}
+                  </div>
+                  {selectedUserId === "__all__" ? (
+                    <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
+                  ) : dailyReport ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
+                        {dailyReport.tasks_overdue.length ? (
+                          <div className="mt-2 space-y-2">
+                            {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
+                              <div key={item.task.id} className="flex items-start justify-between gap-2">
+                                <div className="text-sm text-slate-800">{item.task.title}</div>
+                                <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                  late {item.late_days ?? 0}d
+                                </div>
+                              </div>
+                            ))}
+                            {dailyReport.tasks_overdue.length > 8 ? (
+                              <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
+                        {dailyReport.system_overdue.length ? (
+                          <div className="mt-2 space-y-2">
+                            {dailyReport.system_overdue.slice(0, 8).map((occ) => (
+                              <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
+                                <div className="text-sm text-slate-800">
+                                  {occ.title}{" "}
+                                  <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
+                                </div>
+                                <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                  late {occ.late_days ?? 0}d
+                                </div>
+                              </div>
+                            ))}
+                            {dailyReport.system_overdue.length > 8 ? (
+                              <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500">No report available.</div>
+                  )}
+                </Card>
+                ) : null}
                 <div className="space-y-4">
                   <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
@@ -2278,7 +3136,154 @@ export default function DepartmentKanban() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
-                  {!isReadOnly && (<Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}><DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white">Create Task</Button></DialogTrigger><DialogContent className="rounded-2xl sm:max-w-xl"><DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader><div className="grid gap-4 py-4"><div className="space-y-2"><Label>Category</Label><Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{NO_PROJECT_TYPES.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Title</Label><Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} /></div><div className="space-y-2"><Label>Description</Label><BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} /></div><div className="grid grid-cols-3 gap-4"><div className="space-y-2"><Label>Assignee</Label><Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__unassigned__">Unassigned</SelectItem><SelectItem value="__all__">Everyone</SelectItem>{departmentUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Finish by</Label><Select value={noProjectFinishPeriod} onValueChange={(value) => setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>{FINISH_PERIOD_OPTIONS.map(value => (<SelectItem key={value} value={value}>{value}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Due Date</Label><Input className="rounded-xl" type="date" value={noProjectDueDate} onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))} /></div></div></div><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setNoProjectOpen(false)}>Cancel</Button><Button className="rounded-xl" onClick={() => void submitNoProjectTask()}>Create</Button></div></DialogContent></Dialog>)}
+                  {!isReadOnly && (
+                    <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="rounded-xl bg-slate-900 text-white">Create Task</Button>
+                      </DialogTrigger>
+                      <DialogContent className="rounded-2xl sm:max-w-xl">
+                        <DialogHeader>
+                          <DialogTitle>New Task</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Category</Label>
+                            <Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}>
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {NO_PROJECT_TYPES.map((t) => (
+                                  <SelectItem key={t.id} value={t.id}>
+                                    {t.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Title</Label>
+                            <Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Description</Label>
+                            <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Assignee</Label>
+                              <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
+                                <DialogTrigger asChild>
+                                  <Button type="button" variant="outline" className="w-full justify-start rounded-xl">
+                                    {noProjectAssigneeLabel}
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="rounded-2xl sm:max-w-md">
+                                  <DialogHeader>
+                                    <DialogTitle>Select Assignees</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                    {departmentUsers.length ? (
+                                      departmentUsers.map((u) => {
+                                        const isSelected = noProjectAssignees.includes(u.id)
+                                        return (
+                                          <div
+                                            key={u.id}
+                                            className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                            onClick={() => {
+                                              if (isSelected) {
+                                                setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
+                                              } else {
+                                                setNoProjectAssignees((prev) => [...prev, u.id])
+                                              }
+                                            }}
+                                          >
+                                            <Checkbox checked={isSelected} />
+                                            <Label className="cursor-pointer flex-1">
+                                              {u.full_name || u.username || "-"}
+                                            </Label>
+                                          </div>
+                                        )
+                                      })
+                                    ) : (
+                                      <div className="text-sm text-slate-600">No team members available.</div>
+                                    )}
+                                  </div>
+                                  <div className="mt-4 flex justify-end gap-2">
+                                    <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
+                                      Clear
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => setNoProjectAssignees(departmentUsers.map((u) => u.id))}
+                                      disabled={!departmentUsers.length}
+                                    >
+                                      All team
+                                    </Button>
+                                    <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
+                                      Done
+                                    </Button>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Finish by</Label>
+                              <Select
+                                value={noProjectFinishPeriod}
+                                onValueChange={(value) =>
+                                  setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                                }
+                              >
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {value}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Start date</Label>
+                              <Input
+                                className="rounded-xl w-full"
+                                type="date"
+                                required
+                                value={noProjectStartDate}
+                                onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Due date (optional)</Label>
+                              <Input
+                                className="rounded-xl w-full"
+                                type="date"
+                                value={noProjectDueDate}
+                                onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" onClick={() => setNoProjectOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            className="rounded-xl"
+                            disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
+                            onClick={() => void submitNoProjectTask()}
+                          >
+                            {creatingNoProject ? "Creating..." : "Create"}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                 </div>
               {!isReadOnly ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
@@ -2295,7 +3300,7 @@ export default function DepartmentKanban() {
                         <Label>Description</Label>
                         <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label>Finish by</Label>
                           <Select
@@ -2318,9 +3323,19 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Due Date</Label>
+                          <Label>Start date</Label>
                           <Input
-                            className="rounded-xl"
+                            className="rounded-xl w-full"
+                            type="date"
+                            required
+                            value={editTaskStartDate}
+                            onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Due date (optional)</Label>
+                          <Input
+                            className="rounded-xl w-full"
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
@@ -2331,7 +3346,7 @@ export default function DepartmentKanban() {
                         <Button variant="ghost" onClick={cancelEditTask}>
                           Cancel
                         </Button>
-                        <Button disabled={!editTaskTitle.trim() || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
+                        <Button disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
                           {updatingTask ? "Updating..." : "Update"}
                         </Button>
                       </div>
@@ -2935,34 +3950,51 @@ export default function DepartmentKanban() {
         </div>
       </div>
       <div className="hidden print:block">
-        <div className="px-6 py-4">
-          <div className="text-center text-sm font-semibold text-slate-700">PrimeFlow</div>
-          <div className="mt-4 text-2xl font-bold text-slate-900">
-            {showAllTodayPrint ? "All Today Report" : "Weekly Task Report"}
+        <div
+          ref={printContainerRef}
+          className="print-page px-6 pb-6"
+          style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
+        >
+          <div ref={printMeasureRef} className="print-page-measure" />
+          <div className="print-header">
+            <div />
+            <div className="print-title">
+              {showAllTodayPrint
+                ? "ALL TODAY REPORT"
+                : printRange === "today" && showDailyUserReport
+                  ? "DAILY TASK REPORT"
+                  : "PLANIFIKIMI JAVOR - PRMBL PLANIFIKIMI JAVOR"}
+            </div>
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                month: "2-digit",
+                day: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
           </div>
-          <div className="mt-1 text-sm text-slate-700">
-            Department: {departmentName}
+          <div className="print-meta">
+            <div>Department: {departmentName}</div>
+            {showAllTodayPrint ? (
+              <div>
+                Users: {selectedUserId === "__all__"
+                  ? "All users"
+                  : allTodayPrintColumns[0]?.label || "Selected user"}
+              </div>
+            ) : (
+              <div>User: {user?.full_name || user?.username || "-"}</div>
+            )}
+            <div>
+              {showAllTodayPrint
+                ? ""
+                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
+            </div>
           </div>
           {showAllTodayPrint ? (
-            <div className="text-sm text-slate-700">
-              Users: {selectedUserId === "__all__"
-                ? "All users"
-                : allTodayPrintColumns[0]?.label || "Selected user"}
-            </div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              User: {user?.full_name || user?.username || "-"}
-            </div>
-          )}
-          <div className="text-sm text-slate-700">
-            {showAllTodayPrint
-              ? `Date: ${todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}`
-              : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
-          </div>
-        </div>
-        <div className="px-6 pb-6">
-          {showAllTodayPrint ? (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <>
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
@@ -3108,8 +4140,108 @@ export default function DepartmentKanban() {
                 ))}
               </tbody>
             </table>
+            {selectedUserId !== "__all__" && dailyReport && (dailyReport.tasks_overdue.length || dailyReport.system_overdue.length) ? (
+              <div className="mt-6">
+                <div className="text-sm font-semibold text-slate-900">Daily Report (Overdue)</div>
+                <div className="text-xs text-slate-700 mt-1">
+                  Late items for the selected user. (Planned date is preserved.)
+                </div>
+
+                {dailyReport.tasks_overdue.length ? (
+                  <div className="mt-3">
+                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue tasks</div>
+                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
+                      {dailyReport.tasks_overdue.slice(0, 20).map((item) => (
+                        <li key={item.task.id}>
+                          {item.task.title} — late {item.late_days ?? 0}d (planned end: {item.planned_end || "-"})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {dailyReport.system_overdue.length ? (
+                  <div className="mt-3">
+                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue system tasks</div>
+                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
+                      {dailyReport.system_overdue.slice(0, 20).map((occ) => (
+                        <li key={`${occ.template_id}-${occ.occurrence_date}`}>
+                          {occ.title} — late {occ.late_days ?? 0}d (was planned for: {occ.occurrence_date})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            </>
+          ) : printRange === "today" && showDailyUserReport ? (
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+              <colgroup>
+                <col className="w-[36px]" />
+                <col className="w-[44px]" />
+                <col className="w-[30px]" />
+                <col className="w-[36px]" />
+                <col className="w-[150px]" />
+                <col className="w-[110px]" />
+              <col className="w-[60px]" />
+              <col className="w-[40px]" />
+              <col className="w-[52px]" />
+              <col className="w-[30px]" />
+              <col className="w-[140px]" />
+            </colgroup>
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                    <span className="block">AM/</span>
+                    <span className="block">PM</span>
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyUserReportRows.length ? (
+                dailyUserReportRows.map((row, index) => (
+                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">
+                      <input
+                        type="text"
+                        aria-label="Koment"
+                        className="h-4 w-full border-b border-slate-400 bg-transparent"
+                      />
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                  <tr>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                      No data available.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px]">
+            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>
                 <tr className="bg-slate-100">
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
@@ -3162,16 +4294,163 @@ export default function DepartmentKanban() {
               </tbody>
             </table>
           )}
+          {printPageMarkers.map((marker) => (
+            <div
+              key={`print-page-${marker.page}`}
+              className="print-page-marker"
+              style={{ top: `${marker.top}px` }}
+            >
+              Page {marker.page} / {marker.total}
+            </div>
+          ))}
+          <div className="print-footer">
+            <span />
+            <div className="print-page-count">1/{printTotalPages}</div>
+            <div className="print-initials">
+              PUNOI: <span className="print-signature-line" />
+            </div>
+          </div>
         </div>
       </div>
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        @media print {
-          body { background: white; }
-          aside { display: none !important; }
-          @page { margin: 12mm; }
+      <style jsx global>{`
+        .daily-report-table th,
+        .daily-report-table td {
+          vertical-align: bottom;
+          padding-bottom: 0;
+          padding-top: 15px;
         }
-      `}} />
+        .daily-report-table thead tr {
+          border-top: 2px solid #e2e8f0;
+          border-bottom: 2px solid #e2e8f0;
+        }
+        .daily-report-table thead th {
+          border-width: 2px;
+          border-color: #cbd5e1;
+        }
+        .weekly-report-table thead th {
+          border-width: 2px;
+          border-color: #0f172a;
+        }
+        .print-nr-cell {
+          font-weight: 700;
+        }
+        @media print {
+          body {
+            background: white;
+          }
+          aside {
+            display: none !important;
+          }
+          @page {
+            margin: 0.36in 0.1in 0.51in 0.1in;
+          }
+          .print-page {
+            position: relative;
+            padding-bottom: 0.35in;
+          }
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 0.15in;
+            margin-bottom: 0.15in;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-meta {
+            font-size: 11px;
+            color: #334155;
+            margin-bottom: 16px;
+            display: grid;
+            gap: 2px;
+          }
+          .print-page-measure {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: calc(11in - 0.36in - 0.51in);
+            width: 1px;
+            visibility: hidden;
+            pointer-events: none;
+          }
+          .print-page-marker {
+            position: absolute;
+            left: 0.1in;
+            right: 0.1in;
+            text-align: center;
+            font-size: 10px;
+            color: #334155;
+            z-index: 5;
+            display: none;
+          }
+          .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.1in;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            grid-column: 2;
+            text-align: center;
+          }
+          .print-signature-line {
+            display: inline-block;
+            min-width: 1.2in;
+            border-bottom: 1px solid #334155;
+            height: 0.6em;
+            margin-left: 0.1in;
+            vertical-align: bottom;
+          }
+          .print-initials {
+            grid-column: 3;
+            text-align: right;
+          }
+          .weekly-report-table thead {
+            display: table-header-group;
+          }
+          .weekly-report-table th,
+          .weekly-report-table td,
+          .daily-report-table th,
+          .daily-report-table td {
+            vertical-align: bottom !important;
+          }
+          .weekly-report-table,
+          .daily-report-table {
+            table-layout: fixed;
+          }
+          .weekly-report-table thead th {
+            border-width: 2px;
+          }
+          .daily-report-table thead th {
+            border-width: 2px;
+            border-color: #0f172a;
+          }
+          .daily-report-table thead tr {
+            border-top: 2px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
+          }
+          .weekly-report-table {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+        }
+      `}</style>
     </div>
   )
 }

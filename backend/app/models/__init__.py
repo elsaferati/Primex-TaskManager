@@ -17,8 +17,12 @@ from app.models.project_prompt import ProjectPrompt
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_occurrence import SystemTaskOccurrence
+from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
@@ -47,8 +51,12 @@ __all__ = [
     "VsWorkflowItem",
     "RefreshToken",
     "SystemTaskTemplate",
+    "SystemTaskOccurrence",
+    "SystemTaskTemplateAlignmentRole",
+    "SystemTaskTemplateAlignmentUser",
     "Task",
     "TaskAssignee",
+    "TaskAlignmentUser",
     "TaskStatus",
     "TaskUserComment",
     "TaskTemplate",

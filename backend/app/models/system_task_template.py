@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Time, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -42,6 +42,10 @@ class SystemTaskTemplate(Base):
     finish_period: Mapped[str | None] = mapped_column(
         String(50), nullable=True
     )
+
+    # Optional coordination/alignment settings (informational; does not affect scheduling directly).
+    requires_alignment: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    alignment_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

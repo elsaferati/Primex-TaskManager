@@ -18,6 +18,7 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskUpdate
 from pydantic import BaseModel
@@ -111,6 +112,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut], user_comment: str
         is_personal=task.is_personal,
         is_active=task.is_active,
         user_comment=user_comment,
+        alignment_user_ids=None,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -212,7 +214,24 @@ async def list_tasks(
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
-    return [_task_to_out(t, assignee_map.get(t.id, [])) for t in tasks]
+    # Fetch alignment users for returned tasks
+    alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if task_ids:
+        rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for tid, uid in rows:
+            alignment_map.setdefault(tid, []).append(uid)
+
+    out = []
+    for t in tasks:
+        dto = _task_to_out(t, assignee_map.get(t.id, []))
+        dto.alignment_user_ids = alignment_map.get(t.id)
+        out.append(dto)
+    return out
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -230,7 +249,14 @@ async def get_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    return _task_to_out(task, assignee_map.get(task.id, []))
+    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    rows = (
+        await db.execute(
+            select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id)
+        )
+    ).scalars().all()
+    dto.alignment_user_ids = list(rows) if rows else None
+    return dto
 
 
 @router.post("", response_model=TaskOut)
@@ -326,6 +352,15 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
+
+    # Optional: store alignment users for this task (fast-task alignment).
+    if payload.alignment_user_ids:
+        seen: set[uuid.UUID] = set()
+        ids = [uid for uid in payload.alignment_user_ids if not (uid in seen or seen.add(uid))]
+        await db.execute(
+            insert(TaskAlignmentUser),
+            [{"task_id": task.id, "user_id": uid} for uid in ids],
+        )
     if assignee_ids is not None:
         await _replace_task_assignees(db, task, assignee_ids)
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
@@ -397,7 +432,9 @@ async def create_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    return _task_to_out(task, assignee_map.get(task.id, []))
+    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    dto.alignment_user_ids = payload.alignment_user_ids
+    return dto
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
@@ -560,6 +597,21 @@ async def update_task(
             task.completed_at = None
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
+    # Optional: update alignment users if provided
+    alignment_set = False
+    if hasattr(payload, "model_fields_set"):
+        alignment_set = "alignment_user_ids" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        alignment_set = "alignment_user_ids" in payload.__fields_set__  # type: ignore[attr-defined]
+    if alignment_set:
+        await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
+        if payload.alignment_user_ids:
+            seen: set[uuid.UUID] = set()
+            ids = [uid for uid in payload.alignment_user_ids if not (uid in seen or seen.add(uid))]
+            await db.execute(
+                insert(TaskAlignmentUser),
+                [{"task_id": task.id, "user_id": uid} for uid in ids],
+            )
 
     if payload.priority is not None:
         task.priority = payload.priority
@@ -575,6 +627,9 @@ async def update_task(
     if payload.start_date is not None:
         task.start_date = payload.start_date
     if payload.due_date is not None:
+        # If due_date is being changed (postponed), preserve the original planned date once.
+        if task.due_date is not None and payload.due_date != task.due_date and task.original_due_date is None:
+            task.original_due_date = task.due_date
         task.due_date = payload.due_date
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
@@ -652,7 +707,15 @@ async def update_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    return _task_to_out(task, assignee_map.get(task.id, []))
+    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    if alignment_set:
+        dto.alignment_user_ids = payload.alignment_user_ids
+    else:
+        rows = (
+            await db.execute(select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id))
+        ).scalars().all()
+        dto.alignment_user_ids = list(rows) if rows else None
+    return dto
 
 
 @router.post("/{task_id}/deactivate", response_model=TaskOut)

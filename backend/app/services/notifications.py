@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.integrations.redis import get_redis_sync
+from app.config import settings
 from app.models.enums import NotificationType
 from app.models.notification import Notification
 
@@ -48,6 +49,8 @@ def notification_to_payload(notification: Notification) -> dict:
 
 
 async def publish_notification(*, user_id: uuid.UUID, notification: Notification) -> None:
+    if not settings.REDIS_ENABLED:
+        return
     client = get_redis_sync()
     payload = json.dumps({"user_id": str(user_id), "notification": {"type": "notification", **notification_to_payload(notification)}})
     await asyncio.to_thread(client.publish, CHANNEL, payload)

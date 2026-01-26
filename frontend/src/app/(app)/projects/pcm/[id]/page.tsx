@@ -809,6 +809,7 @@ export default function PcmProjectPage() {
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
   const mstCommentTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const vsVlDescriptionTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const vsVlMetaTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -1144,16 +1145,17 @@ export default function PcmProjectPage() {
         return (a.title || "").localeCompare(b.title || "")
       })
   }, [planningItems])
-
-  // Initialize MST checklist checked state and comments from database
-  React.useEffect(() => {
-    if (!isMst || !project) return
-
-    const mstChecklistItems = checklistItems.filter((item) => {
+  const mstChecklistItems = React.useMemo(() => {
+    return checklistItems.filter((item) => {
       if (item.item_type !== "CHECKBOX") return false
       if (!item.path || !item.title) return false
       return !MST_EXCLUDED_PATHS.has(item.path)
     })
+  }, [checklistItems])
+
+  // Initialize MST checklist checked state and comments from database
+  React.useEffect(() => {
+    if (!isMst || !project) return
 
     const checked: Record<string, boolean> = {}
     const comments: Record<string, string> = {}
@@ -1702,6 +1704,7 @@ export default function PcmProjectPage() {
     return () => {
       // Cleanup timers on unmount
       Object.values(vsVlDescriptionTimersRef.current).forEach(clearTimeout)
+      Object.values(vsVlMetaTimersRef.current).forEach(clearTimeout)
       Object.values(mstCommentTimersRef.current).forEach(clearTimeout)
     }
   }, [])
@@ -1902,7 +1905,8 @@ export default function PcmProjectPage() {
   const exportVsVlChecklist = async (
     items: ChecklistItem[],
     path: string,
-    filenameSuffix: string
+    filenameSuffix: string,
+    title: string
   ) => {
     const checklistId = items[0]?.checklist_id
     if (!checklistId) {
@@ -1917,6 +1921,7 @@ export default function PcmProjectPage() {
       if (path === VS_VL_AMAZON_CHECKLIST_PATH && vsVlPhase === "CHECK") {
         params.set("include_ko2", "1")
       }
+      params.set("title", title)
       const res = await apiFetch(`/exports/checklists.xlsx?${params.toString()}`)
       if (!res.ok) {
         let detail = "Failed to export checklist."
@@ -2722,7 +2727,7 @@ export default function PcmProjectPage() {
       }
       if (!nextMeta.comment) delete nextMeta.comment
       if (!nextMeta.checklist) delete nextMeta.checklist
-      if (!nextMeta.unlock_after_days) delete nextMeta.unlock_after_days
+      if (nextMeta.unlock_after_days == null) delete nextMeta.unlock_after_days
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2735,6 +2740,15 @@ export default function PcmProjectPage() {
       const updated = (await res.json()) as Task
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       return updated
+    }
+    const queueVsVlMetaSave = (task: Task, updates: Partial<VsVlTaskMeta>) => {
+      const timers = vsVlMetaTimersRef.current
+      if (timers[task.id]) {
+        clearTimeout(timers[task.id])
+      }
+      timers[task.id] = setTimeout(() => {
+        void updateVsVlMeta(task, updates)
+      }, 700)
     }
 
     // VS/VL acceptance checklist items map
@@ -2944,34 +2958,36 @@ export default function PcmProjectPage() {
                 &larr; Back to Projects
               </button>
               <div className="flex items-center gap-3">
-              {project?.start_date ? (
-                <div className="text-xs text-slate-500">
-                  Started: {new Date(project.start_date).toLocaleDateString()}
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-7"
-                  onClick={async () => {
-                    if (!project) return
-                    const res = await apiFetch(`/projects/${project.id}`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ start_date: new Date().toISOString() }),
-                    })
-                    if (res.ok) {
-                      const updated = (await res.json()) as Project
-                      setProject(updated)
-                      toast.success("Project started!")
-                    } else {
-                      toast.error("Failed to start project")
-                    }
-                  }}
-                >
-                  Start Project
-                </Button>
-              )}
+              {!project?.is_template ? (
+                project?.start_date ? (
+                  <div className="text-xs text-slate-500">
+                    Started: {new Date(project.start_date).toLocaleDateString()}
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={async () => {
+                      if (!project) return
+                      const res = await apiFetch(`/projects/${project.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ start_date: new Date().toISOString() }),
+                      })
+                      if (res.ok) {
+                        const updated = (await res.json()) as Project
+                        setProject(updated)
+                        toast.success("Project started!")
+                      } else {
+                        toast.error("Failed to start project")
+                      }
+                    }}
+                  >
+                    Start Project
+                  </Button>
+                )
+              ) : null}
               {user?.role === "ADMIN" && (
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox
@@ -3098,7 +3114,8 @@ export default function PcmProjectPage() {
                       void exportVsVlChecklist(
                         vsVlChecklistTab === "amazon" ? vsVlAmazonChecklistItems : vsVlImagesChecklistItems,
                         vsVlChecklistTab === "amazon" ? VS_VL_AMAZON_CHECKLIST_PATH : VS_VL_IMAGES_CHECKLIST_PATH,
-                        vsVlChecklistTab === "amazon" ? "amazon" : "images"
+                        vsVlChecklistTab === "amazon" ? "amazon" : "images",
+                        vsVlChecklistTab === "amazon" ? "Amazon Checklist" : "Images Checklist"
                       )
                     }
                     disabled={
@@ -3154,7 +3171,10 @@ export default function PcmProjectPage() {
                         vsVlDreamrobotChecklistTab === "vs"
                           ? VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
                           : VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
-                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl"
+                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl",
+                        vsVlDreamrobotChecklistTab === "vs"
+                          ? "VS Dreamrobot Checklist"
+                          : "VL Dreamrobot Checklist"
                       )
                     }
                     disabled={
@@ -3521,7 +3541,8 @@ export default function PcmProjectPage() {
                           void exportVsVlChecklist(
                             vsVlAmazonChecklistItems,
                             VS_VL_AMAZON_CHECKLIST_PATH,
-                            "amazon"
+                            "amazon",
+                            "Amazon Checklist"
                           )
                         }
                         disabled={exportingVsVlChecklist || vsVlAmazonChecklistItems.length === 0}
@@ -4208,7 +4229,7 @@ export default function PcmProjectPage() {
                         className={`rounded-lg border bg-white transition-shadow hover:shadow-sm ${
                           isLocked 
                             ? "border-amber-200 bg-amber-50/20" 
-                            : "border-slate-200"
+                            : "border-slate-300 shadow-[0_0_0_1px_#cbd5e1]"
                         }`}
                       >
                         {/* Main Row - Compact */}
@@ -4244,7 +4265,7 @@ export default function PcmProjectPage() {
                                 void patchTask(task.id, { title: nextValue }, "Failed to update title")
                               }}
                               className={`h-auto text-sm font-semibold px-0 border-0 bg-transparent focus-visible:ring-1 focus-visible:ring-slate-300 ${
-                                !isEditing ? "text-slate-700" : "text-slate-900"
+                                !isEditing ? (isLocked ? "text-slate-600" : "text-slate-900 font-bold") : "text-slate-900"
                               }`}
                               readOnly={!isEditing}
                               disabled={isLocked || !isEditing}
@@ -4512,9 +4533,16 @@ export default function PcmProjectPage() {
                                 <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Comment</Label>
                                 <Textarea
                                   value={commentValue}
-                                  onChange={(e) =>
-                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
-                                  }
+                                  onChange={(e) => {
+                                    const nextValue = e.target.value
+                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                    if (isLocked) return
+                                    const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
+                                    queueVsVlMetaSave(task, {
+                                      comment: nextValue.trim() || undefined,
+                                      checklist: checklist || undefined,
+                                    })
+                                  }}
                                   onBlur={async (e) => {
                                     if (isLocked) return
                                     const nextValue = e.target.value.trim()
@@ -4538,9 +4566,16 @@ export default function PcmProjectPage() {
                                 <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Checklist</Label>
                                 <Textarea
                                   value={checklistValue}
-                                  onChange={(e) =>
-                                    setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: e.target.value }))
-                                  }
+                                  onChange={(e) => {
+                                    const nextValue = e.target.value
+                                    setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                    if (isLocked) return
+                                    const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
+                                    queueVsVlMetaSave(task, {
+                                      checklist: nextValue.trim() || undefined,
+                                      comment: comment || undefined,
+                                    })
+                                  }}
                                   onBlur={async (e) => {
                                     if (isLocked) return
                                     const nextValue = e.target.value.trim()
@@ -4725,13 +4760,6 @@ export default function PcmProjectPage() {
     const templateOrderMap = new Map(
       MST_FINAL_CHECKLIST.map((row, index) => [`${row.path}|${row.detyrat}`, index])
     )
-
-    // Get MST checklist items from database (exclude planning/meeting/finalization)
-    const mstChecklistItems = checklistItems.filter((item) => {
-      if (item.item_type !== "CHECKBOX") return false
-      if (!item.path || !item.title) return false
-      return !MST_EXCLUDED_PATHS.has(item.path)
-    })
 
     const mstChecklistRows = mstChecklistItems
       .map((item) => {

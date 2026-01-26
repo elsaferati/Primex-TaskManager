@@ -10,6 +10,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.services.system_task_schedule import should_reopen_system_task
+from app.services.system_task_occurrences import ensure_occurrences_in_range
 
 
 async def generate_system_tasks() -> int:
@@ -18,11 +19,14 @@ async def generate_system_tasks() -> int:
     async with SessionLocal() as db:
         templates = (await db.execute(select(SystemTaskTemplate))).scalars().all()
         for tmpl in templates:
+            # Some DBs may contain multiple rows per template (historical data). Pick the newest.
             task = (
                 await db.execute(
-                    select(Task).where(Task.system_template_origin_id == tmpl.id)
+                    select(Task)
+                    .where(Task.system_template_origin_id == tmpl.id)
+                    .order_by(Task.created_at.desc())
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
             active_value = tmpl.is_active and not (
                 tmpl.department_id is not None and tmpl.default_assignee_id is None
             )
@@ -61,6 +65,10 @@ async def generate_system_tasks() -> int:
                 if active_value and should_reopen_system_task(task, tmpl, now):
                     task.status = TaskStatus.TODO
                     task.completed_at = None
+
+        # Ensure today's occurrences exist.
+        today = now.date()
+        await ensure_occurrences_in_range(db=db, start=today, end=today)
 
         await db.commit()
 

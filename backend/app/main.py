@@ -36,7 +36,8 @@ async def health() -> dict:
 @app.on_event("startup")
 async def _startup() -> None:
     global listener_task
-    listener_task = asyncio.create_task(start_notification_listener())
+    if settings.REDIS_ENABLED:
+        listener_task = asyncio.create_task(start_notification_listener())
 
 
 @app.on_event("shutdown")

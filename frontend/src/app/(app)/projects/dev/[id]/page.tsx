@@ -201,6 +201,7 @@ export default function DevelopmentProjectPage() {
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
+  const [newStartDate, setNewStartDate] = React.useState("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [newFinishPeriod, setNewFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -213,6 +214,7 @@ export default function DevelopmentProjectPage() {
   const [editPriority, setEditPriority] = React.useState<Task["priority"]>("NORMAL")
   const [editAssignedTo, setEditAssignedTo] = React.useState<string>("__unassigned__")
   const [editPhase, setEditPhase] = React.useState<string>("")
+  const [editStartDate, setEditStartDate] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -365,6 +367,7 @@ export default function DevelopmentProjectPage() {
         status: newStatus,
         priority: newPriority,
         phase: newTaskPhase || activePhase,
+        start_date: newStartDate ? new Date(newStartDate).toISOString() : null,
         due_date: newDueDate || null,
         finish_period: newFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : newFinishPeriod,
       }
@@ -393,6 +396,7 @@ export default function DevelopmentProjectPage() {
       setNewPriority("NORMAL")
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
+      setNewStartDate("")
       setNewDueDate("")
       setNewFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -434,6 +438,7 @@ export default function DevelopmentProjectPage() {
     setEditPriority(task.priority || "NORMAL")
     setEditAssignedTo(task.assigned_to || task.assigned_to_user_id || "__unassigned__")
     setEditPhase(task.phase || activePhase)
+    setEditStartDate(toDateInput(task.start_date))
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
@@ -450,6 +455,7 @@ export default function DevelopmentProjectPage() {
         priority: editPriority,
         assigned_to: editAssignedTo === "__unassigned__" ? null : editAssignedTo,
         phase: editPhase || activePhase,
+        start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
         due_date: editDueDate || null,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
       }
@@ -1475,7 +1481,16 @@ export default function DevelopmentProjectPage() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-slate-700">Due date</Label>
+                          <Label className="text-slate-700">Start date</Label>
+                          <Input
+                            type="date"
+                            value={newStartDate}
+                            onChange={(e) => setNewStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
                             type="date"
                             value={newDueDate}
@@ -1604,7 +1619,16 @@ export default function DevelopmentProjectPage() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-slate-700">Due date</Label>
+                          <Label className="text-slate-700">Start date</Label>
+                          <Input
+                            type="date"
+                            value={editStartDate}
+                            onChange={(e) => setEditStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
                             type="date"
                             value={editDueDate}

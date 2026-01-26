@@ -36,6 +36,10 @@ export interface SystemTaskTemplate {
   month_of_year?: number | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
+  requires_alignment?: boolean | null
+  alignment_time?: string | null
+  alignment_roles?: string[] | null
+  alignment_user_ids?: string[] | null
   status?: string | null
   is_active: boolean
   user_comment?: string | null
@@ -159,8 +163,40 @@ export interface Task {
   is_1h_report?: boolean
   is_r1?: boolean
   is_personal?: boolean
+  user_comment?: string | null
+  alignment_user_ids?: string[] | null
   created_at: string
   updated_at: string
+}
+
+export type DailyReportSystemOccurrenceStatus = "OPEN" | "DONE" | "NOT_DONE" | "SKIPPED"
+
+export interface DailyReportTaskItem {
+  task: Task
+  planned_start?: string | null
+  planned_end?: string | null
+  original_planned_end?: string | null
+  is_overdue: boolean
+  late_days?: number | null
+}
+
+export interface DailyReportSystemOccurrence {
+  template_id: string
+  title: string
+  occurrence_date: string
+  status: DailyReportSystemOccurrenceStatus
+  comment?: string | null
+  acted_at?: string | null
+  is_overdue: boolean
+  late_days?: number | null
+}
+
+export interface DailyReportResponse {
+  day: string
+  tasks_today: DailyReportTaskItem[]
+  tasks_overdue: DailyReportTaskItem[]
+  system_today: DailyReportSystemOccurrence[]
+  system_overdue: DailyReportSystemOccurrence[]
 }
 
 export type ChecklistItemType = "TITLE" | "COMMENT" | "CHECKBOX"
@@ -274,4 +310,3 @@ export interface Meeting {
   created_at: string
   updated_at: string
 }
-

@@ -90,6 +90,7 @@ VS_VL_SMALL_TEMPLATE_OFFSETS = {
     "DREAM ROBOT VL": 5,
     "KALKULIMI I PESHAVE": 5,
 }
+VS_VL_LARGE_TEMPLATE_OFFSETS = VS_VL_SMALL_TEMPLATE_OFFSETS
 VS_VL_META_PREFIX = "VS_VL_META:"
 VS_VL_ACCEPTANCE_QUESTIONS = [
     "IS TEAMS GROUP OPENED?",
@@ -101,67 +102,164 @@ VS_VL_TEMPLATE_TASKS = [
         "key": "base",
         "title": "ANALIZIMI DHE IDENTIFIKIMI I KOLONAVE",
         "phase": "AMAZON",
-        "description": None,  # Add your description here
+        "description": (
+            "Pas pranimit të projektit të ri nga furnitori, analizohen të gjitha informatat e pranuara, "
+            "duke identifikuar të dhënat që mungojnë si dhe rastet e reja. Pas kësaj faze, përcaktohen "
+            "kolonat (informatat) që mungojnë dhe plotësohen përmes burimeve të ndryshme në web ose "
+            "I ipen zhvillimit per ti gjetur te dhenat me agjent. Në rast se informatat gjenerohen nga "
+            "agjentët, ato kontrollohen dhe manualisht.\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL \n"
+            "4.TRAJNIM: 0\n"
+            "5. BZ GROUP: VS_EMRI I FURNITORIT\n"
+        ),
     },
     {
         "key": "template",
         "title": "PLOTESIMI I TEMPLATE-IT TE AMAZONIT",
         "phase": "AMAZON",
         "dependency_key": "base",
-        "description": None,  # Add your description here
+        "description": (
+            "Pas sigurimit të informatave të nevojshme, bëhet plotësimi i kolonave në template-in e "
+            "Amazon-it. Në to vendosen informatat që kanë munguar dhe janë siguruar përmes web-it ose "
+            "agjentit, si dhe të dhënat që gjenden në produktdaten (dokumentet) e dërguara nga klienti, "
+            "të përshtatura sipas rregullave dhe standardeve të Amazon-it.1. \n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\\00_TEMPLATE\\BLANK\\AMAZON\\FINAL\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL \n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
     {
         "key": "prices",
         "title": "KALKULIMI I CMIMEVE",
         "phase": "AMAZON",
-        "description": None,  # Add your description here
+        "description": (
+            "Fillimisht cmimet e dërguara nga VS kontrollohen për të parë nëse ka ndonjë mungesë; në rast "
+            "se ka mungesa, ato i dërgohen VS-se për sigurimin e cmimeve. Më pas produktet ndahen në dy "
+            "Excel-a të veçantë: pijet dhe feinkost. Në secilin Excel vendosen numrat e artikujve dhe "
+            "çmimet përkatëse, të cilët më pas ngarkohen në Platforme. Excel-i i pijeve llogaritet me "
+            "normal price, ndërsa ai i feinkost-it (ushqime) me feinkost prices. Pas këtij procesi, "
+            "gjenerohet automatikisht Excel-i me çmime për sasi 01, 03, 06 dhe 12, dhe këto çmime "
+            "vendosen në template-in e Amazon-it.\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\\00_TEMPLATE\\FILLED\\AMAZON\\FINAL\\PRICES\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL \n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
     {
         "key": "photos",
         "title": "GJENERIMI I FOTOVE",
         "phase": "AMAZON",
-        "description": None,  # Add your description here
+        "description": (
+            "Fillimisht Fotot e dërguara nga VS kontrollohen për të parë nëse ka ndonjë mungesë; në rast "
+            "se ka mungesa, ato i dërgohen VS-se për sigurimin e fotove. Më pas bëhet kontrollimi i "
+            "fotove nëse përmbajnë kuti druri, vite(ne shishe) apo kanaqe dhe ato modifikohen/editohen. "
+            "Fotot pranohen përmes listës në Excel ose në formatet PNG/JPG. Këto foto kthehen në linka "
+            "URL (përmes Python-it, sipas checklistës se fotove) dhe këta linka vendosen në template-in "
+            "për Amazon.\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\\00_TEMPLATE\\FILLED\\AMAZON\\FINAL\\PICTURE\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL\n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT\n"
+        ),
     },
     {
         "key": "kontrol",
         "title": "KONTROLLIMI I PROD. EGZSISTUESE DHE POSTIMI NE AMAZON",
         "phase": "AMAZON",
         "dependency_key": "ko2",
-        "description": None,  # Add your description here
+        "description": (
+            "Behet kontrolla e produkteve  ekzistuese në Amazon. Në përputhje me rregullat dhe kërkesat "
+            "e klientit, fshihen produktet që janë të njëjta ose duplikatë me ato që planifikohen për "
+            "postim. Më pas realizohet postimi i produkteve në Amazon. Pas postimit, identifikohen "
+            "error-at, bëhet rregullimi i tyre dhe produktet ripostohen derisa procesi të përfundojë "
+            "pa asnjë error.\n"
+        ),
     },
     {
         "key": "ko1",
         "title": "KO1 E PROJEKTIT VS",
         "phase": "CHECK",
         "dependency_key": "base",
-        "description": None,  # Add your description here
+        "description": (
+            "Pas perfundimit te projektit behet kontrolla e te gjitha kolonave nese ka blanks. Dhe "
+            "vazhdohet me kontrollen e projektit permes checklistes per Amazon VS\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL \n"
+            "4.TRAJNIM: 0\n"
+        ),
     },
     {
         "key": "ko2",
         "title": "KO2 E PROJEKTIT VS",
         "phase": "CHECK",
         "dependency_key": "ko1",
-        "description": None,  # Add your description here
+        "description": (
+            "Pas kontrolles se pare te projektit VS behet kontrolla e dyte finale sipas checklistes "
+            "per Amazon VS\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\AMAZON\\FINAL \n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
     {
         "key": "dreamVs",
         "title": "DREAM ROBOT VS",
         "phase": "DREAMROBOT",
         "dependency_key": "kontrol",
-        "description": None,  # Add your description here
+        "description": (
+            "Plotësohet template-i për Dream Robot për VS. Kontrollohen produktet ekzistuese dhe bëhet "
+            "fshirja e tyre. Pas përfundimit të kontrollit, produktet postohen dhe realizohet lidhja "
+            "e tyre me variacione. Më pas, produktet e vjetra (me prefix-e në fund) lidhen me produktet "
+            "e reja që janë postuar. \n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\\00_TEMPLATE\\BLANK\\DREAM ROBOT\\FINAL\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\DREAMROBOT\\FINAL\n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
     {
         "key": "dreamVl",
         "title": "DREAM ROBOT VL",
         "phase": "DREAMROBOT",
         "dependency_key": "kontrol",
-        "description": None,  # Add your description here
+        "description": (
+            "Plotësohet template-i për Dream Robot për VL. Kontrollohen produktet ekzistuese dhe bëhet "
+            "fshirja e tyre. Pas përfundimit të kontrollit, produktet postohen dhe realizohet lidhja "
+            "e tyre me variacione. Më pas, produktet e vjetra (me prefix-e në fund) lidhen me produktet "
+            "e reja që janë postuar. \n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\26_VL\\00_TEMPLATES\\BLANK TEMPLATE\\DREAM ROBOT\\FINAL\n"
+            "3.CHECK: V:\\26_VL\\01_CHECKLISTA\\FINAL\\DREAMROBOT\n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
     {
         "key": "dreamWeights",
         "title": "KALKULIMI I PESHAVE",
         "phase": "DREAMROBOT",
-        "description": None,  # Add your description here
+        "description": (
+            "Fillimisht peshat e dërguara nga VS kontrollohen për të parë nëse ka ndonjë mungesë; në rast "
+            "se ka mungesa, ato i dërgohen VS-se për sigurimin e peshave. Më pas, peshat vendosen në "
+            "template-in përkatës dhe bëhet kalkulimi i peshës totale të produkteve për sasi 01, 03, 06 "
+            "dhe 12. Në fund, këto të dhëna vendosen në template-in e Dream Robot\n"
+            "1. REGJ: VS/VL\n"
+            "2.PATH: V:\\20_VS\\00_TEMPLATE\\FILLED\\DREAM ROBOT\\FINAL\\WEIGHT\n"
+            "3.CHECK: V:\\20_VS\\01_CHECKLISTA\\DREAMROBOT\\FINAL\n"
+            "4.TRAJNIM: 0\n"
+            "5.BZ GROUP: VS_EMRI I FURNITORIT"
+        ),
     },
 ]
 
@@ -791,7 +889,7 @@ async def seed() -> None:
 
             await ensure_vs_vl_template(
                 VS_VL_LARGE_TEMPLATE_TITLE,
-                None,
+                VS_VL_LARGE_TEMPLATE_OFFSETS,
                 legacy_titles=VS_VL_LARGE_TEMPLATE_LEGACY_TITLES,
             )
             await ensure_vs_vl_template(VS_VL_SMALL_TEMPLATE_TITLE, VS_VL_SMALL_TEMPLATE_OFFSETS)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,10 @@ class SystemTaskTemplateOut(BaseModel):
     month_of_year: int | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
+    requires_alignment: bool = False
+    alignment_time: time | None = None
+    alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool
     created_at: datetime
 
@@ -43,6 +47,10 @@ class SystemTaskTemplateCreate(BaseModel):
     month_of_year: int | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
+    requires_alignment: bool | None = None
+    alignment_time: time | None = None
+    alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
 
 
@@ -61,5 +69,9 @@ class SystemTaskTemplateUpdate(BaseModel):
     month_of_year: int | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
+    requires_alignment: bool | None = None
+    alignment_time: time | None = None
+    alignment_roles: list[str] | None = None
+    alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
 
