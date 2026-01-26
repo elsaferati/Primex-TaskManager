@@ -1,4 +1,4 @@
-﻿
+
 "use client"
 
 import * as React from "react"
@@ -111,9 +111,15 @@ function timeInputValue(value?: string | null) {
   return String(value).slice(0, 5)
 }
 
-function userDisplayLabel(user?: User | UserLookup | null) {
+function userDisplayLabel(
+  user?: {
+    full_name?: string | null
+    username?: string | null
+    email?: string | null
+  } | null
+) {
   if (!user) return ""
-  return user.full_name || user.username || ("email" in user ? user.email : "") || ""
+  return user.full_name || user.username || user.email || ""
 }
 
 function userInitials(label: string) {
@@ -123,8 +129,8 @@ function userInitials(label: string) {
   const tokens = base.match(/[A-Za-z0-9]+/g) || []
   if (tokens.length === 0) return base.slice(0, 2).toUpperCase()
   if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase()
-  const first = tokens[0][0] || ""
-  const last = tokens[tokens.length - 1][0] || ""
+  const first = tokens[0]?.[0] ?? ""
+  const last = tokens[tokens.length - 1]?.[0] ?? ""
   return `${first}${last}`.toUpperCase()
 }
 
@@ -1302,6 +1308,32 @@ export function SystemTasksView({
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;")
     }
+    const stripHtml = (value: string | null | undefined) => String(value ?? "").replace(/<[^>]+>/g, "").trim()
+    const buildDetails = (template: SystemTaskTemplate) => {
+      const notes = parseInternalNotes(template.internal_notes)
+      const parts: string[] = []
+      const reg = notes.REGJ ? `REGJ: ${notes.REGJ}` : ""
+      const path = notes.PATH ? `PATH: ${notes.PATH}` : ""
+      const check = notes.CHECKLISTA || notes.CHECK ? `CHECKLISTA: ${notes.CHECKLISTA || notes.CHECK}` : ""
+      const training = notes.TRAINING ? `TRAINING: ${notes.TRAINING}` : ""
+      if (reg) parts.push(reg)
+      if (path) parts.push(path)
+      if (check) parts.push(check)
+      if (training) parts.push(training)
+      return parts.join(" | ")
+    }
+    const buildBzGroup = (template: SystemTaskTemplate) => {
+      const notes = parseInternalNotes(template.internal_notes)
+      return notes["BZ GROUP"] || ""
+    }
+    const assigneeInitials = (list?: SystemTaskTemplate["assignees"]) => {
+      if (!list || list.length === 0) return "-"
+      return list
+        .map((person) => userDisplayLabel(person))
+        .filter(Boolean)
+        .map((label) => userInitials(label))
+        .join(", ")
+    }
 
     const rows = sections[0]?.templates ?? []
     if (rows.length === 0) {
@@ -1334,6 +1366,39 @@ export function SystemTasksView({
       grouped.get(template.frequency)?.push(template)
     }
 
+    const frequencyShortLabel = (value: SystemTaskFrequency) => {
+      switch (value) {
+        case "DAILY":
+          return "D"
+        case "WEEKLY":
+          return "W"
+        case "MONTHLY":
+          return "M"
+        case "3_MONTHS":
+          return "3M"
+        case "6_MONTHS":
+          return "6M"
+        case "YEARLY":
+          return "Y"
+        default:
+          return value
+      }
+    }
+
+    const departmentShortLabel = (template: SystemTaskTemplate, department: Department | null) => {
+      if (template.scope === "GA") return "GA"
+      if (template.scope === "ALL") return "ALL"
+      if (department?.code) return department.code.toUpperCase()
+      const name = department?.name || ""
+      if (!name) return "-"
+      return name
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((part) => part[0])
+        .join("")
+        .toUpperCase()
+    }
+
     const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
       const priorityValue = normalizePriority(template.priority)
       const department = template.department_id ? departmentMap.get(template.department_id) : null
@@ -1346,24 +1411,30 @@ export function SystemTasksView({
             : department
               ? formatDepartmentName(department.name)
               : "-"
-      const ownerLabel = assigneeSummary(template.assignees)
+      const ownerLabel = assigneeInitials(template.assignees)
       const frequencyLabelResolved =
         FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency
+      const frequencyShort = frequencyShortLabel(template.frequency)
+      const departmentShort = departmentShortLabel(template, department || null)
+      const priorityShort = priorityValue === "HIGH" ? "H" : "N"
 
       return `
         <tr>
           <td class="num">${rowNumber}</td>
-          <td class="title">${escapeHtml(template.title)}</td>
-          <td>${escapeHtml(departmentLabel)}</td>
-          <td>${escapeHtml(ownerLabel)}</td>
-          <td>${escapeHtml(frequencyLabelResolved)}</td>
+          <td class="center">${escapeHtml(priorityShort)}</td>
+          <td class="center no-wrap">${escapeHtml(frequencyShort)}</td>
+          <td class="no-wrap">${escapeHtml(departmentShort)}</td>
           <td class="center">${escapeHtml(template.finish_period || "-")}</td>
-          <td class="center">
-            <span class="pill ${priorityValue === "HIGH" ? "pill-high" : "pill-normal"}">${escapeHtml(
-              PRIORITY_LABELS[priorityValue]
-            )}</span>
-          </td>
-          <td class="center">${template.is_active === false ? "No" : "Yes"}</td>
+          <td class="title">${escapeHtml(template.title)}</td>
+          <td class="description">${escapeHtml(
+            (() => {
+              const desc = stripHtml(template.description)
+              return desc && desc.toLowerCase() !== "pershkrimi" ? desc : "-"
+            })()
+          )}</td>
+          <td>${escapeHtml(ownerLabel)}</td>
+          <td class="details">${escapeHtml(buildDetails(template))}</td>
+          <td class="bz-group">${escapeHtml(buildBzGroup(template))}</td>
         </tr>
       `
     }
@@ -1376,7 +1447,7 @@ export function SystemTasksView({
       const label = FREQUENCY_OPTIONS.find((o) => o.value === frequency)?.label ?? frequency
       tableBody += `
         <tr class="group-row">
-          <td colspan="8">${escapeHtml(label)}</td>
+          <td colspan="10">${escapeHtml(label)}</td>
         </tr>
       `
       for (const template of list) {
@@ -1388,7 +1459,7 @@ export function SystemTasksView({
     if (inactive.length) {
       tableBody += `
         <tr class="inactive-row">
-          <td colspan="8">Inactive Tasks</td>
+          <td colspan="10">Inactive Tasks</td>
         </tr>
       `
       for (const template of inactive) {
@@ -1406,13 +1477,14 @@ export function SystemTasksView({
           <style>
             @media print {
               @page { margin: 12mm; }
-              body { margin: 0; }
+              body { margin: 0; padding-bottom: 14mm; }
             }
 
             body {
               font-family: Arial, sans-serif;
               font-size: 10pt;
               color: #0f172a;
+              position: relative;
             }
 
             .header {
@@ -1452,7 +1524,7 @@ export function SystemTasksView({
             table {
               width: 100%;
               border-collapse: collapse;
-              table-layout: fixed;
+              table-layout: auto;
             }
 
             thead th {
@@ -1461,6 +1533,7 @@ export function SystemTasksView({
               padding: 8px 6px;
               font-size: 9pt;
               text-align: left;
+              white-space: normal;
             }
 
             tbody td {
@@ -1469,12 +1542,19 @@ export function SystemTasksView({
               vertical-align: top;
               font-size: 9pt;
               word-break: break-word;
+              white-space: normal;
+            }
+            .no-wrap {
+              white-space: nowrap;
             }
 
             tr { page-break-inside: avoid; }
 
-            .num { width: 36px; text-align: center; font-weight: bold; }
-            .title { width: 38%; font-weight: 600; }
+            .num { text-align: center; font-weight: bold; }
+            .title { font-weight: 600; }
+            .description { }
+            .details { }
+            .bz-group { }
             .center { text-align: center; }
 
             .group-row td {
@@ -1506,6 +1586,37 @@ export function SystemTasksView({
 
             .pill-normal { background: #ffedd5; border-color: #fdba74; color: #9a3412; }
             .pill-high { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
+
+            .print-footer-fixed {
+              display: none;
+            }
+
+            @media print {
+              .print-footer-fixed {
+                display: grid;
+                position: fixed;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                padding: 6px 10px;
+                font-size: 9pt;
+                color: #475569;
+                z-index: 9999;
+                pointer-events: none;
+                grid-template-columns: 1fr auto 1fr;
+                align-items: center;
+              }
+              .print-footer-fixed .page-count {
+                grid-column: 2;
+              }
+              .print-footer-fixed .page-count::before {
+                content: counter(page) "/" var(--print-total-pages, "1");
+              }
+              .print-footer-fixed .punoi {
+                grid-column: 3;
+                justify-self: end;
+              }
+            }
           </style>
         </head>
         <body>
@@ -1520,20 +1631,60 @@ export function SystemTasksView({
           <table>
             <thead>
               <tr>
-                <th style="width:36px;">No.</th>
-                <th>Task Title</th>
-                <th style="width:16%;">Department</th>
-                <th style="width:16%;">Owner</th>
-                <th style="width:12%;">Frequency</th>
-                <th style="width:9%;">Finish</th>
-                <th style="width:10%;">Priority</th>
-                <th style="width:7%;">Active</th>
+                <th>No.</th>
+                <th>P</th>
+                <th>Lloji</th>
+                <th>D</th>
+                <th>AM/PM</th>
+                <th>Titulli</th>
+                <th>Pershkrimi</th>
+                <th>Personi</th>
+                <th>REGJ/PATH/CHECKLISTA/TRAINING</th>
+                <th>BZ GROUP</th>
               </tr>
             </thead>
             <tbody>
               ${tableBody}
             </tbody>
           </table>
+          <div class="print-footer-fixed">
+            <span></span>
+            <span class="page-count"></span>
+            <span class="punoi">PUNOI ___</span>
+          </div>
+          <script>
+            (function () {
+              const PX_PER_IN = 96;
+              const A4_HEIGHT_IN = 11.69;
+              const marginTopMm = 12;
+              const marginBottomMm = 12;
+              const pageHeight = A4_HEIGHT_IN * PX_PER_IN;
+              const marginTopPx = (marginTopMm / 25.4) * PX_PER_IN;
+              const marginBottomPx = (marginBottomMm / 25.4) * PX_PER_IN;
+              // Body coordinates in print start inside the @page margins, so "one page height"
+              // in DOM space is the printable content height (pageHeight - topMargin - bottomMargin).
+              const printableHeight = pageHeight - marginTopPx - marginBottomPx;
+              const measureAndSetTotal = () => {
+                const scrollHeight =
+                  Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight,
+                    document.body.offsetHeight,
+                    document.documentElement.offsetHeight
+                  ) || 0;
+
+                const totalPages = Math.max(1, Math.ceil(scrollHeight / printableHeight));
+                document.documentElement.style.setProperty("--print-total-pages", String(totalPages));
+              };
+
+              // Run ASAP (so parent window's setTimeout(print) sees the footer),
+              // then once more on load in case fonts/layout adjust.
+              requestAnimationFrame(() => requestAnimationFrame(measureAndSetTotal));
+              window.addEventListener("load", () => {
+                requestAnimationFrame(() => requestAnimationFrame(measureAndSetTotal));
+              });
+            })();
+          </script>
         </body>
       </html>
     `
@@ -1543,13 +1694,21 @@ export function SystemTasksView({
     printWindow.document.close()
     printWindow.focus()
 
-    setTimeout(() => {
+    // Prefer onload so the footer/counters are ready for the preview.
+    printWindow.onload = () => {
+      printWindow.focus()
       printWindow.print()
-    }, 250)
+    }
+    // Fallback in case onload doesn't fire (rare for about:blank).
+    setTimeout(() => {
+      try {
+        printWindow.focus()
+        printWindow.print()
+      } catch {}
+    }, 500)
   }, [
     allFrequenciesSelected,
     allPrioritiesSelected,
-    assigneeSummary,
     departmentMap,
     frequencyLabel,
     headingTitle,
@@ -1828,34 +1987,6 @@ export function SystemTasksView({
                 className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
               >
                 Print
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0]
-                  if (file) await importTemplatesFromFile(file)
-                  event.target.value = ""
-                }}
-              />
-              <Button
-                variant="outline"
-                disabled={!canCreate}
-                onClick={() => fileInputRef.current?.click()}
-                size="sm"
-                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-              >
-                Import Excel
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => exportTemplatesCSV("all")}
-                size="sm"
-                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-              >
-                Export All
               </Button>
               <Button
                 variant="outline"

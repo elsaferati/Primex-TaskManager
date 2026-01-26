@@ -25,13 +25,14 @@ from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
 from app.models.meeting import Meeting
 from app.models.project import Project
+from app.models.department import Department
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
 from app.models.user import User
-from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType
+from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope
 
 
 router = APIRouter()
@@ -74,6 +75,21 @@ def _scope_label(template: SystemTaskTemplate) -> str:
     if template.scope:
         return template.scope
     return "DEPARTMENT" if template.department_id else "ALL"
+
+
+def _parse_internal_notes(notes: str | None) -> dict[str, str]:
+    if not notes:
+        return {}
+    values: dict[str, str] = {}
+    for raw in notes.splitlines():
+        if ":" not in raw:
+            continue
+        key, value = raw.split(":", 1)
+        key = key.strip().upper()
+        value = value.strip()
+        if key and value:
+            values[key] = value
+    return values
 
 
 async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
@@ -621,41 +637,170 @@ async def export_system_tasks_xlsx(
     user=Depends(get_current_user),
 ):
     ensure_manager_or_admin(user)
-    stmt = select(SystemTaskTemplate)
+    template_stmt = select(SystemTaskTemplate)
+    if user.role != UserRole.ADMIN:
+        if user.department_id is None:
+            if user.role != UserRole.MANAGER:
+                return []
+        else:
+            template_stmt = template_stmt.where(
+                or_(
+                    SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
+                    SystemTaskTemplate.scope == SystemTaskScope.GA.value,
+                    and_(
+                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
+                        SystemTaskTemplate.department_id == user.department_id,
+                    ),
+                )
+            )
+
+    templates = (await db.execute(template_stmt.order_by(SystemTaskTemplate.title))).scalars().all()
+    if not templates:
+        return []
+
+    template_ids = [t.id for t in templates]
+    task_stmt = (
+        select(Task, SystemTaskTemplate)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.system_template_origin_id.in_(template_ids))
+    )
     if active_only:
-        stmt = stmt.where(SystemTaskTemplate.is_active.is_(True))
-    templates = (await db.execute(stmt.order_by(SystemTaskTemplate.title))).scalars().all()
+        task_stmt = task_stmt.where(Task.is_active.is_(True))
+    task_rows = (await db.execute(task_stmt.order_by(Task.created_at.desc()))).all()
+    dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
+    for task, tmpl in task_rows:
+        prev = dedup.get(tmpl.id)
+        if prev is None or (task.created_at and prev[0].created_at and task.created_at > prev[0].created_at):
+            dedup[tmpl.id] = (task, tmpl)
+    task_rows = list(dedup.values())
+
+    task_ids = [task.id for task, _ in task_rows]
+    assignee_map: dict[uuid.UUID, list[str]] = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        assignee_rows = (
+            await db.execute(
+                select(TaskAssignee.task_id, User)
+                .join(User, TaskAssignee.user_id == User.id)
+                .where(TaskAssignee.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_row in assignee_rows:
+            label = user_row.full_name or user_row.username or ""
+            if label:
+                assignee_map.setdefault(task_id, []).append(label)
+
+    fallback_ids = [
+        task.assigned_to
+        for task, _ in task_rows
+        if task.assigned_to is not None and not assignee_map.get(task.id)
+    ]
+    fallback_map: dict[uuid.UUID, str] = {}
+    if fallback_ids:
+        fallback_users = (
+            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+        ).scalars().all()
+        fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
+
+    department_ids = {template.department_id for _, template in task_rows if template.department_id}
+    department_map: dict[uuid.UUID, str] = {}
+    if department_ids:
+        departments = (
+            await db.execute(select(Department).where(Department.id.in_(department_ids)))
+        ).scalars().all()
+        department_map = {d.id: d.name for d in departments}
 
     wb = Workbook()
     ws = wb.active
     ws.title = "System Tasks"
 
-    headers = ["Nr", "Prioriteti", "Lloji", "AM/PM", "Titulli", "Pershkrimi"]
-    ws.append(headers)
-    header_font = Font(bold=True)
-    for col_idx in range(1, len(headers) + 1):
-        cell = ws.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    headers = [
+        "Nr",
+        "Prioriteti",
+        "Lloji",
+        "Departamenti",
+        "AM/PM",
+        "Titulli",
+        "Pershkrimi",
+        "Personi",
+        "REGJ/PATH/CHECKLISTA/TRAINING",
+        "BZ GROUP",
+    ]
+    last_col = len(headers)
 
-    for idx, template in enumerate(templates, start=1):
-        ws.append(
-            [
-                idx,
-                _priority_label(template.priority),
-                _scope_label(template),
-                template.finish_period or "",
-                template.title,
-                _strip_html(template.description),
-            ]
-        )
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value="SYSTEM TASKS")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    widths = [6, 12, 12, 10, 40, 60]
-    for col_idx, width in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="center")
 
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
+    col_widths = [len(header) for header in headers]
+
+    for idx, (task, template) in enumerate(task_rows, start=1):
+        assignees = assignee_map.get(task.id, [])
+        if not assignees and task.assigned_to in fallback_map:
+            assignees = [fallback_map[task.assigned_to]]
+        assignee_label = ", ".join(assignees)
+        row_idx = 3 + idx
+        if template.department_id and template.department_id in department_map:
+            department_label = department_map[template.department_id]
+        elif template.scope == "GA":
+            department_label = "GA"
+        else:
+            department_label = "ALL"
+        note_values = _parse_internal_notes(template.internal_notes)
+        details_parts = []
+        for label, key in [
+            ("REGJ", "REGJ"),
+            ("PATH", "PATH"),
+            ("CHECKLISTA", "CHECKLISTA"),
+            ("CHECKLISTA", "CHECK"),
+            ("TRAINING", "TRAINING"),
+        ]:
+            value = note_values.get(key, "")
+            if value:
+                details_parts.append(f"{label}: {value}")
+        details_value = " | ".join(details_parts)
+        bz_group_value = note_values.get("BZ GROUP", "")
+        values = [
+            idx,
+            _priority_label(template.priority),
+            template.frequency,
+            department_label,
+            task.finish_period or "",
+            task.title,
+            _strip_html(task.description),
+            assignee_label,
+            details_value,
+            bz_group_value,
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            col_widths[col_idx - 1] = max(col_widths[col_idx - 1], len(str(value)))
+
+    for col_idx, width in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 80)
+
+    for row_idx in range(4, ws.max_row + 1):
+        ws.cell(row=row_idx, column=1).font = Font(bold=True)
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    last_row = ws.max_row
+    for r in range(3, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == 3 else thin
+            bottom = thick if r in (3, last_row) else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    ws.freeze_panes = "B4"
+    ws.auto_filter.ref = f"A3:{get_column_letter(last_col)}{last_row}"
 
     bio = io.BytesIO()
     wb.save(bio)
