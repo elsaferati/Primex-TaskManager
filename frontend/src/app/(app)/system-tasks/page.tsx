@@ -1,4 +1,4 @@
-
+﻿
 "use client"
 
 import * as React from "react"
@@ -1477,14 +1477,14 @@ export function SystemTasksView({
           <style>
             @media print {
               @page { margin: 12mm; }
-              body { margin: 0; padding-bottom: 14mm; }
+              body { margin: 0; padding-bottom: 30px; }
             }
 
             body {
               font-family: Arial, sans-serif;
               font-size: 10pt;
               color: #0f172a;
-              position: relative;
+              padding-bottom: 40px;
             }
 
             .header {
@@ -1587,34 +1587,54 @@ export function SystemTasksView({
             .pill-normal { background: #ffedd5; border-color: #fdba74; color: #9a3412; }
             .pill-high { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
 
-            .print-footer-fixed {
+            .print-footer {
               display: none;
             }
 
             @media print {
-              .print-footer-fixed {
+              .print-footer {
                 display: grid;
                 position: fixed;
+                bottom: 0;
                 left: 0;
                 right: 0;
-                bottom: 0;
-                padding: 6px 10px;
+                padding: 6px 0;
                 font-size: 9pt;
                 color: #475569;
-                z-index: 9999;
-                pointer-events: none;
                 grid-template-columns: 1fr auto 1fr;
                 align-items: center;
               }
-              .print-footer-fixed .page-count {
+              .print-footer .page-count {
                 grid-column: 2;
+                text-align: center;
               }
-              .print-footer-fixed .page-count::before {
-                content: counter(page) "/" var(--print-total-pages, "1");
-              }
-              .print-footer-fixed .punoi {
+              .print-footer .punoi {
                 grid-column: 3;
-                justify-self: end;
+                text-align: right;
+              }
+            }
+
+            @media screen {
+              .print-footer {
+                display: grid;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                padding: 10px 20px;
+                font-size: 9pt;
+                color: #475569;
+                background: white;
+                grid-template-columns: 1fr auto 1fr;
+                align-items: center;
+              }
+              .print-footer .page-count {
+                grid-column: 2;
+                text-align: center;
+              }
+              .print-footer .punoi {
+                grid-column: 3;
+                text-align: right;
               }
             }
           </style>
@@ -1624,7 +1644,7 @@ export function SystemTasksView({
             <h1>${escapeHtml(effectiveTitle)}</h1>
             <div class="meta">
               <div class="filters"><strong>Filters:</strong> ${escapeHtml(filterLine)}</div>
-              <div class="printedAt"><strong>Printed:</strong> ${escapeHtml(printedAt)}</div>
+              <div class="printedAt">${escapeHtml(printedAt)}</div>
             </div>
           </div>
 
@@ -1647,42 +1667,37 @@ export function SystemTasksView({
               ${tableBody}
             </tbody>
           </table>
-          <div class="print-footer-fixed">
+          <div class="print-footer">
             <span></span>
-            <span class="page-count"></span>
+            <span class="page-count" id="page-count">1/1</span>
             <span class="punoi">PUNOI ___</span>
           </div>
           <script>
             (function () {
-              const PX_PER_IN = 96;
-              const A4_HEIGHT_IN = 11.69;
-              const marginTopMm = 12;
-              const marginBottomMm = 12;
-              const pageHeight = A4_HEIGHT_IN * PX_PER_IN;
-              const marginTopPx = (marginTopMm / 25.4) * PX_PER_IN;
-              const marginBottomPx = (marginBottomMm / 25.4) * PX_PER_IN;
-              // Body coordinates in print start inside the @page margins, so "one page height"
-              // in DOM space is the printable content height (pageHeight - topMargin - bottomMargin).
-              const printableHeight = pageHeight - marginTopPx - marginBottomPx;
-              const measureAndSetTotal = () => {
-                const scrollHeight =
-                  Math.max(
-                    document.body.scrollHeight,
-                    document.documentElement.scrollHeight,
-                    document.body.offsetHeight,
-                    document.documentElement.offsetHeight
-                  ) || 0;
-
-                const totalPages = Math.max(1, Math.ceil(scrollHeight / printableHeight));
-                document.documentElement.style.setProperty("--print-total-pages", String(totalPages));
-              };
-
-              // Run ASAP (so parent window's setTimeout(print) sees the footer),
-              // then once more on load in case fonts/layout adjust.
-              requestAnimationFrame(() => requestAnimationFrame(measureAndSetTotal));
-              window.addEventListener("load", () => {
-                requestAnimationFrame(() => requestAnimationFrame(measureAndSetTotal));
-              });
+              // Calculate approximate page count based on content height
+              var A4_HEIGHT_PX = 11.69 * 96; // ~1122px
+              var MARGIN_PX = 12 * 96 / 25.4; // 12mm ~45px
+              var printableHeight = A4_HEIGHT_PX - MARGIN_PX * 2;
+              
+              function updatePageCount() {
+                var bodyHeight = Math.max(
+                  document.body.scrollHeight,
+                  document.body.offsetHeight,
+                  document.documentElement.scrollHeight
+                );
+                var totalPages = Math.max(1, Math.ceil(bodyHeight / printableHeight));
+                var pageCountEl = document.getElementById("page-count");
+                if (pageCountEl) {
+                  pageCountEl.textContent = "1/" + totalPages;
+                }
+              }
+              
+              // Update on load
+              if (document.readyState === "complete") {
+                updatePageCount();
+              } else {
+                window.addEventListener("load", updatePageCount);
+              }
             })();
           </script>
         </body>
@@ -1694,18 +1709,23 @@ export function SystemTasksView({
     printWindow.document.close()
     printWindow.focus()
 
-    // Prefer onload so the footer/counters are ready for the preview.
-    printWindow.onload = () => {
+    const triggerPrint = () => {
       printWindow.focus()
       printWindow.print()
+      // Close the window after printing (works when user prints or cancels)
+      printWindow.close()
+    }
+
+    // Prefer onload so the footer/counters are ready for the preview.
+    printWindow.onload = () => {
+      setTimeout(triggerPrint, 100)
     }
     // Fallback in case onload doesn't fire (rare for about:blank).
     setTimeout(() => {
       try {
-        printWindow.focus()
-        printWindow.print()
+        triggerPrint()
       } catch {}
-    }, 500)
+    }, 600)
   }, [
     allFrequenciesSelected,
     allPrioritiesSelected,
