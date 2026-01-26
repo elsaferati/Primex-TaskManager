@@ -28,11 +28,16 @@ from app.models.project import Project
 from app.models.department import Department
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope
+from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 
 
 router = APIRouter()
@@ -199,6 +204,92 @@ def _resolve_period(finish_period: str | None, date_value: date | datetime | Non
     if isinstance(date_value, datetime):
         return "PM" if date_value.hour >= 12 else "AM"
     return "AM"
+
+
+def _planned_range_for_task(task: Task) -> tuple[date | None, date | None]:
+    if task.due_date is None:
+        return None, None
+    due = task.due_date.date()
+    if task.start_date is not None:
+        start = task.start_date.date()
+        if start <= due:
+            return start, due
+    return due, due
+
+
+async def _user_comments_for_tasks(
+    db: AsyncSession, task_ids: list[uuid.UUID], user_id: uuid.UUID
+) -> dict[uuid.UUID, str | None]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskUserComment.task_id, TaskUserComment.comment)
+            .where(TaskUserComment.task_id.in_(task_ids))
+            .where(TaskUserComment.user_id == user_id)
+        )
+    ).all()
+    return {task_id: comment for task_id, comment in rows}
+
+
+async def _alignment_maps_for_templates(
+    db: AsyncSession, template_ids: list[uuid.UUID]
+) -> tuple[dict[uuid.UUID, list[str]], dict[uuid.UUID, list[uuid.UUID]]]:
+    if not template_ids:
+        return {}, {}
+    role_rows = (
+        await db.execute(
+            select(SystemTaskTemplateAlignmentRole.template_id, SystemTaskTemplateAlignmentRole.role)
+            .where(SystemTaskTemplateAlignmentRole.template_id.in_(template_ids))
+        )
+    ).all()
+    roles_map: dict[uuid.UUID, list[str]] = {}
+    for tid, role in role_rows:
+        roles_map.setdefault(tid, []).append(role)
+
+    alignment_user_rows = (
+        await db.execute(
+            select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+            .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+        )
+    ).all()
+    alignment_users_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for tid, uid in alignment_user_rows:
+        alignment_users_map.setdefault(tid, []).append(uid)
+
+    return roles_map, alignment_users_map
+
+
+def _format_task_status(status: str | None) -> str:
+    if not status:
+        return "-"
+    if status == "IN_PROGRESS":
+        return "In Progress"
+    if status == "TODO":
+        return "To Do"
+    if status == "DONE":
+        return "Done"
+    return status
+
+
+def _format_system_status(status: str | None) -> str:
+    if not status:
+        return "-"
+    if status == "NOT_DONE":
+        return "Not Done"
+    if status == "DONE":
+        return "Done"
+    if status == "OPEN":
+        return "Open"
+    if status == "SKIPPED":
+        return "Skipped"
+    return status
+
+
+def _format_alignment_time(value: time | None) -> str:
+    if not value:
+        return "-"
+    return f"{value.hour:02d}:{value.minute:02d}"
 
 
 def _tyo_label(base_date: date | None, completed_at: date | None, today: date) -> str:
@@ -627,6 +718,323 @@ async def export_checklist_xlsx(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{safe_filename}.xlsx\"'},
+    )
+
+
+@router.get("/daily-report.xlsx")
+async def export_daily_report_xlsx(
+    day: date,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if user.role == UserRole.STAFF:
+        department_id = user.department_id
+        user_id = user.id
+
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+    elif user.role != UserRole.ADMIN:
+        department_id = user.department_id
+
+    if user_id is None:
+        user_id = user.id
+
+    task_stmt = (
+        select(Task)
+        .where(Task.completed_at.is_(None))
+        .where(Task.is_active.is_(True))
+        .where(Task.system_template_origin_id.is_(None))
+        .where(Task.due_date.is_not(None))
+    )
+    if department_id is not None:
+        task_stmt = task_stmt.where(Task.department_id == department_id)
+    if user_id is not None:
+        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+
+    tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
+
+    tasks_today: list[Task] = []
+    tasks_overdue: list[Task] = []
+    for task in tasks:
+        planned_start, planned_end = _planned_range_for_task(task)
+        if planned_start is None or planned_end is None:
+            continue
+        if planned_start <= day <= planned_end:
+            tasks_today.append(task)
+        elif planned_end < day:
+            tasks_overdue.append(task)
+
+    daily_tasks = tasks_today + tasks_overdue
+    task_comment_map = await _user_comments_for_tasks(db, [t.id for t in daily_tasks], user_id)
+
+    project_ids = {t.project_id for t in daily_tasks if t.project_id is not None}
+    project_map: dict[uuid.UUID, str] = {}
+    if project_ids:
+        projects = (
+            await db.execute(select(Project).where(Project.id.in_(project_ids)))
+        ).scalars().all()
+        for project in projects:
+            project_map[project.id] = project.title or project.name or "-"
+
+    await ensure_occurrences_in_range(db=db, start=day - timedelta(days=60), end=day)
+    await db.commit()
+
+    occ_today_rows = (
+        await db.execute(
+            select(SystemTaskOccurrence, SystemTaskTemplate)
+            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskOccurrence.user_id == user_id)
+            .where(SystemTaskOccurrence.occurrence_date == day)
+            .order_by(SystemTaskTemplate.title)
+        )
+    ).all()
+    occ_overdue_rows = (
+        await db.execute(
+            select(SystemTaskOccurrence, SystemTaskTemplate)
+            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskOccurrence.user_id == user_id)
+            .where(SystemTaskOccurrence.occurrence_date < day)
+            .where(SystemTaskOccurrence.status == OPEN)
+            .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
+        )
+    ).all()
+
+    today_template_ids = {tmpl.id for _, tmpl in occ_today_rows}
+    overdue_rows: list[tuple[SystemTaskOccurrence, SystemTaskTemplate]] = []
+    seen_templates: set[uuid.UUID] = set()
+    for occ, tmpl in occ_overdue_rows:
+        if tmpl.id in today_template_ids or tmpl.id in seen_templates:
+            continue
+        seen_templates.add(tmpl.id)
+        overdue_rows.append((occ, tmpl))
+
+    template_ids = list({tmpl.id for _, tmpl in occ_today_rows} | set(seen_templates))
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
+    alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
+    alignment_user_map: dict[uuid.UUID, str] = {}
+    if alignment_user_ids:
+        users = (await db.execute(select(User).where(User.id.in_(alignment_user_ids)))).scalars().all()
+        for u in users:
+            label = u.full_name or u.username or ""
+            alignment_user_map[u.id] = _initials(label)
+
+    def alignment_values(tmpl: SystemTaskTemplate) -> tuple[str, str]:
+        roles = roles_map.get(tmpl.id, [])
+        user_ids = alignment_users_map.get(tmpl.id, [])
+        alignment_enabled = bool(
+            tmpl.requires_alignment or tmpl.alignment_time or roles or user_ids
+        )
+        if not alignment_enabled:
+            return "-", "-"
+        bz = "-"
+        if user_ids:
+            initials = [alignment_user_map.get(uid, "") for uid in user_ids]
+            initials = [value for value in initials if value]
+            if initials:
+                bz = "/".join(initials)
+        elif roles:
+            bz = ", ".join(roles)
+        koha_bz = _format_alignment_time(tmpl.alignment_time) if tmpl.alignment_time else "-"
+        return bz, koha_bz
+
+    rows: list[list[str]] = []
+    fast_rows: list[tuple[int, int, list[str]]] = []
+    project_rows: list[list[str]] = []
+    system_am_rows: list[list[str]] = []
+    system_pm_rows: list[list[str]] = []
+    fast_index = 0
+
+    def fast_type_order(task: Task) -> int:
+        label = _no_project_type_label(task)
+        if label == "BLLOK":
+            return 0
+        if label == "1H":
+            return 1
+        if label == "Personal":
+            return 2
+        if label == "R1":
+            return 3
+        if label == "Normal":
+            return 4
+        return 5
+
+    for task in daily_tasks:
+        base_dt = task.due_date or task.start_date or task.created_at
+        base_date = base_dt.date() if base_dt else None
+        tyo = _tyo_label(base_date, task.completed_at.date() if task.completed_at else None, day)
+        period = _resolve_period(task.finish_period, base_dt)
+        status = _format_task_status(task.status)
+        comment = task_comment_map.get(task.id) or ""
+        if task.project_id is None:
+            fast_rows.append(
+                (
+                    fast_type_order(task),
+                    fast_index,
+                    [
+                        "",
+                        "FT",
+                        _fast_subtype_short(task),
+                        period,
+                        task.title or "-",
+                        task.description or "-",
+                        status,
+                        "-",
+                        "-",
+                        tyo,
+                        comment,
+                    ],
+                )
+            )
+            fast_index += 1
+        else:
+            project_label = project_map.get(task.project_id, "-")
+            project_rows.append(
+                [
+                    "",
+                    "PRJK",
+                    "-",
+                    period,
+                    f"{project_label} - {task.title or '-'}",
+                    task.description or "-",
+                    status,
+                    "-",
+                    "-",
+                    tyo,
+                    comment,
+                ]
+            )
+
+    def add_system_row(container: list[list[str]], occ: SystemTaskOccurrence, tmpl: SystemTaskTemplate) -> None:
+        base_date = occ.occurrence_date
+        acted_date = occ.acted_at.date() if occ.acted_at else None
+        tyo = _tyo_label(base_date, acted_date, day)
+        period = _resolve_period(tmpl.finish_period, occ.occurrence_date)
+        bz, koha_bz = alignment_values(tmpl)
+        container.append(
+            [
+                "",
+                "SYS",
+                _system_frequency_short_label(tmpl.frequency),
+                period,
+                tmpl.title or "-",
+                tmpl.description or "-",
+                _format_system_status(occ.status),
+                bz,
+                koha_bz,
+                tyo,
+                occ.comment or "",
+            ]
+        )
+
+    for occ, tmpl in overdue_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
+        add_system_row(target, occ, tmpl)
+
+    for occ, tmpl in occ_today_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
+        add_system_row(target, occ, tmpl)
+
+    fast_rows.sort(key=lambda item: (item[0], item[1]))
+    rows.extend([row for _, __, row in fast_rows])
+    rows.extend(system_am_rows)
+    rows.extend(project_rows)
+    rows.extend(system_pm_rows)
+
+    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Daily Report"
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    title_cell = ws.cell(row=1, column=1, value="DAILY TASK REPORT")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    header_row = 3
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        cell.alignment = Alignment(
+            horizontal="left",
+            vertical="bottom",
+            wrap_text=False if header == "NR" else True,
+        )
+
+    column_widths = {
+        "NR": 4,
+        "LL": 5,
+        "NLL": 6,
+        "AM/PM": 7,
+        "TITULLI": 32,
+        "PERSHKRIMI": 28,
+        "STS": 10,
+        "BZ": 8,
+        "KOHA BZ": 10,
+        "T/Y/O": 6,
+        "KOMENT": 22,
+    }
+    for col_idx, header in enumerate(headers, start=1):
+        width = column_widths.get(header, 16)
+        ws.column_dimensions[ws.cell(row=header_row, column=col_idx).column_letter].width = width
+
+    data_row = header_row + 1
+    for idx, row in enumerate(rows, start=1):
+        row_values = row.copy()
+        row_values[0] = idx
+        for col_idx, value in enumerate(row_values, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            cell.alignment = Alignment(
+                horizontal="left",
+                vertical="bottom",
+                wrap_text=col_idx in {5, 6, 11},
+            )
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    ws.freeze_panes = ws["B4"]
+    ws.print_title_rows = "3:3"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.fitToPage = True
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    last_row = data_row - 1
+    last_col = len(headers)
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{ws.cell(row=header_row, column=last_col).column_letter}{last_row}"
+        thin = Side(style="thin", color="000000")
+        thick = Side(style="medium", color="000000")
+        for r in range(header_row, last_row + 1):
+            for c in range(1, last_col + 1):
+                left = thick if c == 1 else thin
+                right = thick if c == last_col else thin
+                top = thick if r == header_row else thin
+                bottom = thick if r == last_row else thin
+                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = f"daily_report_{day.isoformat()}_{user_initials or 'user'}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
 
