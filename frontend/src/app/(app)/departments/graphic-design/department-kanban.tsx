@@ -536,6 +536,7 @@ export default function DepartmentKanban() {
   const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -686,10 +687,12 @@ export default function DepartmentKanban() {
       }))
       setPrintPageMarkers(markers)
       setPrintPageMinHeight(totalPages * pageHeightPx)
+      setPrintTotalPages(totalPages)
     }
     const handleAfterPrint = () => {
       setPrintPageMarkers([])
       setPrintPageMinHeight(null)
+      setPrintTotalPages(1)
     }
     window.addEventListener("beforeprint", handleBeforePrint)
     window.addEventListener("afterprint", handleAfterPrint)
@@ -4250,9 +4253,11 @@ export default function DepartmentKanban() {
             </div>
           ))}
           <div className="print-footer">
-            <div />
-            <div className="print-page-count" />
-            <div className="print-initials">PUNOI: {printInitials || "____"}</div>
+            <span />
+            <div className="print-page-count">1/{printTotalPages}</div>
+            <div className="print-initials">
+              PUNOI: <span className="print-signature-line" />
+            </div>
           </div>
         </div>
       </div>
@@ -4347,7 +4352,14 @@ export default function DepartmentKanban() {
             color: #334155;
           }
           .print-page-count {
-            display: none;
+            grid-column: 2;
+            text-align: center;
+          }
+          .print-signature-line {
+            display: inline-block;
+            width: 1.5in;
+            border-bottom: 1px solid #334155;
+            vertical-align: bottom;
           }
           .print-initials {
             grid-column: 3;
