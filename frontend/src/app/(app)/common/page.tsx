@@ -3222,6 +3222,9 @@ export default function CommonViewPage() {
             })}
             </div>
             <div className="week-nav-buttons">
+              <button className="week-nav-btn" type="button" onClick={selectAll}>
+                Select All Days
+              </button>
               <button
                 className={`week-nav-btn ${toISODate(weekStart) === toISODate(getMonday(new Date())) ? "active" : ""}`}
                 type="button"
