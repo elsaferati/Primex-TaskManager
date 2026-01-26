@@ -1905,7 +1905,8 @@ export default function PcmProjectPage() {
   const exportVsVlChecklist = async (
     items: ChecklistItem[],
     path: string,
-    filenameSuffix: string
+    filenameSuffix: string,
+    title: string
   ) => {
     const checklistId = items[0]?.checklist_id
     if (!checklistId) {
@@ -1920,6 +1921,7 @@ export default function PcmProjectPage() {
       if (path === VS_VL_AMAZON_CHECKLIST_PATH && vsVlPhase === "CHECK") {
         params.set("include_ko2", "1")
       }
+      params.set("title", title)
       const res = await apiFetch(`/exports/checklists.xlsx?${params.toString()}`)
       if (!res.ok) {
         let detail = "Failed to export checklist."
@@ -3112,7 +3114,8 @@ export default function PcmProjectPage() {
                       void exportVsVlChecklist(
                         vsVlChecklistTab === "amazon" ? vsVlAmazonChecklistItems : vsVlImagesChecklistItems,
                         vsVlChecklistTab === "amazon" ? VS_VL_AMAZON_CHECKLIST_PATH : VS_VL_IMAGES_CHECKLIST_PATH,
-                        vsVlChecklistTab === "amazon" ? "amazon" : "images"
+                        vsVlChecklistTab === "amazon" ? "amazon" : "images",
+                        vsVlChecklistTab === "amazon" ? "Amazon Checklist" : "Images Checklist"
                       )
                     }
                     disabled={
@@ -3168,7 +3171,10 @@ export default function PcmProjectPage() {
                         vsVlDreamrobotChecklistTab === "vs"
                           ? VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
                           : VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
-                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl"
+                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl",
+                        vsVlDreamrobotChecklistTab === "vs"
+                          ? "VS Dreamrobot Checklist"
+                          : "VL Dreamrobot Checklist"
                       )
                     }
                     disabled={
@@ -3535,7 +3541,8 @@ export default function PcmProjectPage() {
                           void exportVsVlChecklist(
                             vsVlAmazonChecklistItems,
                             VS_VL_AMAZON_CHECKLIST_PATH,
-                            "amazon"
+                            "amazon",
+                            "Amazon Checklist"
                           )
                         }
                         disabled={exportingVsVlChecklist || vsVlAmazonChecklistItems.length === 0}
