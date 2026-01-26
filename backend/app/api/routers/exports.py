@@ -25,11 +25,12 @@ from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
 from app.models.meeting import Meeting
 from app.models.project import Project
+from app.models.system_task_occurrence import SystemTaskOccurrence
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
-from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
 from app.models.user import User
-from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType
+from app.models.enums import UserRole, ChecklistItemType
 
 
 router = APIRouter()
@@ -148,6 +149,76 @@ def _task_rows(tasks: list[Task], status_map: dict[uuid.UUID, str], user_map: di
             ]
         )
     return rows
+
+
+def _initials(label: str | None) -> str:
+    if not label:
+        return ""
+    return "".join(part[0] for part in label.split() if part).upper()
+
+
+def _resolve_period(finish_period: str | None, date_value: date | datetime | None) -> str:
+    if finish_period in {"AM", "PM"}:
+        return finish_period
+    if date_value is None:
+        return "AM"
+    if isinstance(date_value, datetime):
+        return "PM" if date_value.hour >= 12 else "AM"
+    return "AM"
+
+
+def _tyo_label(base_date: date | None, completed_at: date | None, today: date) -> str:
+    if completed_at and completed_at == today:
+        return "T"
+    if base_date is None:
+        return "-"
+    if base_date == today:
+        return "T"
+    delta = (today - base_date).days
+    if delta == 1:
+        return "Y"
+    if delta > 1:
+        return str(delta)
+    return "-"
+
+
+def _no_project_type_label(task: Task) -> str:
+    if task.is_bllok:
+        return "BLLOK"
+    if task.is_1h_report:
+        return "1H"
+    if task.is_r1:
+        return "R1"
+    if task.is_personal:
+        return "Personal"
+    if task.ga_note_origin_id:
+        return "GA"
+    return "Normal"
+
+
+def _fast_subtype_short(task: Task) -> str:
+    base = _no_project_type_label(task)
+    if base == "BLLOK":
+        return "BLL"
+    if base == "Personal":
+        return "P:"
+    if base == "Normal":
+        return "N"
+    return base
+
+
+def _system_frequency_short_label(freq: str | None) -> str:
+    if not freq:
+        return "-"
+    mapping = {
+        "DAILY": "D",
+        "WEEKLY": "W",
+        "MONTHLY": "M",
+        "YEARLY": "Y",
+        "3_MONTHS": "3M",
+        "6_MONTHS": "6M",
+    }
+    return mapping.get(freq, str(freq))
 
 
 EXPORT_HEADERS = [
@@ -330,6 +401,7 @@ async def export_checklist_xlsx(
     include_ko2: bool = False,
     path: str | None = None,
     format: str | None = None,
+    title: str | None = None,
     exclude_path: list[str] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -371,9 +443,9 @@ async def export_checklist_xlsx(
     ).scalars().all()
 
     if format == "mst":
-        headers = ["NO", "PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA", "CHECK", "INCL", "KOMENT"]
+        headers = ["NR", "PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA", "CHECK", "INCL", "KOMENT"]
     else:
-        headers = ["NO", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
+        headers = ["NR", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
         if include_ko2:
             headers.append("KO2")
 
@@ -403,8 +475,9 @@ async def export_checklist_xlsx(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = checklist.title or "Checklist"
-    title = (checklist.title or "Checklist").upper()
+    raw_title = title or checklist.title or "Checklist"
+    title = raw_title.upper()
+    ws.title = raw_title[:31]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
     title_cell = ws.cell(row=1, column=1, value=title)
     title_cell.font = Font(bold=True, size=16)
@@ -415,11 +488,15 @@ async def export_checklist_xlsx(
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        cell.alignment = Alignment(
+            horizontal="left",
+            vertical="center",
+            wrap_text=False if header == "NR" else True,
+        )
 
     if format == "mst":
         column_widths = {
-            "NO": 3,
+            "NR": 3,
             "PATH": 22,
             "DETYRAT": 28,
             "KEYWORDS": 20,
@@ -431,7 +508,7 @@ async def export_checklist_xlsx(
         }
     else:
         column_widths = {
-            "NO": 3,
+            "NR": 3,
             "TASK": 36,
             "COMMENT": 46,
             "CHECK": 8,
@@ -472,6 +549,8 @@ async def export_checklist_xlsx(
         for col_idx, value in enumerate(row_values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            if col_idx == 1:
+                cell.font = Font(bold=True)
         data_row += 1
 
     ws.freeze_panes = ws["B4"]
@@ -479,8 +558,8 @@ async def export_checklist_xlsx(
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
-    ws.page_margins.left = 0.2
-    ws.page_margins.right = 0.08
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
     ws.page_margins.top = 0.36
     ws.page_margins.bottom = 0.51
     ws.page_margins.header = 0.15
@@ -502,7 +581,8 @@ async def export_checklist_xlsx(
 
     ws.oddHeader.right.text = "&D &T"
     ws.oddFooter.center.text = "Page &P / &N"
-    ws.oddFooter.right.text = "Initials: ____"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
 
     bio = io.BytesIO()
     wb.save(bio)

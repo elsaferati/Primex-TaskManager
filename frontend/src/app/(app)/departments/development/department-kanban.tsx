@@ -600,6 +600,12 @@ export default function DepartmentKanban() {
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
+  const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
+  const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
+  const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
@@ -999,6 +1005,11 @@ export default function DepartmentKanban() {
       bz: string
       kohaBz: string
       tyo: string
+      comment?: string | null
+      taskId?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      systemStatus?: string
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -1027,7 +1038,13 @@ export default function DepartmentKanban() {
     const todayTemplateIds = new Set(
       todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
     )
-    const overdueByTemplate = new Map<string, DailyReportSystemOccurrence>()
+    const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
+    if (dailyReport?.system_today?.length) {
+      for (const occ of dailyReport.system_today) {
+        systemTodayByTemplate.set(occ.template_id, occ)
+      }
+    }
+    const overdueByTemplate = new Map<string, DailyReportResponse["system_overdue"][number]>()
     if (dailyReport?.system_overdue?.length) {
       for (const occ of dailyReport.system_overdue) {
         if (todayTemplateIds.has(occ.template_id)) {
@@ -1072,10 +1089,16 @@ export default function DepartmentKanban() {
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+        comment: occ.comment ?? null,
+        systemTemplateId: occ.template_id,
+        systemOccurrenceDate: occ.occurrence_date,
+        systemStatus: occ.status,
       })
     }
 
     for (const tmpl of todaySystemTasks) {
+      const templateId = tmpl.template_id || tmpl.id
+      const occ = templateId ? systemTodayByTemplate.get(templateId) : undefined
       const alignmentEnabled = Boolean(
         tmpl.requires_alignment ||
         tmpl.alignment_time ||
@@ -1099,6 +1122,10 @@ export default function DepartmentKanban() {
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
+        comment: occ?.comment ?? null,
+        systemTemplateId: templateId,
+        systemOccurrenceDate: occ?.occurrence_date || todayIso,
+        systemStatus: occ?.status || "OPEN",
       })
     }
 
@@ -1117,6 +1144,8 @@ export default function DepartmentKanban() {
           bz: "-",
           kohaBz: "-",
           tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          comment: task.user_comment ?? null,
+          taskId: task.id,
         },
       })
       fastIndex += 1
@@ -1136,6 +1165,8 @@ export default function DepartmentKanban() {
         bz: "-",
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        comment: task.user_comment ?? null,
+        taskId: task.id,
       })
     }
 
@@ -1906,6 +1937,175 @@ export default function DepartmentKanban() {
       toast.error("Failed to close task")
     } finally {
       setClosingTask(false)
+    }
+  }
+
+  const updateTaskCommentState = (taskId: string, comment: string | null) => {
+    setDepartmentTasks((prev) =>
+      prev.map((task) => (task.id === taskId ? { ...task, user_comment: comment } : task))
+    )
+    setNoProjectTasks((prev) =>
+      prev.map((task) => (task.id === taskId ? { ...task, user_comment: comment } : task))
+    )
+  }
+
+  const setDailyReportCommentSaving = (commentKey: string, isSaving: boolean) => {
+    setSavingDailyReportComments((prev) => ({ ...prev, [commentKey]: isSaving }))
+  }
+
+  const isDragTargetInteractive = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false
+    const tag = target.tagName
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || tag === "SELECT" || tag === "LABEL"
+  }
+
+  const handleDailyReportMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    if (isDragTargetInteractive(event.target)) return
+    const container = dailyReportScrollRef.current
+    if (!container) return
+    dailyReportDragRef.current = {
+      isDragging: true,
+      startX: event.pageX - container.offsetLeft,
+      startScrollLeft: container.scrollLeft,
+    }
+    setIsDraggingDailyReport(true)
+  }
+
+  const handleDailyReportMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const dragState = dailyReportDragRef.current
+    if (!dragState.isDragging) return
+    const container = dailyReportScrollRef.current
+    if (!container) return
+    const x = event.pageX - container.offsetLeft
+    const walk = x - dragState.startX
+    container.scrollLeft = dragState.startScrollLeft - walk
+  }
+
+  const handleDailyReportMouseEnd = () => {
+    if (!dailyReportDragRef.current.isDragging) return
+    dailyReportDragRef.current.isDragging = false
+    setIsDraggingDailyReport(false)
+  }
+
+  const saveDailyReportTaskComment = async (
+    taskId: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: payloadComment }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+      updateTaskCommentState(taskId, payloadComment)
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const saveDailyReportSystemComment = async (
+    templateId: string,
+    occurrenceDate: string,
+    status: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setDailyReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: templateId,
+          occurrence_date: occurrenceDate,
+          status: status || "OPEN",
+          comment: payloadComment,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+
+      setDailyReport((prev) => {
+        if (!prev) return prev
+        const updateOccurrence = (occ: DailyReportResponse["system_today"][number]) =>
+          occ.template_id === templateId && occ.occurrence_date === occurrenceDate
+            ? { ...occ, comment: payloadComment }
+            : occ
+        return {
+          ...prev,
+          system_today: prev.system_today.map(updateOccurrence),
+          system_overdue: prev.system_overdue.map(updateOccurrence),
+        }
+      })
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setDailyReportCommentSaving(commentKey, false)
+    }
+  }
+
+  const exportDailyReport = async () => {
+    if (!department?.id || !user?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+        user_id: user.id,
+      })
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const initialsLabel = initials(user.full_name || user.username || "user")
+      link.href = url
+      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
     }
   }
 
@@ -3115,9 +3315,28 @@ export default function DepartmentKanban() {
                       System, fast, and project tasks for today.
                     </div>
                   </div>
-                  {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                  <div className="flex items-center gap-2">
+                    {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-lg border-slate-300 bg-white px-3 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
+                      disabled={exportingDailyReport}
+                      onClick={() => void exportDailyReport()}
+                    >
+                      {exportingDailyReport ? "Exporting..." : "Export Excel"}
+                    </Button>
+                  </div>
                 </div>
-                <div className="mt-3 overflow-x-auto">
+                <div
+                  ref={dailyReportScrollRef}
+                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
+                    isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                  }`}
+                  onMouseDown={handleDailyReportMouseDown}
+                  onMouseMove={handleDailyReportMouseMove}
+                  onMouseUp={handleDailyReportMouseEnd}
+                  onMouseLeave={handleDailyReportMouseEnd}
+                >
                   <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
                       <col className="w-[36px]" />
@@ -3134,7 +3353,9 @@ export default function DepartmentKanban() {
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                        <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          Nr
+                        </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">NLL</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
@@ -3149,27 +3370,90 @@ export default function DepartmentKanban() {
                     </thead>
                     <tbody>
                       {dailyUserReportRows.length ? (
-                        dailyUserReportRows.map((row, index) => (
-                          <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{index + 1}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">
-                              <input
-                                type="text"
-                                aria-label="Koment"
-                                className="h-4 w-full border-b border-slate-300 bg-transparent"
-                              />
-                            </td>
-                          </tr>
-                        ))
+                        dailyUserReportRows.map((row, index) => {
+                          const commentKey = row.taskId
+                            ? `task:${row.taskId}`
+                            : row.systemTemplateId && row.systemOccurrenceDate
+                              ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+                              : ""
+                          const previousValue = row.comment ?? ""
+                          const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
+                          const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
+                          return (
+                            <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                              <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                                {index + 1}
+                              </td>
+                              <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top">
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    aria-label="Koment"
+                                    className="h-4 w-full border-b border-slate-300 bg-transparent"
+                                    value={commentValue}
+                                    onChange={(e) => {
+                                      if (!commentKey) return
+                                      const nextValue = e.target.value
+                                      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
+                                    }}
+                                    onBlur={(e) => {
+                                      if (!commentKey) return
+                                      const nextValue = e.target.value
+                                      if (row.taskId) {
+                                        void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                        return
+                                      }
+                                      if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                        void saveDailyReportSystemComment(
+                                          row.systemTemplateId,
+                                          row.systemOccurrenceDate,
+                                          row.systemStatus || "OPEN",
+                                          nextValue,
+                                          previousValue,
+                                          commentKey
+                                        )
+                                      }
+                                    }}
+                                    disabled={!commentKey}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+                                    disabled={!commentKey || isSaving}
+                                    onClick={() => {
+                                      if (!commentKey) return
+                                      if (row.taskId) {
+                                        void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                        return
+                                      }
+                                      if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                        void saveDailyReportSystemComment(
+                                          row.systemTemplateId,
+                                          row.systemOccurrenceDate,
+                                          row.systemStatus || "OPEN",
+                                          commentValue,
+                                          previousValue,
+                                          commentKey
+                                        )
+                                      }
+                                    }}
+                                  >
+                                    {isSaving ? "Saving" : "Save"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
                       ) : (
                         <tr>
                           <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
@@ -4825,7 +5109,7 @@ export default function DepartmentKanban() {
                 ? "ALL TODAY REPORT"
                 : printRange === "today" && showDailyUserReport
                   ? "DAILY TASK REPORT"
-                  : "WEEKLY TASK REPORT"}
+                  : "PLANIFIKIMI JAVOR - PRMBL PLANIFIKIMI JAVOR"}
             </div>
             <div className="print-datetime">
               {printedAt.toLocaleString("en-US", {
@@ -5058,7 +5342,9 @@ export default function DepartmentKanban() {
             </colgroup>
             <thead>
               <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                  Nr
+                </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
@@ -5073,27 +5359,88 @@ export default function DepartmentKanban() {
             </thead>
             <tbody>
               {dailyUserReportRows.length ? (
-                dailyUserReportRows.map((row, index) => (
+                dailyUserReportRows.map((row, index) => {
+                  const commentKey = row.taskId
+                    ? `task:${row.taskId}`
+                    : row.systemTemplateId && row.systemOccurrenceDate
+                      ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+                      : ""
+                  const previousValue = row.comment ?? ""
+                  const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
+                  const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
+                  return (
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">
-                      <input
-                        type="text"
-                        aria-label="Koment"
-                        className="h-4 w-full border-b border-slate-400 bg-transparent"
-                      />
-                    </td>
-                  </tr>
-                ))
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            aria-label="Koment"
+                            className="h-4 w-full border-b border-slate-400 bg-transparent"
+                            value={commentValue}
+                            onChange={(e) => {
+                              if (!commentKey) return
+                              const nextValue = e.target.value
+                              setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
+                            }}
+                            onBlur={(e) => {
+                              if (!commentKey) return
+                              const nextValue = e.target.value
+                              if (row.taskId) {
+                                void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                return
+                              }
+                              if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                void saveDailyReportSystemComment(
+                                  row.systemTemplateId,
+                                  row.systemOccurrenceDate,
+                                  row.systemStatus || "OPEN",
+                                  nextValue,
+                                  previousValue,
+                                  commentKey
+                                )
+                              }
+                            }}
+                            disabled={!commentKey}
+                          />
+                          <button
+                            type="button"
+                            className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+                            disabled={!commentKey || isSaving}
+                            onClick={() => {
+                              if (!commentKey) return
+                              if (row.taskId) {
+                                void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                return
+                              }
+                              if (row.systemTemplateId && row.systemOccurrenceDate) {
+                                void saveDailyReportSystemComment(
+                                  row.systemTemplateId,
+                                  row.systemOccurrenceDate,
+                                  row.systemStatus || "OPEN",
+                                  commentValue,
+                                  previousValue,
+                                  commentKey
+                                )
+                              }
+                            }}
+                          >
+                            {isSaving ? "Saving" : "Save"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
               ) : (
                   <tr>
                     <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
@@ -5120,7 +5467,9 @@ export default function DepartmentKanban() {
               </colgroup>
               <thead>
                 <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">Nr</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                    Nr
+                  </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Prioriteti</th>
@@ -5138,7 +5487,7 @@ export default function DepartmentKanban() {
                 {weeklyTaskReportRows.length ? (
                   weeklyTaskReportRows.map((row, index) => (
                     <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.priority}</td>
@@ -5229,7 +5578,7 @@ export default function DepartmentKanban() {
           .print-meta {
             font-size: 11px;
             color: #334155;
-            margin-bottom: 12px;
+            margin-bottom: 16px;
             display: grid;
             gap: 2px;
           }
@@ -5268,13 +5617,20 @@ export default function DepartmentKanban() {
           .weekly-report-table thead th {
             border-width: 2px;
           }
+          .daily-report-table thead th {
+            border-width: 2px;
+            border-color: #0f172a;
+          }
           .daily-report-table thead tr {
-            border-top: 2px solid #cbd5f5;
-            border-bottom: 2px solid #cbd5f5;
+            border-top: 2px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
           }
           .weekly-report-table {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+          }
+          .print-nr-cell {
+            font-weight: 700;
           }
         }
       `}</style>
