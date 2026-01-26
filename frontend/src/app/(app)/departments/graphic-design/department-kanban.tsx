@@ -579,7 +579,8 @@ export default function DepartmentKanban() {
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
   const [noProjectType, setNoProjectType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
-  const [noProjectAssignee, setNoProjectAssignee] = React.useState<string>("__unassigned__")
+  const [noProjectAssignees, setNoProjectAssignees] = React.useState<string[]>([])
+  const [selectNoProjectAssigneesOpen, setSelectNoProjectAssigneesOpen] = React.useState(false)
   const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
@@ -769,6 +770,15 @@ export default function DepartmentKanban() {
         : [],
     [department, users]
   )
+  const noProjectAssigneeLabel = React.useMemo(() => {
+    if (noProjectAssignees.length === 0) return "Unassigned"
+    if (departmentUsers.length && noProjectAssignees.length === departmentUsers.length) return "All team"
+    if (noProjectAssignees.length === 1) {
+      const selected = departmentUsers.find((u) => u.id === noProjectAssignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${noProjectAssignees.length} selected`
+  }, [departmentUsers, noProjectAssignees])
   const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
   const mstTemplateOptions = React.useMemo(() => {
     return templateProjects.filter((p) => {
@@ -1880,7 +1890,7 @@ export default function DepartmentKanban() {
           start_date: startDate,
           due_date: dueDate,
         }
-      const assigneeIds = noProjectAssignee === "__all__" ? departmentUsers.map((u) => u.id) : noProjectAssignee === "__unassigned__" ? [null] : [noProjectAssignee]
+      const assigneeIds = noProjectAssignees.length ? noProjectAssignees : [null]
 
       const createdTasks: Task[] = []
       for (const assigneeId of assigneeIds) {
@@ -1904,6 +1914,7 @@ export default function DepartmentKanban() {
       setNoProjectOpen(false)
       setNoProjectTitle("")
       setNoProjectDescription("")
+      setNoProjectAssignees([])
       setNoProjectStartDate("")
       setNoProjectDueDate("")
       toast.success("Task created")
@@ -2631,7 +2642,7 @@ export default function DepartmentKanban() {
                       onMouseUp={handleDailyReportMouseEnd}
                       onMouseLeave={handleDailyReportMouseEnd}
                     >
-                      <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                      <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                         <colgroup>
                           <col className="w-[36px]" />
                           <col className="w-[44px]" />
@@ -3161,20 +3172,60 @@ export default function DepartmentKanban() {
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2">
                               <Label>Assignee</Label>
-                              <Select value={noProjectAssignee} onValueChange={setNoProjectAssignee}>
-                                <SelectTrigger className="rounded-xl">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                                  <SelectItem value="__all__">Everyone</SelectItem>
-                                  {departmentUsers.map((u) => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
+                                <DialogTrigger asChild>
+                                  <Button type="button" variant="outline" className="w-full justify-start rounded-xl">
+                                    {noProjectAssigneeLabel}
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="rounded-2xl sm:max-w-md">
+                                  <DialogHeader>
+                                    <DialogTitle>Select Assignees</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                    {departmentUsers.length ? (
+                                      departmentUsers.map((u) => {
+                                        const isSelected = noProjectAssignees.includes(u.id)
+                                        return (
+                                          <div
+                                            key={u.id}
+                                            className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                            onClick={() => {
+                                              if (isSelected) {
+                                                setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
+                                              } else {
+                                                setNoProjectAssignees((prev) => [...prev, u.id])
+                                              }
+                                            }}
+                                          >
+                                            <Checkbox checked={isSelected} />
+                                            <Label className="cursor-pointer flex-1">
+                                              {u.full_name || u.username || "-"}
+                                            </Label>
+                                          </div>
+                                        )
+                                      })
+                                    ) : (
+                                      <div className="text-sm text-slate-600">No team members available.</div>
+                                    )}
+                                  </div>
+                                  <div className="mt-4 flex justify-end gap-2">
+                                    <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
+                                      Clear
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => setNoProjectAssignees(departmentUsers.map((u) => u.id))}
+                                      disabled={!departmentUsers.length}
+                                    >
+                                      All team
+                                    </Button>
+                                    <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
+                                      Done
+                                    </Button>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
                             </div>
                             <div className="space-y-2">
                               <Label>Finish by</Label>
