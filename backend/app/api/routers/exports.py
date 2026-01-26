@@ -28,9 +28,10 @@ from app.models.project import Project
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.task_status import TaskStatus
 from app.models.user import User
-from app.models.enums import UserRole, ChecklistItemType
+from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType
 
 
 router = APIRouter()
@@ -56,6 +57,23 @@ def _format_excel_date(d: date) -> str:
 def _day_code(d: date) -> str:
     codes = ["H", "M", "MR", "E", "P", "S", "D"]
     return codes[d.weekday()] if 0 <= d.weekday() < len(codes) else ""
+
+
+def _strip_html(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"<[^>]+>", "", value).strip()
+
+
+def _priority_label(value: str | None) -> str:
+    normalized = value.upper() if value else "NORMAL"
+    return "Larte" if normalized == "HIGH" else "Normal"
+
+
+def _scope_label(template: SystemTaskTemplate) -> str:
+    if template.scope:
+        return template.scope
+    return "DEPARTMENT" if template.department_id else "ALL"
 
 
 async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
@@ -593,6 +611,60 @@ async def export_checklist_xlsx(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{safe_filename}.xlsx\"'},
+    )
+
+
+@router.get("/system-tasks.xlsx")
+async def export_system_tasks_xlsx(
+    active_only: bool = True,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_manager_or_admin(user)
+    stmt = select(SystemTaskTemplate)
+    if active_only:
+        stmt = stmt.where(SystemTaskTemplate.is_active.is_(True))
+    templates = (await db.execute(stmt.order_by(SystemTaskTemplate.title))).scalars().all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "System Tasks"
+
+    headers = ["Nr", "Prioriteti", "Lloji", "AM/PM", "Titulli", "Pershkrimi"]
+    ws.append(headers)
+    header_font = Font(bold=True)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    for idx, template in enumerate(templates, start=1):
+        ws.append(
+            [
+                idx,
+                _priority_label(template.priority),
+                _scope_label(template),
+                template.finish_period or "",
+                template.title,
+                _strip_html(template.description),
+            ]
+        )
+
+    widths = [6, 12, 12, 10, 40, 60]
+    for col_idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = "system_tasks_active.xlsx" if active_only else "system_tasks_all.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
 
