@@ -1607,11 +1607,6 @@ export function SystemTasksView({
               .print-footer .page-count {
                 grid-column: 2;
                 text-align: center;
-                font-size: 0;
-              }
-              .print-footer .page-count::before {
-                content: counter(page) " / " counter(pages);
-                font-size: 9pt;
               }
               .print-footer .punoi {
                 grid-column: 3;

@@ -171,6 +171,7 @@ export default function CommonViewPage() {
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
@@ -1071,6 +1072,30 @@ export default function CommonViewPage() {
   const handlePrint = () => {
     window.print()
   }
+
+  // Calculate total pages for print footer
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const dpi = 96
+      const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
+      const bodyHeight = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight
+      )
+      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
+      setPrintTotalPages(totalPages)
+    }
+    const handleAfterPrint = () => {
+      setPrintTotalPages(1)
+    }
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+    }
+  }, [])
 
   const handleExportExcel = async () => {
     if (exportingExcel) return
@@ -2084,9 +2109,6 @@ export default function CommonViewPage() {
           .print-page-count {
             grid-column: 2;
             text-align: center;
-          }
-          .print-page-count::before {
-            content: "Page " counter(page) " / " counter(pages);
           }
           .print-initials {
             grid-column: 3;
@@ -4184,7 +4206,8 @@ export default function CommonViewPage() {
               </tbody>
             </table>
             <div className="print-footer">
-              <div className="print-page-count" />
+              <span />
+              <div className="print-page-count">1/{printTotalPages}</div>
               <div className="print-initials">Initials: {printInitials}</div>
             </div>
           </div>
@@ -4276,7 +4299,8 @@ export default function CommonViewPage() {
               })}
           </div>
           <div className="print-footer">
-            <div className="print-page-count" />
+            <span />
+            <div className="print-page-count">1/{printTotalPages}</div>
             <div className="print-initials">Initials: {printInitials}</div>
           </div>
         </div>
