@@ -3388,7 +3388,7 @@ export default function DepartmentKanban() {
                   onMouseUp={handleDailyReportMouseEnd}
                   onMouseLeave={handleDailyReportMouseEnd}
                 >
-                  <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                  <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
                       <col className="w-[36px]" />
                       <col className="w-[44px]" />
@@ -3409,8 +3409,9 @@ export default function DepartmentKanban() {
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                          AM/PM
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          <span className="block">AM/</span>
+                          <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
