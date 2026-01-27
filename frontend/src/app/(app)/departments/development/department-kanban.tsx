@@ -5569,6 +5569,20 @@ export default function DepartmentKanban() {
                   }
                 }
                 
+                // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
+                allRows.sort((a, b) => {
+                  // First sort by typeLabel (LL)
+                  if (a.typeLabel !== b.typeLabel) {
+                    return a.typeLabel.localeCompare(b.typeLabel)
+                  }
+                  // Then by subtype (NLL)
+                  if (a.subtype !== b.subtype) {
+                    return a.subtype.localeCompare(b.subtype)
+                  }
+                  // Finally by tyo (T/Y/O)
+                  return a.tyo.localeCompare(b.tyo)
+                })
+                
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>

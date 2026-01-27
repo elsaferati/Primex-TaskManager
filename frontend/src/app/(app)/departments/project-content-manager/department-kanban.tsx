@@ -2079,6 +2079,19 @@ export default function DepartmentKanban() {
         rows.push({ ...row, userName })
       }
     }
+    // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
+    rows.sort((a, b) => {
+      // First sort by typeLabel (LL)
+      if (a.typeLabel !== b.typeLabel) {
+        return a.typeLabel.localeCompare(b.typeLabel)
+      }
+      // Then by subtype (NLL)
+      if (a.subtype !== b.subtype) {
+        return a.subtype.localeCompare(b.subtype)
+      }
+      // Finally by tyo (T/Y/O)
+      return a.tyo.localeCompare(b.tyo)
+    })
     return rows
   }, [allTodayPrintBaseUsers, allUsersDailyReports])
 
@@ -5554,7 +5567,7 @@ export default function DepartmentKanban() {
           }
           .print-page {
             position: relative;
-            padding-bottom: 0.35in;
+            padding-bottom: 0.6in;
           }
           .print-page-measure {
             position: absolute;
@@ -5591,6 +5604,14 @@ export default function DepartmentKanban() {
           .print-table,
           .weekly-report-table {
             table-layout: fixed;
+          }
+          .print-table {
+            margin-bottom: 0.6in;
+            page-break-inside: auto;
+          }
+          .print-table tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
           }
           .print-table thead th {
             background: #e2e8f0;
