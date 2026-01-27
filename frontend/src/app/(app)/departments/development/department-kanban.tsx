@@ -582,6 +582,7 @@ export default function DepartmentKanban() {
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+  const [pendingPrint, setPendingPrint] = React.useState(false)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
@@ -1889,6 +1890,7 @@ export default function DepartmentKanban() {
     const run = async () => {
       if (!showAllTodayPrint || !department?.id || allTodayPrintBaseUsers.length === 0) {
         setAllUsersDailyReports(new Map())
+        setLoadingAllUsersDailyReports(false)
         return
       }
       setLoadingAllUsersDailyReports(true)
@@ -1930,6 +1932,26 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
+
+  const handlePrint = React.useCallback(() => {
+    if (showAllTodayPrint && loadingAllUsersDailyReports) {
+      setPendingPrint(true)
+      return
+    }
+    window.print()
+  }, [loadingAllUsersDailyReports, showAllTodayPrint])
+
+  React.useEffect(() => {
+    if (!pendingPrint) return
+    if (loadingAllUsersDailyReports) return
+    if (!showAllTodayPrint) {
+      setPendingPrint(false)
+      return
+    }
+    setPendingPrint(false)
+    const timer = window.setTimeout(() => window.print(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadingAllUsersDailyReports, pendingPrint, showAllTodayPrint])
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isReadOnly = viewMode === "mine"
@@ -2354,9 +2376,51 @@ export default function DepartmentKanban() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
-      const initialsLabel = initials(user.full_name || user.username || "user")
       link.href = url
-      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const exportAllTodayReport = async () => {
+    if (!department?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+      })
+      if (selectedUserId && selectedUserId !== "__all__") {
+        qs.set("user_id", selectedUserId)
+      } else {
+        qs.set("all_users", "true")
+      }
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -3499,10 +3563,18 @@ export default function DepartmentKanban() {
                     <Button
                       variant="outline"
                       className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                      onClick={() => window.print()}
+                      onClick={handlePrint}
                     >
                       <Printer className="mr-2 h-4 w-4" />
                       Print
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                      onClick={exportAllTodayReport}
+                      disabled={exportingDailyReport}
+                    >
+                      {exportingDailyReport ? "Exporting..." : "Export Excel"}
                     </Button>
                   </>
                 ) : null}
@@ -3534,7 +3606,7 @@ export default function DepartmentKanban() {
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                      onClick={() => window.print()}
+                      onClick={handlePrint}
                     >
                       <Printer className="mr-2 h-4 w-4" />
                       Print
@@ -5778,6 +5850,8 @@ export default function DepartmentKanban() {
           vertical-align: bottom;
           padding-bottom: 0;
           padding-top: 15px;
+          direction: ltr;
+          text-align: left;
         }
         .daily-report-table thead th {
           border-width: 2px;
@@ -5886,6 +5960,8 @@ export default function DepartmentKanban() {
           .daily-report-table th,
           .daily-report-table td {
             vertical-align: bottom !important;
+            direction: ltr;
+            text-align: left;
           }
           .weekly-report-table,
           .daily-report-table {

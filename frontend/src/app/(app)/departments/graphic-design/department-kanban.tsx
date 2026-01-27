@@ -539,6 +539,7 @@ export default function DepartmentKanban() {
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+  const [pendingPrint, setPendingPrint] = React.useState(false)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -1800,6 +1801,7 @@ export default function DepartmentKanban() {
     const run = async () => {
       if (!showAllTodayPrint || !department?.id || allTodayPrintBaseUsers.length === 0) {
         setAllUsersDailyReports(new Map())
+        setLoadingAllUsersDailyReports(false)
         return
       }
       setLoadingAllUsersDailyReports(true)
@@ -1841,6 +1843,26 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
+
+  const handlePrint = React.useCallback(() => {
+    if (showAllTodayPrint && loadingAllUsersDailyReports) {
+      setPendingPrint(true)
+      return
+    }
+    window.print()
+  }, [loadingAllUsersDailyReports, showAllTodayPrint])
+
+  React.useEffect(() => {
+    if (!pendingPrint) return
+    if (loadingAllUsersDailyReports) return
+    if (!showAllTodayPrint) {
+      setPendingPrint(false)
+      return
+    }
+    setPendingPrint(false)
+    const timer = window.setTimeout(() => window.print(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadingAllUsersDailyReports, pendingPrint, showAllTodayPrint])
 
   const allTodayPrintCategories = React.useMemo(
     () => [
@@ -2751,7 +2773,7 @@ export default function DepartmentKanban() {
                         <Button
                           variant="outline"
                           className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                          onClick={() => window.print()}
+                          onClick={handlePrint}
                         >
                           <Printer className="mr-2 h-4 w-4" />
                           Print
@@ -2786,7 +2808,7 @@ export default function DepartmentKanban() {
                         <Button
                           variant="outline"
                           className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                          onClick={() => window.print()}
+                          onClick={handlePrint}
                         >
                           <Printer className="mr-2 h-4 w-4" />
                           Print
@@ -4425,6 +4447,8 @@ export default function DepartmentKanban() {
           vertical-align: bottom;
           padding-bottom: 0;
           padding-top: 15px;
+          direction: ltr;
+          text-align: left;
         }
         .daily-report-table thead tr {
           border-top: 2px solid #e2e8f0;
@@ -4536,6 +4560,8 @@ export default function DepartmentKanban() {
           .daily-report-table th,
           .daily-report-table td {
             vertical-align: bottom !important;
+            direction: ltr;
+            text-align: left;
           }
           .weekly-report-table,
           .daily-report-table {

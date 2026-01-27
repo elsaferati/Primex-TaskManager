@@ -721,26 +721,13 @@ async def export_checklist_xlsx(
     )
 
 
-@router.get("/daily-report.xlsx")
-async def export_daily_report_xlsx(
+async def _daily_report_rows_for_user(
+    *,
+    db: AsyncSession,
     day: date,
-    department_id: uuid.UUID | None = None,
-    user_id: uuid.UUID | None = None,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    if user.role == UserRole.STAFF:
-        department_id = user.department_id
-        user_id = user.id
-
-    if department_id is not None:
-        ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
-        department_id = user.department_id
-
-    if user_id is None:
-        user_id = user.id
-
+    department_id: uuid.UUID | None,
+    user_id: uuid.UUID,
+) -> list[list[str]]:
     task_stmt = (
         select(Task)
         .where(Task.completed_at.is_(None))
@@ -750,8 +737,7 @@ async def export_daily_report_xlsx(
     )
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
-    if user_id is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+    task_stmt = task_stmt.where(Task.assigned_to == user_id)
 
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
 
@@ -941,19 +927,84 @@ async def export_daily_report_xlsx(
     rows.extend(system_am_rows)
     rows.extend(project_rows)
     rows.extend(system_pm_rows)
+    return rows
 
-    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT"]
+
+@router.get("/daily-report.xlsx")
+async def export_daily_report_xlsx(
+    day: date,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    all_users: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if user.role == UserRole.STAFF:
+        department_id = user.department_id
+        user_id = user.id
+        all_users = False
+
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+    elif user.role != UserRole.ADMIN:
+        department_id = user.department_id
+
+    if user_id is None:
+        user_id = user.id
+
+    rows: list[list[str]] = []
+    users_for_export: list[User] = []
+    if all_users:
+        if department_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id is required")
+        users_for_export = (
+            await db.execute(
+                select(User)
+                .where(User.department_id == department_id)
+                .order_by(User.full_name, User.username)
+            )
+        ).scalars().all()
+    else:
+        users_for_export = [
+            (
+                await db.execute(select(User).where(User.id == user_id))
+            ).scalar_one()
+        ]
+
+    for member in users_for_export:
+        member_rows = await _daily_report_rows_for_user(
+            db=db,
+            day=day,
+            department_id=department_id,
+            user_id=member.id,
+        )
+        member_label = member.full_name or member.username or "-"
+        for row in member_rows:
+            rows.append(row + [member_label])
+
+    headers = ["Nr", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "User"]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily Report"
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
-    title_cell = ws.cell(row=1, column=1, value="DAILY TASK REPORT")
+    title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers) - 1)
+    title_cell = ws.cell(row=1, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    header_row = 3
+    department_label = ""
+    if department_id:
+        department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+        department_label = department.name if department else ""
+    ws.cell(row=2, column=1, value=f"Department: {department_label or '-'}")
+    if all_users:
+        ws.cell(row=3, column=1, value="Users: All users")
+    else:
+        ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
+
+    header_row = 4
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
@@ -961,11 +1012,11 @@ async def export_daily_report_xlsx(
         cell.alignment = Alignment(
             horizontal="left",
             vertical="bottom",
-            wrap_text=False if header == "NR" else True,
+            wrap_text=True if header == "Nr" else True,
         )
 
     column_widths = {
-        "NR": 4,
+        "Nr": 4,
         "LL": 5,
         "NLL": 6,
         "AM/PM": 7,
@@ -976,6 +1027,7 @@ async def export_daily_report_xlsx(
         "KOHA BZ": 10,
         "T/Y/O": 6,
         "KOMENT": 22,
+        "User": 18,
     }
     for col_idx, header in enumerate(headers, start=1):
         width = column_widths.get(header, 16)
@@ -990,14 +1042,14 @@ async def export_daily_report_xlsx(
             cell.alignment = Alignment(
                 horizontal="left",
                 vertical="bottom",
-                wrap_text=col_idx in {5, 6, 11},
+                wrap_text=col_idx in {5, 6, 11, 12},
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B4"]
-    ws.print_title_rows = "3:3"
+    ws.freeze_panes = ws["B5"]
+    ws.print_title_rows = "4:4"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1020,7 +1072,10 @@ async def export_daily_report_xlsx(
                 right = thick if c == last_col else thin
                 top = thick if r == header_row else thin
                 bottom = thick if r == last_row else thin
-                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+                if r == header_row:
+                    ws.cell(row=r, column=c).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
     ws.oddHeader.right.text = "&D &T"
     ws.oddFooter.center.text = "Page &P / &N"
@@ -1030,13 +1085,14 @@ async def export_daily_report_xlsx(
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = f"daily_report_{day.isoformat()}_{user_initials or 'user'}.xlsx"
+    date_label = day.strftime("%d_%m_%y")
+    worker_label = (user.full_name or user.username or "user").replace(" ", "")
+    filename = f"Daily_Report_{date_label}_{worker_label}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
-
 
 @router.get("/system-tasks.xlsx")
 async def export_system_tasks_xlsx(

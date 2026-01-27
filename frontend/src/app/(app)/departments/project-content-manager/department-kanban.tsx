@@ -1700,9 +1700,51 @@ export default function DepartmentKanban() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
-      const initialsLabel = initials(user.full_name || user.username || "user")
       link.href = url
-      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const exportAllTodayReport = async () => {
+    if (!department?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+      })
+      if (selectedUserId && selectedUserId !== "__all__") {
+        qs.set("user_id", selectedUserId)
+      } else {
+        qs.set("all_users", "true")
+      }
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -3557,6 +3599,14 @@ export default function DepartmentKanban() {
                       >
                         <Printer className="mr-2 h-4 w-4" />
                         Print
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                        onClick={exportAllTodayReport}
+                        disabled={exportingDailyReport}
+                      >
+                        {exportingDailyReport ? "Exporting..." : "Export Excel"}
                       </Button>
                     </>
                 ) : null}
@@ -5445,6 +5495,8 @@ export default function DepartmentKanban() {
         .daily-report-table td {
           vertical-align: bottom;
           padding-bottom: 0;
+          direction: ltr;
+          text-align: left;
         }
         .daily-report-table thead tr {
           border-top: 2px solid #e2e8f0;
@@ -5526,6 +5578,8 @@ export default function DepartmentKanban() {
           .print-table td {
             vertical-align: bottom;
             padding-bottom: 0;
+            direction: ltr;
+            text-align: left;
           }
           .print-footer {
             position: fixed;
