@@ -1112,7 +1112,11 @@ export default function CommonViewPage() {
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = `common_view_${weekStartIso}.xlsx`
+      const dd = String(weekStart.getDate()).padStart(2, "0")
+      const mm = String(weekStart.getMonth() + 1).padStart(2, "0")
+      const yy = String(weekStart.getFullYear()).slice(-2)
+      const initialsValue = (printInitials || "USER").toUpperCase()
+      link.download = `COMMON VIEW ${dd}_${mm}_${yy}_EF (${initialsValue}).xlsx`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -2059,7 +2063,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0.36in 0.08in 0.51in 0.2in;
+            margin: 0.36in 0.1in 0.51in 0.1in;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -2098,11 +2102,11 @@ export default function CommonViewPage() {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: 0.3in;
+            bottom: 0.2in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.2in;
-            padding-right: 0.08in;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
             font-size: 10px;
             color: #334155;
           }
@@ -2582,17 +2586,30 @@ export default function CommonViewPage() {
           border-collapse: collapse;
           border: 2px solid #111827;
           font-size: 11px;
+          direction: ltr;
         }
         .week-table th {
           border: 1px solid #111827;
           background: #dbeafe;
           padding: 8px 6px;
-          text-align: center;
+          text-align: left;
           font-weight: 700;
-          vertical-align: middle;
+          vertical-align: bottom;
           position: sticky;
           top: 0;
           z-index: 2;
+        }
+        .week-table thead tr:first-child th {
+          border-top-width: 2px;
+        }
+        .week-table thead tr:last-child th {
+          border-bottom-width: 2px;
+        }
+        .week-table thead th:first-child {
+          border-left-width: 2px;
+        }
+        .week-table thead th:last-child {
+          border-right-width: 2px;
         }
         .week-table thead tr:nth-child(2) th {
           top: 30px;
@@ -2610,8 +2627,9 @@ export default function CommonViewPage() {
         .week-table td {
           border: 1px solid #dee2e6;
           padding: 6px 8px;
-          vertical-align: top;
+          vertical-align: bottom;
           font-size: 10px;
+          text-align: left;
         }
         .week-table-number {
           text-align: center;
@@ -4023,7 +4041,7 @@ export default function CommonViewPage() {
             <table className="week-table">
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ width: "60px" }}>NO</th>
+                  <th rowSpan={2} style={{ width: "60px" }}>NR</th>
                   <th rowSpan={2} style={{ width: "150px" }}>LL</th>
                   {weekISOs.map((iso) => {
                     const d = fromISODate(iso)
@@ -4208,7 +4226,7 @@ export default function CommonViewPage() {
             <div className="print-footer">
               <span />
               <div className="print-page-count">1/{printTotalPages}</div>
-              <div className="print-initials">Initials: {printInitials}</div>
+              <div className="print-initials">PUNOI: {printInitials}</div>
             </div>
           </div>
         ) : null}
@@ -4301,7 +4319,7 @@ export default function CommonViewPage() {
           <div className="print-footer">
             <span />
             <div className="print-page-count">1/{printTotalPages}</div>
-            <div className="print-initials">Initials: {printInitials}</div>
+            <div className="print-initials">PUNOI: {printInitials}</div>
           </div>
         </div>
       </div>

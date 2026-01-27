@@ -913,7 +913,6 @@ async def _daily_report_rows_for_user(
                         period,
                         department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                         task.title or "-",
-                        task.description or "-",
                         (status or "").upper(),
                         "-",
                         "-",
@@ -933,7 +932,6 @@ async def _daily_report_rows_for_user(
                     period,
                     department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                     f"{project_label} - {task.title or '-'}",
-                    task.description or "-",
                     (status or "").upper(),
                     "-",
                     "-",
@@ -956,7 +954,6 @@ async def _daily_report_rows_for_user(
                 period,
                 department_label(tmpl.department_id, tmpl.scope, False),
                 tmpl.title or "-",
-                tmpl.description or "-",
                 _format_system_status(occ.status).upper(),
                 bz,
                 koha_bz,
@@ -1029,11 +1026,19 @@ async def export_daily_report_xlsx(
             department_id=department_id,
             user_id=member.id,
         )
-        member_label = member.full_name or member.username or "-"
+        member_label = _initials(member.full_name or member.username or "") or "-"
         for row in member_rows:
             rows.append(row + [member_label])
 
-    headers = ["Nr", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "User"]
+    # Sort by LL (index 1), NLL (index 2), and T/Y/O (index 8)
+    if all_users:
+        rows.sort(key=lambda r: (
+            r[1] if len(r) > 1 else "",  # LL (typeLabel)
+            r[2] if len(r) > 2 else "",  # NLL (subtype)
+            r[8] if len(r) > 8 else "",  # T/Y/O (tyo)
+        ))
+
+    headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
 
     wb = Workbook()
     ws = wb.active
@@ -1059,9 +1064,12 @@ async def export_daily_report_xlsx(
     if all_users:
         ws.cell(row=user_row, column=1, value="Users: All users")
     else:
-        ws.cell(row=user_row, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
+        ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
+
+    header_row = 6
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         cell.alignment = Alignment(
@@ -1069,21 +1077,22 @@ async def export_daily_report_xlsx(
             vertical="bottom",
             wrap_text=True if header == "Nr" else True,
         )
+        # Force uppercase display even if Excel auto-changes header text.
+        cell.number_format = "@"
 
     column_widths = {
-        "Nr": 4,
+        "NR": 4,
         "LL": 5,
         "NLL": 6,
         "AM/PM": 7,
         "DEP": 6,
         "TITULLI": 32,
-        "PERSHKRIMI": 28,
         "STS": 10,
         "BZ": 8,
         "KOHA BZ": 10,
         "T/Y/O": 6,
         "KOMENT": 22,
-        "User": 18,
+        "USER": 6,
     }
     for col_idx, header in enumerate(headers, start=1):
         width = column_widths.get(header, 16)
@@ -1104,8 +1113,8 @@ async def export_daily_report_xlsx(
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = f"B{header_row + 1}"
-    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.freeze_panes = ws["B7"]
+    ws.print_title_rows = "6:6"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1136,8 +1145,8 @@ async def export_daily_report_xlsx(
                 # Header row: thick outside border (top/bottom/edges), thin inside separators.
                 if is_header:
                     ws.cell(row=r, column=c).border = Border(
-                        left=left,
-                        right=right,
+                        left=thick,
+                        right=thick,
                         top=thick,
                         bottom=thick,
                     )
@@ -1707,15 +1716,19 @@ async def export_common_xlsx(
     last_col = 2 + len(week_dates)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value="COMMON VIEW")
-    title_cell.font = Font(bold=True, size=14)
+    title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.cell(row=4, column=1, value="NO")
-    ws.cell(row=4, column=2, value="LL")
+    header_day_row = 3
+    header_row = 4
+    data_start_row = 5
+
+    ws.cell(row=header_row, column=1, value="NR")
+    ws.cell(row=header_row, column=2, value="LL")
     for idx, day in enumerate(week_dates):
         col = 3 + idx
-        ws.cell(row=3, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}")
-        ws.cell(row=4, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
+        ws.cell(row=header_day_row, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}".upper())
+        ws.cell(row=header_row, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
 
     row_specs = [
         ("late", "Delays"),
@@ -1731,7 +1744,7 @@ async def export_common_xlsx(
         ("feedback", "Complaints/Requests/Proposals"),
     ]
 
-    start_row = 5
+    start_row = data_start_row
     for idx, (key, label) in enumerate(row_specs, start=1):
         row_idx = start_row + idx - 1
         ws.cell(row=row_idx, column=1, value=idx)
@@ -1747,61 +1760,83 @@ async def export_common_xlsx(
         ws.column_dimensions[get_column_letter(col)].width = 28
 
     ws.row_dimensions[1].height = 24
-    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[2].height = 6
     ws.row_dimensions[3].height = 22
     ws.row_dimensions[4].height = 20
 
     header_font = Font(bold=True)
     label_font = Font(bold=True)
     for col in range(1, 3 + len(week_dates)):
-        cell = ws.cell(row=3, column=col)
+        cell = ws.cell(row=header_day_row, column=col)
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        cell = ws.cell(row=4, column=col)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        cell.number_format = "@"
+        cell = ws.cell(row=header_row, column=col)
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        cell.number_format = "@"
 
     last_row = start_row + len(row_specs) - 1
     for row in range(start_row, last_row + 1):
-        ws.cell(row=row, column=1).font = label_font
+        ws.cell(row=row, column=1).font = Font(bold=True)
         ws.cell(row=row, column=2).font = label_font
         for col in range(1, last_col + 1):
             cell = ws.cell(row=row, column=col)
-            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
     thin = Side(style="thin", color="000000")
     thick = Side(style="medium", color="000000")
-    for r in range(1, last_row + 1):
+    table_top = header_day_row
+    for r in range(table_top, last_row + 1):
         for c in range(1, last_col + 1):
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 1 else thin
+            top = thick if r == table_top else thin
             bottom = thick if r == last_row else thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    for r in (3, 4):
+    for r in range(header_day_row, header_row + 1):
         for c in range(1, last_col + 1):
             cell = ws.cell(row=r, column=c)
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 3 else thin
-            bottom = thick if r == 4 else thin
+            top = thick if r == header_day_row else thin
+            bottom = thick if r == header_row else thin
             cell.border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.auto_filter.ref = f"A4:{get_column_letter(last_col)}{last_row}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
 
-    ws.freeze_panes = "C3"
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_day_row}:{header_row}"
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
     ws.page_setup.fitToPage = True
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 0
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
 
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = f"common_view_{week_dates[0].isoformat()}.xlsx"
+    filename_date = f"{week_dates[0].day:02d}_{week_dates[0].month:02d}_{str(week_dates[0].year)[-2:]}"
+    initials_value = user_initials or "USER"
+    filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

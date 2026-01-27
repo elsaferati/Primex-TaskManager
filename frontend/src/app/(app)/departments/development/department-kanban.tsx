@@ -1312,6 +1312,9 @@ export default function DepartmentKanban() {
       for (const occ of allSystemOccurrences) {
         const tmpl = systemTemplateById.get(occ.template_id) || null
         const baseDate = toDate(occ.occurrence_date)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
         const alignmentEnabled = Boolean(
           tmpl?.requires_alignment ||
           tmpl?.alignment_time ||
@@ -1350,6 +1353,9 @@ export default function DepartmentKanban() {
 
       for (const task of allTasks) {
         const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || "-"
@@ -1390,12 +1396,32 @@ export default function DepartmentKanban() {
         }
       }
 
+      const tyoRank = (value: string) => {
+        const trimmed = value.trim()
+        if (!trimmed || trimmed === "-") return 3
+        if (trimmed === "Y") return 1
+        if (trimmed === "T") return 2
+        if (/^\d+$/.test(trimmed)) return 0
+        return 3
+      }
+      const tyoNumber = (value: string) => {
+        const trimmed = value.trim()
+        return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+      }
+      const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+        const rankA = tyoRank(a.tyo)
+        const rankB = tyoRank(b.tyo)
+        if (rankA !== rankB) return rankA - rankB
+        if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+        return 0
+      }
+
       fastRows
-        .sort((a, b) => a.order - b.order || a.index - b.index)
+        .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
         .forEach((entry) => rows.push(entry.row))
-      rows.push(...systemAmRows)
-      rows.push(...projectRows)
-      rows.push(...systemPmRows)
+      rows.push(...systemAmRows.sort(sortByTyo))
+      rows.push(...projectRows.sort(sortByTyo))
+      rows.push(...systemPmRows.sort(sortByTyo))
 
       return rows
     },
@@ -5530,6 +5556,7 @@ export default function DepartmentKanban() {
                   systemOccurrenceDate?: string
                   systemStatus?: string
                   userName: string
+                  userInitials: string
                 }> = []
                 
                 for (const member of allTodayPrintBaseUsers) {
@@ -5537,26 +5564,41 @@ export default function DepartmentKanban() {
                   if (!userReport) continue
                   const userRows = convertDailyReportToRows(userReport, member.id)
                   const userName = member.full_name || member.username || "-"
+                  const userInitials = initials(userName)
                   // Add userName to each row and add to allRows
                   for (const row of userRows) {
-                    allRows.push({ ...row, userName })
+                    allRows.push({ ...row, userName, userInitials })
                   }
                 }
+                
+                // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
+                allRows.sort((a, b) => {
+                  // First sort by typeLabel (LL)
+                  if (a.typeLabel !== b.typeLabel) {
+                    return a.typeLabel.localeCompare(b.typeLabel)
+                  }
+                  // Then by subtype (NLL)
+                  if (a.subtype !== b.subtype) {
+                    return a.subtype.localeCompare(b.subtype)
+                  }
+                  // Finally by tyo (T/Y/O)
+                  return a.tyo.localeCompare(b.tyo)
+                })
                 
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
+                      <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[36px]" />
-                      <col className="w-[150px]" />
-                      <col className="w-[60px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[52px]" />
-                      <col className="w-[36px]" />
+                      <col className="w-[34px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[140px]" />
+                      <col className="w-[52px]" />
+                      <col className="w-[28px]" />
+                      <col className="w-[50px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[120px]" />
+                      <col className="w-[44px]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-slate-100">
@@ -5604,7 +5646,7 @@ export default function DepartmentKanban() {
                             <td className="border border-slate-900 px-2 py-2 align-top">
                               <div className="h-4 w-full border-b border-slate-400" />
                             </td>
-                            <td className="border border-slate-900 px-2 py-2 align-top">{row.userName}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.userInitials}</td>
                           </tr>
                         ))
                       ) : (
