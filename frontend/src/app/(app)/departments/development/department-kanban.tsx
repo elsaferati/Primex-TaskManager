@@ -5447,93 +5447,115 @@ export default function DepartmentKanban() {
             <>
               {loadingAllUsersDailyReports ? (
                 <div className="text-sm text-slate-600 py-4">Loading daily reports...</div>
-              ) : (
-                allTodayPrintBaseUsers.map((member, userIndex) => {
+              ) : (() => {
+                // Collect all rows from all users into a single array
+                const allRows: Array<{
+                  typeLabel: string
+                  subtype: string
+                  period: string
+                  title: string
+                  description: string
+                  status: string
+                  bz: string
+                  kohaBz: string
+                  tyo: string
+                  comment?: string | null
+                  taskId?: string
+                  systemTemplateId?: string
+                  systemOccurrenceDate?: string
+                  systemStatus?: string
+                  userName: string
+                }> = []
+                
+                for (const member of allTodayPrintBaseUsers) {
                   const userReport = allUsersDailyReports.get(member.id)
-                  if (!userReport) return null
+                  if (!userReport) continue
                   const userRows = convertDailyReportToRows(userReport, member.id)
                   const userName = member.full_name || member.username || "-"
-                  return (
-                    <div key={member.id} className={userIndex > 0 ? "mt-8" : ""}>
-                      <div className="mb-3 text-sm font-semibold text-slate-900">
-                        User: {userName}
-                      </div>
-                      <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
-                        <colgroup>
-                          <col className="w-[36px]" />
-                          <col className="w-[44px]" />
-                          <col className="w-[30px]" />
-                          <col className="w-[36px]" />
-                          <col className="w-[150px]" />
-                          <col className="w-[110px]" />
-                          <col className="w-[60px]" />
-                          <col className="w-[30px]" />
-                          <col className="w-[52px]" />
-                          <col className="w-[36px]" />
-                          <col className="w-[140px]" />
-                        </colgroup>
-                        <thead>
-                          <tr className="bg-slate-100">
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
-                              Nr
-                            </th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                            <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                              NLL
-                            </th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                              <span className="block">AM/</span>
-                              <span className="block">PM</span>
-                            </th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                              T/Y/O
-                            </th>
-                            <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                  // Add userName to each row and add to allRows
+                  for (const row of userRows) {
+                    allRows.push({ ...row, userName })
+                  }
+                }
+                
+                return (
+                  <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+                    <colgroup>
+                      <col className="w-[36px]" />
+                      <col className="w-[44px]" />
+                      <col className="w-[30px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[150px]" />
+                      <col className="w-[110px]" />
+                      <col className="w-[60px]" />
+                      <col className="w-[30px]" />
+                      <col className="w-[52px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[140px]" />
+                      <col className="w-[120px]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-slate-100">
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                          Nr
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                        <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                          NLL
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          <span className="block">AM/</span>
+                          <span className="block">PM</span>
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                          T/Y/O
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allRows.length ? (
+                        allRows.map((row, index) => (
+                          <tr key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}>
+                            <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.subtype}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.period}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.tyo}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">
+                              <div className="h-4 w-full border-b border-slate-400" />
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.userName}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {userRows.length ? (
-                            userRows.map((row, index) => (
-                              <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                                <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                                  {row.subtype}
-                                </td>
-                                <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                                  {row.period}
-                                </td>
-                                <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                                <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                                  {row.tyo}
-                                </td>
-                                <td className="border border-slate-900 px-2 py-2 align-top">
-                                  <div className="h-4 w-full border-b border-slate-400" />
-                                </td>
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
-                                No data available.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                })
-              )}
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
+                            No data available.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                )
+              })()}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
@@ -5781,7 +5803,7 @@ export default function DepartmentKanban() {
           }
           .print-page {
             position: relative;
-            padding-bottom: 0.35in;
+            padding-bottom: 0.6in;
           }
           .print-page-measure {
             position: absolute;
@@ -5868,6 +5890,18 @@ export default function DepartmentKanban() {
           .weekly-report-table,
           .daily-report-table {
             table-layout: fixed;
+            margin-bottom: 0.6in;
+            page-break-inside: auto;
+          }
+          .daily-report-table tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          .daily-report-table thead {
+            display: table-header-group;
+          }
+          .daily-report-table tfoot {
+            display: table-footer-group;
           }
           .weekly-report-table thead th {
             border-width: 2px;
