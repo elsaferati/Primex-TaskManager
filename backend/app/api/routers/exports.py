@@ -33,6 +33,7 @@ from app.models.system_task_template_alignment_user import SystemTaskTemplateAli
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_assignee import TaskAssignee
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
@@ -73,7 +74,28 @@ def _strip_html(value: str | None) -> str:
 
 def _priority_label(value: str | None) -> str:
     normalized = value.upper() if value else "NORMAL"
-    return "Larte" if normalized == "HIGH" else "Normal"
+    return "H" if normalized == "HIGH" else "N"
+
+
+def _frequency_label(value: str | None) -> str:
+    normalized = value.upper() if value else ""
+    return {
+        "DAILY": "D",
+        "WEEKLY": "W",
+        "MONTHLY": "M",
+        "YEARLY": "Y",
+        "3_MONTHS": "3M",
+        "6_MONTHS": "6M",
+    }.get(normalized, value or "")
+
+
+def _department_short(label: str) -> str:
+    key = label.strip().upper()
+    return {
+        "DEVELOPMENT": "DEV",
+        "GRAPHIC DESIGN": "GDS",
+        "PRODUCT CONTENT": "PCM",
+    }.get(key, label)
 
 
 def _scope_label(template: SystemTaskTemplate) -> str:
@@ -1182,6 +1204,17 @@ async def export_system_tasks_xlsx(
         ).scalars().all()
         fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
 
+    task_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        alignment_rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_id in alignment_rows:
+            task_alignment_map.setdefault(task_id, []).append(user_id)
+
     department_ids = {template.department_id for _, template in task_rows if template.department_id}
     department_map: dict[uuid.UUID, str] = {}
     if department_ids:
@@ -1190,29 +1223,47 @@ async def export_system_tasks_xlsx(
         ).scalars().all()
         department_map = {d.id: d.name for d in departments}
 
+    alignment_user_ids: set[uuid.UUID] = set()
+    for task, template in task_rows:
+        ids = task_alignment_map.get(task.id) or []
+        if not ids:
+            ids = getattr(template, "alignment_user_ids", None) or []
+        for user_id in ids:
+            alignment_user_ids.add(user_id)
+    alignment_user_map: dict[uuid.UUID, str] = {}
+    if alignment_user_ids:
+        alignment_users = (
+            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+        ).scalars().all()
+        alignment_user_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in alignment_users
+        }
+
     wb = Workbook()
     ws = wb.active
     ws.title = "System Tasks"
 
     headers = [
-        "Nr",
-        "Prioriteti",
-        "Lloji",
-        "Departamenti",
-        "AM/PM",
-        "Titulli",
-        "Pershkrimi",
-        "Personi",
-        "REGJ/PATH/CHECKLISTA/TRAINING",
-        "BZ GROUP",
+        "NR",
+        "PRIO",
+        "LL",
+        "DEP",
+        "AM/\nPM",
+        "TITULLI",
+        "PERSHKRIMI",
+        "USER",
+        "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
+        "BZ ME",
+        "KOHA BZ",
     ]
     last_col = len(headers)
 
-    header_row = 4
+    title_row = 3
+    header_row = 5
     data_row = header_row + 1
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
-    title_cell = ws.cell(row=1, column=1, value="SYSTEM TASKS")
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
+    title_cell = ws.cell(row=title_row, column=1, value="SYSTEM TASKS")
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
@@ -1230,41 +1281,57 @@ async def export_system_tasks_xlsx(
         assignee_label = ", ".join(assignees)
         row_idx = data_row + idx - 1
         if template.department_id and template.department_id in department_map:
-            department_label = department_map[template.department_id]
+            department_label = _department_short(department_map[template.department_id])
         elif template.scope == "GA":
             department_label = "GA"
         else:
             department_label = "ALL"
         note_values = _parse_internal_notes(template.internal_notes)
-        details_parts = []
-        for label, key in [
-            ("REGJ", "REGJ"),
-            ("PATH", "PATH"),
-            ("CHECKLISTA", "CHECKLISTA"),
-            ("CHECKLISTA", "CHECK"),
-            ("TRAINING", "TRAINING"),
-        ]:
-            value = note_values.get(key, "")
-            if value:
-                details_parts.append(f"{label}: {value}")
-        details_value = " | ".join(details_parts)
-        bz_group_value = note_values.get("BZ GROUP", "")
+        regj_value = note_values.get("REGJ", "") or "-"
+        path_value = note_values.get("PATH", "") or "-"
+        check_value = note_values.get("CHECKLISTA", "") or note_values.get("CHECK", "") or "-"
+        training_value = note_values.get("TRAINING", "") or "-"
+        bz_group_value = note_values.get("BZ GROUP", "") or "-"
+        if all(value == "-" for value in [regj_value, path_value, check_value, training_value, bz_group_value]):
+            details_value = ""
+        else:
+            details_value = "\n".join(
+                [
+                    f"1.REGJ: {regj_value}",
+                    f"2.PATH: {path_value}",
+                    f"3.CHECKLISTA: {check_value}",
+                    f"4.TRAINING: {training_value}",
+                    f"5.BZ GROUP: {bz_group_value}",
+                ]
+            )
+        alignment_ids = task_alignment_map.get(task.id) or []
+        if not alignment_ids:
+            alignment_ids = getattr(template, "alignment_user_ids", None) or []
+        bz_me_labels = [alignment_user_map.get(user_id, "") for user_id in alignment_ids]
+        bz_me_value = ", ".join([label for label in bz_me_labels if label])
+        alignment_time = getattr(template, "alignment_time", None)
+        bz_time_value = ""
+        if alignment_time:
+            alignment_time_str = str(alignment_time)
+            bz_time_value = alignment_time_str[:5]
         values = [
             idx,
             _priority_label(template.priority),
-            template.frequency,
+            _frequency_label(template.frequency),
             department_label,
             task.finish_period or "",
             task.title,
             _strip_html(task.description),
             assignee_label,
             details_value,
-            bz_group_value,
+            bz_me_value,
+            bz_time_value,
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
             col_widths[col_idx - 1] = max(col_widths[col_idx - 1], len(str(value)))
+        # Excel rich text caused repair prompts; keep plain text for compatibility.
 
     for col_idx, width in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 80)
@@ -1288,7 +1355,7 @@ async def export_system_tasks_xlsx(
                 bottom = thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.freeze_panes = "B5"
+    ws.freeze_panes = "B6"
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
     ws.print_title_rows = f"{header_row}:{header_row}"
     ws.page_margins.left = 0.1
