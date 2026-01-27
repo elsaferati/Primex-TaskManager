@@ -1135,15 +1135,18 @@ async def export_system_tasks_xlsx(
     ]
     last_col = len(headers)
 
+    header_row = 4
+    data_row = header_row + 1
+
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value="SYSTEM TASKS")
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="left", vertical="center")
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
     col_widths = [len(header) for header in headers]
 
@@ -1152,7 +1155,7 @@ async def export_system_tasks_xlsx(
         if not assignees and task.assigned_to in fallback_map:
             assignees = [fallback_map[task.assigned_to]]
         assignee_label = ", ".join(assignees)
-        row_idx = 3 + idx
+        row_idx = data_row + idx - 1
         if template.department_id and template.department_id in department_map:
             department_label = department_map[template.department_id]
         elif template.scope == "GA":
@@ -1187,33 +1190,50 @@ async def export_system_tasks_xlsx(
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
             col_widths[col_idx - 1] = max(col_widths[col_idx - 1], len(str(value)))
 
     for col_idx, width in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 80)
 
-    for row_idx in range(4, ws.max_row + 1):
-        ws.cell(row=row_idx, column=1).font = Font(bold=True)
+    for row_idx in range(data_row, ws.max_row + 1):
+        cell = ws.cell(row=row_idx, column=1)
+        cell.font = Font(bold=True)
+        cell.number_format = "#,##0"
 
     thin = Side(style="thin", color="000000")
     thick = Side(style="medium", color="000000")
     last_row = ws.max_row
-    for r in range(3, last_row + 1):
+    for r in range(header_row, last_row + 1):
         for c in range(1, last_col + 1):
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 3 else thin
-            bottom = thick if r in (3, last_row) else thin
+            top = thick if r == header_row else thin
+            if r == header_row or r == last_row:
+                bottom = thick
+            else:
+                bottom = thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.freeze_panes = "B4"
-    ws.auto_filter.ref = f"A3:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "B5"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
 
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = "system_tasks_active.xlsx" if active_only else "system_tasks_all.xlsx"
+    today = datetime.now().date()
+    filename = f"SYSTEM_TASKS_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}_{user_initials or 'USER'}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

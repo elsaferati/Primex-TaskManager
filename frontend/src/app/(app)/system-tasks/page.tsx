@@ -1326,6 +1326,37 @@ export function SystemTasksView({
       const notes = parseInternalNotes(template.internal_notes)
       return notes["BZ GROUP"] || ""
     }
+    const buildBzMe = (template: SystemTaskTemplate) => {
+      if (!template.requires_alignment) return ""
+      const managerIds = template.alignment_user_ids ?? []
+      if (managerIds.length === 0) return ""
+      const labels = managerIds
+        .map((id) => {
+          const person = userMap.get(id)
+          if (!person) return id
+          return userDisplayLabel(person)
+        })
+        .filter(Boolean)
+        .map((label) => userInitials(label))
+        .filter(Boolean)
+      return labels.join(", ")
+    }
+    const buildBzKur = (template: SystemTaskTemplate) => {
+      if (!template.requires_alignment) return ""
+      return timeInputValue(template.alignment_time)
+    }
+    const buildDetailsWithBzGroup = (template: SystemTaskTemplate) => {
+      const notes = parseInternalNotes(template.internal_notes)
+      const parts: string[] = []
+      if (notes.REGJ) parts.push(`<strong>1.REGJ:</strong> ${escapeHtml(notes.REGJ)}`)
+      if (notes.PATH) parts.push(`<strong>2.PATH:</strong> ${escapeHtml(notes.PATH)}`)
+      if (notes.TRAINING) parts.push(`<strong>3.TRAINING:</strong> ${escapeHtml(notes.TRAINING)}`)
+      const checklistaValue = notes.CHECKLISTA || notes.CHECK
+      if (checklistaValue) parts.push(`<strong>4.CHECKLISTA:</strong> ${escapeHtml(checklistaValue)}`)
+      const bzGroup = buildBzGroup(template)
+      if (bzGroup) parts.push(`<strong>5.BZ GROUP:</strong> ${escapeHtml(bzGroup)}`)
+      return parts.join("\n")
+    }
     const assigneeInitials = (list?: SystemTaskTemplate["assignees"]) => {
       if (!list || list.length === 0) return "-"
       return list
@@ -1420,21 +1451,17 @@ export function SystemTasksView({
 
       return `
         <tr>
-          <td class="num">${rowNumber}</td>
-          <td class="center">${escapeHtml(priorityShort)}</td>
-          <td class="center no-wrap">${escapeHtml(frequencyShort)}</td>
-          <td class="no-wrap">${escapeHtml(departmentShort)}</td>
-          <td class="center">${escapeHtml(template.finish_period || "-")}</td>
+          <td class="num tight">${rowNumber}</td>
+          <td class="center tight">${escapeHtml(priorityShort)}</td>
+          <td class="center no-wrap tight">${escapeHtml(frequencyShort)}</td>
+          <td class="no-wrap tight">${escapeHtml(departmentShort)}</td>
+          <td class="ampm tight">${escapeHtml(template.finish_period || "-")}</td>
           <td class="title">${escapeHtml(template.title)}</td>
-          <td class="description">${escapeHtml(
-            (() => {
-              const desc = stripHtml(template.description)
-              return desc && desc.toLowerCase() !== "pershkrimi" ? desc : "-"
-            })()
-          )}</td>
           <td>${escapeHtml(ownerLabel)}</td>
-          <td class="details">${escapeHtml(buildDetails(template))}</td>
-          <td class="bz-group">${escapeHtml(buildBzGroup(template))}</td>
+          <td class="details-bz">${buildDetailsWithBzGroup(template)}</td>
+          <td class="bz-me">${escapeHtml(buildBzMe(template) || "-")}</td>
+          <td class="bz-kur">${escapeHtml(buildBzKur(template) || "-")}</td>
+          <td class="comment">${escapeHtml(template.user_comment || "-")}</td>
         </tr>
       `
     }
@@ -1444,24 +1471,15 @@ export function SystemTasksView({
     for (const frequency of frequencyOrder) {
       const list = grouped.get(frequency) ?? []
       if (!list.length) continue
-      const label = FREQUENCY_OPTIONS.find((o) => o.value === frequency)?.label ?? frequency
-      tableBody += `
-        <tr class="group-row">
-          <td colspan="10">${escapeHtml(label)}</td>
-        </tr>
-      `
+      // Print view: no DAILY/WEEKLY/... separator rows; keep ordering only.
       for (const template of list) {
         counter += 1
         tableBody += renderTemplateRow(template, counter)
       }
     }
 
+    // Keep inactive tasks at the end, but without a separate "Inactive Tasks" separator row.
     if (inactive.length) {
-      tableBody += `
-        <tr class="inactive-row">
-          <td colspan="10">Inactive Tasks</td>
-        </tr>
-      `
       for (const template of inactive) {
         counter += 1
         tableBody += renderTemplateRow(template, counter)
@@ -1475,29 +1493,31 @@ export function SystemTasksView({
           <meta charset="utf-8" />
           <title>${escapeHtml(effectiveTitle)}</title>
           <style>
-            @media print {
-              @page { margin: 12mm; }
-              body { margin: 0; padding-bottom: 30px; }
+            @page { margin: 8mm; }
+            html, body {
+              direction: ltr;
+              margin: 0;
+              padding: 0;
             }
 
             body {
               font-family: Arial, sans-serif;
               font-size: 10pt;
               color: #0f172a;
-              padding-bottom: 40px;
             }
 
             .header {
-              text-align: center;
-              margin-bottom: 14px;
-              padding-bottom: 10px;
-              border-bottom: 2px solid #0f172a;
+              text-align: left;
+              margin: 0 0 8px 0;
+              padding: 0;
+              border-bottom: 0;
             }
 
             .header h1 {
               margin: 0;
               font-size: 16pt;
               letter-spacing: 0.2px;
+              text-align: center;
             }
 
             .meta {
@@ -1525,55 +1545,86 @@ export function SystemTasksView({
               width: 100%;
               border-collapse: collapse;
               table-layout: auto;
+              direction: ltr;
+              margin-top: 0;
+              border: 2px solid #0f172a;
             }
+
+            col.col-num { width: auto; }
+            col.col-prio { width: auto; }
+            col.col-lloji { width: auto; }
+            col.col-dept { width: auto; }
+            col.col-ampm { width: auto; }
+            col.col-title { width: 20%; }
+            col.col-person { width: auto; }
+            col.col-details { width: 28%; }
+            col.col-bzme { width: auto; }
+            col.col-bzkur { width: auto; }
+            col.col-comment { width: 12%; }
 
             thead th {
               background: #f1f5f9;
-              border: 1px solid #0f172a;
-              padding: 8px 6px;
+              border: 2px solid #0f172a;
+              padding: 3px;
               font-size: 9pt;
               text-align: left;
+              text-transform: uppercase;
               white-space: normal;
+              word-break: break-word;
+              hyphens: auto;
+              vertical-align: bottom;
+              line-height: 1.1;
             }
 
             tbody td {
               border: 1px solid #0f172a;
-              padding: 6px;
-              vertical-align: top;
+              padding: 3px;
+              vertical-align: bottom;
               font-size: 9pt;
               word-break: break-word;
               white-space: normal;
             }
-            .no-wrap {
+            /* Match left/right spacing for narrow columns */
+            thead th:nth-child(-n + 5),
+            tbody td:nth-child(-n + 5),
+            thead th:nth-child(7),
+            tbody td:nth-child(7),
+            thead th:nth-child(9),
+            tbody td:nth-child(9),
+            thead th:nth-child(10),
+            tbody td:nth-child(10) {
+              padding-left: 4px;
+              padding-right: 4px;
+            }
+            .details-bz {
+              white-space: pre-line;
+            }
+ /* Force tight columns (first 5 + Personi + BZ ME + KOHA BZ) */
+            thead th:nth-child(-n + 5),
+            tbody td:nth-child(-n + 5),
+            thead th:nth-child(7),
+            tbody td:nth-child(7),
+            thead th:nth-child(9),
+            tbody td:nth-child(9),
+            thead th:nth-child(10),
+            tbody td:nth-child(10) {
+              padding-left: 4px;
+              padding-right: 4px;
               white-space: nowrap;
             }
 
             tr { page-break-inside: avoid; }
 
-            .num { text-align: center; font-weight: bold; }
-            .title { font-weight: 600; }
+            .num { text-align: left; font-weight: bold; }
+            .tight { padding-left: 0; padding-right: 0; }
+            .ampm { text-align: center; }
+            .ampm-head { text-align: center; line-height: 1.05; }
+            .ampm-head span { display: inline-block; }
+            .title { font-weight: 400; }
             .description { }
             .details { }
             .bz-group { }
-            .center { text-align: center; }
-
-            .group-row td {
-              background: #e2e8f0;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.6px;
-              font-size: 8pt;
-              color: #334155;
-            }
-
-            .inactive-row td {
-              background: #f8fafc;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.6px;
-              font-size: 8pt;
-              color: #94a3b8;
-            }
+            .center { text-align: left; }
 
             .pill {
               display: inline-block;
@@ -1598,7 +1649,7 @@ export function SystemTasksView({
                 bottom: 0;
                 left: 0;
                 right: 0;
-                padding: 6px 0;
+                padding: 0;
                 font-size: 9pt;
                 color: #475569;
                 grid-template-columns: 1fr auto 1fr;
@@ -1621,7 +1672,7 @@ export function SystemTasksView({
                 bottom: 0;
                 left: 0;
                 right: 0;
-                padding: 10px 20px;
+                padding: 0;
                 font-size: 9pt;
                 color: #475569;
                 background: white;
@@ -1649,18 +1700,32 @@ export function SystemTasksView({
           </div>
 
           <table>
+            <colgroup>
+              <col class="col-num" />
+              <col class="col-prio" />
+              <col class="col-lloji" />
+              <col class="col-dept" />
+              <col class="col-ampm" />
+              <col class="col-title" />
+              <col class="col-person" />
+              <col class="col-details" />
+              <col class="col-bzme" />
+              <col class="col-bzkur" />
+              <col class="col-comment" />
+            </colgroup>
             <thead>
               <tr>
-                <th>No.</th>
-                <th>P</th>
-                <th>Lloji</th>
-                <th>D</th>
-                <th>AM/PM</th>
+                <th class="tight">No</th>
+                <th class="tight">PRIO</th>
+                <th class="tight">LL</th>
+                <th class="tight">DEP</th>
+                <th class="ampm-head tight"><span>AM/<br />PM</span></th>
                 <th>Titulli</th>
-                <th>Pershkrimi</th>
-                <th>Personi</th>
-                <th>REGJ/PATH/CHECKLISTA/TRAINING</th>
-                <th>BZ GROUP</th>
+                <th>USER</th>
+                <th>REGJ/PATH/CHECKLISTA/TRAINING / BZ GROUP</th>
+                <th>BZ ME</th>
+                <th>KOHA BZ</th>
+                <th>KOMENT</th>
               </tr>
             </thead>
             <tbody>
@@ -1676,7 +1741,7 @@ export function SystemTasksView({
             (function () {
               // Calculate approximate page count based on content height
               var A4_HEIGHT_PX = 11.69 * 96; // ~1122px
-              var MARGIN_PX = 12 * 96 / 25.4; // 12mm ~45px
+              var MARGIN_PX = 0;
               var printableHeight = A4_HEIGHT_PX - MARGIN_PX * 2;
               
               function updatePageCount() {
