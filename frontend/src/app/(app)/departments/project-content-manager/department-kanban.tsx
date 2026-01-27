@@ -2068,15 +2068,16 @@ export default function DepartmentKanban() {
 
   const allTodayPrintRows = React.useMemo(() => {
     const rows: Array<
-      ReturnType<typeof convertDailyReportToRows>[number] & { userName: string }
+      ReturnType<typeof convertDailyReportToRows>[number] & { userName: string; userInitials: string }
     > = []
     for (const member of allTodayPrintBaseUsers) {
       const report = allUsersDailyReports.get(member.id)
       if (!report) continue
       const userName = member.full_name || member.username || "-"
+      const userInitials = initials(userName)
       const userRows = convertDailyReportToRows(report, member.id)
       for (const row of userRows) {
-        rows.push({ ...row, userName })
+        rows.push({ ...row, userName, userInitials })
       }
     }
     // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
@@ -5320,17 +5321,17 @@ export default function DepartmentKanban() {
                 ) : (
                   <table className="print-table w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
+                      <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[36px]" />
-                      <col className="w-[150px]" />
-                      <col className="w-[60px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[52px]" />
-                      <col className="w-[36px]" />
+                      <col className="w-[34px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[140px]" />
+                      <col className="w-[52px]" />
+                      <col className="w-[28px]" />
+                      <col className="w-[50px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[120px]" />
+                      <col className="w-[44px]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-slate-100">
@@ -5379,7 +5380,7 @@ export default function DepartmentKanban() {
                               <div className="h-4 w-full border-b border-slate-400" />
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.userName}
+                              {row.userInitials}
                             </td>
                           </tr>
                         ))

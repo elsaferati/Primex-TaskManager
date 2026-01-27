@@ -4305,6 +4305,7 @@ export default function DepartmentKanban() {
                   systemOccurrenceDate?: string
                   systemStatus?: string
                   userName: string
+                  userInitials: string
                 }> = []
                 
                 for (const member of allTodayPrintBaseUsers) {
@@ -4312,9 +4313,10 @@ export default function DepartmentKanban() {
                   if (!userReport) continue
                   const userRows = convertDailyReportToRows(userReport, member.id)
                   const userName = member.full_name || member.username || "-"
+                  const userInitials = initials(userName)
                   // Add userName to each row and add to allRows
                   for (const row of userRows) {
-                    allRows.push({ ...row, userName })
+                    allRows.push({ ...row, userName, userInitials })
                   }
                 }
                 
@@ -4335,17 +4337,17 @@ export default function DepartmentKanban() {
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
+                      <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[36px]" />
-                      <col className="w-[150px]" />
-                      <col className="w-[60px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[52px]" />
-                      <col className="w-[36px]" />
+                      <col className="w-[34px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[140px]" />
+                      <col className="w-[52px]" />
+                      <col className="w-[28px]" />
+                      <col className="w-[50px]" />
+                      <col className="w-[34px]" />
                       <col className="w-[120px]" />
+                      <col className="w-[44px]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-slate-100">
@@ -4393,7 +4395,7 @@ export default function DepartmentKanban() {
                             <td className="border border-slate-900 px-2 py-2 align-top">
                               <div className="h-4 w-full border-b border-slate-400" />
                             </td>
-                            <td className="border border-slate-900 px-2 py-2 align-top">{row.userName}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.userInitials}</td>
                           </tr>
                         ))
                       ) : (

@@ -997,7 +997,7 @@ async def export_daily_report_xlsx(
             department_id=department_id,
             user_id=member.id,
         )
-        member_label = member.full_name or member.username or "-"
+        member_label = _initials(member.full_name or member.username or "") or "-"
         for row in member_rows:
             rows.append(row + [member_label])
 
@@ -1033,7 +1033,7 @@ async def export_daily_report_xlsx(
 
     header_row = 6
     for col_idx, header in enumerate(headers, start=1):
-        header_text = header.upper()
+        header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
         cell = ws.cell(row=header_row, column=col_idx, value=header_text)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
@@ -1056,7 +1056,7 @@ async def export_daily_report_xlsx(
         "KOHA BZ": 10,
         "T/Y/O": 6,
         "KOMENT": 22,
-        "USER": 18,
+        "USER": 6,
     }
     for col_idx, header in enumerate(headers, start=1):
         width = column_widths.get(header, 16)
