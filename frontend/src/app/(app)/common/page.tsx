@@ -2145,12 +2145,37 @@ export default function CommonViewPage() {
             padding-top: 18px;
             padding-bottom: 18px;
           }
-          .swimlane-header,
-          .swimlane-badge,
           .swimlane-cell {
             background: #ffffff !important;
             color: #111827 !important;
           }
+          .swimlane-header,
+          .swimlane-badge {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .swimlane-header.delay { background: var(--delay-bg) !important; color: #c2410c !important; }
+          .swimlane-header.absence { background: var(--absence-bg) !important; color: #b91c1c !important; }
+          .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
+          .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
+          .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
+          .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
+          .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
+          .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
+          .swimlane-header.priority { background: var(--priority-bg) !important; color: #b45309 !important; }
+          .swimlane-badge.delay { border-color: var(--delay-accent) !important; color: #c2410c !important; }
+          .swimlane-badge.absence { border-color: var(--absence-accent) !important; color: #b91c1c !important; }
+          .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
+          .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
+          .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
+          .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
+          .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
+          .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
+          .swimlane-badge.priority { border-color: var(--priority-accent) !important; color: #b45309 !important; }
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;

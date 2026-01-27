@@ -1069,7 +1069,7 @@ async def export_daily_report_xlsx(
     else:
         ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
 
-    header_row = 6
+    header_row = 5
     for col_idx, header in enumerate(headers, start=1):
         header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
         cell = ws.cell(row=header_row, column=col_idx, value=header_text)
@@ -1102,6 +1102,12 @@ async def export_daily_report_xlsx(
         width = column_widths.get(header, 16)
         ws.column_dimensions[ws.cell(row=header_row, column=col_idx).column_letter].width = width
 
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 16
+    ws.row_dimensions[3].height = 16
+    ws.row_dimensions[4].height = 6
+    ws.row_dimensions[header_row].height = 20
+
     data_row = header_row + 1
     for idx, row in enumerate(rows, start=1):
         row_values = row.copy()
@@ -1117,8 +1123,8 @@ async def export_daily_report_xlsx(
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B7"]
-    ws.print_title_rows = "6:6"
+    ws.freeze_panes = ws["B6"]
+    ws.print_title_rows = "5:5"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
