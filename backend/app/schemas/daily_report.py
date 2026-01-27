@@ -20,6 +20,9 @@ class DailyReportTaskItem(BaseModel):
 class DailyReportSystemOccurrence(BaseModel):
     template_id: uuid.UUID
     title: str
+    frequency: str | None = None
+    department_id: uuid.UUID | None = None
+    scope: str | None = None
     occurrence_date: date
     status: str
     comment: str | None = None
