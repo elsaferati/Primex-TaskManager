@@ -886,6 +886,7 @@ async def _daily_report_rows_for_user(
                         _fast_subtype_short(task),
                         period,
                         task.title or "-",
+                        task.description or "",
                         status,
                         "-",
                         "-",
@@ -904,6 +905,7 @@ async def _daily_report_rows_for_user(
                     "-",
                     period,
                     f"{project_label} - {task.title or '-'}",
+                    task.description or "",
                     status,
                     "-",
                     "-",
@@ -925,6 +927,7 @@ async def _daily_report_rows_for_user(
                 _system_frequency_short_label(tmpl.frequency),
                 period,
                 tmpl.title or "-",
+                tmpl.description or "",
                 _format_system_status(occ.status),
                 bz,
                 koha_bz,
@@ -1001,22 +1004,22 @@ async def export_daily_report_xlsx(
         for row in member_rows:
             rows.append(row + [member_label])
 
-    # Sort by LL (index 1), NLL (index 2), and T/Y/O (index 8)
+    # Sort by LL (index 1), NLL (index 2), and T/Y/O (index 9)
     if all_users:
         rows.sort(key=lambda r: (
             r[1] if len(r) > 1 else "",  # LL (typeLabel)
             r[2] if len(r) > 2 else "",  # NLL (subtype)
-            r[8] if len(r) > 8 else "",  # T/Y/O (tyo)
+            r[9] if len(r) > 9 else "",  # T/Y/O (tyo)
         ))
 
-    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
+    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily Report"
 
     title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers) - 1)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
     title_cell = ws.cell(row=1, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1051,6 +1054,7 @@ async def export_daily_report_xlsx(
         "NLL": 6,
         "AM/PM": 7,
         "TITULLI": 32,
+        "PERSHKRIMI": 26,
         "STS": 10,
         "BZ": 8,
         "KOHA BZ": 10,
@@ -1071,7 +1075,7 @@ async def export_daily_report_xlsx(
             cell.alignment = Alignment(
                 horizontal="left",
                 vertical="bottom",
-                wrap_text=col_idx in {5, 6, 11, 12},
+                wrap_text=col_idx in {5, 6, 11},
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
@@ -1674,24 +1678,24 @@ async def export_common_xlsx(
     data_start_row = 5
 
     ws.cell(row=header_row, column=1, value="NR")
-    ws.cell(row=header_row, column=2, value="LL")
+    ws.cell(row=header_row, column=2, value="LLOJI")
     for idx, day in enumerate(week_dates):
         col = 3 + idx
         ws.cell(row=header_day_row, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}".upper())
         ws.cell(row=header_row, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
 
     row_specs = [
-        ("late", "Delays"),
-        ("absent", "Absences"),
-        ("leave", "Annual Leave"),
-        ("external", "External Meetings"),
-        ("blocked", "Blocked"),
+        ("late", "VONS"),
+        ("absent", "MUNG"),
+        ("leave", "PV/FEST"),
+        ("external", "TAK EXT"),
+        ("blocked", "BLL"),
         ("oneH", "1H"),
-        ("personal", "Personal"),
+        ("personal", "P:"),
         ("r1", "R1"),
-        ("priority", "Projects"),
-        ("problem", "Problems"),
-        ("feedback", "Complaints/Requests/Proposals"),
+        ("priority", "PRJK"),
+        ("problem", "PRBL"),
+        ("feedback", "ANK/KRK/PRZ"),
     ]
 
     start_row = data_start_row
