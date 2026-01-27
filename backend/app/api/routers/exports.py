@@ -1004,7 +1004,7 @@ async def export_daily_report_xlsx(
     else:
         ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
 
-    header_row = 4
+    header_row = 5
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
@@ -1048,8 +1048,8 @@ async def export_daily_report_xlsx(
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B5"]
-    ws.print_title_rows = "4:4"
+    ws.freeze_panes = ws["B6"]
+    ws.print_title_rows = "5:5"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1068,14 +1068,30 @@ async def export_daily_report_xlsx(
         thick = Side(style="medium", color="000000")
         for r in range(header_row, last_row + 1):
             for c in range(1, last_col + 1):
-                left = thick if c == 1 else thin
-                right = thick if c == last_col else thin
-                top = thick if r == header_row else thin
-                bottom = thick if r == last_row else thin
-                if r == header_row:
-                    ws.cell(row=r, column=c).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                is_first_col = c == 1
+                is_last_col = c == last_col
+                is_header = r == header_row
+                is_last_row = r == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+                # Keep header row thick on the outside only; avoid thick separator under header.
+                if is_header:
+                    ws.cell(row=r, column=c).border = Border(
+                        left=left,
+                        right=right,
+                        top=thick,
+                        bottom=thin,
+                    )
                 else:
-                    ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+                    ws.cell(row=r, column=c).border = Border(
+                        left=left,
+                        right=right,
+                        top=top,
+                        bottom=bottom,
+                    )
 
     ws.oddHeader.right.text = "&D &T"
     ws.oddFooter.center.text = "Page &P / &N"
@@ -1086,8 +1102,10 @@ async def export_daily_report_xlsx(
     wb.save(bio)
     bio.seek(0)
     date_label = day.strftime("%d_%m_%y")
-    worker_label = (user.full_name or user.username or "user").replace(" ", "")
-    filename = f"Daily_Report_{date_label}_{worker_label}.xlsx"
+    title_label = title_text.upper()
+    user_initials = _initials(user.full_name or user.username or "")
+    initials_label = user_initials or "USER"
+    filename = f"{title_label}_{date_label}_{initials_label}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

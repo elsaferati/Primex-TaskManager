@@ -3596,13 +3596,12 @@ export default function DepartmentKanban() {
                       <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
                       <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
                         <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                          <SelectValue placeholder="This Week" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="today">Today</SelectItem>
-                        <SelectItem value="week">This Week</SelectItem>
-                      </SelectContent>
-                    </Select>
+                          <SelectValue placeholder="Today" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="today">Today</SelectItem>
+                        </SelectContent>
+                      </Select>
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -3662,16 +3661,15 @@ export default function DepartmentKanban() {
                 >
                   <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
+                      <col className="w-[28px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[32px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[56px]" />
-                      <col className="w-[56px]" />
                       <col className="w-[150px]" />
-                      <col className="w-[110px]" />
-                      <col className="w-[60px]" />
-                      <col className="w-[40px]" />
-                      <col className="w-[52px]" />
                       <col className="w-[48px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[48px]" />
+                      <col className="w-[32px]" />
                       <col className="w-[140px]" />
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
@@ -3686,12 +3684,12 @@ export default function DepartmentKanban() {
                           <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                          T/Y/O
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          <span className="block">T/Y</span>
+                          <span className="block">/O</span>
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                       </tr>
@@ -3716,7 +3714,6 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                              <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -5509,11 +5506,7 @@ export default function DepartmentKanban() {
             ) : (
               <div>User: {user?.full_name || user?.username || "-"}</div>
             )}
-            <div>
-              {showAllTodayPrint
-                ? ""
-                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
-            </div>
+            {null}
           </div>
           {showAllTodayPrint ? (
             <>
@@ -5558,7 +5551,6 @@ export default function DepartmentKanban() {
                       <col className="w-[30px]" />
                       <col className="w-[36px]" />
                       <col className="w-[150px]" />
-                      <col className="w-[110px]" />
                       <col className="w-[60px]" />
                       <col className="w-[30px]" />
                       <col className="w-[52px]" />
@@ -5580,7 +5572,6 @@ export default function DepartmentKanban() {
                           <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
@@ -5604,7 +5595,6 @@ export default function DepartmentKanban() {
                               {row.period}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -5632,17 +5622,16 @@ export default function DepartmentKanban() {
           ) : printRange === "today" && showDailyUserReport ? (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <colgroup>
-                <col className="w-[36px]" />
-                <col className="w-[44px]" />
-                <col className="w-[30px]" />
-                <col className="w-[36px]" />
-                <col className="w-[150px]" />
-                <col className="w-[110px]" />
-              <col className="w-[60px]" />
-              <col className="w-[30px]" />
-              <col className="w-[52px]" />
-              <col className="w-[36px]" />
-              <col className="w-[140px]" />
+                <col className="w-[28px]" />
+                <col className="w-[32px]" />
+                <col className="w-[26px]" />
+                <col className="w-[32px]" />
+                <col className="w-[140px]" />
+              <col className="w-[50px]" />
+              <col className="w-[28px]" />
+              <col className="w-[46px]" />
+              <col className="w-[32px]" />
+              <col className="w-[130px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-100">
@@ -5658,7 +5647,6 @@ export default function DepartmentKanban() {
                     <span className="block">PM</span>
                   </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
@@ -5684,7 +5672,6 @@ export default function DepartmentKanban() {
                       <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -5853,6 +5840,21 @@ export default function DepartmentKanban() {
           direction: ltr;
           text-align: left;
         }
+        .weekly-report-table th,
+        .weekly-report-table td {
+          vertical-align: bottom;
+          padding-bottom: 0;
+          padding-top: 15px;
+          padding-left: 4px;
+          padding-right: 4px;
+          direction: ltr;
+          text-align: left;
+        }
+        .daily-report-table th:nth-child(3),
+        .daily-report-table td:nth-child(3) {
+          padding-left: 2px;
+          padding-right: 2px;
+        }
         .daily-report-table thead th {
           border-width: 2px;
           border-color: #cbd5e1;
@@ -5962,6 +5964,18 @@ export default function DepartmentKanban() {
             vertical-align: bottom !important;
             direction: ltr;
             text-align: left;
+          }
+          .weekly-report-table th,
+          .weekly-report-table td {
+            padding-bottom: 0;
+            padding-top: 15px;
+            padding-left: 4px;
+            padding-right: 4px;
+          }
+          .daily-report-table th:nth-child(3),
+          .daily-report-table td:nth-child(3) {
+            padding-left: 2px;
+            padding-right: 2px;
           }
           .weekly-report-table,
           .daily-report-table {
