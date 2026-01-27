@@ -1171,6 +1171,9 @@ export default function DepartmentKanban() {
       for (const occ of allSystemOccurrences) {
         const tmpl = systemTemplateById.get(occ.template_id) || null
         const baseDate = toDate(occ.occurrence_date)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
         const alignmentEnabled = Boolean(
           tmpl?.requires_alignment ||
           tmpl?.alignment_time ||
@@ -1209,6 +1212,9 @@ export default function DepartmentKanban() {
 
       for (const task of allTasks) {
         const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || "-"
@@ -1249,12 +1255,32 @@ export default function DepartmentKanban() {
         }
       }
 
+      const tyoRank = (value: string) => {
+        const trimmed = value.trim()
+        if (!trimmed || trimmed === "-") return 3
+        if (trimmed === "Y") return 1
+        if (trimmed === "T") return 2
+        if (/^\d+$/.test(trimmed)) return 0
+        return 3
+      }
+      const tyoNumber = (value: string) => {
+        const trimmed = value.trim()
+        return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+      }
+      const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+        const rankA = tyoRank(a.tyo)
+        const rankB = tyoRank(b.tyo)
+        if (rankA !== rankB) return rankA - rankB
+        if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+        return 0
+      }
+
       fastRows
-        .sort((a, b) => a.order - b.order || a.index - b.index)
+        .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
         .forEach((entry) => rows.push(entry.row))
-      rows.push(...systemAmRows)
-      rows.push(...projectRows)
-      rows.push(...systemPmRows)
+      rows.push(...systemAmRows.sort(sortByTyo))
+      rows.push(...projectRows.sort(sortByTyo))
+      rows.push(...systemPmRows.sort(sortByTyo))
 
       return rows
     },
@@ -1404,6 +1430,45 @@ export default function DepartmentKanban() {
         department_id: department.id,
         user_id: user.id,
       })
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const exportAllTodayReport = async () => {
+    if (!department?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+      })
+      if (selectedUserId && selectedUserId !== "__all__") {
+        qs.set("user_id", selectedUserId)
+      } else {
+        qs.set("all_users", "true")
+      }
       const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
       if (!res.ok) {
         toast.error("Failed to export report")
@@ -2780,6 +2845,14 @@ export default function DepartmentKanban() {
                         >
                           <Printer className="mr-2 h-4 w-4" />
                           Print
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                          onClick={exportAllTodayReport}
+                          disabled={exportingDailyReport}
+                        >
+                          {exportingDailyReport ? "Exporting..." : "Export Excel"}
                         </Button>
                       </>
                   ) : null}

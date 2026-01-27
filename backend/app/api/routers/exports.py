@@ -864,7 +864,6 @@ async def _daily_report_rows_for_user(
                         _fast_subtype_short(task),
                         period,
                         task.title or "-",
-                        task.description or "-",
                         status,
                         "-",
                         "-",
@@ -883,7 +882,6 @@ async def _daily_report_rows_for_user(
                     "-",
                     period,
                     f"{project_label} - {task.title or '-'}",
-                    task.description or "-",
                     status,
                     "-",
                     "-",
@@ -905,7 +903,6 @@ async def _daily_report_rows_for_user(
                 _system_frequency_short_label(tmpl.frequency),
                 period,
                 tmpl.title or "-",
-                tmpl.description or "-",
                 _format_system_status(occ.status),
                 bz,
                 koha_bz,
@@ -982,7 +979,7 @@ async def export_daily_report_xlsx(
         for row in member_rows:
             rows.append(row + [member_label])
 
-    headers = ["Nr", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "User"]
+    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
 
     wb = Workbook()
     ws = wb.active
@@ -1004,9 +1001,10 @@ async def export_daily_report_xlsx(
     else:
         ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
 
-    header_row = 5
+    header_row = 6
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        header_text = header.upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         cell.alignment = Alignment(
@@ -1014,20 +1012,21 @@ async def export_daily_report_xlsx(
             vertical="bottom",
             wrap_text=True if header == "Nr" else True,
         )
+        # Force uppercase display even if Excel auto-changes header text.
+        cell.number_format = "@"
 
     column_widths = {
-        "Nr": 4,
+        "NR": 4,
         "LL": 5,
         "NLL": 6,
         "AM/PM": 7,
         "TITULLI": 32,
-        "PERSHKRIMI": 28,
         "STS": 10,
         "BZ": 8,
         "KOHA BZ": 10,
         "T/Y/O": 6,
         "KOMENT": 22,
-        "User": 18,
+        "USER": 18,
     }
     for col_idx, header in enumerate(headers, start=1):
         width = column_widths.get(header, 16)
@@ -1048,8 +1047,8 @@ async def export_daily_report_xlsx(
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B6"]
-    ws.print_title_rows = "5:5"
+    ws.freeze_panes = ws["B7"]
+    ws.print_title_rows = "6:6"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1080,8 +1079,8 @@ async def export_daily_report_xlsx(
                 # Keep header row thick on the outside only; avoid thick separator under header.
                 if is_header:
                     ws.cell(row=r, column=c).border = Border(
-                        left=left,
-                        right=right,
+                        left=thick,
+                        right=thick,
                         top=thick,
                         bottom=thin,
                     )
