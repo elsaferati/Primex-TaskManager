@@ -1047,11 +1047,10 @@ async def export_daily_report_xlsx(
     ws = wb.active
     ws.title = "Daily Report"
 
-    empty_header_rows = 2
-    title_row = 1 + empty_header_rows
-    dept_row = title_row + 1
-    user_row = title_row + 2
-    header_row = title_row + 4
+    title_row = 1
+    dept_row = 2
+    user_row = 3
+    header_row = 5
 
     title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
     ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
@@ -1067,9 +1066,7 @@ async def export_daily_report_xlsx(
     if all_users:
         ws.cell(row=user_row, column=1, value="Users: All users")
     else:
-        ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
-
-    header_row = 5
+        ws.cell(row=user_row, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
     for col_idx, header in enumerate(headers, start=1):
         header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
         cell = ws.cell(row=header_row, column=col_idx, value=header_text)
@@ -1105,8 +1102,8 @@ async def export_daily_report_xlsx(
     ws.row_dimensions[1].height = 24
     ws.row_dimensions[2].height = 16
     ws.row_dimensions[3].height = 16
-    ws.row_dimensions[4].height = 6
-    ws.row_dimensions[header_row].height = 20
+    ws.row_dimensions[4].height = 10
+    ws.row_dimensions[header_row].height = 28
 
     data_row = header_row + 1
     for idx, row in enumerate(rows, start=1):
