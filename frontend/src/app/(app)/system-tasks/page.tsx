@@ -474,7 +474,17 @@ export function SystemTasksView({
           rows.map((row) => {
             const templateId = row.template_id ?? row.id
             const meta = metaById.get(templateId)
-            return meta ? { ...row, ...meta } : row
+            if (!meta) return row
+            const merged = { ...row, ...meta }
+            if (row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
+            if (row.alignment_time != null) merged.alignment_time = row.alignment_time
+            if (row.alignment_roles && row.alignment_roles.length) {
+              merged.alignment_roles = row.alignment_roles
+            }
+            if (row.alignment_user_ids && row.alignment_user_ids.length) {
+              merged.alignment_user_ids = row.alignment_user_ids
+            }
+            return merged
           })
         )
       } else {
@@ -1327,13 +1337,12 @@ export function SystemTasksView({
       return notes["BZ GROUP"] || ""
     }
     const buildBzMe = (template: SystemTaskTemplate) => {
-      if (!template.requires_alignment) return ""
       const managerIds = template.alignment_user_ids ?? []
       if (managerIds.length === 0) return ""
       const labels = managerIds
         .map((id) => {
           const person = userMap.get(id)
-          if (!person) return id
+          if (!person) return ""
           return userDisplayLabel(person)
         })
         .filter(Boolean)
@@ -1347,14 +1356,24 @@ export function SystemTasksView({
     }
     const buildDetailsWithBzGroup = (template: SystemTaskTemplate) => {
       const notes = parseInternalNotes(template.internal_notes)
-      const parts: string[] = []
-      if (notes.REGJ) parts.push(`<strong>1.REGJ:</strong> ${escapeHtml(notes.REGJ)}`)
-      if (notes.PATH) parts.push(`<strong>2.PATH:</strong> ${escapeHtml(notes.PATH)}`)
-      if (notes.TRAINING) parts.push(`<strong>3.TRAINING:</strong> ${escapeHtml(notes.TRAINING)}`)
-      const checklistaValue = notes.CHECKLISTA || notes.CHECK
-      if (checklistaValue) parts.push(`<strong>4.CHECKLISTA:</strong> ${escapeHtml(checklistaValue)}`)
-      const bzGroup = buildBzGroup(template)
-      if (bzGroup) parts.push(`<strong>5.BZ GROUP:</strong> ${escapeHtml(bzGroup)}`)
+      const normalize = (value?: string | null) => {
+        const trimmed = String(value ?? "").trim()
+        return trimmed === "-" ? "" : trimmed
+      }
+      const reg = normalize(notes.REGJ)
+      const path = normalize(notes.PATH)
+      const training = normalize(notes.TRAINING)
+      const checklistaValue = normalize(notes.CHECKLISTA || notes.CHECK)
+      const bzGroup = normalize(buildBzGroup(template))
+      const hasAny = reg || path || training || checklistaValue || bzGroup
+      if (!hasAny) return ""
+      const parts = [
+        `<strong>1.REGJ:</strong> ${escapeHtml(reg || "-")}`,
+        `<strong>2.PATH:</strong> ${escapeHtml(path || "-")}`,
+        `<strong>3.CHECKLISTA:</strong> ${escapeHtml(checklistaValue || "-")}`,
+        `<strong>4.TRAINING:</strong> ${escapeHtml(training || "-")}`,
+        `<strong>5.BZ GROUP:</strong> ${escapeHtml(bzGroup || "-")}`,
+      ]
       return parts.join("\n")
     }
     const assigneeInitials = (list?: SystemTaskTemplate["assignees"]) => {
@@ -1694,7 +1713,7 @@ export function SystemTasksView({
           <div class="header">
             <h1>${escapeHtml(effectiveTitle)}</h1>
             <div class="meta">
-              <div class="filters"><strong>Filters:</strong> ${escapeHtml(filterLine)}</div>
+              <div class="filters"><strong>FILTERS:</strong> ${escapeHtml(filterLine).toUpperCase()}</div>
               <div class="printedAt">${escapeHtml(printedAt)}</div>
             </div>
           </div>
@@ -1715,7 +1734,7 @@ export function SystemTasksView({
             </colgroup>
             <thead>
               <tr>
-                <th class="tight">No</th>
+                <th class="tight">NR</th>
                 <th class="tight">PRIO</th>
                 <th class="tight">LL</th>
                 <th class="tight">DEP</th>
