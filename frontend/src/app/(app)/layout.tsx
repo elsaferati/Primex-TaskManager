@@ -22,11 +22,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen print:min-h-0 print:block">
       <Sidebar role={user.role} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col print:block">
         <Topbar />
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-4 print:p-0">{children}</main>
       </div>
       <CommandPalette />
     </div>

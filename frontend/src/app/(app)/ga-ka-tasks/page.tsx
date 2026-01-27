@@ -365,12 +365,6 @@ export default function GaKaTasksPage() {
   const printInitials = initials(user?.full_name || user?.username || "")
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
-  const printContainerRef = React.useRef<HTMLDivElement | null>(null)
-  const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
-  const [printPageMarkers, setPrintPageMarkers] = React.useState<
-    Array<{ page: number; total: number; top: number }>
-  >([])
-  const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
@@ -454,52 +448,6 @@ export default function GaKaTasksPage() {
     void loadDailyReport()
   }, [loadDailyReport, showDailyUserReport])
 
-  React.useEffect(() => {
-    const handleBeforePrint = () => {
-      const container = printContainerRef.current
-      if (!container) return
-      const dpi = 96
-      const measuredHeight = printMeasureRef.current?.offsetHeight
-      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
-      const footerOffsetPx = 0.2 * dpi
-      const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
-      const markers = Array.from({ length: totalPages }, (_, index) => ({
-        page: index + 1,
-        total: totalPages,
-        top: pageHeightPx * (index + 1) - footerOffsetPx,
-      }))
-      setPrintPageMarkers(markers)
-      setPrintPageMinHeight(totalPages * pageHeightPx)
-    }
-    const handleAfterPrint = () => {
-      setPrintPageMarkers([])
-      setPrintPageMinHeight(null)
-    }
-    window.addEventListener("beforeprint", handleBeforePrint)
-    window.addEventListener("afterprint", handleAfterPrint)
-    const mediaQuery = window.matchMedia("print")
-    const handleMediaChange = (event: MediaQueryListEvent) => {
-      if (event.matches) {
-        handleBeforePrint()
-      } else {
-        handleAfterPrint()
-      }
-    }
-    if ("addEventListener" in mediaQuery) {
-      mediaQuery.addEventListener("change", handleMediaChange)
-    } else {
-      mediaQuery.addListener(handleMediaChange)
-    }
-    return () => {
-      window.removeEventListener("beforeprint", handleBeforePrint)
-      window.removeEventListener("afterprint", handleAfterPrint)
-      if ("removeEventListener" in mediaQuery) {
-        mediaQuery.removeEventListener("change", handleMediaChange)
-      } else {
-        mediaQuery.removeListener(handleMediaChange)
-      }
-    }
-  }, [])
 
   const submitTask = async () => {
     if (!title.trim()) {
@@ -663,6 +611,7 @@ export default function GaKaTasksPage() {
       kohaBz: string
       tyo: string
       comment?: string | null
+      userInitials?: string
       taskId?: string
       systemTemplateId?: string
       systemOccurrenceDate?: string
@@ -714,6 +663,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
         comment: taskCommentMap.get(task.id) ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         taskId: task.id,
       })
     }
@@ -748,6 +698,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
         comment: taskCommentMap.get(task.id) ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         taskId: task.id,
       })
     }
@@ -786,6 +737,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
         comment: occ.comment ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         systemTemplateId: occ.template_id,
         systemOccurrenceDate: occ.occurrence_date,
         systemStatus: occ.status,
@@ -795,7 +747,7 @@ export default function GaKaTasksPage() {
     systemOverdue.forEach(pushSystemRow)
 
     return rows
-  }, [dailyReport, departments, ganeUserId, taskCommentMap, tasks, todayDate])
+  }, [dailyReport, departments, ganeUser, ganeUserId, taskCommentMap, tasks, todayDate])
 
   const startEditTask = (task: Task) => {
     setEditingTaskId(task.id)
@@ -999,11 +951,15 @@ export default function GaKaTasksPage() {
 
   const exportDailyReport = async () => {
     if (!user?.id) return
+    if (!ganeUserId) {
+      toast.error("Gane Arifaj user not found. Cannot export.")
+      return
+    }
     setExportingDailyReport(true)
     try {
       const qs = new URLSearchParams({
         day: todayIso,
-        user_id: user.id,
+        user_id: ganeUserId,
       })
       const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
       if (!res.ok) {
@@ -1183,6 +1139,7 @@ export default function GaKaTasksPage() {
                     <col className="w-[52px]" />
                     <col className="w-[48px]" />
                     <col className="w-[140px]" />
+                    <col className="w-[70px]" />
                   </colgroup>
                   <thead className="sticky top-0 z-10 bg-slate-50">
                     <tr className="bg-slate-50">
@@ -1208,6 +1165,7 @@ export default function GaKaTasksPage() {
                         T/Y/O
                       </th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">User</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1299,12 +1257,15 @@ export default function GaKaTasksPage() {
                                 </button>
                               </div>
                             </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              {row.userInitials || "-"}
+                            </td>
                           </tr>
                         )
                       })
                     ) : (
                       <tr>
-                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
+                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
                           No data available.
                         </td>
                       </tr>
@@ -1578,13 +1539,8 @@ export default function GaKaTasksPage() {
           />
         </div>
       ) : null}
-      <div className="hidden print:block">
-        <div
-          ref={printContainerRef}
-          className="print-page px-6 pb-6 min-h-0"
-          style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
-        >
-          <div ref={printMeasureRef} className="print-page-measure" />
+      <div className="hidden print:block print:!p-0 print:!m-0">
+        <div className="print-page">
           <div className="print-header">
             <span />
             <div className="print-title">Daily Report</div>
@@ -1611,6 +1567,7 @@ export default function GaKaTasksPage() {
               <col className="w-[52px]" />
               <col className="w-[36px]" />
               <col className="w-[140px]" />
+              <col className="w-[70px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-100">
@@ -1634,6 +1591,7 @@ export default function GaKaTasksPage() {
                   T/Y/O
                 </th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
               </tr>
             </thead>
             <tbody>
@@ -1661,29 +1619,23 @@ export default function GaKaTasksPage() {
                     <td className="border border-slate-900 px-2 py-2 align-top">
                       <div className="h-4 w-full border-b border-slate-400" />
                     </td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                      {row.userInitials || "-"}
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                  <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
                     No data available.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-          {printPageMarkers.map((marker) => (
-            <div
-              key={`print-page-${marker.page}`}
-              className="print-page-marker"
-              style={{ top: `${marker.top}px` }}
-            >
-              {marker.page}/{marker.total}
-            </div>
-          ))}
           <div className="print-footer">
             <span />
-            <span />
+            <span className="print-page-count">1/1</span>
             <div className="print-initials">PUNOI: {printInitials || "—"}</div>
           </div>
         </div>
@@ -1727,19 +1679,30 @@ export default function GaKaTasksPage() {
           border-right: 2px solid #475569 !important;
         }
         @media print {
-          body {
+          * {
+            box-sizing: border-box;
+          }
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white;
           }
-          aside {
+          aside, header, nav {
             display: none !important;
           }
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.25in 0.1in 0.35in 0.1in;
+            size: landscape;
           }
           .print-page {
             position: relative;
-            padding-bottom: 0.35in;
-            min-height: auto !important;
+            padding: 0.1in !important;
+            margin: 0 !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
           }
           .print-header {
             display: grid;
@@ -1760,38 +1723,22 @@ export default function GaKaTasksPage() {
             font-size: 10px;
             color: #334155;
           }
-          .print-page-measure {
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: calc(11in - 0.36in - 0.51in);
-            width: 1px;
-            visibility: hidden;
-            pointer-events: none;
-          }
-          .print-page-marker {
-            position: absolute;
-            left: 0.1in;
-            right: 0.1in;
-            text-align: center;
-            font-size: 10px;
-            color: #334155;
-            z-index: 5;
-          }
           .print-footer {
             position: fixed;
+            bottom: 0.1in;
             left: 0;
             right: 0;
-            bottom: 0.2in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.1in;
-            padding-right: 0.1in;
+            padding-left: 0.2in;
+            padding-right: 0.2in;
             font-size: 10px;
             color: #334155;
           }
+          .print-page-count {
+            text-align: center;
+          }
           .print-initials {
-            grid-column: 3;
             text-align: right;
           }
           .daily-report-table thead {
