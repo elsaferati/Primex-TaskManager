@@ -211,6 +211,9 @@ async def daily_report(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
                 title=tmpl.title,
+                frequency=tmpl.frequency,
+                department_id=tmpl.department_id,
+                scope=tmpl.scope,
                 occurrence_date=occ.occurrence_date,
                 status=occ.status,
                 comment=occ.comment,
@@ -232,6 +235,9 @@ async def daily_report(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
                 title=tmpl.title,
+                frequency=tmpl.frequency,
+                department_id=tmpl.department_id,
+                scope=tmpl.scope,
                 occurrence_date=occ.occurrence_date,
                 status=occ.status,
                 comment=occ.comment,

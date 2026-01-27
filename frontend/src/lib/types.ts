@@ -183,6 +183,9 @@ export interface DailyReportTaskItem {
 export interface DailyReportSystemOccurrence {
   template_id: string
   title: string
+  frequency?: string | null
+  department_id?: string | null
+  scope?: SystemTaskScope | null
   occurrence_date: string
   status: DailyReportSystemOccurrenceStatus
   comment?: string | null

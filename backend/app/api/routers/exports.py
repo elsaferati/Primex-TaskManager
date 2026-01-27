@@ -828,6 +828,32 @@ async def _daily_report_rows_for_user(
             label = u.full_name or u.username or ""
             alignment_user_map[u.id] = _initials(label)
 
+    dept_ids = {t.department_id for t in daily_tasks if t.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl in occ_today_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl in overdue_rows if tmpl.department_id}
+    department_map: dict[uuid.UUID, Department] = {}
+    if dept_ids:
+        departments = (
+            await db.execute(select(Department).where(Department.id.in_(dept_ids)))
+        ).scalars().all()
+        department_map = {dept.id: dept for dept in departments}
+
+    def department_label(
+        department_id_value: uuid.UUID | None,
+        scope_value: str | None = None,
+        is_ga_note: bool = False,
+    ) -> str:
+        if scope_value == SystemTaskScope.GA.value:
+            return "GA"
+        if scope_value == SystemTaskScope.ALL.value:
+            return "ALL"
+        if department_id_value:
+            dept = department_map.get(department_id_value)
+            return (dept.code if dept and dept.code else dept.name) or "-"
+        if is_ga_note:
+            return "GA"
+        return "-"
+
     def alignment_values(tmpl: SystemTaskTemplate) -> tuple[str, str]:
         roles = roles_map.get(tmpl.id, [])
         user_ids = alignment_users_map.get(tmpl.id, [])
@@ -885,9 +911,10 @@ async def _daily_report_rows_for_user(
                         "FT",
                         _fast_subtype_short(task),
                         period,
+                        department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                         task.title or "-",
                         task.description or "-",
-                        status,
+                        (status or "").upper(),
                         "-",
                         "-",
                         tyo,
@@ -904,9 +931,10 @@ async def _daily_report_rows_for_user(
                     "PRJK",
                     "-",
                     period,
+                    department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                     f"{project_label} - {task.title or '-'}",
                     task.description or "-",
-                    status,
+                    (status or "").upper(),
                     "-",
                     "-",
                     tyo,
@@ -926,9 +954,10 @@ async def _daily_report_rows_for_user(
                 "SYS",
                 _system_frequency_short_label(tmpl.frequency),
                 period,
+                department_label(tmpl.department_id, tmpl.scope, False),
                 tmpl.title or "-",
                 tmpl.description or "-",
-                _format_system_status(occ.status),
+                _format_system_status(occ.status).upper(),
                 bz,
                 koha_bz,
                 tyo,
@@ -1004,15 +1033,21 @@ async def export_daily_report_xlsx(
         for row in member_rows:
             rows.append(row + [member_label])
 
-    headers = ["Nr", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "User"]
+    headers = ["Nr", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "User"]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily Report"
 
+    empty_header_rows = 2
+    title_row = 1 + empty_header_rows
+    dept_row = title_row + 1
+    user_row = title_row + 2
+    header_row = title_row + 4
+
     title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers) - 1)
-    title_cell = ws.cell(row=1, column=1, value=title_text)
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers) - 1)
+    title_cell = ws.cell(row=title_row, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
@@ -1020,13 +1055,11 @@ async def export_daily_report_xlsx(
     if department_id:
         department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
         department_label = department.name if department else ""
-    ws.cell(row=2, column=1, value=f"Department: {department_label or '-'}")
+    ws.cell(row=dept_row, column=1, value=f"Department: {department_label or '-'}")
     if all_users:
-        ws.cell(row=3, column=1, value="Users: All users")
+        ws.cell(row=user_row, column=1, value="Users: All users")
     else:
-        ws.cell(row=3, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
-
-    header_row = 5
+        ws.cell(row=user_row, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
@@ -1042,6 +1075,7 @@ async def export_daily_report_xlsx(
         "LL": 5,
         "NLL": 6,
         "AM/PM": 7,
+        "DEP": 6,
         "TITULLI": 32,
         "PERSHKRIMI": 28,
         "STS": 10,
@@ -1064,14 +1098,14 @@ async def export_daily_report_xlsx(
             cell.alignment = Alignment(
                 horizontal="left",
                 vertical="bottom",
-                wrap_text=col_idx in {5, 6, 11, 12},
+                wrap_text=col_idx in {6, 7, 12, 13},
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B6"]
-    ws.print_title_rows = "5:5"
+    ws.freeze_panes = f"B{header_row + 1}"
+    ws.print_title_rows = f"{header_row}:{header_row}"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1099,13 +1133,13 @@ async def export_daily_report_xlsx(
                 right = thick if is_last_col else thin
                 top = thick if is_header else thin
                 bottom = thick if is_last_row else thin
-                # Keep header row thick on the outside only; avoid thick separator under header.
+                # Header row: thick outside border (top/bottom/edges), thin inside separators.
                 if is_header:
                     ws.cell(row=r, column=c).border = Border(
                         left=left,
                         right=right,
                         top=thick,
-                        bottom=thin,
+                        bottom=thick,
                     )
                 else:
                     ws.cell(row=r, column=c).border = Border(
@@ -1216,6 +1250,17 @@ async def export_system_tasks_xlsx(
         for task_id, user_id in alignment_rows:
             task_alignment_map.setdefault(task_id, []).append(user_id)
 
+    template_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_ids:
+        template_alignment_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+                .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+            )
+        ).all()
+        for template_id, user_id in template_alignment_rows:
+            template_alignment_map.setdefault(template_id, []).append(user_id)
+
     department_ids = {template.department_id for _, template in task_rows if template.department_id}
     department_map: dict[uuid.UUID, str] = {}
     if department_ids:
@@ -1228,7 +1273,7 @@ async def export_system_tasks_xlsx(
     for task, template in task_rows:
         ids = task_alignment_map.get(task.id) or []
         if not ids:
-            ids = getattr(template, "alignment_user_ids", None) or []
+            ids = template_alignment_map.get(template.id) or []
         for user_id in ids:
             alignment_user_ids.add(user_id)
     alignment_user_map: dict[uuid.UUID, str] = {}
@@ -1307,7 +1352,7 @@ async def export_system_tasks_xlsx(
             )
         alignment_ids = task_alignment_map.get(task.id) or []
         if not alignment_ids:
-            alignment_ids = getattr(template, "alignment_user_ids", None) or []
+            alignment_ids = template_alignment_map.get(template.id) or []
         bz_me_labels = [alignment_user_map.get(user_id, "") for user_id in alignment_ids]
         bz_me_value = ", ".join([label for label in bz_me_labels if label])
         alignment_time = getattr(template, "alignment_time", None)
@@ -1359,6 +1404,9 @@ async def export_system_tasks_xlsx(
     ws.freeze_panes = "B6"
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
     ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
     ws.page_margins.left = 0.1
     ws.page_margins.right = 0.1
     ws.page_margins.top = 0.36
