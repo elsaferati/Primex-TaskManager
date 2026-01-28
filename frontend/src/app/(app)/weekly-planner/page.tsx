@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner"
 import { ChevronDown, Plus, Save, X, Printer } from "lucide-react"
 import { useAuth } from "@/lib/auth"
+import { formatDepartmentName } from "@/lib/department-name"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -28,6 +29,8 @@ import type { Department, Project, Task, UserLookup } from "@/lib/types"
 type WeeklyTableProjectTaskEntry = {
   task_id: string
   task_title: string
+  status?: string | null
+  completed_at?: string | null
   daily_products: number | null
   is_bllok: boolean
   is_1h_report: boolean
@@ -48,6 +51,8 @@ type WeeklyTableProjectEntry = {
 type WeeklyTableTaskEntry = {
   task_id: string | null
   title: string
+  status?: string | null
+  completed_at?: string | null
   daily_products: number | null
   fast_task_type?: string | null
   is_bllok: boolean
@@ -105,6 +110,7 @@ export default function WeeklyPlannerPage() {
   const [isThisWeek, setIsThisWeek] = React.useState(false)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [isExporting, setIsExporting] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
@@ -638,6 +644,39 @@ export default function WeeklyPlannerPage() {
     N: "border-slate-200 bg-slate-50 text-slate-700",
   }
 
+  const getStatusCardClasses = React.useCallback((status?: string | null) => {
+    const normalized = (status || "TODO").toUpperCase()
+    if (normalized === "IN_PROGRESS") {
+      return "border-[#000000] bg-[#FFFF00] text-[#000000]"
+    }
+    if (normalized === "DONE") {
+      return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
+    }
+    if (normalized === "TODO") {
+      return "border-[#000000] bg-[#FFC4ED] text-[#000000]"
+    }
+    return "border-[#000000] bg-[#f1f5f9] text-[#000000]"
+  }, [])
+
+  const getStatusCardClassesForDay = React.useCallback(
+    (status?: string | null, completedAt?: string | null, dayDate?: string | null) => {
+      const normalized = (status || "TODO").toUpperCase()
+      if (normalized !== "DONE") {
+        return getStatusCardClasses(normalized)
+      }
+      if (!completedAt || !dayDate) {
+        return getStatusCardClasses("IN_PROGRESS")
+      }
+      const completedDate = completedAt.slice(0, 10)
+      const currentDate = dayDate.slice(0, 10)
+      if (completedDate === currentDate) {
+        return getStatusCardClasses("DONE")
+      }
+      return getStatusCardClasses("IN_PROGRESS")
+    },
+    [getStatusCardClasses]
+  )
+
   const getTaskStatusBadge = React.useCallback((task: {
     is_bllok?: boolean
     is_1h_report?: boolean
@@ -691,7 +730,7 @@ export default function WeeklyPlannerPage() {
 
     const weekRange = `${formatDate(data.week_start)} - ${formatDate(data.week_end)}`
     const selectedDept = departmentId !== ALL_DEPARTMENTS_VALUE 
-      ? departments.find(d => d.id === departmentId)?.name || "All Departments"
+      ? formatDepartmentName(departments.find(d => d.id === departmentId)?.name || "All Departments")
       : "All Departments"
     const printedAt = new Date()
     const printInitials = (user?.full_name || user?.username || "")
@@ -709,14 +748,14 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { margin: 0.36in 0.08in 0.51in 0.2in; }
+              @page { margin: 0.36in 0.08in 0.8in 0.2in; }
               body { margin: 0; padding: 0; }
             }
             body {
               font-family: Arial, sans-serif;
               font-size: 10pt;
               margin: 0;
-              padding: 0 0 0.35in 0;
+              padding: 0 0 0.8in 0;
             }
             .print-header {
               display: grid;
@@ -759,6 +798,8 @@ export default function WeeklyPlannerPage() {
               text-align: center;
               font-weight: bold;
               font-size: 9pt;
+              text-transform: uppercase;
+              vertical-align: bottom;
             }
             td {
               border: 1px solid #000;
@@ -771,6 +812,23 @@ export default function WeeklyPlannerPage() {
               background-color: #f9f9f9;
               text-align: center;
               width: 80px;
+            }
+            .ll-cell {
+              font-weight: bold;
+              background-color: #f9f9f9;
+              text-align: center;
+              width: 40px;
+            }
+            .time-cell {
+              width: 36px;
+              text-align: center;
+              padding-left: 4px;
+              padding-right: 4px;
+            }
+            .print-subhead {
+              font-weight: bold;
+              text-transform: uppercase;
+              font-size: 9pt;
             }
             .project-card {
               margin: 4px 0;
@@ -818,13 +876,14 @@ export default function WeeklyPlannerPage() {
               position: fixed;
               left: 0;
               right: 0;
-              bottom: 0.3in;
+              bottom: 0.2in;
               display: grid;
               grid-template-columns: 1fr auto 1fr;
               padding-left: 0.2in;
               padding-right: 0.08in;
               font-size: 10pt;
               color: #334155;
+              background: #fff;
             }
             .print-page-count {
               text-align: center;
@@ -867,17 +926,14 @@ export default function WeeklyPlannerPage() {
       const allUsers = Array.from(userMap.values())
 
       printContent += `
-        <h2 style="margin-top: 20px; margin-bottom: 10px; font-size: 14pt;">${dept.department_name}</h2>
+        <h2 style="margin-top: 20px; margin-bottom: 10px; font-size: 14pt;">${formatDepartmentName(dept.department_name)}</h2>
         <table>
           <thead>
             <tr>
               <th class="day-cell" rowspan="2">Day</th>
-              <th style="width: 50px;">Time</th>
+              <th style="width: 40px;">LL</th>
+              <th class="time-cell">Time</th>
               ${allUsers.map(user => `<th>${user.user_name}</th>`).join("")}
-            </tr>
-            <tr>
-              <th style="width: 50px;"></th>
-              ${allUsers.map(() => `<th></th>`).join("")}
             </tr>
           </thead>
           <tbody>
@@ -887,16 +943,17 @@ export default function WeeklyPlannerPage() {
         const dayName = DAY_NAMES[dayIndex]
         const dayDate = formatDate(day.date)
         
-        // AM Row
+        // AM PRJK Row
         printContent += `
           <tr>
-            <td class="day-cell" rowspan="2" style="text-align: left; padding: 8px;">
+            <td class="day-cell" rowspan="4" style="text-align: left; padding: 8px;">
               <div style="display: flex; flex-direction: column;">
-                <strong>${dayName}</strong>
-                <span style="font-size: 8pt; color: #666; margin-top: 2px;">${dayDate}</span>
+                <strong class="print-subhead">${dayName}</strong>
+                <span class="print-subhead" style="margin-top: 2px;">${dayDate}</span>
               </div>
             </td>
-            <td style="text-align: center; font-weight: bold; font-size: 8pt; color: #2563eb;">AM</td>
+            <td class="ll-cell print-subhead">PRJK</td>
+            <td class="print-subhead time-cell">AM</td>
         `
         allUsers.forEach((user) => {
           const userDay = day.users.find(u => u.user_id === user.user_id)
@@ -905,16 +962,15 @@ export default function WeeklyPlannerPage() {
           const fastTasks = userDay?.am_fast_tasks || []
           
           printContent += `<td>`
-          if (projects.length > 0 || systemTasks.length > 0 || fastTasks.length > 0) {
+          if (projects.length > 0 || systemTasks.length > 0) {
             projects.forEach((project) => {
-              const isDevelopment = dept.department_name === "Development"
               printContent += `<div class="project-card">
                 <div class="project-title">${project.project_title}`
               if (project.project_total_products) {
                 printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
               }
               printContent += `</div>`
-              if (!isDevelopment && project.tasks && project.tasks.length > 0) {
+              if (project.tasks && project.tasks.length > 0) {
                 project.tasks.forEach((task) => {
                   printContent += `<div class="task-item">${task.task_title}`
                   if (task.daily_products) {
@@ -942,24 +998,39 @@ export default function WeeklyPlannerPage() {
               })
               printContent += `</div>`
             }
+          } else {
+            printContent += `<div class="empty-cell">—</div>`
+          }
+          printContent += `</td>`
+        })
+        printContent += `</tr>`
+
+        // AM FT Row
+        printContent += `<tr>`
+        printContent += `<td class="ll-cell print-subhead">FT</td>`
+        printContent += `<td class="print-subhead time-cell">AM</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const fastTasks = userDay?.am_fast_tasks || []
+
+          printContent += `<td>`
             if (fastTasks.length > 0) {
-              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
-              fastTasks.forEach((task) => {
-                printContent += `<div class="task-item">${task.title}`
-                const badge = getFastTaskBadge(task)
-                if (badge) {
-                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
-                                   badge.label === "R1" ? "badge-r1" :
-                                   badge.label === "1H" ? "badge-1h" :
-                                   badge.label === "GA" ? "badge-ga" :
-                                   badge.label === "P:" ? "badge-p" :
-                                   badge.label === "N" ? "badge-n" : ""
-                  printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
-                }
-                printContent += `</div>`
-              })
+            printContent += `<div style="font-size: 8pt; color: #0f172a;">`
+            fastTasks.forEach((task) => {
+              printContent += `<div class="task-item">${task.title}`
+              const badge = getFastTaskBadge(task)
+              if (badge) {
+                const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                 badge.label === "R1" ? "badge-r1" :
+                                 badge.label === "1H" ? "badge-1h" :
+                                 badge.label === "GA" ? "badge-ga" :
+                                 badge.label === "P:" ? "badge-p" :
+                                 badge.label === "N" ? "badge-n" : ""
+                printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+              }
               printContent += `</div>`
-            }
+            })
+            printContent += `</div>`
           } else {
             printContent += `<div class="empty-cell">—</div>`
           }
@@ -967,9 +1038,10 @@ export default function WeeklyPlannerPage() {
         })
         printContent += `</tr>`
         
-        // PM Row
+        // PM PRJK Row
         printContent += `<tr style="border-top: 2px solid #000;">`
-        printContent += `<td style="text-align: center; font-weight: bold; font-size: 8pt; color: #2563eb;">PM</td>`
+        printContent += `<td class="ll-cell print-subhead">PRJK</td>`
+        printContent += `<td class="print-subhead time-cell">PM</td>`
         allUsers.forEach((user) => {
           const userDay = day.users.find(u => u.user_id === user.user_id)
           const projects = userDay?.pm_projects || []
@@ -977,16 +1049,15 @@ export default function WeeklyPlannerPage() {
           const fastTasks = userDay?.pm_fast_tasks || []
           
           printContent += `<td>`
-          if (projects.length > 0 || systemTasks.length > 0 || fastTasks.length > 0) {
+          if (projects.length > 0 || systemTasks.length > 0) {
             projects.forEach((project) => {
-              const isDevelopment = dept.department_name === "Development"
               printContent += `<div class="project-card">
                 <div class="project-title">${project.project_title}`
               if (project.project_total_products) {
                 printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
               }
               printContent += `</div>`
-              if (!isDevelopment && project.tasks && project.tasks.length > 0) {
+              if (project.tasks && project.tasks.length > 0) {
                 project.tasks.forEach((task) => {
                   printContent += `<div class="task-item">${task.task_title}`
                   if (task.daily_products) {
@@ -1014,24 +1085,39 @@ export default function WeeklyPlannerPage() {
               })
               printContent += `</div>`
             }
-            if (fastTasks.length > 0) {
-              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #d97706;"><strong>Fast Tasks:</strong>`
-              fastTasks.forEach((task) => {
-                printContent += `<div class="task-item">${task.title}`
-                const badge = getFastTaskBadge(task)
-                if (badge) {
-                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
-                                   badge.label === "R1" ? "badge-r1" :
-                                   badge.label === "1H" ? "badge-1h" :
-                                   badge.label === "GA" ? "badge-ga" :
-                                   badge.label === "P:" ? "badge-p" :
-                                   badge.label === "N" ? "badge-n" : ""
-                  printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
-                }
-                printContent += `</div>`
-              })
+          } else {
+            printContent += `<div class="empty-cell">—</div>`
+          }
+          printContent += `</td>`
+        })
+        printContent += `</tr>`
+
+        // PM FT Row
+        printContent += `<tr>`
+        printContent += `<td class="ll-cell print-subhead">FT</td>`
+        printContent += `<td class="print-subhead time-cell">PM</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const fastTasks = userDay?.pm_fast_tasks || []
+
+          printContent += `<td>`
+          if (fastTasks.length > 0) {
+            printContent += `<div style="font-size: 8pt; color: #0f172a;">`
+            fastTasks.forEach((task) => {
+              printContent += `<div class="task-item">${task.title}`
+              const badge = getFastTaskBadge(task)
+              if (badge) {
+                const badgeClass = badge.label === "BLL" ? "badge-bll" :
+                                 badge.label === "R1" ? "badge-r1" :
+                                 badge.label === "1H" ? "badge-1h" :
+                                 badge.label === "GA" ? "badge-ga" :
+                                 badge.label === "P:" ? "badge-p" :
+                                 badge.label === "N" ? "badge-n" : ""
+                printContent += ` <span class="badge ${badgeClass}">${badge.label}</span>`
+              }
               printContent += `</div>`
-            }
+            })
+            printContent += `</div>`
           } else {
             printContent += `<div class="empty-cell">—</div>`
           }
@@ -1066,6 +1152,49 @@ export default function WeeklyPlannerPage() {
     }, 250)
   }, [data, departmentId, departments, getTaskStatusBadge])
 
+  const parseFilenameFromDisposition = (headerValue: string | null) => {
+    if (!headerValue) return null
+    const match = headerValue.match(/filename=\"?([^\";]+)\"?/i)
+    return match ? match[1] : null
+  }
+
+  const exportWeeklyPlannerExcel = async () => {
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      const targets =
+        departmentId === ALL_DEPARTMENTS_VALUE
+          ? departments.map((d) => d.id)
+          : [departmentId]
+
+      for (const deptId of targets) {
+        const qs = new URLSearchParams()
+        qs.set("department_id", deptId)
+        qs.set("is_this_week", isThisWeek.toString())
+        const res = await apiFetch(`/exports/weekly-planner.xlsx?${qs.toString()}`)
+        if (!res.ok) {
+          toast.error("Failed to export weekly planner")
+          return
+        }
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = url
+        const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+        link.download = filename || "weekly_planner.xlsx"
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error("Failed to export weekly planner", error)
+      toast.error("Failed to export weekly planner")
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <style dangerouslySetInnerHTML={{__html: `
@@ -1086,6 +1215,9 @@ export default function WeeklyPlannerPage() {
             <Button onClick={handleSavePlan} disabled={isSaving}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? "Saving..." : "Save Plan"}
+            </Button>
+            <Button variant="outline" onClick={exportWeeklyPlannerExcel} disabled={isExporting}>
+              {isExporting ? "Exporting..." : "Export Excel"}
             </Button>
             <Button variant="outline" onClick={handlePrint} disabled={!data}>
               <Printer className="mr-2 h-4 w-4" />
@@ -1119,7 +1251,7 @@ export default function WeeklyPlannerPage() {
                 <SelectItem value={ALL_DEPARTMENTS_VALUE}>All Departments</SelectItem>
                 {departments.map((d) => (
                   <SelectItem key={d.id} value={d.id}>
-                    {d.name}
+                    {formatDepartmentName(d.name)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1152,7 +1284,7 @@ export default function WeeklyPlannerPage() {
                   <SelectContent>
                     {availableDepartments.map((dept) => (
                       <SelectItem key={dept.id} value={dept.id}>
-                        {dept.name}
+                        {formatDepartmentName(dept.name)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1449,7 +1581,7 @@ export default function WeeklyPlannerPage() {
             {data.departments.map((dept) => (
             <Card key={dept.department_id}>
             <CardHeader>
-                <CardTitle>{dept.department_name}</CardTitle>
+                <CardTitle>{formatDepartmentName(dept.department_name)}</CardTitle>
             </CardHeader>
               <CardContent>
                 <div 
@@ -1463,11 +1595,12 @@ export default function WeeklyPlannerPage() {
                     touchAction: "pan-y",
                   }}
                 >
-                  <Table>
+                  <Table className="table-fixed w-full">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-32 sticky left-0 bg-background z-10" rowSpan={2}>Day</TableHead>
-                        <TableHead className="w-12 sticky left-32 bg-background z-10">Time</TableHead>
+                        <TableHead className="w-24 min-w-24 sticky left-0 bg-background z-10 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
+                        <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
+                        <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
                         {(() => {
                           // Get all unique users from all days
                           const userMap = new Map<string, WeeklyTableUserDay>()
@@ -1481,27 +1614,9 @@ export default function WeeklyPlannerPage() {
                           const allUsers = Array.from(userMap.values())
                           
                           return allUsers.map((user) => (
-                            <TableHead key={user.user_id} className="min-w-48 text-center">
+                            <TableHead key={user.user_id} className="w-56 min-w-56 text-center text-xs font-bold uppercase">
                               <div className="font-semibold">{user.user_name}</div>
                             </TableHead>
-                          ))
-                        })()}
-                      </TableRow>
-                      <TableRow>
-                        <TableHead className="sticky left-32 bg-background z-10"></TableHead>
-                        {(() => {
-                          const userMap = new Map<string, WeeklyTableUserDay>()
-                          dept.days.forEach((day) => {
-                            day.users.forEach((userDay) => {
-                              if (!userMap.has(userDay.user_id)) {
-                                userMap.set(userDay.user_id, userDay)
-                              }
-                            })
-                          })
-                          const allUsers = Array.from(userMap.values())
-                          
-                          return allUsers.map((user) => (
-                            <TableHead key={user.user_id} className="min-w-48 text-center"></TableHead>
                           ))
                         })()}
                       </TableRow>
@@ -1523,7 +1638,8 @@ export default function WeeklyPlannerPage() {
                                 projects: WeeklyTableProjectEntry[],
                                 systemTasks: WeeklyTableTaskEntry[],
                                 fastTasks: WeeklyTableTaskEntry[],
-                                timeSlot: "am" | "pm"
+                                timeSlot: "am" | "pm",
+                                dayDate: string
                               ) => {
                                 // Ensure arrays are defined
                                 const projectsList = projects || []
@@ -1533,11 +1649,11 @@ export default function WeeklyPlannerPage() {
                                 const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
                                 
                                 if (!hasContent) {
-                                  return <div className="min-h-24 text-xs text-muted-foreground/50">—</div>
+                                  return <div className="min-h-20 text-xs text-muted-foreground/50">—</div>
                                 }
                                 
                                 return (
-                                  <div className="space-y-2 min-h-24">
+                                  <div className="space-y-2 min-h-20">
                                     {/* Projects */}
                                     {projectsList.map((project, idx) => {
                                       // Debug: log if project should be late
@@ -1548,15 +1664,15 @@ export default function WeeklyPlannerPage() {
                                       <div
                                         key={project.project_id}
                                         className={[
-                                          "group p-2 rounded-md transition-colors",
+                                          "group p-1.5 rounded-md transition-colors",
                                           project.is_late
                                             ? "bg-red-50 dark:bg-red-950/20 border-2 border-red-500 hover:bg-red-100 dark:hover:bg-red-950/30"
                                             : "bg-primary/5 border border-primary/20 hover:bg-primary/10",
                                         ].join(" ")}
                                       >
-                                        <div className="font-medium text-sm flex items-start justify-between gap-2">
-                                          <div className="flex items-center gap-2">
-                                            <span>{project.project_title}</span>
+                                        <div className="font-semibold text-sm text-slate-900 flex items-start justify-between gap-2">
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <span className="truncate whitespace-nowrap">{project.project_title}</span>
                                             {project.is_late && (
                                               <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
                                                 LATE
@@ -1578,13 +1694,19 @@ export default function WeeklyPlannerPage() {
                                             </button>
                                           )}
                                         </div>
-                                        {project.tasks && project.tasks.length > 0 && dept.department_name !== "Development" && (
+                                        {project.tasks && project.tasks.length > 0 && (
                                           <div className="mt-1 space-y-0.5">
                                             {project.tasks.map((task) => {
                                               const statusBadge = getTaskStatusBadge(task)
                                               return (
-                                                <div key={task.task_id} className="text-xs text-muted-foreground flex justify-between items-center group/task">
-                                                  <span className="truncate">{task.task_title}</span>
+                                                <div
+                                                  key={task.task_id}
+                                                  className={[
+                                                    "text-[11px] flex justify-between items-center gap-1 rounded border px-1.5 py-0.5 group/task",
+                                                    getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                                  ].join(" ")}
+                                                >
+                                                  <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.task_title}</span>
                                                   <div className="flex items-center gap-1">
                                                     {statusBadge && (
                                                       <span
@@ -1621,7 +1743,7 @@ export default function WeeklyPlannerPage() {
                                           </div>
                                         )}
                                         {(!project.tasks || project.tasks.length === 0) && project.task_count > 1 && (
-                                          <div className="text-xs text-muted-foreground mt-0.5">
+                                          <div className="text-xs font-semibold text-slate-900 mt-0.5">
                                             {project.task_count} tasks
                                           </div>
                                         )}
@@ -1632,15 +1754,18 @@ export default function WeeklyPlannerPage() {
                                     {/* System Tasks */}
                                     {systemTasksList.length > 0 && (
                                       <div className="space-y-1">
-                                        <div className="text-xs font-medium text-muted-foreground mb-1">System Tasks</div>
+                                        <div className="text-[11px] font-semibold text-slate-900 mb-1">System Tasks</div>
                                         {systemTasksList.map((task, idx) => {
                                           const statusBadge = getTaskStatusBadge(task)
                                           return (
                                             <div
                                               key={task.task_id || idx}
-                                              className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm flex justify-between items-center group/task"
+                                              className={[
+                                                "p-1 rounded border text-[11px] flex justify-between items-center group/task",
+                                                getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                              ].join(" ")}
                                             >
-                                              <span className="truncate">{task.title}</span>
+                                              <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.title}</span>
                                               <div className="flex items-center gap-1">
                                                 {statusBadge && (
                                                   <span
@@ -1677,15 +1802,17 @@ export default function WeeklyPlannerPage() {
                                     {/* Fast Tasks */}
                                     {fastTasksList.length > 0 && (
                                       <div className="space-y-1">
-                                        <div className="text-xs font-medium text-muted-foreground mb-1">Fast Tasks</div>
                                     {fastTasksList.map((task, idx) => {
                                           const statusBadge = getFastTaskBadge(task)
                                           return (
                                             <div
                                               key={task.task_id || idx}
-                                              className="p-1.5 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm flex justify-between items-center group/task"
+                                              className={[
+                                                "p-1 rounded border text-[11px] flex justify-between items-center group/task",
+                                                getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                              ].join(" ")}
                                             >
-                                              <span className="truncate">{task.title}</span>
+                                              <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.title}</span>
                                               <div className="flex items-center gap-1">
                                                 {statusBadge && (
                                                   <span
@@ -1722,55 +1849,121 @@ export default function WeeklyPlannerPage() {
                                 )
                               }
 
+                        const renderProjectsAndSystem = (
+                          projects: WeeklyTableProjectEntry[],
+                          systemTasks: WeeklyTableTaskEntry[],
+                          dayDate: string
+                        ) => (
+                          renderCellContent(projects, systemTasks, [], "am", dayDate)
+                        )
+
+                        const renderFastOnly = (
+                          fastTasks: WeeklyTableTaskEntry[],
+                          dayDate: string
+                        ) => (
+                          renderCellContent([], [], fastTasks, "am", dayDate)
+                        )
+
                         return (
                           <React.Fragment key={day.date}>
-                            {/* AM Row */}
+                            {/* AM PRJK Row */}
                             <TableRow>
                               <TableCell 
-                                className="font-medium sticky left-0 bg-background z-10 align-top"
-                                rowSpan={2}
+                                className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
+                                rowSpan={4}
                               >
                                 <div className="flex flex-col">
-                                  <div className="font-semibold">{DAY_NAMES[dayIndex]}</div>
-                                  <div className="text-xs text-muted-foreground mt-1">{formatDate(day.date)}</div>
+                                  <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
+                                  <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
                                 </div>
                               </TableCell>
-                              <TableCell className="w-12 align-top sticky left-32 bg-background z-10">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
+                                PRJK
+                              </TableCell>
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
                                 <div className="text-xs font-medium text-primary">AM</div>
                               </TableCell>
                               {allUsers.map((user) => {
                                 const userDay = day.users.find((u) => u.user_id === user.user_id)
                                 return (
-                                  <TableCell key={`${user.user_id}-am`} className="align-top">
+                                  <TableCell key={`${user.user_id}-am-prjk`} className="align-top w-56 min-w-56">
                                     {userDay
-                                      ? renderCellContent(
+                                      ? renderProjectsAndSystem(
                                           userDay.am_projects || [],
                                           userDay.am_system_tasks || [],
-                                          userDay.am_fast_tasks || [],
-                                          "am"
+                                          day.date
                                         )
-                                      : <div className="min-h-24 text-xs text-muted-foreground/50">—</div>}
+                                      : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                   </TableCell>
                                 )
                               })}
                             </TableRow>
-                            {/* PM Row */}
+
+                            {/* AM FT Row */}
+                            <TableRow className="border-t border-border">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
+                                FT
+                              </TableCell>
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <div className="text-xs font-medium text-primary">AM</div>
+                              </TableCell>
+                              {allUsers.map((user) => {
+                                const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                return (
+                                  <TableCell key={`${user.user_id}-am-ft`} className="align-top w-56 min-w-56">
+                                    {userDay
+                                      ? renderFastOnly(
+                                          userDay.am_fast_tasks || [],
+                                          day.date
+                                        )
+                                      : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
+
+                            {/* PM PRJK Row */}
                             <TableRow className="border-t-2 border-border">
-                              <TableCell className="w-12 align-top sticky left-32 bg-background z-10">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
+                                PRJK
+                              </TableCell>
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
                                 <div className="text-xs font-medium text-primary">PM</div>
                               </TableCell>
                               {allUsers.map((user) => {
                                 const userDay = day.users.find((u) => u.user_id === user.user_id)
                                 return (
-                                  <TableCell key={`${user.user_id}-pm`} className="align-top">
+                                  <TableCell key={`${user.user_id}-pm-prjk`} className="align-top w-56 min-w-56">
                                     {userDay
-                                      ? renderCellContent(
+                                      ? renderProjectsAndSystem(
                                           userDay.pm_projects || [],
                                           userDay.pm_system_tasks || [],
-                                          userDay.pm_fast_tasks || [],
-                                          "pm"
+                                          day.date
                                         )
-                                      : <div className="min-h-24 text-xs text-muted-foreground/50">—</div>}
+                                      : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
+
+                            {/* PM FT Row */}
+                            <TableRow className="border-t border-border">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
+                                FT
+                              </TableCell>
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <div className="text-xs font-medium text-primary">PM</div>
+                              </TableCell>
+                              {allUsers.map((user) => {
+                                const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                return (
+                                  <TableCell key={`${user.user_id}-pm-ft`} className="align-top w-56 min-w-56">
+                                    {userDay
+                                      ? renderFastOnly(
+                                          userDay.pm_fast_tasks || [],
+                                          day.date
+                                        )
+                                      : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                   </TableCell>
                                 )
                               })}

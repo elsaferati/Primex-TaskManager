@@ -620,6 +620,11 @@ async def weekly_table_planner(
         if saved_plan:
             saved_plan_id = saved_plan.id
     
+    # Identify departments with special weekly planner logic (use all departments, not filtered)
+    all_dept_rows = (await db.execute(select(Department.id, Department.name))).all()
+    dev_dept_names = {"Development"}
+    dev_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in dev_dept_names}
+
     # Get departments to show
     if user.role == UserRole.STAFF:
         department_id = user.department_id
@@ -641,12 +646,6 @@ async def weekly_table_planner(
     
     departments = (await db.execute(dept_stmt.order_by(Department.name))).scalars().all()
     
-    # Identify departments with special weekly planner logic
-    design_dept_names = {"Graphic Design", "Project Content Manager"}
-    design_dept_ids = {dept.id for dept in departments if dept.name in design_dept_names}
-    dev_dept_names = {"Development"}
-    dev_dept_ids = {dept.id for dept in departments if dept.name in dev_dept_names}
-    
     # Get all users - filter by department if a specific department is selected
     users_stmt = select(User).where(User.is_active == True)
     if department_id is not None:
@@ -654,22 +653,14 @@ async def weekly_table_planner(
     all_users = (await db.execute(users_stmt.order_by(User.full_name))).scalars().all()
     
     # Get projects (not templates). Completed projects are included for weekly overlap logic.
-    # For Design/PCM, we need all projects to show all tasks.
+    # We don't filter by department here because we show tasks by assignee department.
     project_stmt = select(Project).where(Project.is_template == False)
-    if department_id is not None and department_id not in design_dept_ids:
-        project_stmt = project_stmt.where(Project.department_id == department_id)
     projects = (await db.execute(project_stmt.order_by(Project.created_at))).scalars().all()
     project_map = {p.id: p for p in projects}
     
-    # Get active tasks. Completed tasks from Development are included for per-day range logic.
-    # For Design/PCM, we need all tasks from all departments.
+    # Get active tasks (including completed ones so they can show through completion day).
+    # We don't filter by department here because we show tasks by assignee department.
     task_stmt = select(Task).where(Task.is_active == True)
-    if department_id is not None and department_id not in design_dept_ids:
-        task_stmt = task_stmt.where(Task.department_id == department_id)
-    if dev_dept_ids:
-        task_stmt = task_stmt.where(or_(Task.completed_at.is_(None), Task.department_id.in_(dev_dept_ids)))
-    else:
-        task_stmt = task_stmt.where(Task.completed_at.is_(None))
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
     # Filter tasks for the selected week (planning only):
@@ -699,7 +690,16 @@ async def weekly_table_planner(
             if end < start:
                 return None, None
             return start, end
-        return _planned_range(task)
+        start, end = _planned_range(task)
+        if start is None or end is None:
+            return None, None
+        if task.completed_at:
+            completed_date = task.completed_at.date()
+            if completed_date < end:
+                end = completed_date
+        if end < start:
+            return None, None
+        return start, end
 
     def _overlaps_week(task: Task) -> bool:
         start, end = _task_active_range(task)
@@ -838,12 +838,16 @@ async def weekly_table_planner(
     for dept in departments:
         # Show only users from this specific department (exclude users with no department)
         dept_users = [u for u in all_users if u.department_id is not None and u.department_id == dept.id]
-        # For Design and PCM departments, show all tasks (from all departments)
-        # For other departments, show only tasks from that department
-        if dept.id in design_dept_ids:
-            dept_tasks = week_tasks  # All tasks from all departments
-        else:
-            dept_tasks = [t for t in week_tasks if t.department_id == dept.id]
+        # Show tasks that belong to users in this department (regardless of task.department_id)
+        dept_user_ids = {u.id for u in dept_users}
+        dept_tasks = [
+            t
+            for t in week_tasks
+            if (
+                t.assigned_to in dept_user_ids
+                or any(a.id in dept_user_ids for a in assignee_map.get(t.id, []))
+            )
+        ]
         
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
@@ -881,7 +885,7 @@ async def weekly_table_planner(
                 # If overdue (due_date < Monday) and not completed, show on Monday as late project
                 user_projects_with_due: set[uuid.UUID] = set()
                 user_late_projects: set[uuid.UUID] = set()
-                for project in projects_with_due_dates if dept.id in design_dept_ids else []:
+                for project in projects_with_due_dates:
                     # Check if user is a member of this project
                     if project.id not in project_members_map:
                         logger.debug(f"Project {project.title} (id={project.id}) has no members in map - skipping")
@@ -890,14 +894,7 @@ async def weekly_table_planner(
                         logger.debug(f"Project {project.title} (id={project.id}) - user {dept_user.full_name} (id={dept_user.id}) is not a member. Members: {list(project_members_map[project.id])}")
                         continue
                     
-                    # Check department filter
-                    # For Design/PCM departments, show projects from all departments
-                    # For other departments, only show projects from that department
-                    if dept.id not in design_dept_ids:
-                        if project.department_id != dept.id:
-                            logger.debug(f"Project {project.title} (id={project.id}) - department mismatch: project.dept={project.department_id}, current_dept={dept.id}")
-                            continue
-                    # For Design/PCM, we already have all projects in the projects list, so no need to filter
+                    # No department filter here: project visibility is based on membership
                     
                     project_due_date = project.due_date.date()
                     project_start_date = project.created_at.date()
@@ -972,6 +969,8 @@ async def weekly_table_planner(
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
+                            status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
+                            completed_at=task.completed_at,
                             daily_products=task.daily_products,
                             fast_task_type=get_fast_task_type(task),
                             is_bllok=task.is_bllok,
@@ -1021,6 +1020,8 @@ async def weekly_table_planner(
                                 WeeklyTableProjectTaskEntry(
                                     task_id=t.id,
                                     task_title=t.title,
+                                    status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                    completed_at=t.completed_at,
                                     daily_products=t.daily_products,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,
@@ -1045,6 +1046,8 @@ async def weekly_table_planner(
                                 WeeklyTableProjectTaskEntry(
                                     task_id=t.id,
                                     task_title=t.title,
+                                    status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                    completed_at=t.completed_at,
                                     daily_products=t.daily_products,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,

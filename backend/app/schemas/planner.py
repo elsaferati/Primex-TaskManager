@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
 from app.schemas.project import ProjectOut
 from app.schemas.task import TaskOut
+from app.models.enums import TaskStatus
 
 
 class WeeklyPlannerDay(BaseModel):
@@ -32,6 +33,8 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     """A task within a project entry in the weekly table"""
     task_id: uuid.UUID
     task_title: str
+    status: TaskStatus = TaskStatus.TODO
+    completed_at: datetime | None = None
     daily_products: int | None = None
     is_bllok: bool = False
     is_1h_report: bool = False
@@ -54,6 +57,8 @@ class WeeklyTableTaskEntry(BaseModel):
     """A task entry (for system/fast tasks) in the weekly table"""
     task_id: uuid.UUID | None = None
     title: str
+    status: TaskStatus = TaskStatus.TODO
+    completed_at: datetime | None = None
     daily_products: int | None = None
     fast_task_type: str | None = None
     is_bllok: bool = False
