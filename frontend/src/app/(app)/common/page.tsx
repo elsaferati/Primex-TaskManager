@@ -1472,7 +1472,7 @@ export default function CommonViewPage() {
     return [
       {
         id: "late",
-        label: "Delays",
+        label: "VONS",
         count: filtered.late.length,
         headerClass: "swimlane-header delay",
         badgeClass: "swimlane-badge delay",
@@ -1480,7 +1480,7 @@ export default function CommonViewPage() {
       },
       {
         id: "absent",
-        label: "Absences",
+        label: "MUNG",
         count: filtered.absent.length,
         headerClass: "swimlane-header absence",
         badgeClass: "swimlane-badge absence",
@@ -1488,7 +1488,7 @@ export default function CommonViewPage() {
       },
       {
         id: "leave",
-        label: "Annual Leave",
+        label: "PV/FEST",
         count: filtered.leave.length,
         headerClass: "swimlane-header leave",
         badgeClass: "swimlane-badge leave",
@@ -1496,7 +1496,7 @@ export default function CommonViewPage() {
       },
       {
         id: "external",
-        label: "External Meetings",
+        label: "TAK EXT",
         count: filtered.external.length,
         headerClass: "swimlane-header external",
         badgeClass: "swimlane-badge external",
@@ -1504,7 +1504,7 @@ export default function CommonViewPage() {
       },
       {
         id: "blocked",
-        label: "BLLOK",
+        label: "BLL",
         count: filtered.blocked.length,
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
@@ -1520,7 +1520,7 @@ export default function CommonViewPage() {
       },
       {
         id: "personal",
-        label: "Personal",
+        label: "P:",
         count: filtered.personal.length,
         headerClass: "swimlane-header personal",
         badgeClass: "swimlane-badge personal",
@@ -1536,7 +1536,7 @@ export default function CommonViewPage() {
       },
       {
         id: "priority",
-        label: "Projects",
+        label: "PRJK",
         count: filtered.priority.length,
         headerClass: "swimlane-header priority",
         badgeClass: "swimlane-badge priority",
@@ -1544,7 +1544,7 @@ export default function CommonViewPage() {
       },
       {
         id: "problem",
-        label: "Problems",
+        label: "PRBL",
         count: filtered.problems.length,
         headerClass: "swimlane-header problem",
         badgeClass: "swimlane-badge problem",
@@ -1552,7 +1552,7 @@ export default function CommonViewPage() {
       },
       {
         id: "feedback",
-        label: "Complaints/Requests/Proposals",
+        label: "ANK/KRK/PRZ",
         count: filtered.feedback.length,
         headerClass: "swimlane-header feedback",
         badgeClass: "swimlane-badge feedback",
@@ -2145,12 +2145,37 @@ export default function CommonViewPage() {
             padding-top: 18px;
             padding-bottom: 18px;
           }
-          .swimlane-header,
-          .swimlane-badge,
           .swimlane-cell {
             background: #ffffff !important;
             color: #111827 !important;
           }
+          .swimlane-header,
+          .swimlane-badge {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .swimlane-header.delay { background: var(--delay-bg) !important; color: #c2410c !important; }
+          .swimlane-header.absence { background: var(--absence-bg) !important; color: #b91c1c !important; }
+          .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
+          .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
+          .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
+          .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
+          .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
+          .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
+          .swimlane-header.priority { background: var(--priority-bg) !important; color: #b45309 !important; }
+          .swimlane-badge.delay { border-color: var(--delay-accent) !important; color: #c2410c !important; }
+          .swimlane-badge.absence { border-color: var(--absence-accent) !important; color: #b91c1c !important; }
+          .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
+          .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
+          .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
+          .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
+          .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
+          .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
+          .swimlane-badge.priority { border-color: var(--priority-accent) !important; color: #b45309 !important; }
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;
@@ -3307,35 +3332,35 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("late")}
             >
-              Delays
+              VONS
             </button>
             <button
               className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("absent")}
             >
-              Absences
+              MUNG
             </button>
             <button
               className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("leave")}
             >
-              Annual Leave
+              PV/FEST
             </button>
             <button
               className={`chip ${typeFilters.has("external") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("external")}
             >
-              External Meetings
+              TAK EXT
             </button>
             <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("blocked")}
             >
-              BLOCKED
+              BLL
             </button>
             <button
               className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
@@ -3349,7 +3374,7 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("personal")}
             >
-              Personal
+              P:
             </button>
             <button
               className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
@@ -3363,21 +3388,21 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("priority")}
             >
-              Projects
+              PRJK
             </button>
             <button
               className={`chip ${typeFilters.has("problem") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("problem")}
             >
-              Problems
+              PRBL
             </button>
             <button
               className={`chip ${typeFilters.has("feedback") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("feedback")}
             >
-              Complaints/Requests/Proposals
+              ANK/KRK/PRZ
             </button>
             </div>
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
@@ -4041,8 +4066,8 @@ export default function CommonViewPage() {
             <table className="week-table">
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ width: "60px" }}>NR</th>
-                  <th rowSpan={2} style={{ width: "150px" }}>LL</th>
+                  <th rowSpan={2} style={{ width: "40px" }}>NR</th>
+                  <th rowSpan={2} style={{ width: "110px" }}>LLOJI</th>
                   {weekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
