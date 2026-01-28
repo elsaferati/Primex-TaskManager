@@ -9,6 +9,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
@@ -129,21 +131,37 @@ def _fast_task_badge(task) -> str:
     return ""
 
 
-def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: bool) -> list[str]:
-    lines: list[str] = []
+def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: bool) -> list[tuple[str, str, str]]:
+    """
+    Returns list of tuples: (number_part, title_part, rest_part)
+    - number_part: "1", "2", etc.
+    - title_part: the title that should be bold (e.g., "IWF", "PROJECT_TITLE")
+    - rest_part: the rest of the text after the colon (e.g., "XML UPDATE", "TASK_NAME")
+    """
+    lines: list[tuple[str, str, str]] = []
+    task_num = 1
+    
     for project in projects:
-        title = project.project_title or ""
-        if title:
-            lines.append(title)
+        project_title = project.project_title or ""
         for task in project.tasks or []:
-            line = f"{task.task_title}"
+            task_title = task.task_title or ""
+            task_name = task_title
             if task.daily_products is not None:
-                line = f"{line} {task.daily_products} pcs"
-            lines.append(line)
+                task_name = f"{task_name} {task.daily_products} pcs"
+            # Format: "1. PROJECT_TITLE: TASK_NAME" or "1. TASK_NAME" if no project
+            if project_title:
+                lines.append((str(task_num), project_title, task_name))
+            else:
+                # If no project title, use task name as title
+                lines.append((str(task_num), task_name, ""))
+            task_num += 1
+    
     for task in system_tasks:
         title = task.title or ""
         if title:
-            lines.append(title)
+            lines.append((str(task_num), title, ""))
+            task_num += 1
+    
     if include_fast:
         for task in fast_tasks:
             label = task.title or ""
@@ -151,8 +169,35 @@ def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: boo
             if badge:
                 label = f"{label} [{badge}]"
             if label:
-                lines.append(label)
+                lines.append((str(task_num), label, ""))
+                task_num += 1
+    
     return lines
+
+
+def _create_rich_text_cell(lines: list[tuple[str, str, str]]) -> CellRichText | str:
+    """
+    Creates a RichText cell with bold titles, or returns plain string if no lines.
+    Format: "1. TITLE: REST" where TITLE is bold.
+    """
+    if not lines:
+        return ""
+
+    rich_text_parts: list[TextBlock] = []
+
+    for idx, (number_part, title_part, rest_part) in enumerate(lines):
+        prefix = "\n" if idx > 0 else ""
+        # Add number and period
+        rich_text_parts.append(TextBlock(text=f"{prefix}{number_part}. ", font=InlineFont()))
+
+        # Add bold title
+        rich_text_parts.append(TextBlock(text=title_part, font=InlineFont(b=True)))
+
+        # Add colon and rest if there is rest
+        if rest_part:
+            rich_text_parts.append(TextBlock(text=f": {rest_part}", font=InlineFont()))
+
+    return CellRichText(rich_text_parts)
 
 
 def _effective_status(status: str | None, completed_at: datetime | None, day_date: date) -> str:
@@ -2079,10 +2124,10 @@ async def export_weekly_planner_xlsx(
                     include_fast=include_fast,
                     day_date=day.date,
                 )
-                value = "\n".join(lines) if lines else ""
-                cell = ws.cell(row=row_idx, column=5 + u_idx, value=value)
+                cell_value = _create_rich_text_cell(lines)
+                cell = ws.cell(row=row_idx, column=5 + u_idx, value=cell_value)
                 cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
-                if status_value in status_fills and value:
+                if status_value in status_fills and lines:
                     cell.fill = status_fills[status_value]
 
     last_row = data_start_row + len(dept.days) * 4 - 1
