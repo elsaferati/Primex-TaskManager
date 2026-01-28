@@ -1426,7 +1426,8 @@ async def export_system_tasks_xlsx(
         assignees = assignee_map.get(task.id, [])
         if not assignees and task.assigned_to in fallback_map:
             assignees = [fallback_map[task.assigned_to]]
-        assignee_label = ", ".join(assignees)
+        assignee_initials = [(_initials(name) if name else "") for name in assignees]
+        assignee_label = ", ".join([initials for initials in assignee_initials if initials])
         row_idx = data_row + idx - 1
         if template.department_id and template.department_id in department_map:
             department_label = _department_short(department_map[template.department_id])

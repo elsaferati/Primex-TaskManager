@@ -840,6 +840,8 @@ export default function PcmProjectPage() {
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const canEditDueDate = isAdmin || isManager
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -3005,12 +3007,12 @@ export default function PcmProjectPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <span className="text-3xl font-semibold">{title}</span>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
+                  {canEditDueDate && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
                       console.log("Set due date clicked", { project: project?.id, due_date: project?.due_date, isAdmin })
                       const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
                       console.log("Setting due date to:", currentDueDate)
@@ -3027,9 +3029,9 @@ export default function PcmProjectPage() {
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
                 )}
-                {!isAdmin && project.due_date && (
-                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
-                )}
+                  {!canEditDueDate && project.due_date && (
+                    <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                  )}
                 {project?.is_template && (
                   <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                 )}
@@ -5288,7 +5290,7 @@ export default function PcmProjectPage() {
               </button>
               <div className="flex items-center gap-3">
                 <div className="text-3xl font-semibold">{title}</div>
-                {isAdmin && (
+                {canEditDueDate && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -5304,7 +5306,7 @@ export default function PcmProjectPage() {
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
                 )}
-                {!isAdmin && project.due_date && (
+                {!canEditDueDate && project.due_date && (
                   <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
                 )}
               </div>
@@ -7155,24 +7157,25 @@ export default function PcmProjectPage() {
           <div className="mt-3 flex items-center gap-3">
             <span className="text-3xl font-semibold">{title}</span>
             {isAdmin && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
-                  setEditProjectDueDate(currentDueDate)
-                  setEditProjectDueDateOpen(true)
-                }}
-                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
-                title="Edit project due date"
-              >
-                {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
-              </button>
-            )}
-            {!isAdmin && project.due_date && (
-              <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
-            )}
+              {canEditDueDate && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
+                    setEditProjectDueDate(currentDueDate)
+                    setEditProjectDueDateOpen(true)
+                  }}
+                  className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
+                  title="Edit project due date"
+                >
+                  {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
+                </button>
+              )}
+              {!canEditDueDate && project.due_date && (
+                <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+              )}
             {project?.is_template && (
               <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
             )}

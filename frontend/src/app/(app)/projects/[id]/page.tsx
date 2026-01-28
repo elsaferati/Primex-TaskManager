@@ -1822,6 +1822,8 @@ export default function ProjectPage() {
   }, [apiFetch, project])
 
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const canEditDueDate = isAdmin || isManager
 
   const addMstAcceptanceItem = async () => {
     if (!project) return
@@ -2160,7 +2162,7 @@ export default function ProjectPage() {
             </button>
             <div className="mt-3 flex items-center gap-3">
               <div className="text-3xl font-semibold">{title}</div>
-              {isAdmin && (
+              {canEditDueDate && (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -2177,7 +2179,7 @@ export default function ProjectPage() {
                   {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                 </button>
               )}
-              {!isAdmin && project.due_date && (
+              {!canEditDueDate && project.due_date && (
                 <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
               )}
             </div>

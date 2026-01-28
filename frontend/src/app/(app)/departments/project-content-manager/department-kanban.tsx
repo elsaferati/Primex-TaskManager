@@ -2282,7 +2282,7 @@ export default function DepartmentKanban() {
     []
   )
 
-  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const showSystemActions = viewMode === "mine"
@@ -3472,7 +3472,6 @@ export default function DepartmentKanban() {
                             value={projectDueDate}
                             onChange={(e) => setProjectDueDate(e.target.value)}
                             placeholder="Select due date"
-                            disabled={user?.role !== "ADMIN"}
                           />
                         </div>
                         <div className="flex justify-end gap-2 md:col-span-2">

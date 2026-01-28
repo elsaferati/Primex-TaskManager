@@ -1943,7 +1943,8 @@ export default function DepartmentKanban() {
     []
   )
 
-  const canCreate = true // Everyone in this department can create/manage
+  const canCreate =
+    user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF" // All roles may create/manage
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
@@ -2698,7 +2699,6 @@ export default function DepartmentKanban() {
                               value={projectDueDate}
                               onChange={(e) => setProjectDueDate(e.target.value)}
                               className="rounded-xl"
-                              disabled={user?.role !== "ADMIN"}
                             />
                           </div>
                         </div>

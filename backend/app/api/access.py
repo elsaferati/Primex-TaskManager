@@ -20,6 +20,12 @@ def ensure_manager_or_admin(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
+def ensure_project_creator(user: User) -> None:
+    """Allow Admin, Manager, or Staff to create projects."""
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
 def ensure_admin(user: User) -> None:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
