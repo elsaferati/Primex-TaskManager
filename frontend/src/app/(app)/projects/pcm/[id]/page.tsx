@@ -7160,7 +7160,11 @@ export default function PcmProjectPage() {
             <span className="text-3xl font-semibold">{title}</span>
             {isAdmin && (
               <>
+<<<<<<< HEAD
+                {canEditDueDate ? (
+=======
                 {canEditDueDate && (
+>>>>>>> ec7cef77c620917c0163678f045415829a8b22e9
                   <button
                     type="button"
                     onClick={(e) => {
@@ -7175,10 +7179,17 @@ export default function PcmProjectPage() {
                   >
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
+<<<<<<< HEAD
+                ) : null}
+                {!canEditDueDate && project.due_date ? (
+                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                ) : null}
+=======
                 )}
                 {!canEditDueDate && project.due_date && (
                   <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
                 )}
+>>>>>>> ec7cef77c620917c0163678f045415829a8b22e9
               </>
             )}
             {project?.is_template && (
