@@ -90,8 +90,8 @@ export default function GaKaNotesPage() {
   const [departmentId, setDepartmentId] = React.useState("ALL")
   const [projectId, setProjectId] = React.useState("NONE")
   const [content, setContent] = React.useState("")
-  const [noteType, setNoteType] = React.useState<NoteType>("GA")
-  const [priority, setPriority] = React.useState<NotePriority>("NONE")
+  const [noteType] = React.useState<NoteType>("GA")
+  const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
   const [posting, setPosting] = React.useState(false)
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
@@ -103,8 +103,9 @@ export default function GaKaNotesPage() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [taskDueDate, setTaskDueDate] = React.useState("")
-  const [taskAssigneeId, setTaskAssigneeId] = React.useState("__unassigned__")
+  const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentId, setTaskDepartmentId] = React.useState("__none__")
+  const [taskProjectId, setTaskProjectId] = React.useState("NONE")
 
   // Default department for staff
   React.useEffect(() => {
@@ -161,12 +162,22 @@ export default function GaKaNotesPage() {
 
   const fetchNotes = React.useCallback(async () => {
     if (!user) return
+    // Staff must always query by their department to satisfy backend requirements.
+    const enforcedDepartmentId =
+      user.role === "STAFF" ? user.department_id ?? null : departmentId !== "ALL" ? departmentId : null
+    if (user.role === "STAFF" && !enforcedDepartmentId) {
+      toast.error("Your department is required to load notes.")
+      return
+    }
     setLoading(true)
     try {
       let url = "/ga-notes"
       const params = new URLSearchParams()
-      if (projectId !== "NONE") params.set("project_id", projectId)
-      else if (departmentId && departmentId !== "ALL") params.set("department_id", departmentId)
+      if (projectId !== "NONE") {
+        params.set("project_id", projectId)
+      } else if (enforcedDepartmentId) {
+        params.set("department_id", enforcedDepartmentId)
+      }
       url += params.toString() ? `?${params}` : ""
       const res = await apiFetch(url)
       if (res?.ok) {
@@ -188,11 +199,6 @@ export default function GaKaNotesPage() {
   }, [loadUsers])
 
   React.useEffect(() => {
-    const effectiveDept = departmentId && departmentId !== "ALL" ? departmentId : undefined
-    void loadProjects(effectiveDept)
-  }, [departmentId, loadProjects])
-
-  React.useEffect(() => {
     void fetchNotes()
   }, [fetchNotes])
 
@@ -206,11 +212,7 @@ export default function GaKaNotesPage() {
       toast.error("Content is required")
       return
     }
-    // Staff must target their department or a project
-    if (user?.role === "STAFF" && !projectId && !departmentId) {
-      toast.error("Select a department or project")
-      return
-    }
+    const departmentForNote = user?.role === "STAFF" ? user.department_id ?? null : null
     setPosting(true)
     try {
       const res = await apiFetch("/ga-notes", {
@@ -220,8 +222,8 @@ export default function GaKaNotesPage() {
           content: content.trim(),
           note_type: noteType,
           priority: priority === "NONE" ? null : priority,
-          department_id: projectId !== "NONE" ? null : departmentId !== "ALL" ? departmentId : null,
-          project_id: projectId !== "NONE" ? projectId : null,
+          department_id: departmentForNote,
+          project_id: null,
         }),
       })
       if (!res?.ok) {
@@ -245,22 +247,19 @@ export default function GaKaNotesPage() {
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskDueDate("")
-    setTaskAssigneeId("__unassigned__")
+    setTaskAssigneeIds([])
     setTaskDepartmentId(note.department_id ?? "__none__")
+    setTaskProjectId(note.project_id ?? "NONE")
   }
 
   const createTaskFromNote = async (note: GaNote) => {
-    if (user?.role === "STAFF") {
-      toast.error("Only managers or admins can create tasks")
-      return
-    }
     if (note.is_converted_to_task) return
     if (!taskTitle.trim()) {
       toast.error("Task title is required")
       return
     }
     const effectiveDepartmentId =
-      note.department_id ?? (taskDepartmentId !== "__none__" ? taskDepartmentId : null)
+      taskDepartmentId !== "__none__" ? taskDepartmentId : note.department_id ?? null
     if (!effectiveDepartmentId) {
       toast.error("Select a department before creating a task")
       return
@@ -278,10 +277,11 @@ export default function GaKaNotesPage() {
           priority: taskPriority,
           finish_period: taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod,
           due_date: dueDateValue,
-          assigned_to: taskAssigneeId === "__unassigned__" ? null : taskAssigneeId,
+          assigned_to: taskAssigneeIds[0] ?? null,
+          assignees: taskAssigneeIds,
           ga_note_origin_id: note.id,
           department_id: effectiveDepartmentId,
-          project_id: note.project_id ?? null,
+          project_id: taskProjectId !== "NONE" ? taskProjectId : null,
         }),
       })
       if (!taskRes.ok) {
@@ -330,14 +330,29 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const projectOptions = projects.filter((p) => !departmentId || departmentId === "ALL" || p.department_id === departmentId)
+  // Project list is used only in the task creation dialog (filtered separately).
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
-  const taskDepartmentLocked = Boolean(taskDialogNote?.department_id || taskDialogNote?.project_id)
+  const taskDepartmentLocked = false
   const effectiveTaskDepartmentId =
-    taskDialogNote?.department_id ?? (taskDepartmentId !== "__none__" ? taskDepartmentId : "")
-  const taskAssigneeOptions = users.filter(
-    (person) => effectiveTaskDepartmentId && person.department_id === effectiveTaskDepartmentId
-  )
+    taskDepartmentId !== "__none__"
+      ? taskDepartmentId
+      : taskDialogNote?.department_id ?? ""
+  const taskAssigneeOptions = users
+
+  // Projects filtered by the department chosen in the task dialog
+  const taskProjectOptions = React.useMemo(() => {
+    if (effectiveTaskDepartmentId) {
+      return projects.filter((p) => p.department_id === effectiveTaskDepartmentId)
+    }
+    return projects
+  }, [effectiveTaskDepartmentId, projects])
+
+  // Keep projects in sync when opening dialog or changing department
+  React.useEffect(() => {
+    if (!taskDialogNoteId) return
+    const dep = effectiveTaskDepartmentId || undefined
+    void loadProjects(dep)
+  }, [effectiveTaskDepartmentId, loadProjects, taskDialogNoteId])
   const visibleNotes = React.useMemo(() => {
     const sorted = [...notes].sort((a, b) => {
       const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
@@ -388,67 +403,6 @@ export default function GaKaNotesPage() {
           <CardTitle className="text-sm">New note</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Note type</Label>
-              <Select value={noteType} onValueChange={(v) => setNoteType(v as NoteType)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="GA">GA</SelectItem>
-                  <SelectItem value="KA">KA</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as NotePriority)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="No priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NONE">No priority</SelectItem>
-                  <SelectItem value="NORMAL">Normal</SelectItem>
-                  <SelectItem value="HIGH">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {user?.role !== "STAFF" && (
-              <div className="space-y-2">
-                <Label>Department (optional)</Label>
-                <Select value={departmentId} onValueChange={(v) => setDepartmentId(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All departments" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All</SelectItem>
-                    {departments.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label>Project (optional)</Label>
-              <Select value={projectId} onValueChange={(v) => setProjectId(v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="No project" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NONE">No project</SelectItem>
-                  {projectOptions.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.title || p.name || "Untitled project"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
           <div className="space-y-2">
             <Label>Content</Label>
             <Textarea
@@ -601,7 +555,6 @@ export default function GaKaNotesPage() {
                             variant="outline"
                             size="sm"
                             className="border-indigo-300 text-indigo-800 hover:bg-indigo-50"
-                            disabled={user?.role === "STAFF"}
                             onClick={() => openTaskDialog(note)}
                           >
                             Create task
@@ -698,14 +651,15 @@ export default function GaKaNotesPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select
-                    value={effectiveTaskDepartmentId || "__none__"}
-                    onValueChange={(value) => {
-                      setTaskDepartmentId(value)
-                      setTaskAssigneeId("__unassigned__")
-                    }}
-                    disabled={taskDepartmentLocked}
-                  >
+                <Select
+                  value={effectiveTaskDepartmentId || "__none__"}
+                  onValueChange={(value) => {
+                    setTaskDepartmentId(value)
+                    setTaskAssigneeIds([])
+                    setTaskProjectId("NONE")
+                  }}
+                  disabled={taskDepartmentLocked}
+                >
                     <SelectTrigger>
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
@@ -721,28 +675,83 @@ export default function GaKaNotesPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Assign to</Label>
+                <Label>Project (optional)</Label>
                 <Select
-                  value={taskAssigneeId}
-                  onValueChange={setTaskAssigneeId}
-                  disabled={!effectiveTaskDepartmentId}
+                  value={taskProjectId}
+                  onValueChange={(value) => setTaskProjectId(value)}
+                  disabled={!effectiveTaskDepartmentId && taskProjectOptions.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Unassigned" />
+                    <SelectValue placeholder="Select project" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                    {taskAssigneeOptions.map((person) => (
-                      <SelectItem key={person.id} value={person.id}>
-                        {person.full_name || person.username || person.id}
+                    <SelectItem value="NONE">No project</SelectItem>
+                    {taskProjectOptions.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.title || p.name || "Untitled project"}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {!effectiveTaskDepartmentId ? (
-                  <p className="text-xs text-muted-foreground">Select a department to choose an assignee.</p>
+                  <p className="text-xs text-muted-foreground">Choose a department to filter its projects.</p>
                 ) : null}
               </div>
+                <div className="space-y-2">
+                  <Label>Assign to</Label>
+                  <div className="rounded-md border bg-white p-2">
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {taskAssigneeIds.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">No assignees selected.</span>
+                      ) : (
+                        taskAssigneeIds.map((id) => {
+                          const person = taskAssigneeOptions.find((p) => p.id === id)
+                          const label = person?.full_name || person?.username || person?.email || id
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                              onClick={() =>
+                                setTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
+                              }
+                            >
+                              {label}
+                              <span className="text-slate-500">×</span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                    <Select
+                      value="__picker__"
+                      onValueChange={(value) => {
+                        if (value === "__picker__") return
+                        setTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                      }}
+                      disabled={taskAssigneeOptions.length === 0}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Add assignee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__picker__" disabled>
+                          Add assignee
+                        </SelectItem>
+                        {taskAssigneeOptions
+                          .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
+                          .map((person) => (
+                            <SelectItem key={person.id} value={person.id}>
+                              {person.full_name || person.username || person.email || person.id}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {!effectiveTaskDepartmentId ? (
+                    <p className="text-xs text-muted-foreground">Select a department or pick an assignee to set it automatically.</p>
+                  ) : null}
+                </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel

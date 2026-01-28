@@ -274,7 +274,8 @@ async def create_task(
         if project.department_id is not None and project.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
 
-    if department_id is not None:
+    # Allow cross-department creation when task originates from a GA/KA note.
+    if department_id is not None and payload.ga_note_origin_id is None:
         ensure_department_access(user, department_id)
 
     dependency_task_id = payload.dependency_task_id
@@ -303,7 +304,7 @@ async def create_task(
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
-    allow_cross_department = project is not None
+    allow_cross_department = project is not None or payload.ga_note_origin_id is not None
     if payload.assignees is not None:
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]

@@ -17,6 +17,7 @@ export default function UsersPage() {
   const [users, setUsers] = React.useState<User[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [showInactive, setShowInactive] = React.useState(false)
+  const isAdmin = user?.role === "ADMIN"
 
   const load = React.useCallback(async () => {
     const suffix = showInactive ? "?include_inactive=true" : ""
@@ -76,7 +77,7 @@ export default function UsersPage() {
               Show only deactivated
             </Label>
           </div>
-          <CreateUserDialog departments={departments} onCreated={load} />
+          {isAdmin ? <CreateUserDialog departments={departments} onCreated={load} /> : null}
         </div>
       </div>
 
@@ -104,22 +105,28 @@ export default function UsersPage() {
                   <TableCell>{u.username}</TableCell>
                   <TableCell>{u.full_name || "-"}</TableCell>
                   <TableCell>{(u.department_id && departmentById.get(u.department_id)) || "-"}</TableCell>
-                  <TableCell>
-                    {u.is_active ? <Badge variant="secondary">Active</Badge> : <Badge variant="outline">Inactive</Badge>}
-                  </TableCell>
-                  <TableCell>{u.role}</TableCell>
-                  <TableCell className="space-x-2">
-                    <EditUserDialog userRecord={u} departments={departments} onUpdated={load} />
-                    {u.is_active ? (
-                      <button
-                        className="text-sm text-destructive hover:underline"
-                        onClick={() => void deactivate(u)}
-                      >
-                        Deactivate
-                      </button>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
+                <TableCell>
+                  {u.is_active ? <Badge variant="secondary">Active</Badge> : <Badge variant="outline">Inactive</Badge>}
+                </TableCell>
+                <TableCell>{u.role}</TableCell>
+                <TableCell className="space-x-2">
+                    {isAdmin ? (
+                      <>
+                        <EditUserDialog userRecord={u} departments={departments} onUpdated={load} />
+                        {u.is_active ? (
+                          <button
+                            className="text-sm text-destructive hover:underline"
+                            onClick={() => void deactivate(u)}
+                          >
+                            Deactivate
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">View only</span>
+                    )}
+                </TableCell>
+              </TableRow>
               ))}
             </TableBody>
           </Table>

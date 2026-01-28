@@ -27,6 +27,7 @@ export interface SystemTaskTemplate {
   internal_notes?: string | null
   department_id?: string | null
   default_assignee_id?: string | null
+  created_by?: string | null
   assignees?: TaskAssignee[] | null
   scope: SystemTaskScope
   frequency: SystemTaskFrequency
