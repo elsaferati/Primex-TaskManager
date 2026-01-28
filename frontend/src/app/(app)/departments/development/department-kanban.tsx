@@ -5626,16 +5626,17 @@ export default function DepartmentKanban() {
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
-                      <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[30px]" />
-                      <col className="w-[36px]" />
-                      <col className="w-[220px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[40px]" />
+                      <col className="w-[28px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[170px]" />
                       <col className="w-[60px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[50px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[90px]" />
                       <col className="w-[40px]" />
-                      <col className="w-[52px]" />
-                      <col className="w-[40px]" />
-                      <col className="w-[140px]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-slate-100">
@@ -5658,6 +5659,7 @@ export default function DepartmentKanban() {
                           T/Y/O
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5682,11 +5684,14 @@ export default function DepartmentKanban() {
                             <td className="border border-slate-900 px-2 py-2 align-top">
                               <div className="h-4 w-full border-b border-slate-400" />
                             </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                              {row.userInitials}
+                            </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
+                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
                             No data available.
                           </td>
                         </tr>
