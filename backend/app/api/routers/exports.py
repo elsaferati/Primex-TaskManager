@@ -812,7 +812,7 @@ async def export_checklist_xlsx(
                 bottom = thick if r == last_row else thin
                 ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.oddHeader.right.text = "&D &T"
+    ws.oddHeader.right.text = ""
     ws.oddFooter.center.text = "Page &P / &N"
     user_initials = _initials(user.full_name or user.username or "")
     ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"

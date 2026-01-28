@@ -928,6 +928,12 @@ export default function WeeklyPlannerPage() {
       printContent += `
         <h2 style="margin-top: 20px; margin-bottom: 10px; font-size: 14pt;">${formatDepartmentName(dept.department_name)}</h2>
         <table>
+          <colgroup>
+            <col style="width: 90px;" />
+            <col style="width: 36px;" />
+            <col style="width: 36px;" />
+            ${allUsers.map(() => `<col style="width: 220px;" />`).join("")}
+          </colgroup>
           <thead>
             <tr>
               <th class="day-cell" rowspan="2">Day</th>
