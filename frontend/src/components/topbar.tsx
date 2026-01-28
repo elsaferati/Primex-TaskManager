@@ -65,6 +65,13 @@ export function Topbar() {
           </SheetContent>
         </Sheet>
 
+        <Button
+          variant="outline"
+          className="hidden sm:inline-flex"
+          onClick={() => void logout()}
+        >
+          Sign out
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-10 w-10 rounded-full p-0">

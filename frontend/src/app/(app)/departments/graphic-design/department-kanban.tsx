@@ -2699,7 +2699,6 @@ export default function DepartmentKanban() {
                               value={projectDueDate}
                               onChange={(e) => setProjectDueDate(e.target.value)}
                               className="rounded-xl"
-                              disabled={user?.role !== "ADMIN"}
                             />
                           </div>
                         </div>

@@ -3472,7 +3472,6 @@ export default function DepartmentKanban() {
                             value={projectDueDate}
                             onChange={(e) => setProjectDueDate(e.target.value)}
                             placeholder="Select due date"
-                            disabled={user?.role !== "ADMIN"}
                           />
                         </div>
                         <div className="flex justify-end gap-2 md:col-span-2">

@@ -26,14 +26,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[UserOut]:
-    ensure_manager_or_admin(user)
     stmt = select(User)
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
-    if user.role != UserRole.ADMIN and not include_all_departments:
-        if user.department_id is None:
-            return []
-        stmt = stmt.where(User.department_id == user.department_id)
     users = (await db.execute(stmt.order_by(User.created_at))).scalars().all()
     return [
         UserOut(

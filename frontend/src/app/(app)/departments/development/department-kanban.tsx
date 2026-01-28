@@ -3464,15 +3464,14 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Due Date</Label>
-                        <Input
-                          type="date"
-                          value={projectDueDate}
-                          onChange={(e) => setProjectDueDate(e.target.value)}
-                          placeholder="Select due date"
-                          className="border-slate-200 focus:border-slate-400 rounded-xl"
-                          disabled={user?.role !== "ADMIN"}
-                        />
-                      </div>
+                          <Input
+                            type="date"
+                            value={projectDueDate}
+                            onChange={(e) => setProjectDueDate(e.target.value)}
+                            placeholder="Select due date"
+                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                          />
+                        </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
