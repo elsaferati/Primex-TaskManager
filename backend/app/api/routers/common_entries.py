@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -55,8 +55,6 @@ def _to_out(e: CommonEntry) -> CommonEntryOut:
 @router.get("", response_model=list[CommonEntryOut])
 async def list_entries(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)) -> list[CommonEntryOut]:
     stmt = select(CommonEntry).order_by(CommonEntry.created_at.desc())
-    if user.role == UserRole.STAFF:
-        stmt = stmt.where(or_(CommonEntry.created_by_user_id == user.id, CommonEntry.assigned_to_user_id == user.id))
     entries = (await db.execute(stmt)).scalars().all()
     return [_to_out(e) for e in entries]
 
@@ -295,7 +293,7 @@ async def delete_entry(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> None:
-    if user.role != UserRole.ADMIN:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     entry = (await db.execute(select(CommonEntry).where(CommonEntry.id == entry_id))).scalar_one_or_none()

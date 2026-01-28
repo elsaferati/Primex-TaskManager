@@ -2009,7 +2009,7 @@ export default function DepartmentKanban() {
     return () => window.clearTimeout(timer)
   }, [loadingAllUsersDailyReports, pendingPrint, showAllTodayPrint])
 
-  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const showSystemActions = viewMode === "mine"
