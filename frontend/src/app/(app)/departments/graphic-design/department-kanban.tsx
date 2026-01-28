@@ -2754,7 +2754,11 @@ export default function DepartmentKanban() {
                           </div>
 
                           {/* Description */}
-                          <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 dark:text-slate-400">{project.description || "No description provided."}</p>
+                          <p className="text-sm leading-relaxed text-slate-500 line-clamp-3 dark:text-slate-400">
+                            {project.description
+                              ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
+                              : "No description provided."}
+                          </p>
 
                           {/* Taskbar: Horizontal list of tasks */}
                           <div className="space-y-2">

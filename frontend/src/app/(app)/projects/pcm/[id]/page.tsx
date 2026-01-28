@@ -7157,25 +7157,28 @@ export default function PcmProjectPage() {
           <div className="mt-3 flex items-center gap-3">
             <span className="text-3xl font-semibold">{title}</span>
             {isAdmin && (
-              {canEditDueDate && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
-                    setEditProjectDueDate(currentDueDate)
-                    setEditProjectDueDateOpen(true)
-                  }}
-                  className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
-                  title="Edit project due date"
-                >
-                  {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
-                </button>
-              )}
-              {!canEditDueDate && project.due_date && (
-                <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
-              )}
+              <>
+                {canEditDueDate ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
+                      setEditProjectDueDate(currentDueDate)
+                      setEditProjectDueDateOpen(true)
+                    }}
+                    className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
+                    title="Edit project due date"
+                  >
+                    {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
+                  </button>
+                ) : null}
+                {!canEditDueDate && project.due_date ? (
+                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                ) : null}
+              </>
+            )}
             {project?.is_template && (
               <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
             )}

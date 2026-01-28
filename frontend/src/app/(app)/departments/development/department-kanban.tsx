@@ -953,10 +953,14 @@ export default function DepartmentKanban() {
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
     if (viewMode === "mine" && user?.id) {
-      return projects.filter((p) => p.manager_id === user.id)
+      return projects.filter((p) => {
+        if (p.manager_id === user.id) return true
+        const members = projectMembers[p.id] || []
+        return members.some((m) => m.id === user.id)
+      })
     }
     return projects
-  }, [projects, user?.id, viewMode])
+  }, [projects, projectMembers, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
     () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
@@ -3507,7 +3511,11 @@ export default function DepartmentKanban() {
                           <div className="h-3 w-3 rounded-full bg-slate-400 mt-2 flex-shrink-0"></div>
                           <div>
                             <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
-                            <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                            <div className="mt-1 text-sm text-slate-600">
+                              {project.description
+                                ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
+                                : "-"}
+                            </div>
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">

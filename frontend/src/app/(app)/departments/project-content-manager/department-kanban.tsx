@@ -3514,8 +3514,10 @@ export default function DepartmentKanban() {
                               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                             )}
                           </div>
-                          <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                            {project.description || "-"}
+                          <div className="mt-1 text-[11px] text-muted-foreground line-clamp-3">
+                            {project.description
+                              ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
+                              : "-"}
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
