@@ -202,6 +202,10 @@ export default function GaKaNotesPage() {
   }, [loadUsers])
 
   React.useEffect(() => {
+    void loadProjects()
+  }, [loadProjects])
+
+  React.useEffect(() => {
     void fetchNotes()
   }, [fetchNotes])
 
@@ -403,9 +407,6 @@ export default function GaKaNotesPage() {
           <div>
             <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Department Notes</div>
             <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">GA/KA Notes</div>
-            <div className="text-sm text-muted-foreground mt-1">
-              Capture decisions, asks, and follow-ups. Keep it crisp and actionable.
-            </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Badge variant="secondary" className="px-3 py-1 rounded-full shadow-sm bg-emerald-100 text-emerald-800">
@@ -428,14 +429,10 @@ export default function GaKaNotesPage() {
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Capture the takeaway or ask. Be clear, action-oriented, and include owners or due dates."
               rows={6}
               className="min-h-[220px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
-            <p className="text-xs text-muted-foreground">
-              Tip: Include the who/what/when so the note is actionable later.
-            </p>
           </div>
           <div className="flex justify-end">
             <Button onClick={() => void createNote()} disabled={posting}>
@@ -481,6 +478,18 @@ export default function GaKaNotesPage() {
           ) : (
             <div className="grid gap-3">
               {visibleNotes.map((note) => {
+                const creator = note.created_by ? userMap.get(note.created_by) : null
+                const creatorLabel =
+                  creator?.full_name || creator?.username || creator?.email || "Unknown user"
+                const creatorInitials = getInitials(creatorLabel)
+                const creatorBadgeClasses =
+                  creatorInitials === "GA"
+                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                    : creatorInitials === "KA"
+                      ? "bg-blue-100 text-blue-800 border border-blue-200"
+                      : "bg-slate-200 text-slate-700"
+                const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
+                const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                 if (note.is_converted_to_task) {
                   return (
                     <div
@@ -501,17 +510,17 @@ export default function GaKaNotesPage() {
                         const assigneeNames =
                           task.assignees?.length
                             ? task.assignees
-                                .map((assignee) => assignee.full_name || assignee.username || assignee.email || "")
-                                .filter(Boolean)
+                              .map((assignee) => assignee.full_name || assignee.username || assignee.email || "")
+                              .filter(Boolean)
                             : []
                         const fallbackAssignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         const assigneeLabel =
                           assigneeNames.length > 0
                             ? assigneeNames.join(", ")
                             : fallbackAssignee?.full_name ||
-                              fallbackAssignee?.username ||
-                              fallbackAssignee?.email ||
-                              "-"
+                            fallbackAssignee?.username ||
+                            fallbackAssignee?.email ||
+                            "-"
                         const assigneeInitials = getInitials(assigneeLabel)
                         const departmentLabel = department ? formatDepartmentName(department.name) : "No department"
                         const projectLabel = project?.title || project?.name || ""
@@ -524,25 +533,20 @@ export default function GaKaNotesPage() {
                         return (
                           <div className="space-y-3 text-sm">
                             <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-3 min-w-0">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
-                                  GA
+                              <div className="min-w-0">
+                                <div className="truncate text-base font-semibold text-slate-900">
+                                  {task.title}
                                 </div>
-                                <div className="min-w-0">
-                                  <div className="truncate text-base font-semibold text-slate-900">
-                                    {task.title}
-                                  </div>
-                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${priorityStyle}`}>
-                                      {priorityLabel === "HIGH" ? "High" : "Normal"}
-                                    </span>
-                                    <span
-                                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${statusStyle.pill}`}
-                                    >
-                                      <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
-                                      {statusStyle.label}
-                                    </span>
-                                  </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                  <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${priorityStyle}`}>
+                                    {priorityLabel === "HIGH" ? "High" : "Normal"}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${statusStyle.pill}`}
+                                  >
+                                    <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
+                                    {statusStyle.label}
+                                  </span>
                                 </div>
                               </div>
                               <Link
@@ -551,6 +555,15 @@ export default function GaKaNotesPage() {
                               >
                                 View details
                               </Link>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs text-slate-600">
+                              <div
+                                className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
+                              >
+                                {creatorInitials}
+                              </div>
+                              <span className="font-medium text-slate-800">Added by {creatorLabel}</span>
                             </div>
 
                             <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -584,7 +597,6 @@ export default function GaKaNotesPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <Badge className={TYPE_BADGE[note.note_type] ?? ""}>{note.note_type}</Badge>
                             {note.priority && note.priority !== "NONE" ? (
                               <Badge className={PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}>
                                 {note.priority}
@@ -592,7 +604,29 @@ export default function GaKaNotesPage() {
                             ) : null}
                             <span>Created: {formatDate(note.created_at)}</span>
                           </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            <div
+                              className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${creatorBadgeClasses}`}
+                            >
+                              {creatorInitials}
+                            </div>
+                            <span className="font-semibold text-slate-800">{creatorLabel}</span>
+                          </div>
                           <div className="text-base font-medium leading-relaxed">{note.content}</div>
+                          {(noteProject || noteDepartment) && (
+                            <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+                              {noteProject ? (
+                                <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
+                                  Project: {noteProject.title || noteProject.name || "Unnamed project"}
+                                </Badge>
+                              ) : null}
+                              {noteDepartment ? (
+                                <Badge className="bg-amber-100 text-amber-800 border-amber-200">
+                                  Department: {formatDepartmentName(noteDepartment.name)}
+                                </Badge>
+                              ) : null}
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
@@ -617,16 +651,6 @@ export default function GaKaNotesPage() {
                           )}
                         </div>
                       </div>
-                      {note.project_id || note.department_id ? (
-                        <div className="text-xs text-muted-foreground flex flex-wrap gap-2">
-                          {note.project_id ? (
-                            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">Project</Badge>
-                          ) : null}
-                          {note.department_id ? (
-                            <Badge className="bg-amber-100 text-amber-800 border-amber-200">Department</Badge>
-                          ) : null}
-                        </div>
-                      ) : null}
                     </CardContent>
                   </Card>
                 )
@@ -693,58 +717,58 @@ export default function GaKaNotesPage() {
                   <Label>Due date (optional)</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
-              <div className="space-y-2">
-                <Label>Departments</Label>
-                <div className="rounded-md border bg-white p-2">
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {taskDepartmentIds.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">No departments selected.</span>
-                    ) : (
-                      taskDepartmentIds.map((id) => {
-                        const dept = departments.find((d) => d.id === id)
-                        const label = dept?.name || id
-                        return (
-                          <button
-                            key={id}
-                            type="button"
-                            className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
-                            onClick={() =>
-                              setTaskDepartmentIds((prev) => prev.filter((item) => item !== id))
-                            }
-                          >
-                            {label}
-                            <span className="text-slate-500">×</span>
-                          </button>
-                        )
-                      })
-                    )}
+                <div className="space-y-2">
+                  <Label>Departments</Label>
+                  <div className="rounded-md border bg-white p-2">
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {taskDepartmentIds.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">No departments selected.</span>
+                      ) : (
+                        taskDepartmentIds.map((id) => {
+                          const dept = departments.find((d) => d.id === id)
+                          const label = dept?.name || id
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                              onClick={() =>
+                                setTaskDepartmentIds((prev) => prev.filter((item) => item !== id))
+                              }
+                            >
+                              {label}
+                              <span className="text-slate-500">×</span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                    <Select
+                      value="__dept_picker__"
+                      onValueChange={(value) => {
+                        if (value === "__dept_picker__") return
+                        setTaskProjectId("NONE")
+                        setTaskDepartmentIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Add department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__dept_picker__" disabled>
+                          Add department
+                        </SelectItem>
+                        {departments
+                          .filter((dept) => !taskDepartmentIds.includes(dept.id))
+                          .map((dept) => (
+                            <SelectItem key={dept.id} value={dept.id}>
+                              {dept.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <Select
-                    value="__dept_picker__"
-                    onValueChange={(value) => {
-                      if (value === "__dept_picker__") return
-                      setTaskProjectId("NONE")
-                      setTaskDepartmentIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Add department" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__dept_picker__" disabled>
-                        Add department
-                      </SelectItem>
-                      {departments
-                        .filter((dept) => !taskDepartmentIds.includes(dept.id))
-                        .map((dept) => (
-                          <SelectItem key={dept.id} value={dept.id}>
-                            {dept.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
                 </div>
-              </div>
               </div>
               <div className="space-y-2">
                 <Label>Project (optional)</Label>
@@ -769,65 +793,65 @@ export default function GaKaNotesPage() {
                   <p className="text-xs text-muted-foreground">Choose a department to filter its projects.</p>
                 ) : null}
               </div>
-                <div className="space-y-2">
-                  <Label>Assign to</Label>
-                  <div className="rounded-md border bg-white p-2">
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {taskAssigneeIds.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">No assignees selected.</span>
-                      ) : (
-                        taskAssigneeIds.map((id) => {
-                          const person = taskAssigneeOptions.find((p) => p.id === id)
-                          const label = person?.full_name || person?.username || person?.email || id
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
-                              onClick={() =>
-                                setTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
-                              }
-                            >
-                              {label}
-                              <span className="text-slate-500">×</span>
-                            </button>
-                          )
-                        })
-                      )}
-                    </div>
-                    <Select
-                      value="__picker__"
-                      onValueChange={(value) => {
-                        if (value === "__picker__") return
-                        setTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                        const person = users.find((u) => u.id === value)
-                        if (person?.department_id) {
-                          setTaskDepartmentIds((prev) =>
-                            prev.includes(person.department_id as string)
-                              ? prev
-                              : [...prev, person.department_id as string]
-                          )
-                        }
-                      }}
-                      disabled={taskAssigneeOptions.length === 0}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Add assignee" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__picker__" disabled>
-                          Add assignee
-                        </SelectItem>
-                        {taskAssigneeOptions
-                          .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
-                          .map((person) => (
-                            <SelectItem key={person.id} value={person.id}>
-                              {person.full_name || person.username || person.email || person.id}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+              <div className="space-y-2">
+                <Label>Assign to</Label>
+                <div className="rounded-md border bg-white p-2">
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {taskAssigneeIds.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">No assignees selected.</span>
+                    ) : (
+                      taskAssigneeIds.map((id) => {
+                        const person = taskAssigneeOptions.find((p) => p.id === id)
+                        const label = person?.full_name || person?.username || person?.email || id
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                            onClick={() =>
+                              setTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
+                            }
+                          >
+                            {label}
+                            <span className="text-slate-500">×</span>
+                          </button>
+                        )
+                      })
+                    )}
                   </div>
+                  <Select
+                    value="__picker__"
+                    onValueChange={(value) => {
+                      if (value === "__picker__") return
+                      setTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                      const person = users.find((u) => u.id === value)
+                      if (person?.department_id) {
+                        setTaskDepartmentIds((prev) =>
+                          prev.includes(person.department_id as string)
+                            ? prev
+                            : [...prev, person.department_id as string]
+                        )
+                      }
+                    }}
+                    disabled={taskAssigneeOptions.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Add assignee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__picker__" disabled>
+                        Add assignee
+                      </SelectItem>
+                      {taskAssigneeOptions
+                        .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
+                        .map((person) => (
+                          <SelectItem key={person.id} value={person.id}>
+                            {person.full_name || person.username || person.email || person.id}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {taskDepartmentIds.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
