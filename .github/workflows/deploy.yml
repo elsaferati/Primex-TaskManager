@@ -44,8 +44,13 @@ jobs:
         shell: cmd
         run: |
           cd frontend
+          
+          echo Cleaning old Next.js build...
+          IF EXIST .next rmdir /s /q .next
+
           echo Installing Frontend Dependencies...
           npm install
+
           echo Building Frontend...
           npm run build
 
