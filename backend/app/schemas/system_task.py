@@ -33,4 +33,5 @@ class SystemTaskOut(BaseModel):
     alignment_time: time | None = None
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
+    created_by: uuid.UUID | None = None
     created_at: datetime

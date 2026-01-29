@@ -428,7 +428,7 @@ export function SystemTasksView({
   const [editAlignmentManagerIds, setEditAlignmentManagerIds] = React.useState<string[]>([])
   const [editShowWeekendDays, setEditShowWeekendDays] = React.useState(false)
 
-  const canEdit = showSystemActions && user?.role !== "STAFF"
+  const isManagerOrAdmin = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canCreate = showSystemActions
 
   const load = React.useCallback(async () => {
@@ -495,7 +495,7 @@ export function SystemTasksView({
       } else {
         console.error("Failed to load departments", departmentsRes.status)
       }
-      const usersRes = await apiFetch(canEdit ? "/users" : "/users/lookup")
+      const usersRes = await apiFetch(isManagerOrAdmin ? "/users" : "/users/lookup")
       if (usersRes.ok) {
         setUsers((await usersRes.json()) as AssigneeUser[])
       } else {
@@ -504,7 +504,7 @@ export function SystemTasksView({
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, canCreate])
+  }, [apiFetch, isManagerOrAdmin])
 
   React.useEffect(() => {
     void load()
@@ -1015,8 +1015,27 @@ export function SystemTasksView({
     setPriorityFilters([value])
   }
 
+  const canEditTemplate = React.useCallback(
+    (template?: SystemTaskTemplate | null) => {
+      if (!template) return false
+      if (!showSystemActions || !user) return false
+      if (isManagerOrAdmin) return true
+      const creatorId = template.created_by
+      const assigneeIds = new Set<string>()
+      if (template.default_assignee_id) assigneeIds.add(template.default_assignee_id)
+      if (template.assignees && template.assignees.length) {
+        for (const person of template.assignees) {
+          assigneeIds.add(person.id)
+        }
+      }
+      if (creatorId && creatorId === user.id) return true
+      return assigneeIds.has(user.id)
+    },
+    [isManagerOrAdmin, showSystemActions, user]
+  )
+
   const startEdit = (template: SystemTaskTemplate) => {
-    if (!canEdit) return
+    if (!canEditTemplate(template)) return
     setEditTemplate(template)
     setEditOpen(true)
   }
@@ -3160,7 +3179,7 @@ export function SystemTasksView({
                                           : "Mark done"}
                                     </Button>
                                   )}
-                                  {canEdit && (
+                                  {canEditTemplate(template) && (
                                     <Button
                                       variant="ghost"
                                       size="sm"

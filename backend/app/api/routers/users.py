@@ -119,16 +119,11 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current=Depends(get_current_user),
 ) -> UserOut:
-    ensure_manager_or_admin(current)
+    if current.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    if current.role != UserRole.ADMIN:
-        if current.department_id is None or target.department_id != current.department_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if payload.role is not None or payload.department_id is not None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers cannot change role/department")
 
     if payload.email is not None:
         existing_email = (
@@ -177,18 +172,13 @@ async def deactivate_user(
     db: AsyncSession = Depends(get_db),
     current=Depends(get_current_user),
 ) -> UserOut:
-    ensure_manager_or_admin(current)
+    if current.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if target.id == current.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate yourself")
-
-    if current.role != UserRole.ADMIN:
-        if current.department_id is None or target.department_id != current.department_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if target.role != UserRole.STAFF:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Managers can only deactivate staff")
 
     target.is_active = False
     await db.commit()
