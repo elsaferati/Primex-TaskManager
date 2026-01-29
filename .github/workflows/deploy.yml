@@ -34,29 +34,30 @@ jobs:
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install psycopg2-binary pydantic[email]
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
           pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-      # --- FIXED FRONTEND STEP ---
-      - name: Update Frontend
+      - name: Update Frontend (Stable)
         shell: cmd
         run: |
           cd frontend
           
-          echo 1. DELETING old PM2 process to fix path issues...
+          echo 1. Stopping Old Process...
           pm2 delete frontend || ver > nul
 
           echo 2. Installing Dependencies...
-          npm install
+          call npm install
+          if %errorlevel% neq 0 exit /b %errorlevel%
 
           echo 3. Cleaning Old Build...
           IF EXIST .next rmdir /s /q .next
 
           echo 4. Building New Version...
-          npm run build
+          call npm run build
+          if %errorlevel% neq 0 exit /b %errorlevel%
 
-          echo 5. Starting PM2 from the CURRENT (Correct) Folder...
-          pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
+          echo 5. Starting Process (Using CWD Fix)...
+          REM We use %cd% to automatically pass the full path to PM2
+          pm2 start node_modules/next/dist/bin/next --name frontend --cwd "%cd%" -- start
           
           pm2 save
