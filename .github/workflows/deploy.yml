@@ -29,7 +29,6 @@ jobs:
           echo REDIS_URL=redis://localhost:6379/0 >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
 
-      # Backend doesn't lock files as badly as Frontend, so we keep this fast
       - name: Update Backend
         shell: cmd
         run: |
@@ -39,23 +38,25 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
           pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-      # CRITICAL CHANGE HERE: Install deps first (site online), THEN Stop & Build
+      # --- FIXED FRONTEND STEP ---
       - name: Update Frontend
         shell: cmd
         run: |
           cd frontend
           
-          echo Installing Dependencies (Site still ONLINE)...
-          npm install
-
-          echo Stopping Frontend to unlock files (Site briefly OFFLINE)...
+          echo 1. DELETING old PM2 process to fix path issues...
           pm2 delete frontend || ver > nul
 
-          echo Cleaning and Building (Site is building)...
+          echo 2. Installing Dependencies...
+          npm install
+
+          echo 3. Cleaning Old Build...
           IF EXIST .next rmdir /s /q .next
+
+          echo 4. Building New Version...
           npm run build
 
-          echo Starting Frontend (Site back ONLINE)...
+          echo 5. Starting PM2 from the CURRENT (Correct) Folder...
           pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
           
           pm2 save
