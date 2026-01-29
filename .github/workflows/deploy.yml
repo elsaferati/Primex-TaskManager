@@ -13,12 +13,7 @@ jobs:
         with:
           clean: false 
 
-      - name: Kill Processes (Silent)
-        shell: cmd
-        run: |
-          pm2 stop all || ver > nul
-          taskkill /F /IM python.exe /T || ver > nul
-          taskkill /F /IM node.exe /T || ver > nul
+      # REMOVED "Kill Processes" step to prevent downtime during build
 
       - name: Create Env Files
         shell: cmd
@@ -33,23 +28,31 @@ jobs:
         shell: cmd
         run: |
           cd backend
+          echo Installing Backend Dependencies...
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install psycopg2-binary pydantic[email]
+          echo Running Migrations...
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
 
       - name: Update Frontend
         shell: cmd
         run: |
           cd frontend
+          echo Installing Frontend Dependencies...
           npm install
+          echo Building Frontend...
           npm run build
 
-      - name: Start Services with PM2
+      - name: Restart Services
         shell: cmd
         run: |
-          pm2 delete all || ver > nul
+          echo Restarting PM2 Services...
           cd backend
-          pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          REM Try to RESTART backend. If it does not exist yet, START it.
+          pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          
           cd ../frontend
-          pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
+          REM Try to RESTART frontend. If it does not exist yet, START it.
+          pm2 restart frontend || pm2 start "node" --name frontend -- node_modules/next/dist/bin/next start -- -p 3000 -H 0.0.0.0
+          
           pm2 save
