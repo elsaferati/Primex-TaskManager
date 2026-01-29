@@ -3286,26 +3286,26 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen">
       <div className="sticky top-0 z-[100] print:hidden ">
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
+        <div className="relative overflow-hidden rounded-[1.5rem] sm:rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-4 sm:p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
           <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
           <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
-          <div className="relative space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="relative space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
                   Department
                 </div>
-                <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
                   {departmentName}
                 </div>
                 <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950 w-full sm:w-auto justify-center">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
                     viewMode === "department"
                       ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                       : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
@@ -3317,7 +3317,7 @@ export default function DepartmentKanban() {
                   type="button"
                   onClick={() => setViewMode("mine")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
                     viewMode === "mine"
                       ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                       : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
@@ -3328,8 +3328,8 @@ export default function DepartmentKanban() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
-              <div className="flex flex-wrap gap-2">
+            <div className="rounded-xl sm:rounded-2xl border border-stone-200/70 bg-white p-0.5 sm:p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div className="flex flex-nowrap sm:flex-wrap gap-1 sm:gap-1.5 md:gap-2 overflow-x-auto pb-1 sm:pb-0 -mx-0.5 sm:mx-0 px-0.5 sm:px-0">
                 {TABS.map((tab) => {
                   const isActive = tab.id === activeTab
                   const badgeTone =
@@ -3347,14 +3347,14 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
                       className={[
-                        "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
+                        "relative flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold transition-colors",
                         isActive
                           ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                           : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
                       ].join(" ")}
                     >
-                      <span className="uppercase tracking-wide">{tab.label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                      <span className="uppercase tracking-wide whitespace-nowrap">{tab.label}</span>
+                      <span className={`rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs ${badgeClass}`}>{counts[tab.id]}</span>
                     </button>
                   )
                 })}
@@ -3363,15 +3363,15 @@ export default function DepartmentKanban() {
           </div>
         </div>
       </div>
-      <div className="px-6 pb-6 print:hidden">
+      <div className="px-4 sm:px-6 pb-4 sm:pb-6 print:hidden">
         {activeTab === "projects" ? (
-            <div className="mb-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xl font-semibold text-slate-800">Active Projects</div>
+            <div className="mb-4 sm:mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl px-6">
+                    <Button className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl px-4 sm:px-6 w-full sm:w-auto">
                       + New Project
                     </Button>
                   </DialogTrigger>
@@ -3493,8 +3493,8 @@ export default function DepartmentKanban() {
           ) : null}
 
         {activeTab === "projects" ? (
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const membersForProject = projectMembers[project.id] || []
@@ -3505,20 +3505,20 @@ export default function DepartmentKanban() {
                 const phase = project.current_phase || "MEETINGS"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
-                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 sm:p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
                           <div className="h-3 w-3 rounded-full bg-slate-400 mt-2 flex-shrink-0"></div>
-                          <div>
-                            <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
-                            <div className="mt-1 text-sm text-slate-600">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-base sm:text-lg font-semibold text-slate-800 truncate">{project.title || project.name}</div>
+                            <div className="mt-1 text-xs sm:text-sm text-slate-600 line-clamp-2">
                               {project.description
                                 ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
                                 : "-"}
                             </div>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
                           {canDeleteProjects ? (
                             <Button
                               variant="outline"
@@ -3529,30 +3529,32 @@ export default function DepartmentKanban() {
                                 event.stopPropagation()
                                 void deleteProject(project.id)
                               }}
-                              className="h-7 rounded-full border-red-200 px-3 text-xs text-red-600 hover:bg-red-50"
+                              className="h-7 rounded-full border-red-200 px-2 sm:px-3 text-xs text-red-600 hover:bg-red-50"
                             >
                               {deletingProjectId === project.id ? "Deleting..." : "Delete"}
                             </Button>
                           ) : null}
-                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs">
+                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs whitespace-nowrap">
                             {PHASE_LABELS[phase] || "Meetings"}
                           </Badge>
                         </div>
                       </div>
-                      <div className="mt-4 text-xs text-slate-600">
-                        {PHASES.map((p, idx) => {
-                          const isCurrent = p === phase
-                          return (
-                            <span key={p}>
-                              <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
-                                {PHASE_LABELS[p]}
+                      <div className="mt-3 sm:mt-4 text-xs text-slate-600 overflow-x-auto">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          {PHASES.map((p, idx) => {
+                            const isCurrent = p === phase
+                            return (
+                              <span key={p}>
+                                <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
+                                  {PHASE_LABELS[p]}
+                                </span>
+                                {idx < PHASES.length - 1 ? " > " : ""}
                               </span>
-                              {idx < PHASES.length - 1 ? " > " : ""}
-                            </span>
-                          )
-                        })}
+                            )
+                          })}
+                        </div>
                       </div>
-                      <div className="mt-4 flex items-center justify-between">
+                      <div className="mt-3 sm:mt-4 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           {visibleMembers.length ? (
                             <div className="flex -space-x-2">
@@ -3560,25 +3562,25 @@ export default function DepartmentKanban() {
                                 <div
                                   key={member.id}
                                   title={member.full_name || member.username || "-"}
-                                  className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] sm:text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
                                 >
                                   {initials(member.full_name || member.username || "-")}
                                 </div>
                               ))}
                               {remainingMembers > 0 ? (
-                                <div className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                                <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
                                   +{remainingMembers}
                                 </div>
                               ) : null}
                             </div>
                           ) : (
-                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
+                            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
                               -
                             </div>
                           )}
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline">
+                          <span className="text-xs sm:text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline whitespace-nowrap">
                             View details -&gt;
                           </span>
                         </div>
@@ -3592,26 +3594,26 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "all" ? (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-2xl font-bold tracking-tight text-slate-800">
+                <div className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800">
                   {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
                 </div>
-                <div className="text-sm text-slate-600 mt-1">
+                <div className="text-xs sm:text-sm text-slate-600 mt-1">
                   {viewMode === "department"
                     ? "All of today's tasks for the department team."
                     : "All of today's tasks, organized in one place."}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold text-slate-600 shadow-sm">
                   {formatToday()}
                 </div>
                 {viewMode === "department" ? (
                   <>
                     <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                      <SelectTrigger className="h-8 sm:h-9 w-full sm:w-48 border-slate-200 focus:border-slate-400 rounded-xl text-xs sm:text-sm">
                         <SelectValue placeholder="All users" />
                       </SelectTrigger>
                       <SelectContent>
@@ -3625,15 +3627,15 @@ export default function DepartmentKanban() {
                     </Select>
                     <Button
                       variant="outline"
-                      className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                      className="h-8 sm:h-9 rounded-xl border-slate-300 bg-white px-2 sm:px-3 text-xs sm:text-sm text-slate-900 shadow-sm hover:bg-slate-50 flex-1 sm:flex-none"
                       onClick={handlePrint}
                     >
-                      <Printer className="mr-2 h-4 w-4" />
+                      <Printer className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                       Print
                     </Button>
                     <Button
                       variant="outline"
-                      className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                      className="h-8 sm:h-9 rounded-xl border-slate-300 bg-white px-2 sm:px-3 text-xs sm:text-sm text-slate-900 shadow-sm hover:bg-slate-50 flex-1 sm:flex-none"
                       onClick={exportAllTodayReport}
                       disabled={exportingDailyReport}
                     >
@@ -4152,18 +4154,18 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "system" ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-xl font-semibold text-slate-900">System Tasks</div>
-                <div className="text-sm text-muted-foreground">
+                <div className="text-lg sm:text-xl font-semibold text-slate-900">System Tasks</div>
+                <div className="text-xs sm:text-sm text-muted-foreground">
                   Department tasks organized by frequency and date.
                 </div>
               </div>
               {canManage ? (
                 <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline">+ Add Task</Button>
+                    <Button variant="outline" className="w-full sm:w-auto">+ Add Task</Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
@@ -4466,18 +4468,18 @@ export default function DepartmentKanban() {
         </Dialog>
 
         {activeTab === "no-project" ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
-                <div className="text-sm text-slate-600">
+                <div className="text-lg sm:text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                <div className="text-xs sm:text-sm text-slate-600">
                   Use these buckets to track non-project tasks and special cases.
                 </div>
               </div>
               {!isReadOnly ? (
                 <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                    <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-4 sm:px-6 w-full sm:w-auto">
                       + Add Task
                     </Button>
                   </DialogTrigger>
@@ -4815,13 +4817,13 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "ga-ka" ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-lg font-semibold">GA/KA Notes</div>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-base sm:text-lg font-semibold">GA/KA Notes</div>
               {!isReadOnly ? (
                 <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline">+ Add Note</Button>
+                    <Button variant="outline" className="w-full sm:w-auto">+ Add Note</Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
@@ -5158,9 +5160,9 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "meetings" ? (
-          <div className="space-y-4">
-            <div className="text-xl font-semibold">Meetings</div>
-            <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="text-lg sm:text-xl font-semibold">Meetings</div>
+            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">External Meetings</div>
                 {!isReadOnly ? (

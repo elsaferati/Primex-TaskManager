@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { 
@@ -19,11 +20,13 @@ import {
   StickyNote,
   Briefcase,
   DollarSign,
+  X,
   type LucideIcon
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
+import { useSidebar } from "./sidebar-context"
 
 // 1. Add an 'icon' property to your type definition
 type NavItem = { 
@@ -122,18 +125,47 @@ const items: NavItem[] = [
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const { isOpen, setIsOpen } = useSidebar()
   const projectRoute =
     pathname.startsWith("/projects/pcm") ? "pcm" : pathname.startsWith("/projects/design") ? "design" : pathname.startsWith("/projects/dev") ? "dev" : pathname.startsWith("/projects/") ? "dev" : null
 
+  // Close sidebar when route changes on mobile
+  React.useEffect(() => {
+    setIsOpen(false)
+  }, [pathname, setIsOpen])
+
   return (
-    <aside className="w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen sticky top-0 print:hidden">
-      {/* Header / Logo Area */}
-      <div className="flex h-16 items-center border-b px-6">
-        <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg tracking-tight">
-          <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
-          <span>PrimeFlow</span>
-        </Link>
-      </div>
+    <>
+      {/* Mobile backdrop */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+      
+      <aside
+        className={cn(
+          "fixed md:sticky top-0 left-0 z-50 w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen print:hidden transition-transform duration-300 ease-in-out",
+          "md:relative md:translate-x-0",
+          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}
+      >
+        {/* Header / Logo Area */}
+        <div className="flex h-16 items-center justify-between border-b px-6">
+          <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg tracking-tight">
+            <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
+            <span>PrimeFlow</span>
+          </Link>
+          {/* Close button for mobile */}
+          <button
+            onClick={() => setIsOpen(false)}
+            className="md:hidden p-2 rounded-md hover:bg-sidebar-accent transition-colors"
+            aria-label="Close sidebar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
       {/* Navigation Links */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
@@ -150,6 +182,7 @@ export function Sidebar({ role }: { role: UserRole }) {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setIsOpen(false)}
                 className={cn(
                   "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -170,6 +203,7 @@ export function Sidebar({ role }: { role: UserRole }) {
 
       {/* Optional: User Profile / Footer area could go here */}
     </aside>
+    </>
   )
 }
 
