@@ -2387,26 +2387,47 @@ async def export_ga_notes_xlsx(
     ws = wb.active
     ws.title = "GA-KA Notes"
     
-    # Title row
-    title_row = 1
-    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
-    title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES REPORT")
-    title_cell.font = Font(bold=True, size=16)
-    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Define border styles
+    thin = Side(style="thin", color="475569")
+    thick = Side(style="thick", color="1e293b")
     
-    # Header row
+    # Title row (row 1)
+    title_row = 1
+    last_col = len(headers)
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
+    title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+    
+    # Empty row 2 for spacing
+    # Header row (row 3, but we'll use row 3 as header_row variable)
     header_row = 3
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell = ws.cell(row=header_row, column=col_idx, value=header.upper())
         cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        # Thick outside borders for header
+        left_border = thick if col_idx == 1 else thin
+        right_border = thick if col_idx == last_col else thin
+        top_border = thick
+        bottom_border = thick
+        cell.border = Border(left=left_border, right=right_border, top=top_border, bottom=bottom_border)
     
-    # Data rows
+    # Data rows (starting from row 4)
+    last_row = header_row + len(rows)
     for row_idx, row_data in enumerate(rows, start=header_row + 1):
         for col_idx, value in enumerate(row_data, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+            # Bold for NR column
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+            # Thick outside borders
+            left_border = thick if col_idx == 1 else thin
+            right_border = thick if col_idx == last_col else thin
+            top_border = thin
+            bottom_border = thick if row_idx == last_row else thin
+            cell.border = Border(left=left_border, right=right_border, top=top_border, bottom=bottom_border)
     
     # Column widths
     ws.column_dimensions["A"].width = 5  # NR
@@ -2418,15 +2439,54 @@ async def export_ga_notes_xlsx(
     ws.column_dimensions["G"].width = 15  # KRIJO DETYRE
     ws.column_dimensions["H"].width = 15  # MBYLL SHENIM
     
+    # Freeze panes: freeze column A (NR) and header row
+    ws.freeze_panes = "B4"
+    
+    # Auto filter for all columns
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    
+    # Page setup and margins
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    
+    # Headers and footers
+    now = datetime.now(timezone.utc)
+    date_str = now.strftime("%d.%m.%Y")
+    time_str = now.strftime("%I:%M %p")
+    ws.oddHeader.right.text = f"{date_str}, {time_str}"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "") or "USER"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials}"
+    
+    # Apply to even and first pages as well
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+    
+    # Print title rows (repeat header on each page)
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    
     # Save to bytes
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
     
-    # Generate filename
+    # Generate filename: TITLE DD_MM_YY_EF (USER INITIALS) in uppercase
     today = datetime.now(timezone.utc).date()
-    user_initials = _initials(user.full_name or user.username or "") or "USER"
-    filename = f"GA_KA_NOTES_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({user_initials}).xlsx"
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename = f"GA/KA NOTES {filename_date}_EF ({user_initials}).xlsx"
     
     return StreamingResponse(
         bio,

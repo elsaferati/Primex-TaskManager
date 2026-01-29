@@ -585,6 +585,22 @@ export default function GaKaNotesPage() {
                 const table = tableContainer.querySelector('table')
                 if (!table) return
                 
+                // Get user initials
+                const userInitials = user ? getInitials(user.full_name || user.username || "") : "USER"
+                
+                // Get current date and time
+                const now = new Date()
+                const day = now.getDate().toString().padStart(2, "0")
+                const month = (now.getMonth() + 1).toString().padStart(2, "0")
+                const year = now.getFullYear()
+                let hours = now.getHours()
+                const minutes = now.getMinutes().toString().padStart(2, "0")
+                const ampm = hours >= 12 ? "PM" : "AM"
+                hours = hours % 12
+                hours = hours ? hours : 12
+                const hoursStr = hours.toString().padStart(2, "0")
+                const dateTimeStr = `${day}.${month}.${year}, ${hoursStr}:${minutes} ${ampm}`
+                
                 // Clone the table and clean up React-specific attributes
                 const clonedTable = table.cloneNode(true) as HTMLElement
                 const allElements = clonedTable.querySelectorAll('*')
@@ -610,6 +626,35 @@ export default function GaKaNotesPage() {
                   el.parentNode?.replaceChild(span, el)
                 })
                 
+                // Make all header text uppercase
+                clonedTable.querySelectorAll('thead th').forEach((th) => {
+                  th.textContent = th.textContent?.toUpperCase() || ''
+                })
+                
+                // Ensure NR column is bold and wraps
+                clonedTable.querySelectorAll('tbody td:first-child').forEach((td) => {
+                  td.style.fontWeight = 'bold'
+                  td.style.whiteSpace = 'normal'
+                })
+                
+                // Remove fixed widths from table and cells to allow auto-sizing, except SHENIMI column
+                clonedTable.style.width = 'auto'
+                clonedTable.style.minWidth = 'auto'
+                clonedTable.querySelectorAll('th, td').forEach((cell, index) => {
+                  // Keep SHENIMI column (2nd column) with fixed width
+                  const isShenimiColumn = cell.cellIndex === 1 // 0-indexed, so 1 is 2nd column
+                  if (!isShenimiColumn) {
+                    cell.style.width = 'auto'
+                    cell.style.minWidth = 'auto'
+                  } else {
+                    cell.style.width = '600px'
+                    cell.style.maxWidth = '600px'
+                    cell.style.whiteSpace = 'normal'
+                    cell.style.wordWrap = 'break-word'
+                  }
+                })
+                clonedTable.querySelectorAll('colgroup').forEach((col) => col.remove())
+                
                 printWindow.document.write(`
                   <!DOCTYPE html>
                   <html>
@@ -617,36 +662,134 @@ export default function GaKaNotesPage() {
                       <title>GA/KA Notes</title>
                       <style>
                         * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; font-size: 12px; }
-                        table { border-collapse: collapse; width: 100%; min-width: 1050px; border: 2px solid #1e293b; }
-                        th, td { border: 1px solid #475569; padding: 8px; text-align: left; vertical-align: bottom; }
-                        th { background-color: white; font-weight: bold; border-bottom: 1px solid #334155; }
-                        td:first-child { border-left: 1px solid #475569; font-weight: bold; }
-                        td:last-child { border-right: 1px solid #475569; }
-                        /* Thick outside border for table - top */
-                        thead tr:first-child th { border-top: 2px solid #1e293b; }
-                        /* Thick outside border for table - left */
-                        thead tr:first-child th:first-child,
-                        tbody tr td:first-child { border-left: 2px solid #1e293b; }
-                        /* Thick outside border for table - right */
-                        thead tr:first-child th:last-child,
-                        tbody tr td:last-child { border-right: 2px solid #1e293b; }
+                        @page {
+                          margin-top: 0.36in;
+                          margin-bottom: 0.51in;
+                          margin-left: 0.1in;
+                          margin-right: 0.1in;
+                          size: landscape;
+                        }
+                        body { 
+                          margin: 0; 
+                          padding: 0;
+                          font-family: Arial, sans-serif; 
+                          font-size: 12px;
+                        }
+                        .title {
+                          font-size: 16px;
+                          font-weight: bold;
+                          margin-top: 0.3in;
+                          margin-bottom: 0.2in;
+                          text-align: center;
+                        }
+                        table { 
+                          border-collapse: collapse; 
+                          width: auto;
+                          margin: 0 auto;
+                          margin-top: 0.1in;
+                        }
+                        thead {
+                          display: table-header-group;
+                        }
+                        tbody {
+                          display: table-row-group;
+                        }
+                        th, td { 
+                          border: 1px solid #475569; 
+                          padding: 6px 8px; 
+                          text-align: left; 
+                          vertical-align: bottom;
+                          white-space: nowrap;
+                        }
+                        /* SHENIMI column (2nd column) - set width and wrap */
+                        th:nth-child(2), td:nth-child(2) {
+                          width: 350px;
+                          max-width: 350px;
+                          white-space: normal;
+                          word-wrap: break-word;
+                        }
+                        th { 
+                          background-color: #D9D9D9; 
+                          font-weight: bold; 
+                          text-transform: uppercase;
+                          /* Thick outside borders for header */
+                          border-top: 2px solid #1e293b;
+                          border-bottom: 2px solid #1e293b;
+                        }
+                        thead tr:first-child th:first-child {
+                          border-left: 2px solid #1e293b;
+                        }
+                        thead tr:first-child th:last-child {
+                          border-right: 2px solid #1e293b;
+                        }
+                        td:first-child { 
+                          border-left: 2px solid #1e293b; 
+                          font-weight: bold;
+                          white-space: normal;
+                        }
+                        td:last-child { 
+                          border-right: 2px solid #1e293b; 
+                        }
                         /* Thick outside border for table - bottom */
-                        tbody tr:last-child td { border-bottom: 2px solid #1e293b; }
-                        /* Thick border for header row - bottom */
-                        thead tr:first-child { border-bottom: 4px solid #1e293b; }
-                        thead tr:first-child th { border-bottom: 4px solid #1e293b !important; }
-                        @media print {
-                          body { margin: 0; padding: 10px; }
-                          @page { margin: 1cm; size: landscape; }
-                          table { font-size: 10px; }
-                          th, td { padding: 4px; }
+                        tbody tr:last-child td { 
+                          border-bottom: 2px solid #1e293b; 
+                        }
+                        .footer {
+                          position: fixed;
+                          bottom: 0;
+                          width: 100%;
+                          display: flex;
+                          justify-content: space-between;
+                          padding-bottom: 0.2in;
+                          font-size: 10px;
+                        }
+                        .page-number {
+                          position: absolute;
+                          left: 50%;
+                          transform: translateX(-50%);
+                        }
+                        .user-initials {
+                          position: absolute;
+                          right: 0.1in;
+                        }
+                          @media print {
+                          .footer {
+                            position: running(footer);
+                          }
+                          @page {
+                            @top-right {
+                              content: "${dateTimeStr}";
+                              font-size: 10px;
+                            }
+                            @bottom-center {
+                              content: "Page " counter(page) " / " counter(pages);
+                              font-size: 10px;
+                            }
+                            @bottom-right {
+                              content: "${userInitials}";
+                              font-size: 10px;
+                            }
+                          }
+                          body { 
+                            margin: 0; 
+                            padding: 0;
+                          }
+                          table { 
+                            font-size: 10px;
+                            width: auto;
+                          }
+                          th, td { 
+                            padding: 4px 6px;
+                          }
                         }
                       </style>
                     </head>
                     <body>
-                      <h1 style="margin-bottom: 15px; font-size: 18px;">GA/KA Notes</h1>
+                      <div class="title">GA/KA NOTES</div>
                       ${clonedTable.outerHTML}
+                      <div class="footer">
+                        <div class="page-number"></div>
+                      </div>
                     </body>
                   </html>
                 `)
@@ -679,7 +822,7 @@ export default function GaKaNotesPage() {
                 <table className="w-full caption-bottom text-sm min-w-[1050px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
-                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NR</th>
+                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>Nr</th>
                       <th className="w-[calc(100vw-80px)] md:w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
