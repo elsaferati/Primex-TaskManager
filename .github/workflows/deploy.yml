@@ -37,27 +37,29 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
           pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-      - name: Update Frontend (Stable)
-        shell: cmd
+      # --- SWITCHED TO POWERSHELL FOR RELIABILITY ---
+      - name: Update Frontend (PowerShell)
+        shell: powershell
         run: |
-          cd frontend
+          Set-Location frontend
           
-          echo 1. Stopping Old Process...
-          pm2 delete frontend || ver > nul
+          Write-Host "1. Stopping Frontend..."
+          pm2 delete frontend 2>$null
+          
+          Write-Host "2. Installing Dependencies..."
+          npm install
+          if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
 
-          echo 2. Installing Dependencies...
-          call npm install
-          if %errorlevel% neq 0 exit /b %errorlevel%
+          Write-Host "3. Cleaning Old Build..."
+          if (Test-Path .next) { Remove-Item .next -Recurse -Force }
 
-          echo 3. Cleaning Old Build...
-          IF EXIST .next rmdir /s /q .next
+          Write-Host "4. Building New Version (Please Wait)..."
+          npm run build
+          if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
 
-          echo 4. Building New Version...
-          call npm run build
-          if %errorlevel% neq 0 exit /b %errorlevel%
-
-          echo 5. Starting Process (Using CWD Fix)...
-          REM We use %cd% to automatically pass the full path to PM2
-          pm2 start node_modules/next/dist/bin/next --name frontend --cwd "%cd%" -- start
+          Write-Host "5. Starting Frontend..."
+          # Get current full path for PM2
+          $CurrentPath = (Get-Location).Path
+          pm2 start node_modules/next/dist/bin/next --name frontend --cwd $CurrentPath -- start
           
           pm2 save
