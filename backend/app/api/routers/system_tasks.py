@@ -214,6 +214,7 @@ def _task_row_to_out(
         alignment_time=getattr(template, "alignment_time", None),
         alignment_roles=alignment_roles,
         alignment_user_ids=alignment_user_ids,
+        created_by=task.created_by,
         created_at=task.created_at,
     )
 
@@ -546,12 +547,37 @@ async def update_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
-    ensure_manager_or_admin(user)
     template = (
         await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
     ).scalar_one_or_none()
     if template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+
+    # Permission check: allow managers/admins, template creator, or assigned users to edit.
+    task = (
+        await db.execute(
+            select(Task)
+            .where(Task.system_template_origin_id == template.id)
+            .order_by(Task.created_at.desc())
+        )
+    ).scalars().first()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+
+    explicit_assignees = (
+        await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
+    ).scalars().all()
+    assignee_ids = {uid for uid in explicit_assignees}
+    if task.assigned_to:
+        assignee_ids.add(task.assigned_to)
+
+    has_edit_rights = (
+        user.role in (UserRole.ADMIN, UserRole.MANAGER)
+        or (task.created_by is not None and task.created_by == user.id)
+        or (user.id in assignee_ids)
+    )
+    if not has_edit_rights:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     fields_set = payload.__fields_set__
     scope_set = "scope" in fields_set

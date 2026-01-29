@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update, cast, String as SQLString, or_, ins
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_project_creator
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
@@ -342,7 +342,8 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> ProjectOut:
-    ensure_manager_or_admin(user)
+    # Allow Admin, Manager, and Staff to create projects
+    ensure_project_creator(user)
     ensure_department_access(user, payload.department_id)
 
     if payload.manager_id is not None:
@@ -463,7 +464,7 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> ProjectOut:
-    ensure_manager_or_admin(user)
+    ensure_project_creator(user)
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -544,7 +545,8 @@ async def advance_project_phase(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> ProjectOut:
-    ensure_manager_or_admin(user)
+    # Allow any role to advance/close phases
+    ensure_project_creator(user)
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

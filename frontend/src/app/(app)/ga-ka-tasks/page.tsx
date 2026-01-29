@@ -365,12 +365,6 @@ export default function GaKaTasksPage() {
   const printInitials = initials(user?.full_name || user?.username || "")
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
-  const printContainerRef = React.useRef<HTMLDivElement | null>(null)
-  const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
-  const [printPageMarkers, setPrintPageMarkers] = React.useState<
-    Array<{ page: number; total: number; top: number }>
-  >([])
-  const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
@@ -383,6 +377,11 @@ export default function GaKaTasksPage() {
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
 
   const isAdmin = user?.role === "ADMIN"
+  const ganeUser = React.useMemo(
+    () => users.find((person) => person.username?.toLowerCase() === "gane.arifaj") ?? null,
+    [users]
+  )
+  const ganeUserId = ganeUser?.id ?? null
 
   const load = React.useCallback(async () => {
     setLoadingTasks(true)
@@ -417,9 +416,10 @@ export default function GaKaTasksPage() {
     if (!user?.id) return
     setLoadingDailyReport(true)
     try {
+      const targetUserId = ganeUserId ?? user.id
       const params: Record<string, string> = {
         day: todayIso,
-        user_id: user.id,
+        user_id: targetUserId,
       }
       if (adminDepartmentId) {
         params.department_id = adminDepartmentId
@@ -437,7 +437,7 @@ export default function GaKaTasksPage() {
     } finally {
       setLoadingDailyReport(false)
     }
-  }, [adminDepartmentId, apiFetch, todayIso, user?.id])
+  }, [adminDepartmentId, apiFetch, ganeUserId, todayIso, user?.id])
 
   React.useEffect(() => {
     void load()
@@ -448,56 +448,14 @@ export default function GaKaTasksPage() {
     void loadDailyReport()
   }, [loadDailyReport, showDailyUserReport])
 
-  React.useEffect(() => {
-    const handleBeforePrint = () => {
-      const container = printContainerRef.current
-      if (!container) return
-      const dpi = 96
-      const measuredHeight = printMeasureRef.current?.offsetHeight
-      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
-      const footerOffsetPx = 0.2 * dpi
-      const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
-      const markers = Array.from({ length: totalPages }, (_, index) => ({
-        page: index + 1,
-        total: totalPages,
-        top: pageHeightPx * (index + 1) - footerOffsetPx,
-      }))
-      setPrintPageMarkers(markers)
-      setPrintPageMinHeight(totalPages * pageHeightPx)
-    }
-    const handleAfterPrint = () => {
-      setPrintPageMarkers([])
-      setPrintPageMinHeight(null)
-    }
-    window.addEventListener("beforeprint", handleBeforePrint)
-    window.addEventListener("afterprint", handleAfterPrint)
-    const mediaQuery = window.matchMedia("print")
-    const handleMediaChange = (event: MediaQueryListEvent) => {
-      if (event.matches) {
-        handleBeforePrint()
-      } else {
-        handleAfterPrint()
-      }
-    }
-    if ("addEventListener" in mediaQuery) {
-      mediaQuery.addEventListener("change", handleMediaChange)
-    } else {
-      mediaQuery.addListener(handleMediaChange)
-    }
-    return () => {
-      window.removeEventListener("beforeprint", handleBeforePrint)
-      window.removeEventListener("afterprint", handleAfterPrint)
-      if ("removeEventListener" in mediaQuery) {
-        mediaQuery.removeEventListener("change", handleMediaChange)
-      } else {
-        mediaQuery.removeListener(handleMediaChange)
-      }
-    }
-  }, [])
 
   const submitTask = async () => {
     if (!title.trim()) {
       toast.error("Task title is required")
+      return
+    }
+    if (!ganeUserId) {
+      toast.error("Gane Arifaj user not found. Cannot assign task.")
       return
     }
     setCreating(true)
@@ -539,6 +497,7 @@ export default function GaKaTasksPage() {
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         due_date: dueDateValue,
         ga_note_origin_id: createdNote.id,
+        assigned_to: ganeUserId,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -579,17 +538,20 @@ export default function GaKaTasksPage() {
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
-  const gaTasks = React.useMemo(
-    () =>
-      tasks.filter((task) => {
-        const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-        if (!task.ga_note_origin_id || isSystem) return false
-        const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
-        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
-        return createdAt >= cutoff
-      }),
-    [tasks]
-  )
+  const gaTasks = React.useMemo(() => {
+    return tasks.filter((task) => {
+      if (!ganeUserId) return false
+      const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
+      if (!task.ga_note_origin_id || isSystem) return false
+      const isAssigned =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      if (!isAssigned) return false
+      const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+      return createdAt >= cutoff
+    })
+  }, [ganeUserId, tasks])
 
   const filteredTasks = React.useMemo(() => {
     let filtered = gaTasks
@@ -641,6 +603,7 @@ export default function GaKaTasksPage() {
       typeLabel: string
       subtype: string
       period: string
+      department: string
       title: string
       description: string
       status: string
@@ -648,6 +611,7 @@ export default function GaKaTasksPage() {
       kohaBz: string
       tyo: string
       comment?: string | null
+      userInitials?: string
       taskId?: string
       systemTemplateId?: string
       systemOccurrenceDate?: string
@@ -660,11 +624,29 @@ export default function GaKaTasksPage() {
     const tasksOverdue = dailyReport.tasks_overdue || []
     const seenTaskIds = new Set<string>()
 
+    const resolveDepartmentLabel = (
+      departmentId?: string | null,
+      scope?: SystemTaskScope | null,
+      isGaNote?: boolean
+    ) => {
+      if (scope === "GA") return "GA"
+      if (scope === "ALL") return "ALL"
+      if (departmentId) {
+        const dept = departments.find((d) => d.id === departmentId)
+        return dept?.code || dept?.name || "-"
+      }
+      if (isGaNote) return "GA"
+      return "-"
+    }
+
     const pushTaskRow = (item: DailyReportResponse["tasks_today"][number]) => {
       const task = item.task
-      // Only show admin tasks: tasks without department_id OR tasks with ga_note_origin_id
-      // Exclude tasks that have a department_id but no ga_note_origin_id (these are regular department tasks)
-      if (task.department_id && !task.ga_note_origin_id) return
+      if (ganeUserId) {
+        const isAssigned =
+          task.assigned_to === ganeUserId ||
+          task.assignees?.some((assignee) => assignee.id === ganeUserId)
+        if (!isAssigned) return
+      }
       if (seenTaskIds.has(task.id)) return
       seenTaskIds.add(task.id)
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
@@ -673,6 +655,7 @@ export default function GaKaTasksPage() {
         typeLabel: isProject ? "PRJK" : "FT",
         subtype: isProject ? "-" : fastReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
         description: task.description || "-",
         status: taskStatusLabel(task),
@@ -680,12 +663,45 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
         comment: taskCommentMap.get(task.id) ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         taskId: task.id,
       })
     }
 
     tasksToday.forEach(pushTaskRow)
     tasksOverdue.forEach(pushTaskRow)
+
+    for (const task of tasks) {
+      if (!ganeUserId) continue
+      const isAssigned =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      if (!isAssigned) continue
+      if (task.is_active === false) continue
+      if (task.system_template_origin_id) continue
+      if (!task.due_date) continue
+      const due = toDate(task.due_date)
+      if (!due || !isSameDay(due, todayDate)) continue
+      if (seenTaskIds.has(task.id)) continue
+      seenTaskIds.add(task.id)
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const isProject = Boolean(task.project_id)
+      rows.push({
+        typeLabel: isProject ? "PRJK" : "FT",
+        subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: taskStatusLabel(task),
+        bz: "-",
+        kohaBz: "-",
+        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        comment: taskCommentMap.get(task.id) ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        taskId: task.id,
+      })
+    }
 
     const systemToday = dailyReport.system_today || []
     const systemOverdue = dailyReport.system_overdue || []
@@ -695,10 +711,25 @@ export default function GaKaTasksPage() {
       if (seenSystemKeys.has(key)) return
       seenSystemKeys.add(key)
       const baseDate = toDate(occ.occurrence_date)
+      const systemSubtype =
+        occ.frequency === "DAILY"
+          ? "D"
+          : occ.frequency === "WEEKLY"
+            ? "W"
+            : occ.frequency === "MONTHLY"
+              ? "M"
+              : occ.frequency === "YEARLY"
+                ? "Y"
+                : occ.frequency === "3_MONTHS"
+                  ? "3M"
+                  : occ.frequency === "6_MONTHS"
+                    ? "6M"
+                    : "SYS"
       rows.push({
         typeLabel: "SYS",
-        subtype: "SYS",
+        subtype: systemSubtype,
         period: "AM",
+        department: resolveDepartmentLabel(occ.department_id, occ.scope || null, false),
         title: occ.title || "-",
         description: "-",
         status: formatSystemOccurrenceStatus(occ.status),
@@ -706,6 +737,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
         comment: occ.comment ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         systemTemplateId: occ.template_id,
         systemOccurrenceDate: occ.occurrence_date,
         systemStatus: occ.status,
@@ -715,7 +747,7 @@ export default function GaKaTasksPage() {
     systemOverdue.forEach(pushSystemRow)
 
     return rows
-  }, [dailyReport, taskCommentMap, todayDate])
+  }, [dailyReport, departments, ganeUser, ganeUserId, taskCommentMap, tasks, todayDate])
 
   const startEditTask = (task: Task) => {
     setEditingTaskId(task.id)
@@ -919,11 +951,15 @@ export default function GaKaTasksPage() {
 
   const exportDailyReport = async () => {
     if (!user?.id) return
+    if (!ganeUserId) {
+      toast.error("Gane Arifaj user not found. Cannot export.")
+      return
+    }
     setExportingDailyReport(true)
     try {
       const qs = new URLSearchParams({
         day: todayIso,
-        user_id: user.id,
+        user_id: ganeUserId,
       })
       const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
       if (!res.ok) {
@@ -1096,13 +1132,14 @@ export default function GaKaTasksPage() {
                     <col className="w-[44px]" />
                     <col className="w-[56px]" />
                     <col className="w-[56px]" />
+                    <col className="w-[56px]" />
                     <col className="w-[150px]" />
-                    <col className="w-[110px]" />
                     <col className="w-[60px]" />
                     <col className="w-[40px]" />
                     <col className="w-[52px]" />
                     <col className="w-[48px]" />
                     <col className="w-[140px]" />
+                    <col className="w-[70px]" />
                   </colgroup>
                   <thead className="sticky top-0 z-10 bg-slate-50">
                     <tr className="bg-slate-50">
@@ -1117,8 +1154,8 @@ export default function GaKaTasksPage() {
                         <span className="block">AM/</span>
                         <span className="block">PM</span>
                       </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">DEP</th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
@@ -1128,6 +1165,7 @@ export default function GaKaTasksPage() {
                         T/Y/O
                       </th>
                       <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">User</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1153,8 +1191,8 @@ export default function GaKaTasksPage() {
                             <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
                               {row.period}
                             </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -1219,12 +1257,15 @@ export default function GaKaTasksPage() {
                                 </button>
                               </div>
                             </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              {row.userInitials || "-"}
+                            </td>
                           </tr>
                         )
                       })
                     ) : (
                       <tr>
-                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
+                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
                           No data available.
                         </td>
                       </tr>
@@ -1482,38 +1523,51 @@ export default function GaKaTasksPage() {
       </Dialog>
 
       {viewFilter !== "tasks" ? (
-        <SystemTasksView
-          scopeFilter="GA"
-          headingTitle="Admin System Tasks"
-          headingDescription="System tasks scoped for Kosove and Gane admins."
-          showSystemActions={false}
-          showFilters={false}
-          allowMarkAsDone={true}
-          externalPriorityFilter={priorityFilter}
-          externalDayFilter={dayFilter}
-          externalDateFilter={dateFilter}
-        />
+        <div className="print:hidden">
+          <SystemTasksView
+            scopeFilter="GA"
+            headingTitle="Admin System Tasks"
+            headingDescription="System tasks scoped for Kosove and Gane admins."
+            showSystemActions={false}
+            showFilters={false}
+            allowMarkAsDone={true}
+            assigneeRoleFilter={["ADMIN"]}
+            assigneeUsernamesFilter={["gane.arifaj"]}
+            externalPriorityFilter={priorityFilter}
+            externalDayFilter={dayFilter}
+            externalDateFilter={dateFilter}
+          />
+        </div>
       ) : null}
-      <div className="hidden print:block">
-        <div
-          ref={printContainerRef}
-          className="print-page px-6 pb-6"
-          style={printPageMinHeight ? { minHeight: `${printPageMinHeight}px` } : undefined}
-        >
-          <div ref={printMeasureRef} className="print-page-measure" />
+      <div className="hidden print:block print:!p-0 print:!m-0">
+        <div className="print-page">
+          <div className="print-header">
+            <span />
+            <div className="print-title">Daily Report</div>
+            <div className="print-datetime">
+              {printedAt.toLocaleString("en-US", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
           <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
             <colgroup>
               <col className="w-[36px]" />
               <col className="w-[44px]" />
               <col className="w-[30px]" />
               <col className="w-[36px]" />
+              <col className="w-[48px]" />
               <col className="w-[150px]" />
-              <col className="w-[110px]" />
               <col className="w-[60px]" />
               <col className="w-[30px]" />
               <col className="w-[52px]" />
               <col className="w-[36px]" />
               <col className="w-[140px]" />
+              <col className="w-[70px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-100">
@@ -1528,8 +1582,8 @@ export default function GaKaTasksPage() {
                   <span className="block">AM/</span>
                   <span className="block">PM</span>
                 </th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">DEP</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
@@ -1537,6 +1591,7 @@ export default function GaKaTasksPage() {
                   T/Y/O
                 </th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
               </tr>
             </thead>
             <tbody>
@@ -1551,9 +1606,11 @@ export default function GaKaTasksPage() {
                     <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
                       {row.period}
                     </td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                      {(row.status || "-").toString().toUpperCase()}
+                    </td>
                     <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
@@ -1562,17 +1619,25 @@ export default function GaKaTasksPage() {
                     <td className="border border-slate-900 px-2 py-2 align-top">
                       <div className="h-4 w-full border-b border-slate-400" />
                     </td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                      {row.userInitials || "-"}
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                  <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
                     No data available.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          <div className="print-footer">
+            <span />
+            <span className="print-page-count">1/1</span>
+            <div className="print-initials">PUNOI: {printInitials || "—"}</div>
+          </div>
         </div>
       </div>
       <style jsx global>{`
@@ -1581,6 +1646,10 @@ export default function GaKaTasksPage() {
           vertical-align: bottom;
           padding-bottom: 0;
           padding-top: 15px;
+        }
+        .daily-report-table {
+          border-collapse: collapse !important;
+          border-spacing: 0 !important;
         }
         .daily-report-table thead {
           position: sticky;
@@ -1610,27 +1679,67 @@ export default function GaKaTasksPage() {
           border-right: 2px solid #475569 !important;
         }
         @media print {
-          body {
+          * {
+            box-sizing: border-box;
+          }
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white;
           }
-          aside {
+          aside, header, nav {
             display: none !important;
           }
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.25in 0.1in 0.35in 0.1in;
+            size: landscape;
           }
           .print-page {
             position: relative;
-            padding-bottom: 0.35in;
+            padding: 0.1in !important;
+            margin: 0 !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
           }
-          .print-page-measure {
-            position: absolute;
-            top: 0;
+          .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-top: 0.15in;
+            margin-bottom: 0.2in;
+          }
+          .print-title {
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: #0f172a;
+          }
+          .print-datetime {
+            text-align: right;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-footer {
+            position: fixed;
+            bottom: 0.1in;
             left: 0;
-            height: calc(11in - 0.36in - 0.51in);
-            width: 1px;
-            visibility: hidden;
-            pointer-events: none;
+            right: 0;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.2in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            text-align: center;
+          }
+          .print-initials {
+            text-align: right;
           }
           .daily-report-table thead {
             display: table-header-group;
@@ -1638,14 +1747,22 @@ export default function GaKaTasksPage() {
           .daily-report-table th,
           .daily-report-table td {
             vertical-align: bottom !important;
+            border: 1px solid #0f172a !important;
           }
           .daily-report-table {
             table-layout: fixed;
+            border-width: 2px;
+            border-color: #0f172a;
+            border-collapse: collapse !important;
+            border-spacing: 0 !important;
           }
           .daily-report-table thead th {
-            border-width: 2px !important;
-            border-color: #0f172a !important;
+            border: 2px solid #0f172a !important;
             background-color: #f1f5f9 !important;
+            box-shadow: none !important;
+            position: static !important;
+            border-left: 2px solid #0f172a !important;
+            border-right: 2px solid #0f172a !important;
           }
           .daily-report-table thead tr {
             border-top: 3px solid #0f172a !important;

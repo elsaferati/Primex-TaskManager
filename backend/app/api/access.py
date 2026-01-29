@@ -20,6 +20,34 @@ def ensure_manager_or_admin(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
+def ensure_project_creator(user: User) -> None:
+    """Allow Admin, Manager, or Staff to create projects."""
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def ensure_task_editor(user: User, task: "Task") -> None:
+    """
+    Allow editing a task when:
+      - user is ADMIN or MANAGER
+      - or user created the task (task.created_by)
+      - or user is the primary assignee (task.assigned_to)
+    """
+    from app.models.task import Task  # local import to avoid circular
+
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        return
+    if task.created_by and task.created_by == user.id:
+        return
+    if task.assigned_to and task.assigned_to == user.id:
+        return
+    # Allow any explicit assignee record (TaskAssignee) as well
+    if hasattr(task, "assignees"):
+        assignees = getattr(task, "assignees") or []
+        if any(ta.user_id == user.id for ta in assignees):
+            return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
 def ensure_admin(user: User) -> None:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")

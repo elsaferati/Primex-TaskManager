@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, insert, select, cast, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
@@ -244,6 +244,7 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     ensure_department_access(user, task.department_id)
+    ensure_task_editor(user, task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
@@ -273,7 +274,8 @@ async def create_task(
         if project.department_id is not None and project.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
 
-    if department_id is not None:
+    # Allow cross-department creation when task originates from a GA/KA note.
+    if department_id is not None and payload.ga_note_origin_id is None:
         ensure_department_access(user, department_id)
 
     dependency_task_id = payload.dependency_task_id
@@ -302,7 +304,7 @@ async def create_task(
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
-    allow_cross_department = project is not None
+    allow_cross_department = project is not None or payload.ga_note_origin_id is not None
     if payload.assignees is not None:
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
@@ -448,15 +450,37 @@ async def update_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     
+    # Check if user has permission to edit this task:
+    # Allow: Admin, Manager, task creator, primary assignee, or any assignee in TaskAssignee table
+    can_edit = False
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        can_edit = True
+    elif task.created_by and task.created_by == user.id:
+        can_edit = True
+    elif task.assigned_to and task.assigned_to == user.id:
+        can_edit = True
+    else:
+        # Check if user is in the TaskAssignee table for this task
+        assignee_record = (
+            await db.execute(
+                select(TaskAssignee)
+                .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if assignee_record is not None:
+            can_edit = True
+    
+    if not can_edit:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    
     # For system task status updates, allow admins and managers to bypass department check
     is_system_task_status_update = (
         task.system_template_origin_id is not None
         and payload.status is not None
         and user.role in (UserRole.ADMIN, UserRole.MANAGER)
     )
-    
-    if task.department_id is not None and not is_system_task_status_update:
-        ensure_department_access(user, task.department_id)
+    # Department access check removed since can_edit above already verified
+    # that user is admin, manager, creator, or assignee
 
     if payload.status is not None and task.system_template_origin_id is not None:
         if task.assigned_to == user.id:
@@ -569,7 +593,8 @@ async def update_task(
                 )
             )
     elif payload.assigned_to is not None and payload.assigned_to != task.assigned_to:
-        ensure_manager_or_admin(user)
+        # Allow task editors (creator, assignee, manager, admin) to change assignee
+        # ensure_manager_or_admin check removed - can_edit already verified permission
         assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
         if assigned_user is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
@@ -618,7 +643,7 @@ async def update_task(
     if payload.finish_period is not None:
         task.finish_period = payload.finish_period
     if payload.phase is not None:
-        ensure_manager_or_admin(user)
+        # Allow task editors to change phase (removed manager/admin restriction)
         task.phase = payload.phase
     if payload.progress_percentage is not None:
         task.progress_percentage = payload.progress_percentage

@@ -102,6 +102,9 @@ const initials = (name: string) => {
 export default function CommonViewPage() {
   const { apiFetch, user } = useAuth()
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const isStaff = user?.role === "STAFF"
+  const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
   const printedAt = React.useMemo(() => new Date(), [])
   const printInitials = initials(user?.full_name || user?.username || "")
 
@@ -171,6 +174,7 @@ export default function CommonViewPage() {
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
+  const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
@@ -182,7 +186,7 @@ export default function CommonViewPage() {
   const [formFrom, setFormFrom] = React.useState("08:00")
   const [formTo, setFormTo] = React.useState("12:00")
   const [formEndDate, setFormEndDate] = React.useState("")
-  const [formFullDay, setFormFullDay] = React.useState(true)
+  const [formFullDay, setFormFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
@@ -586,15 +590,29 @@ export default function CommonViewPage() {
         }
 
         // Load users and departments first
-        const usersEndpoint =
-          user?.role && user.role !== "STAFF"
-            ? "/users?include_all_departments=true"
-            : "/users"
+          // Use lookup endpoint so STAFF can load all users
+          const usersEndpoint = "/users/lookup?include_inactive=false"
         const uRes = await apiFetch(usersEndpoint)
         let loadedUsers: User[] = []
         let projectNameById = new Map<string, string>()
         if (uRes?.ok) {
-          loadedUsers = (await uRes.json()) as User[]
+          const lookup = (await uRes.json()) as {
+            id: string
+            username?: string | null
+            full_name?: string | null
+            role: string
+            department_id?: string | null
+            is_active: boolean
+          }[]
+          loadedUsers = lookup.map((u) => ({
+            id: u.id,
+            email: u.username || u.full_name || "",
+            username: u.username,
+            full_name: u.full_name,
+            role: u.role as any,
+            department_id: u.department_id,
+            is_active: u.is_active,
+          }))
           if (mounted) setUsers(loadedUsers)
         }
         const depRes = await apiFetch("/departments")
@@ -979,12 +997,6 @@ export default function CommonViewPage() {
     }
   }, [apiFetch, user?.role, user?.department_id])
 
-  React.useEffect(() => {
-    if (formType === "leave" && !formFullDay) {
-      setFormFullDay(true)
-    }
-  }, [formType, formFullDay])
-
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
   const leaveCovers = (leave: LeaveItem, dateStr: string) => {
@@ -1072,6 +1084,30 @@ export default function CommonViewPage() {
     window.print()
   }
 
+  // Calculate total pages for print footer
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const dpi = 96
+      const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
+      const bodyHeight = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight
+      )
+      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
+      setPrintTotalPages(totalPages)
+    }
+    const handleAfterPrint = () => {
+      setPrintTotalPages(1)
+    }
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+    }
+  }, [])
+
   const handleExportExcel = async () => {
     if (exportingExcel) return
     setExportingExcel(true)
@@ -1087,7 +1123,11 @@ export default function CommonViewPage() {
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = `common_view_${weekStartIso}.xlsx`
+      const dd = String(weekStart.getDate()).padStart(2, "0")
+      const mm = String(weekStart.getMonth() + 1).padStart(2, "0")
+      const yy = String(weekStart.getFullYear()).slice(-2)
+      const initialsValue = (printInitials || "USER").toUpperCase()
+      link.download = `COMMON VIEW ${dd}_${mm}_${yy}_EF (${initialsValue}).xlsx`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -1126,7 +1166,7 @@ export default function CommonViewPage() {
     setFormFrom("08:00")
     setFormTo("12:00")
     setFormEndDate("")
-    setFormFullDay(true)
+    setFormFullDay(false)
     setFormTitle("")
     setFormNote("")
   }
@@ -1171,12 +1211,14 @@ export default function CommonViewPage() {
         description = description ? `${description}\n\n${delayLines}` : delayLines
       } else if (formType === "absent" && formFrom && formTo) {
         description = description ? `${description}\n\nFrom: ${formFrom} - To: ${formTo}` : `From: ${formFrom} - To: ${formTo}`
-      } else if (formType === "leave") {
-        const leaveInfo =
-          formEndDate && formEndDate !== formDate
-            ? `Date range: ${formDate} to ${formEndDate}`
-            : `Date: ${formDate}`
-        description = description ? `${description}\n\n${leaveInfo}` : leaveInfo
+        } else if (formType === "leave") {
+          const leaveInfo =
+            formEndDate && formEndDate !== formDate
+              ? `Date range: ${formDate} to ${formEndDate}`
+              : `Date: ${formDate}`
+          const timeInfo = formFullDay ? "(Full day)" : `(${formFrom || "--:--"} - ${formTo || "--:--"})`
+          const combinedLeaveInfo = `${leaveInfo} ${timeInfo}`.trim()
+          description = description ? `${description}\n\n${combinedLeaveInfo}` : combinedLeaveInfo
       }
       
       // Add date information
@@ -1228,7 +1270,7 @@ export default function CommonViewPage() {
 
   const deleteCommonEntry = React.useCallback(
     async (entryId: string) => {
-      if (!isAdmin) return
+      if (!canDeleteCommon) return
       const confirmed = window.confirm("Delete this common entry? This action cannot be undone.")
       if (!confirmed) return
       try {
@@ -1443,7 +1485,7 @@ export default function CommonViewPage() {
     return [
       {
         id: "late",
-        label: "Delays",
+        label: "VONS",
         count: filtered.late.length,
         headerClass: "swimlane-header delay",
         badgeClass: "swimlane-badge delay",
@@ -1451,7 +1493,7 @@ export default function CommonViewPage() {
       },
       {
         id: "absent",
-        label: "Absences",
+        label: "MUNG",
         count: filtered.absent.length,
         headerClass: "swimlane-header absence",
         badgeClass: "swimlane-badge absence",
@@ -1459,7 +1501,7 @@ export default function CommonViewPage() {
       },
       {
         id: "leave",
-        label: "Annual Leave",
+        label: "PV/FEST",
         count: filtered.leave.length,
         headerClass: "swimlane-header leave",
         badgeClass: "swimlane-badge leave",
@@ -1467,7 +1509,7 @@ export default function CommonViewPage() {
       },
       {
         id: "external",
-        label: "External Meetings",
+        label: "TAK EXT",
         count: filtered.external.length,
         headerClass: "swimlane-header external",
         badgeClass: "swimlane-badge external",
@@ -1475,7 +1517,7 @@ export default function CommonViewPage() {
       },
       {
         id: "blocked",
-        label: "BLLOK",
+        label: "BLL",
         count: filtered.blocked.length,
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
@@ -1491,7 +1533,7 @@ export default function CommonViewPage() {
       },
       {
         id: "personal",
-        label: "Personal",
+        label: "P:",
         count: filtered.personal.length,
         headerClass: "swimlane-header personal",
         badgeClass: "swimlane-badge personal",
@@ -1507,7 +1549,7 @@ export default function CommonViewPage() {
       },
       {
         id: "priority",
-        label: "Projects",
+        label: "PRJK",
         count: filtered.priority.length,
         headerClass: "swimlane-header priority",
         badgeClass: "swimlane-badge priority",
@@ -1515,7 +1557,7 @@ export default function CommonViewPage() {
       },
       {
         id: "problem",
-        label: "Problems",
+        label: "PRBL",
         count: filtered.problems.length,
         headerClass: "swimlane-header problem",
         badgeClass: "swimlane-badge problem",
@@ -1523,7 +1565,7 @@ export default function CommonViewPage() {
       },
       {
         id: "feedback",
-        label: "Complaints/Requests/Proposals",
+        label: "ANK/KRK/PRZ",
         count: filtered.feedback.length,
         headerClass: "swimlane-header feedback",
         badgeClass: "swimlane-badge feedback",
@@ -2034,7 +2076,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0.36in 0.08in 0.51in 0.2in;
+            margin: 0.36in 0.1in 0.51in 0.1in;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -2073,20 +2115,17 @@ export default function CommonViewPage() {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: 0.3in;
+            bottom: 0.2in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.2in;
-            padding-right: 0.08in;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
             font-size: 10px;
             color: #334155;
           }
           .print-page-count {
             grid-column: 2;
             text-align: center;
-          }
-          .print-page-count::before {
-            content: "Page " counter(page) " / " counter(pages);
           }
           .print-initials {
             grid-column: 3;
@@ -2119,12 +2158,37 @@ export default function CommonViewPage() {
             padding-top: 18px;
             padding-bottom: 18px;
           }
-          .swimlane-header,
-          .swimlane-badge,
           .swimlane-cell {
             background: #ffffff !important;
             color: #111827 !important;
           }
+          .swimlane-header,
+          .swimlane-badge {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .swimlane-header.delay { background: var(--delay-bg) !important; color: #c2410c !important; }
+          .swimlane-header.absence { background: var(--absence-bg) !important; color: #b91c1c !important; }
+          .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
+          .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
+          .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
+          .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
+          .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
+          .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
+          .swimlane-header.priority { background: var(--priority-bg) !important; color: #b45309 !important; }
+          .swimlane-badge.delay { border-color: var(--delay-accent) !important; color: #c2410c !important; }
+          .swimlane-badge.absence { border-color: var(--absence-accent) !important; color: #b91c1c !important; }
+          .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
+          .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
+          .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
+          .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
+          .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
+          .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
+          .swimlane-badge.priority { border-color: var(--priority-accent) !important; color: #b45309 !important; }
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;
@@ -2474,6 +2538,31 @@ export default function CommonViewPage() {
           grid-auto-columns: minmax(220px, 1fr);
           min-width: 660px;
         }
+        .swimlane-delete {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          width: 22px;
+          height: 22px;
+          border-radius: 8px;
+          background: #ffffff;
+          color: #dc2626;
+          border: 1px solid #e2e8f0;
+          font-weight: 900;
+          line-height: 1;
+          cursor: pointer;
+          box-shadow: none;
+          transition: transform 0.1s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+        .swimlane-delete:hover {
+          transform: translateY(-1px);
+          background: #fee2e2;
+          border-color: #fecaca;
+        }
+        .swimlane-delete:active {
+          transform: translateY(0);
+          box-shadow: none;
+        }
         .swimlane-cell {
           padding: 12px 14px;
           border-right: 1px solid var(--swim-border);
@@ -2560,17 +2649,30 @@ export default function CommonViewPage() {
           border-collapse: collapse;
           border: 2px solid #111827;
           font-size: 11px;
+          direction: ltr;
         }
         .week-table th {
           border: 1px solid #111827;
           background: #dbeafe;
           padding: 8px 6px;
-          text-align: center;
+          text-align: left;
           font-weight: 700;
-          vertical-align: middle;
+          vertical-align: bottom;
           position: sticky;
           top: 0;
           z-index: 2;
+        }
+        .week-table thead tr:first-child th {
+          border-top-width: 2px;
+        }
+        .week-table thead tr:last-child th {
+          border-bottom-width: 2px;
+        }
+        .week-table thead th:first-child {
+          border-left-width: 2px;
+        }
+        .week-table thead th:last-child {
+          border-right-width: 2px;
         }
         .week-table thead tr:nth-child(2) th {
           top: 30px;
@@ -2588,8 +2690,9 @@ export default function CommonViewPage() {
         .week-table td {
           border: 1px solid #dee2e6;
           padding: 6px 8px;
-          vertical-align: top;
+          vertical-align: bottom;
           font-size: 10px;
+          text-align: left;
         }
         .week-table-number {
           text-align: center;
@@ -3089,17 +3192,17 @@ export default function CommonViewPage() {
           background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
         }
         .modal-footer .btn-primary {
-          background: #2563eb;
-          color: white;
-          border: none;
-          padding: 14px 32px;
-          font-size: 15px;
-          font-weight: 700;
-          border-radius: 10px;
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-          min-width: 120px;
-          transition: all 0.2s ease;
-        }
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 700;
+            border-radius: 8px;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+            min-width: 108px;
+            transition: all 0.2s ease;
+          }
         .modal-footer .btn-primary:hover:not(:disabled) {
           background: #1d4ed8;
           box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
@@ -3110,17 +3213,17 @@ export default function CommonViewPage() {
           box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
         }
         .modal-footer .btn-outline {
-          background: white;
-          color: #475569;
-          border: 2px solid #cbd5e1;
-          padding: 14px 32px;
-          font-size: 15px;
-          font-weight: 700;
-          border-radius: 10px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-          min-width: 120px;
-          transition: all 0.2s ease;
-        }
+            background: white;
+            color: #475569;
+            border: 1.5px solid #cbd5e1;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 700;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+            min-width: 108px;
+            transition: all 0.2s ease;
+          }
         .modal-footer .btn-outline:hover:not(:disabled) {
           background: #f8fafc;
           border-color: #94a3b8;
@@ -3139,10 +3242,10 @@ export default function CommonViewPage() {
           box-shadow: none;
         }
         .form-grid { 
-          display: grid; 
-          grid-template-columns: 1fr 1fr; 
-          gap: 16px; 
-        }
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 16px; 
+          }
         .form-row { 
           display: flex; 
           flex-direction: column; 
@@ -3157,9 +3260,38 @@ export default function CommonViewPage() {
           min-height: 100px; 
           resize: vertical; 
         }
-        .span-2 { 
-          grid-column: 1 / -1; 
-        }
+          .span-2 { 
+            grid-column: 1 / -1; 
+          }
+          .leave-inline {
+            display: flex;
+            align-items: flex-end;
+            gap: 16px;
+          }
+          .leave-inline .leave-checkbox {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            min-width: 180px;
+            font-weight: 600;
+          }
+          .leave-inline .leave-times {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            width: 100%;
+          }
+          .leave-inline .mini-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .leave-inline .mini-row label {
+            font-size: 13px;
+            color: #475569;
+            font-weight: 700;
+          }
       `}</style>
 
       <div className="common-sticky">
@@ -3267,35 +3399,35 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("late")}
             >
-              Delays
+              VONS
             </button>
             <button
               className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("absent")}
             >
-              Absences
+              MUNG
             </button>
             <button
               className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("leave")}
             >
-              Annual Leave
+              PV/FEST
             </button>
             <button
               className={`chip ${typeFilters.has("external") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("external")}
             >
-              External Meetings
+              TAK EXT
             </button>
             <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("blocked")}
             >
-              BLOCKED
+              BLL
             </button>
             <button
               className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
@@ -3309,7 +3441,7 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("personal")}
             >
-              Personal
+              P:
             </button>
             <button
               className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
@@ -3323,21 +3455,21 @@ export default function CommonViewPage() {
               type="button"
               onClick={() => setTypeFilter("priority")}
             >
-              Projects
+              PRJK
             </button>
             <button
               className={`chip ${typeFilters.has("problem") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("problem")}
             >
-              Problems
+              PRBL
             </button>
             <button
               className={`chip ${typeFilters.has("feedback") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("feedback")}
             >
-              Complaints/Requests/Proposals
+              ANK/KRK/PRZ
             </button>
             </div>
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
@@ -4001,8 +4133,8 @@ export default function CommonViewPage() {
             <table className="week-table">
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ width: "60px" }}>NO</th>
-                  <th rowSpan={2} style={{ width: "150px" }}>LL</th>
+                  <th rowSpan={2} style={{ width: "40px" }}>NR</th>
+                  <th rowSpan={2} style={{ width: "110px" }}>LLOJI</th>
                   {weekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
@@ -4047,30 +4179,30 @@ export default function CommonViewPage() {
                       if (entries.length === 0) return null
                       
                       if (row.id === "late") {
-                        return entries.map((e: LateItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person)} {e.start || "08:00"}-{e.until}</span>
-                            {isAdmin && e.entryId ? (
-                              <button
-                                type="button"
-                                className="week-table-delete"
-                                onClick={() => deleteCommonEntry(e.entryId)}
-                                aria-label="Delete entry"
-                                title="Delete"
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </div>
-                        ))
+        return entries.map((e: LateItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{initials(e.person)} {e.start || "08:00"}-{e.until}</span>
+            {canDeleteCommon && e.entryId ? (
+              <button
+                type="button"
+                className="week-table-delete week-table-delete-red"
+                onClick={() => deleteCommonEntry(e.entryId)}
+                aria-label="Delete entry"
+                title="Delete"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        ))
                       } else if (row.id === "absent") {
                         return entries.map((e: AbsentItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>{initials(e.person)} {e.from} - {e.to}</span>
-                            {isAdmin && e.entryId ? (
+                            {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
-                                className="week-table-delete"
+                                className="week-table-delete week-table-delete-red"
                                 onClick={() => deleteCommonEntry(e.entryId)}
                                 aria-label="Delete entry"
                                 title="Delete"
@@ -4082,14 +4214,17 @@ export default function CommonViewPage() {
                         ))
                       } else if (row.id === "leave") {
                         return entries.map((e: LeaveItem, idx: number) => {
-                          const range = e.endDate !== e.startDate ? `${formatDateHuman(e.startDate)}-${formatDateHuman(e.endDate)}` : formatDateHuman(e.startDate)
+                          const range = "" // hide date in table view
                           return (
                             <div key={idx} className="week-table-entry">
-                              <span>{initials(e.person)} {e.fullDay ? "Full day" : `${e.from}-${e.to}`} {range}</span>
-                              {isAdmin && e.entryId ? (
+                              <span>
+                                {initials(e.person)} {e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`}
+                                {range ? ` ${range}` : ""}
+                              </span>
+                              {canDeleteCommon && e.entryId ? (
                                 <button
                                   type="button"
-                                  className="week-table-delete"
+                                  className="week-table-delete week-table-delete-red"
                                   onClick={() => deleteCommonEntry(e.entryId)}
                                   aria-label="Delete entry"
                                   title="Delete"
@@ -4110,10 +4245,10 @@ export default function CommonViewPage() {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
-                            {isAdmin && e.entryId ? (
+                            {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
-                                className="week-table-delete"
+                                className="week-table-delete week-table-delete-red"
                                 onClick={() => deleteCommonEntry(e.entryId)}
                                 aria-label="Delete entry"
                                 title="Delete"
@@ -4184,8 +4319,9 @@ export default function CommonViewPage() {
               </tbody>
             </table>
             <div className="print-footer">
-              <div className="print-page-count" />
-              <div className="print-initials">Initials: {printInitials}</div>
+              <span />
+              <div className="print-page-count">1/{printTotalPages}</div>
+              <div className="print-initials">PUNOI: {printInitials}</div>
             </div>
           </div>
         ) : null}
@@ -4238,7 +4374,7 @@ export default function CommonViewPage() {
                                   .filter(Boolean)
                                   .join(" ")}
                               >
-                                {!cell.placeholder && isAdmin && cell.entryId ? (
+                                {!cell.placeholder && canDeleteCommon && cell.entryId ? (
                                   <button
                                     type="button"
                                     className="swimlane-delete"
@@ -4246,7 +4382,7 @@ export default function CommonViewPage() {
                                     aria-label="Delete entry"
                                     title="Delete"
                                   >
-                                    A-
+                                    ×
                                   </button>
                                 ) : null}
                                 <div className="swimlane-title">
@@ -4276,8 +4412,9 @@ export default function CommonViewPage() {
               })}
           </div>
           <div className="print-footer">
-            <div className="print-page-count" />
-            <div className="print-initials">Initials: {printInitials}</div>
+            <span />
+            <div className="print-page-count">1/{printTotalPages}</div>
+            <div className="print-initials">PUNOI: {printInitials}</div>
           </div>
         </div>
       </div>
@@ -4296,24 +4433,24 @@ export default function CommonViewPage() {
             <div className="modal-body">
               <form onSubmit={submitForm}>
                 <div className="form-grid">
-                  <div className="form-row">
-                    <label htmlFor="cv-type">Type</label>
-                    <select
-                      id="cv-type"
-                      className="input"
-                      value={formType}
-                      onChange={(e) => {
-                        setFormType(e.target.value as any)
-                      }}
-                      required
-                      >
-                        <option value="late">Delay</option>
-                        <option value="absent">Absence</option>
-                        <option value="leave">Annual Leave</option>
-                        <option value="problem">Problem</option>
-                        <option value="feedback">Complaint/Request/Proposal</option>
-                    </select>
-                  </div>
+            <div className="form-row">
+              <label htmlFor="cv-type">Type</label>
+              <select
+                id="cv-type"
+                className="input"
+                value={formType}
+                onChange={(e) => {
+                  setFormType(e.target.value as any)
+                }}
+                required
+                >
+                  <option value="late">Vonese</option>
+                  <option value="absent">Mungese</option>
+                  <option value="leave">Pushim Vjetor</option>
+                  <option value="problem">Problem</option>
+                  <option value="feedback">Ankese/Kerkese/Propozim</option>
+            </select>
+          </div>
                   <div className="form-row">
                     <label htmlFor="cv-person">Person</label>
                     <select
@@ -4410,16 +4547,54 @@ export default function CommonViewPage() {
                   )}
 
                   {formType === "leave" && (
-                    <div className="form-row">
-                      <label htmlFor="cv-enddate">Until date (optional)</label>
-                      <input
-                        id="cv-enddate"
-                        className="input"
-                        type="date"
-                        value={formEndDate}
-                        onChange={(e) => setFormEndDate(e.target.value)}
-                      />
-                    </div>
+                    <>
+                      <div className="form-row">
+                        <label htmlFor="cv-enddate">Deri me (opsionale)</label>
+                        <input
+                          id="cv-enddate"
+                          className="input"
+                          type="date"
+                          value={formEndDate}
+                          onChange={(e) => setFormEndDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-row span-2 leave-inline">
+                        <label className="checkbox leave-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={formFullDay}
+                            onChange={(e) => setFormFullDay(e.target.checked)}
+                          />
+                          Pushim gjithe diten
+                        </label>
+                        {!formFullDay && (
+                          <div className="leave-times">
+                            <div className="mini-row">
+                              <label htmlFor="cv-leave-from">Nga ora</label>
+                              <input
+                                id="cv-leave-from"
+                                className="input"
+                                type="time"
+                                value={formFrom}
+                                onChange={(e) => setFormFrom(e.target.value)}
+                                required={!formFullDay}
+                              />
+                            </div>
+                            <div className="mini-row">
+                              <label htmlFor="cv-leave-to">Deri ora</label>
+                              <input
+                                id="cv-leave-to"
+                                className="input"
+                                type="time"
+                                value={formTo}
+                                onChange={(e) => setFormTo(e.target.value)}
+                                required={!formFullDay}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
 
                   <div className="form-row span-2">

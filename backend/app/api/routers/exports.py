@@ -9,6 +9,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
@@ -33,10 +35,13 @@ from app.models.system_task_template_alignment_user import SystemTaskTemplateAli
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_assignee import TaskAssignee
+from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
+from app.models.ga_note import GaNote
 from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope
+from app.api.routers.planners import weekly_table_planner
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 
 
@@ -49,6 +54,8 @@ START_RE = re.compile(r"Start:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
 UNTIL_RE = re.compile(r"Until:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
 FROM_TO_RE = re.compile(r"From:\s*(\d{1,2}:\d{2})\s*-\s*To:\s*(\d{1,2}:\d{2})", re.IGNORECASE)
 TIME_RANGE_RE = re.compile(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)")
+
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 
 def _initials(label: str) -> str:
@@ -73,7 +80,166 @@ def _strip_html(value: str | None) -> str:
 
 def _priority_label(value: str | None) -> str:
     normalized = value.upper() if value else "NORMAL"
-    return "Larte" if normalized == "HIGH" else "Normal"
+    return "H" if normalized == "HIGH" else "N"
+
+
+def _frequency_label(value: str | None) -> str:
+    normalized = value.upper() if value else ""
+    return {
+        "DAILY": "D",
+        "WEEKLY": "W",
+        "MONTHLY": "M",
+        "YEARLY": "Y",
+        "3_MONTHS": "3M",
+        "6_MONTHS": "6M",
+    }.get(normalized, value or "")
+
+
+def _department_short(label: str) -> str:
+    key = label.strip().upper()
+    return {
+        "DEVELOPMENT": "DEV",
+        "GRAPHIC DESIGN": "GDS",
+        "PRODUCT CONTENT": "PCM",
+    }.get(key, label)
+
+
+def _display_department_name(label: str | None) -> str:
+    if not label:
+        return ""
+    return "Product Content" if label.strip() == "Project Content Manager" else label
+
+
+def _safe_filename(label: str) -> str:
+    cleaned = re.sub(r"[^\w\s\-]", "", label)
+    cleaned = re.sub(r"\s+", "_", cleaned.strip())
+    return cleaned.upper() or "EXPORT"
+
+
+def _fast_task_badge(task) -> str:
+    if task.is_bllok:
+        return "BLL"
+    if task.is_r1:
+        return "R1"
+    if task.is_1h_report:
+        return "1H"
+    if task.ga_note_origin_id:
+        return "GA"
+    if task.is_personal:
+        return "P:"
+    if task.fast_task_type:
+        return task.fast_task_type
+    return ""
+
+
+def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: bool, day_date: date) -> list[dict[str, str | None]]:
+    """
+    Returns list of task display items with status for coloring.
+    Each item has: number, title, rest, status.
+    """
+    items: list[dict[str, str | None]] = []
+    task_num = 1
+
+    for project in projects:
+        project_title = project.project_title or ""
+        for task in project.tasks or []:
+            task_title = task.task_title or ""
+            task_name = task_title
+            if task.daily_products is not None:
+                task_name = f"{task_name} {task.daily_products} pcs"
+            status_value = _effective_status(task.status, task.completed_at, day_date)
+            if project_title:
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": project_title,
+                        "rest": task_name,
+                        "status": status_value,
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": task_name,
+                        "rest": "",
+                        "status": status_value,
+                    }
+                )
+            task_num += 1
+
+    for task in system_tasks:
+        title = task.title or ""
+        if title:
+            items.append(
+                {
+                    "number": str(task_num),
+                    "title": title,
+                    "rest": "",
+                    "status": _effective_status(task.status, task.completed_at, day_date),
+                }
+            )
+            task_num += 1
+
+    if include_fast:
+        for task in fast_tasks:
+            label = task.title or ""
+            badge = _fast_task_badge(task)
+            if badge:
+                label = f"{label} [{badge}]"
+            if label:
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": label,
+                        "rest": "",
+                        "status": _effective_status(task.status, task.completed_at, day_date),
+                    }
+                )
+                task_num += 1
+
+    return items
+
+
+def _create_rich_text_cell(lines: list[tuple[str, str, str]]) -> CellRichText | str:
+    """
+    Creates a RichText cell with bold titles, or returns plain string if no lines.
+    Format: "1. TITLE: REST" where TITLE is bold.
+    """
+    if not lines:
+        return ""
+
+    rich_text_parts: list[TextBlock] = []
+
+    for idx, (number_part, title_part, rest_part) in enumerate(lines):
+        prefix = "\n" if idx > 0 else ""
+        # Add number and period
+        rich_text_parts.append(TextBlock(text=f"{prefix}{number_part}. ", font=InlineFont()))
+
+        # Add bold title
+        rich_text_parts.append(TextBlock(text=title_part, font=InlineFont(b=True)))
+
+        # Add colon and rest if there is rest
+        if rest_part:
+            rich_text_parts.append(TextBlock(text=f": {rest_part}", font=InlineFont()))
+
+    return CellRichText(rich_text_parts)
+
+
+def _planner_item_rich_text(item: dict[str, str | None]) -> CellRichText | str:
+    number = item.get("number") or ""
+    title = item.get("title") or ""
+    rest = item.get("rest") or ""
+    return _create_rich_text_cell([(number, title, rest)])
+
+
+def _effective_status(status: str | None, completed_at: datetime | None, day_date: date) -> str:
+    normalized = (status or "TODO").upper()
+    if normalized != "DONE":
+        return normalized
+    if not completed_at:
+        return "IN_PROGRESS"
+    return "DONE" if completed_at.date() == day_date else "IN_PROGRESS"
 
 
 def _scope_label(template: SystemTaskTemplate) -> str:
@@ -704,7 +870,7 @@ async def export_checklist_xlsx(
                 bottom = thick if r == last_row else thin
                 ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.oddHeader.right.text = "&D &T"
+    ws.oddHeader.right.text = ""
     ws.oddFooter.center.text = "Page &P / &N"
     user_initials = _initials(user.full_name or user.username or "")
     ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
@@ -721,26 +887,13 @@ async def export_checklist_xlsx(
     )
 
 
-@router.get("/daily-report.xlsx")
-async def export_daily_report_xlsx(
+async def _daily_report_rows_for_user(
+    *,
+    db: AsyncSession,
     day: date,
-    department_id: uuid.UUID | None = None,
-    user_id: uuid.UUID | None = None,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    if user.role == UserRole.STAFF:
-        department_id = user.department_id
-        user_id = user.id
-
-    if department_id is not None:
-        ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
-        department_id = user.department_id
-
-    if user_id is None:
-        user_id = user.id
-
+    department_id: uuid.UUID | None,
+    user_id: uuid.UUID,
+) -> list[list[str]]:
     task_stmt = (
         select(Task)
         .where(Task.completed_at.is_(None))
@@ -750,8 +903,7 @@ async def export_daily_report_xlsx(
     )
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
-    if user_id is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+    task_stmt = task_stmt.where(Task.assigned_to == user_id)
 
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
 
@@ -820,6 +972,32 @@ async def export_daily_report_xlsx(
             label = u.full_name or u.username or ""
             alignment_user_map[u.id] = _initials(label)
 
+    dept_ids = {t.department_id for t in daily_tasks if t.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl in occ_today_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl in overdue_rows if tmpl.department_id}
+    department_map: dict[uuid.UUID, Department] = {}
+    if dept_ids:
+        departments = (
+            await db.execute(select(Department).where(Department.id.in_(dept_ids)))
+        ).scalars().all()
+        department_map = {dept.id: dept for dept in departments}
+
+    def department_label(
+        department_id_value: uuid.UUID | None,
+        scope_value: str | None = None,
+        is_ga_note: bool = False,
+    ) -> str:
+        if scope_value == SystemTaskScope.GA.value:
+            return "GA"
+        if scope_value == SystemTaskScope.ALL.value:
+            return "ALL"
+        if department_id_value:
+            dept = department_map.get(department_id_value)
+            return (dept.code if dept and dept.code else dept.name) or "-"
+        if is_ga_note:
+            return "GA"
+        return "-"
+
     def alignment_values(tmpl: SystemTaskTemplate) -> tuple[str, str]:
         roles = roles_map.get(tmpl.id, [])
         user_ids = alignment_users_map.get(tmpl.id, [])
@@ -877,9 +1055,10 @@ async def export_daily_report_xlsx(
                         "FT",
                         _fast_subtype_short(task),
                         period,
+                        department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                         task.title or "-",
-                        task.description or "-",
-                        status,
+                        task.description or "",
+                        (status or "").upper(),
                         "-",
                         "-",
                         tyo,
@@ -896,9 +1075,10 @@ async def export_daily_report_xlsx(
                     "PRJK",
                     "-",
                     period,
+                    department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
                     f"{project_label} - {task.title or '-'}",
-                    task.description or "-",
-                    status,
+                    task.description or "",
+                    (status or "").upper(),
                     "-",
                     "-",
                     tyo,
@@ -918,9 +1098,10 @@ async def export_daily_report_xlsx(
                 "SYS",
                 _system_frequency_short_label(tmpl.frequency),
                 period,
+                department_label(tmpl.department_id, tmpl.scope, False),
                 tmpl.title or "-",
-                tmpl.description or "-",
-                _format_system_status(occ.status),
+                tmpl.description or "",
+                _format_system_status(occ.status).upper(),
                 bz,
                 koha_bz,
                 tyo,
@@ -941,45 +1122,132 @@ async def export_daily_report_xlsx(
     rows.extend(system_am_rows)
     rows.extend(project_rows)
     rows.extend(system_pm_rows)
+    return rows
 
-    headers = ["NR", "LL", "NLL", "AM/PM", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT"]
+
+@router.get("/daily-report.xlsx")
+async def export_daily_report_xlsx(
+    day: date,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    all_users: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if user.role == UserRole.STAFF:
+        department_id = user.department_id
+        user_id = user.id
+        all_users = False
+
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+    elif user.role != UserRole.ADMIN:
+        department_id = user.department_id
+
+    if user_id is None:
+        user_id = user.id
+
+    rows: list[list[str]] = []
+    users_for_export: list[User] = []
+    if all_users:
+        if department_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id is required")
+        users_for_export = (
+            await db.execute(
+                select(User)
+                .where(User.department_id == department_id)
+                .order_by(User.full_name, User.username)
+            )
+        ).scalars().all()
+    else:
+        users_for_export = [
+            (
+                await db.execute(select(User).where(User.id == user_id))
+            ).scalar_one()
+        ]
+
+    for member in users_for_export:
+        member_rows = await _daily_report_rows_for_user(
+            db=db,
+            day=day,
+            department_id=department_id,
+            user_id=member.id,
+        )
+        member_label = _initials(member.full_name or member.username or "") or "-"
+        for row in member_rows:
+            rows.append(row + [member_label])
+
+    # Sort by LL (index 1), NLL (index 2), and T/Y/O (index 9)
+    if all_users:
+        rows.sort(key=lambda r: (
+            r[1] if len(r) > 1 else "",  # LL (typeLabel)
+            r[2] if len(r) > 2 else "",  # NLL (subtype)
+            r[9] if len(r) > 9 else "",  # T/Y/O (tyo)
+        ))
+
+    headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily Report"
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
-    title_cell = ws.cell(row=1, column=1, value="DAILY TASK REPORT")
+    title_row = 1
+    dept_row = 2
+    user_row = 3
+    header_row = 5
+
+    title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
+    title_cell = ws.cell(row=title_row, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    header_row = 3
+    department_label = ""
+    if department_id:
+        department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+        department_label = department.name if department else ""
+    ws.cell(row=dept_row, column=1, value=f"Department: {department_label or '-'}")
+    if all_users:
+        ws.cell(row=user_row, column=1, value="Users: All users")
+    else:
+        ws.cell(row=user_row, column=1, value=f"User: {users_for_export[0].full_name or users_for_export[0].username or '-'}")
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         cell.alignment = Alignment(
             horizontal="left",
             vertical="bottom",
-            wrap_text=False if header == "NR" else True,
+            wrap_text=True if header == "Nr" else True,
         )
+        # Force uppercase display even if Excel auto-changes header text.
+        cell.number_format = "@"
 
     column_widths = {
         "NR": 4,
         "LL": 5,
         "NLL": 6,
         "AM/PM": 7,
+        "DEP": 6,
         "TITULLI": 32,
-        "PERSHKRIMI": 28,
+        "PERSHKRIMI": 26,
         "STS": 10,
         "BZ": 8,
         "KOHA BZ": 10,
         "T/Y/O": 6,
         "KOMENT": 22,
+        "USER": 6,
     }
     for col_idx, header in enumerate(headers, start=1):
         width = column_widths.get(header, 16)
         ws.column_dimensions[ws.cell(row=header_row, column=col_idx).column_letter].width = width
+
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 16
+    ws.row_dimensions[3].height = 16
+    ws.row_dimensions[4].height = 10
+    ws.row_dimensions[header_row].height = 28
 
     data_row = header_row + 1
     for idx, row in enumerate(rows, start=1):
@@ -990,14 +1258,14 @@ async def export_daily_report_xlsx(
             cell.alignment = Alignment(
                 horizontal="left",
                 vertical="bottom",
-                wrap_text=col_idx in {5, 6, 11},
+                wrap_text=col_idx in {6, 7, 13},
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B4"]
-    ws.print_title_rows = "3:3"
+    ws.freeze_panes = ws["B6"]
+    ws.print_title_rows = "5:5"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -1016,11 +1284,30 @@ async def export_daily_report_xlsx(
         thick = Side(style="medium", color="000000")
         for r in range(header_row, last_row + 1):
             for c in range(1, last_col + 1):
-                left = thick if c == 1 else thin
-                right = thick if c == last_col else thin
-                top = thick if r == header_row else thin
-                bottom = thick if r == last_row else thin
-                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+                is_first_col = c == 1
+                is_last_col = c == last_col
+                is_header = r == header_row
+                is_last_row = r == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+                # Header row: thick outside border (top/bottom/edges), thin inside separators.
+                if is_header:
+                    ws.cell(row=r, column=c).border = Border(
+                        left=thick,
+                        right=thick,
+                        top=thick,
+                        bottom=thick,
+                    )
+                else:
+                    ws.cell(row=r, column=c).border = Border(
+                        left=left,
+                        right=right,
+                        top=top,
+                        bottom=bottom,
+                    )
 
     ws.oddHeader.right.text = "&D &T"
     ws.oddFooter.center.text = "Page &P / &N"
@@ -1030,13 +1317,16 @@ async def export_daily_report_xlsx(
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = f"daily_report_{day.isoformat()}_{user_initials or 'user'}.xlsx"
+    date_label = day.strftime("%d_%m_%y")
+    title_label = title_text.upper()
+    user_initials = _initials(user.full_name or user.username or "")
+    initials_label = user_initials or "USER"
+    filename = f"{title_label}_{date_label}_{initials_label}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
-
 
 @router.get("/system-tasks.xlsx")
 async def export_system_tasks_xlsx(
@@ -1109,6 +1399,28 @@ async def export_system_tasks_xlsx(
         ).scalars().all()
         fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
 
+    task_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        alignment_rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_id in alignment_rows:
+            task_alignment_map.setdefault(task_id, []).append(user_id)
+
+    template_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_ids:
+        template_alignment_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+                .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+            )
+        ).all()
+        for template_id, user_id in template_alignment_rows:
+            template_alignment_map.setdefault(template_id, []).append(user_id)
+
     department_ids = {template.department_id for _, template in task_rows if template.department_id}
     department_map: dict[uuid.UUID, str] = {}
     if department_ids:
@@ -1117,33 +1429,54 @@ async def export_system_tasks_xlsx(
         ).scalars().all()
         department_map = {d.id: d.name for d in departments}
 
+    alignment_user_ids: set[uuid.UUID] = set()
+    for task, template in task_rows:
+        ids = task_alignment_map.get(task.id) or []
+        if not ids:
+            ids = template_alignment_map.get(template.id) or []
+        for user_id in ids:
+            alignment_user_ids.add(user_id)
+    alignment_user_map: dict[uuid.UUID, str] = {}
+    if alignment_user_ids:
+        alignment_users = (
+            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+        ).scalars().all()
+        alignment_user_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in alignment_users
+        }
+
     wb = Workbook()
     ws = wb.active
     ws.title = "System Tasks"
 
     headers = [
-        "Nr",
-        "Prioriteti",
-        "Lloji",
-        "Departamenti",
-        "AM/PM",
-        "Titulli",
-        "Pershkrimi",
-        "Personi",
-        "REGJ/PATH/CHECKLISTA/TRAINING",
-        "BZ GROUP",
+        "NR",
+        "PRIO",
+        "LL",
+        "DEP",
+        "AM/\nPM",
+        "TITULLI",
+        "PERSHKRIMI",
+        "USER",
+        "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
+        "BZ ME",
+        "KOHA BZ",
     ]
     last_col = len(headers)
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
-    title_cell = ws.cell(row=1, column=1, value="SYSTEM TASKS")
+    title_row = 3
+    header_row = 5
+    data_row = header_row + 1
+
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
+    title_cell = ws.cell(row=title_row, column=1, value="SYSTEM TASKS")
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="left", vertical="center")
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
     col_widths = [len(header) for header in headers]
 
@@ -1151,69 +1484,106 @@ async def export_system_tasks_xlsx(
         assignees = assignee_map.get(task.id, [])
         if not assignees and task.assigned_to in fallback_map:
             assignees = [fallback_map[task.assigned_to]]
-        assignee_label = ", ".join(assignees)
-        row_idx = 3 + idx
+        assignee_initials = [(_initials(name) if name else "") for name in assignees]
+        assignee_label = ", ".join([initials for initials in assignee_initials if initials])
+        row_idx = data_row + idx - 1
         if template.department_id and template.department_id in department_map:
-            department_label = department_map[template.department_id]
+            department_label = _department_short(department_map[template.department_id])
         elif template.scope == "GA":
             department_label = "GA"
         else:
             department_label = "ALL"
         note_values = _parse_internal_notes(template.internal_notes)
-        details_parts = []
-        for label, key in [
-            ("REGJ", "REGJ"),
-            ("PATH", "PATH"),
-            ("CHECKLISTA", "CHECKLISTA"),
-            ("CHECKLISTA", "CHECK"),
-            ("TRAINING", "TRAINING"),
-        ]:
-            value = note_values.get(key, "")
-            if value:
-                details_parts.append(f"{label}: {value}")
-        details_value = " | ".join(details_parts)
-        bz_group_value = note_values.get("BZ GROUP", "")
+        regj_value = note_values.get("REGJ", "") or "-"
+        path_value = note_values.get("PATH", "") or "-"
+        check_value = note_values.get("CHECKLISTA", "") or note_values.get("CHECK", "") or "-"
+        training_value = note_values.get("TRAINING", "") or "-"
+        bz_group_value = note_values.get("BZ GROUP", "") or "-"
+        if all(value == "-" for value in [regj_value, path_value, check_value, training_value, bz_group_value]):
+            details_value = ""
+        else:
+            details_value = "\n".join(
+                [
+                    f"1.REGJ: {regj_value}",
+                    f"2.PATH: {path_value}",
+                    f"3.CHECKLISTA: {check_value}",
+                    f"4.TRAINING: {training_value}",
+                    f"5.BZ GROUP: {bz_group_value}",
+                ]
+            )
+        alignment_ids = task_alignment_map.get(task.id) or []
+        if not alignment_ids:
+            alignment_ids = template_alignment_map.get(template.id) or []
+        bz_me_labels = [alignment_user_map.get(user_id, "") for user_id in alignment_ids]
+        bz_me_value = ", ".join([label for label in bz_me_labels if label])
+        alignment_time = getattr(template, "alignment_time", None)
+        bz_time_value = ""
+        if alignment_time:
+            alignment_time_str = str(alignment_time)
+            bz_time_value = alignment_time_str[:5]
         values = [
             idx,
             _priority_label(template.priority),
-            template.frequency,
+            _frequency_label(template.frequency),
             department_label,
             task.finish_period or "",
             task.title,
             _strip_html(task.description),
             assignee_label,
             details_value,
-            bz_group_value,
+            bz_me_value,
+            bz_time_value,
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
             col_widths[col_idx - 1] = max(col_widths[col_idx - 1], len(str(value)))
+        # Excel rich text caused repair prompts; keep plain text for compatibility.
 
     for col_idx, width in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 80)
 
-    for row_idx in range(4, ws.max_row + 1):
-        ws.cell(row=row_idx, column=1).font = Font(bold=True)
+    for row_idx in range(data_row, ws.max_row + 1):
+        cell = ws.cell(row=row_idx, column=1)
+        cell.font = Font(bold=True)
+        cell.number_format = "#,##0"
 
     thin = Side(style="thin", color="000000")
     thick = Side(style="medium", color="000000")
     last_row = ws.max_row
-    for r in range(3, last_row + 1):
+    for r in range(header_row, last_row + 1):
         for c in range(1, last_col + 1):
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 3 else thin
-            bottom = thick if r in (3, last_row) else thin
+            top = thick if r == header_row else thin
+            if r == header_row or r == last_row:
+                bottom = thick
+            else:
+                bottom = thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.freeze_panes = "B4"
-    ws.auto_filter.ref = f"A3:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "B6"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
 
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = "system_tasks_active.xlsx" if active_only else "system_tasks_all.xlsx"
+    today = datetime.now().date()
+    filename = f"SYSTEM_TASKS_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}_{user_initials or 'USER'}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1498,31 +1868,35 @@ async def export_common_xlsx(
     last_col = 2 + len(week_dates)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value="COMMON VIEW")
-    title_cell.font = Font(bold=True, size=14)
+    title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.cell(row=4, column=1, value="NO")
-    ws.cell(row=4, column=2, value="LL")
+    header_day_row = 3
+    header_row = 4
+    data_start_row = 5
+
+    ws.cell(row=header_row, column=1, value="NR")
+    ws.cell(row=header_row, column=2, value="LLOJI")
     for idx, day in enumerate(week_dates):
         col = 3 + idx
-        ws.cell(row=3, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}")
-        ws.cell(row=4, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
+        ws.cell(row=header_day_row, column=col, value=f"{_day_code(day)} = {_format_excel_date(day)}".upper())
+        ws.cell(row=header_row, column=col, value="KUSH/BZ ME/DET/SI/KUR/KUJT")
 
     row_specs = [
-        ("late", "Delays"),
-        ("absent", "Absences"),
-        ("leave", "Annual Leave"),
-        ("external", "External Meetings"),
-        ("blocked", "Blocked"),
+        ("late", "VONS"),
+        ("absent", "MUNG"),
+        ("leave", "PV/FEST"),
+        ("external", "TAK EXT"),
+        ("blocked", "BLL"),
         ("oneH", "1H"),
-        ("personal", "Personal"),
+        ("personal", "P:"),
         ("r1", "R1"),
-        ("priority", "Projects"),
-        ("problem", "Problems"),
-        ("feedback", "Complaints/Requests/Proposals"),
+        ("priority", "PRJK"),
+        ("problem", "PRBL"),
+        ("feedback", "ANK/KRK/PRZ"),
     ]
 
-    start_row = 5
+    start_row = data_start_row
     for idx, (key, label) in enumerate(row_specs, start=1):
         row_idx = start_row + idx - 1
         ws.cell(row=row_idx, column=1, value=idx)
@@ -1538,55 +1912,582 @@ async def export_common_xlsx(
         ws.column_dimensions[get_column_letter(col)].width = 28
 
     ws.row_dimensions[1].height = 24
-    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[2].height = 6
     ws.row_dimensions[3].height = 22
     ws.row_dimensions[4].height = 20
 
     header_font = Font(bold=True)
     label_font = Font(bold=True)
     for col in range(1, 3 + len(week_dates)):
-        cell = ws.cell(row=3, column=col)
+        cell = ws.cell(row=header_day_row, column=col)
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        cell = ws.cell(row=4, column=col)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        cell.number_format = "@"
+        cell = ws.cell(row=header_row, column=col)
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        cell.number_format = "@"
 
     last_row = start_row + len(row_specs) - 1
     for row in range(start_row, last_row + 1):
-        ws.cell(row=row, column=1).font = label_font
+        ws.cell(row=row, column=1).font = Font(bold=True)
         ws.cell(row=row, column=2).font = label_font
         for col in range(1, last_col + 1):
             cell = ws.cell(row=row, column=col)
-            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
     thin = Side(style="thin", color="000000")
     thick = Side(style="medium", color="000000")
-    for r in range(1, last_row + 1):
+    table_top = header_day_row
+    for r in range(table_top, last_row + 1):
         for c in range(1, last_col + 1):
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 1 else thin
+            top = thick if r == table_top else thin
             bottom = thick if r == last_row else thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    for r in (3, 4):
+    for r in range(header_day_row, header_row + 1):
         for c in range(1, last_col + 1):
             cell = ws.cell(row=r, column=c)
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
-            top = thick if r == 3 else thin
-            bottom = thick if r == 4 else thin
+            top = thick if r == header_day_row else thin
+            bottom = thick if r == header_row else thin
             cell.border = Border(left=left, right=right, top=top, bottom=bottom)
 
-    ws.auto_filter.ref = f"A4:{get_column_letter(last_col)}{last_row}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
 
-    ws.freeze_panes = "C3"
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_day_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
 
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = f"common_view_{week_dates[0].isoformat()}.xlsx"
+    filename_date = f"{week_dates[0].day:02d}_{week_dates[0].month:02d}_{str(week_dates[0].year)[-2:]}"
+    initials_value = user_initials or "USER"
+    filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/weekly-planner.xlsx")
+async def export_weekly_planner_xlsx(
+    week_start: date | None = None,
+    department_id: uuid.UUID | None = None,
+    is_this_week: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if department_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id is required")
+
+    data = await weekly_table_planner(
+        week_start=week_start,
+        department_id=department_id,
+        is_this_week=is_this_week,
+        db=db,
+        user=user,
+    )
+
+    if not data.departments:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No weekly planner data found")
+
+    dept = data.departments[0]
+    dept_label = _display_department_name(dept.department_name)
+    week_start_date = data.week_start
+    week_end_date = data.week_end
+
+    # Add "THIS WEEK PLAN" or "NEXT WEEK PLAN" label
+    week_label = "THIS WEEK PLAN" if is_this_week else "NEXT WEEK PLAN"
+    title_label = f"{dept_label} {week_start_date.day:02d}-{week_start_date.month:02d}-{week_start_date.year} - {week_end_date.day:02d}-{week_end_date.month:02d}-{week_end_date.year} - {week_label}"
+    title_upper = title_label.upper()
+
+    # Collect users in stable order
+    user_map: dict[uuid.UUID, str] = {}
+    for day in dept.days:
+        for user_day in day.users:
+            user_map.setdefault(user_day.user_id, user_day.user_name or "")
+    user_ids = list(user_map.keys())
+    user_names = [user_map[user_id] for user_id in user_ids]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = dept_label[:31] if dept_label else "Weekly Planner"
+
+    status_fills = {
+        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+    }
+
+    last_col = 4 + len(user_names)  # NR, DAY, LL, TIME + users
+
+    # Title row
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_upper)
+    title_cell.font = Font(bold=True, size=12)  # Reduced from 16 to help fit on one page
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Reduced row heights to help fit on one page when printing
+    ws.row_dimensions[1].height = 18
+    ws.row_dimensions[2].height = 4
+    ws.row_dimensions[3].height = 4
+
+    header_row = 4
+    data_start_row = 5
+    ws.row_dimensions[header_row].height = 15
+
+    headers = ["NR", "DAY", "LLOJI", "TIME"] + [name.upper() for name in user_names]
+    for col_idx, label in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+    # Column widths
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 6
+    ws.column_dimensions["D"].width = 6
+    for idx in range(5, last_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 28
+
+    # Fill data rows (expand rows so each task can be colored by status)
+    current_row = data_start_row
+    for day_index, day in enumerate(dept.days, start=1):
+        day_name = DAY_NAMES[day_index - 1].upper() if 0 <= day_index - 1 < len(DAY_NAMES) else ""
+        day_date = f"{day.date.day:02d}-{day.date.month:02d}-{day.date.year}"
+        day_label = f"{day_name}\n{day_date}".strip()
+
+        slot_specs = [
+            ("PRJK", "AM", False),
+            ("FT", "AM", True),
+            ("PRJK", "PM", False),
+            ("FT", "PM", True),
+        ]
+
+        slot_rows: list[dict[str, object]] = []
+        for ll_label, time_label, include_fast in slot_specs:
+            per_user_items: list[list[dict[str, str | None]]] = []
+            max_items = 0
+            for user_id in user_ids:
+                user_day = next((u for u in day.users if u.user_id == user_id), None)
+                projects = []
+                system_tasks = []
+                fast_tasks = []
+                if user_day:
+                    if time_label == "AM":
+                        projects = user_day.am_projects or []
+                        system_tasks = user_day.am_system_tasks or []
+                        fast_tasks = user_day.am_fast_tasks or []
+                    else:
+                        projects = user_day.pm_projects or []
+                        system_tasks = user_day.pm_system_tasks or []
+                        fast_tasks = user_day.pm_fast_tasks or []
+
+                if include_fast:
+                    projects = []
+                    system_tasks = []
+
+                items = _planner_cell_items(
+                    projects=projects,
+                    system_tasks=system_tasks,
+                    fast_tasks=fast_tasks,
+                    include_fast=include_fast,
+                    day_date=day.date,
+                )
+                per_user_items.append(items)
+                max_items = max(max_items, len(items))
+
+            slot_rows.append(
+                {
+                    "ll_label": ll_label,
+                    "time_label": time_label,
+                    "include_fast": include_fast,
+                    "row_count": max(1, max_items),
+                    "per_user_items": per_user_items,
+                }
+            )
+
+        total_day_rows = sum(slot["row_count"] for slot in slot_rows)
+        base_row = current_row
+
+        # Merge NR and DAY across all rows for this day
+        ws.merge_cells(start_row=base_row, start_column=1, end_row=base_row + total_day_rows - 1, end_column=1)
+        ws.merge_cells(start_row=base_row, start_column=2, end_row=base_row + total_day_rows - 1, end_column=2)
+        nr_cell = ws.cell(row=base_row, column=1, value=day_index)
+        nr_cell.font = Font(bold=True)
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        day_cell = ws.cell(row=base_row, column=2, value=day_label)
+        day_cell.font = Font(bold=True)
+        day_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+        row_cursor = base_row
+        for slot in slot_rows:
+            slot_start = row_cursor
+            row_count = slot["row_count"]
+            ll_label = slot["ll_label"]
+            time_label = slot["time_label"]
+            per_user_items = slot["per_user_items"]
+
+            if row_count > 1:
+                ws.merge_cells(start_row=slot_start, start_column=3, end_row=slot_start + row_count - 1, end_column=3)
+                ws.merge_cells(start_row=slot_start, start_column=4, end_row=slot_start + row_count - 1, end_column=4)
+
+            ll_cell = ws.cell(row=slot_start, column=3, value=ll_label)
+            ll_cell.font = Font(bold=True)
+            ll_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+            time_cell = ws.cell(row=slot_start, column=4, value=time_label)
+            time_cell.font = Font(bold=True)
+            time_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+
+            for offset in range(row_count):
+                row_idx = slot_start + offset
+                for u_idx, _ in enumerate(user_ids):
+                    items = per_user_items[u_idx]
+                    item = items[offset] if offset < len(items) else None
+                    cell_value = _planner_item_rich_text(item) if item else ""
+                    cell = ws.cell(row=row_idx, column=5 + u_idx, value=cell_value)
+                    cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+                    if item and item.get("status") in status_fills:
+                        cell.fill = status_fills[item["status"]]
+
+            row_cursor += row_count
+
+        current_row = base_row + total_day_rows
+
+    last_row = current_row - 1
+
+    # Borders
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    # Header row thicker outline
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=header_row, column=c)
+        cell.border = Border(
+            left=thick if c == 1 else thin,
+            right=thick if c == last_col else thin,
+            top=thick,
+            bottom=thick,
+        )
+
+    # Alignment and formats
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            if not cell.alignment:
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+            else:
+                cell.alignment = Alignment(
+                    horizontal=cell.alignment.horizontal or "left",
+                    vertical="bottom",
+                    wrap_text=True,
+                )
+
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    # Minimal margins to maximize printable area for fitting on one page
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.1
+    ws.page_margins.bottom = 0.1
+    ws.page_margins.header = 0.1
+    ws.page_margins.footer = 0.1
+    # Force fit to exactly 1 page (width and height) - Excel will scale down as needed
+    # This is the key setting to ensure everything fits on one page
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    # Number column formatting
+    for r in range(data_start_row, last_row + 1):
+        cell = ws.cell(row=r, column=1)
+        cell.number_format = "#,##0"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    initials_value = user_initials or "USER"
+    filename_title = _safe_filename(title_upper)
+    filename = f"{filename_title}_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/ga-notes.xlsx")
+async def export_ga_notes_xlsx(
+    department_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Export GA/KA notes to Excel"""
+    from datetime import timedelta
+    from app.models.enums import GaNoteStatus
+    
+    # Build query
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    closed_cutoff = datetime.utcnow() - timedelta(days=5)
+    
+    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
+    
+    # Exclude closed notes that are older than 5 days
+    stmt = stmt.where(
+        or_(
+            GaNote.status != GaNoteStatus.CLOSED,
+            GaNote.completed_at.is_(None),
+            GaNote.completed_at >= closed_cutoff,
+        )
+    )
+    
+    if project_id is not None:
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        stmt = stmt.where(GaNote.project_id == project_id)
+    elif department_id is not None:
+        ensure_department_access(user, department_id)
+        stmt = stmt.where(GaNote.department_id == department_id)
+    elif user.role == UserRole.STAFF:
+        # STAFF users can only see their department's notes
+        if user.department_id:
+            stmt = stmt.where(GaNote.department_id == user.department_id)
+    
+    notes = (await db.execute(stmt)).scalars().all()
+    
+    # Get related data
+    user_ids = {n.created_by for n in notes if n.created_by}
+    department_ids = {n.department_id for n in notes if n.department_id}
+    project_ids = {n.project_id for n in notes if n.project_id}
+    
+    users_map = {}
+    if user_ids:
+        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users_map = {u.id: u for u in users}
+    
+    departments_map = {}
+    if department_ids:
+        departments = (await db.execute(select(Department).where(Department.id.in_(department_ids)))).scalars().all()
+        departments_map = {d.id: d for d in departments}
+    
+    projects_map = {}
+    if project_ids:
+        projects = (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()
+        projects_map = {p.id: p for p in projects}
+    
+    # Helper functions
+    def get_user_initials(user_id: uuid.UUID | None) -> str:
+        if not user_id or user_id not in users_map:
+            return "-"
+        u = users_map[user_id]
+        return _initials(u.full_name or u.username or "")
+    
+    def get_department_abbrev(dept_id: uuid.UUID | None) -> str:
+        if not dept_id or dept_id not in departments_map:
+            return "-"
+        dept_name = departments_map[dept_id].name
+        key = dept_name.strip().upper()
+        return {
+            "DEVELOPMENT": "DEV",
+            "GRAPHIC DESIGN": "GDS",
+            "PRODUCT CONTENT": "PCM",
+            "PROJECT CONTENT": "PCM",
+        }.get(key, dept_name[:3].upper() if dept_name else "-")
+    
+    def format_note_date(dt: datetime | None) -> str:
+        if not dt:
+            return "-"
+        return dt.strftime("%d.%m, %I:%M %p")
+    
+    # Build rows
+    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "DEP", "PRJK", "KRIJO DETYRE", "MBYLL SHENIM"]
+    rows = []
+    
+    for idx, note in enumerate(notes, start=1):
+        creator_initials = get_user_initials(note.created_by)
+        dept_abbrev = get_department_abbrev(note.department_id) if note.department_id else "-"
+        project_name = "-"
+        if note.project_id and note.project_id in projects_map:
+            p = projects_map[note.project_id]
+            project_name = p.title or p.name or "Project"
+        
+        task_status = "Task Created" if note.is_converted_to_task else "No Task"
+        note_status = "Closed" if note.status == GaNoteStatus.CLOSED else "Open"
+        
+        # Clean content (remove HTML if any)
+        content = _strip_html(note.content) if note.content else ""
+        
+        rows.append([
+            str(idx),
+            content,
+            format_note_date(note.created_at),
+            creator_initials,
+            dept_abbrev,
+            project_name,
+            task_status,
+            note_status,
+        ])
+    
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "GA-KA Notes"
+    
+    # Define border styles
+    thin = Side(style="thin", color="475569")
+    thick = Side(style="thick", color="1e293b")
+    
+    # Title row (row 1)
+    title_row = 1
+    last_col = len(headers)
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
+    title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+    
+    # Empty row 2 for spacing
+    # Header row (row 3, but we'll use row 3 as header_row variable)
+    header_row = 3
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header.upper())
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        # Thick outside borders for header
+        left_border = thick if col_idx == 1 else thin
+        right_border = thick if col_idx == last_col else thin
+        top_border = thick
+        bottom_border = thick
+        cell.border = Border(left=left_border, right=right_border, top=top_border, bottom=bottom_border)
+    
+    # Data rows (starting from row 4)
+    last_row = header_row + len(rows)
+    for row_idx, row_data in enumerate(rows, start=header_row + 1):
+        for col_idx, value in enumerate(row_data, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+            # Bold for NR column
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+            # Thick outside borders
+            left_border = thick if col_idx == 1 else thin
+            right_border = thick if col_idx == last_col else thin
+            top_border = thin
+            bottom_border = thick if row_idx == last_row else thin
+            cell.border = Border(left=left_border, right=right_border, top=top_border, bottom=bottom_border)
+    
+    # Column widths
+    ws.column_dimensions["A"].width = 5  # NR
+    ws.column_dimensions["B"].width = 50  # SHENIMI
+    ws.column_dimensions["C"].width = 18  # DATA,ORA
+    ws.column_dimensions["D"].width = 8   # NGA
+    ws.column_dimensions["E"].width = 8   # DEP
+    ws.column_dimensions["F"].width = 20  # PRJK
+    ws.column_dimensions["G"].width = 15  # KRIJO DETYRE
+    ws.column_dimensions["H"].width = 15  # MBYLL SHENIM
+    
+    # Freeze panes: freeze column A (NR) and header row
+    ws.freeze_panes = "B4"
+    
+    # Auto filter for all columns
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    
+    # Page setup and margins
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    
+    # Headers and footers
+    now = datetime.now(timezone.utc)
+    date_str = now.strftime("%d.%m.%Y")
+    time_str = now.strftime("%I:%M %p")
+    ws.oddHeader.right.text = f"{date_str}, {time_str}"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "") or "USER"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials}"
+    
+    # Apply to even and first pages as well
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+    
+    # Print title rows (repeat header on each page)
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    
+    # Save to bytes
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    
+    # Generate filename: TITLE DD_MM_YY_EF (USER INITIALS) in uppercase
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename = f"GA/KA NOTES {filename_date}_EF ({user_initials}).xlsx"
+    
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

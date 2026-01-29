@@ -839,7 +839,13 @@ export default function PcmProjectPage() {
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const [startDateDialogOpen, setStartDateDialogOpen] = React.useState(false)
+  const [editStartDateDialogOpen, setEditStartDateDialogOpen] = React.useState(false)
+  const [selectedStartDate, setSelectedStartDate] = React.useState("")
+  const [savingStartDate, setSavingStartDate] = React.useState(false)
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const canEditDueDate = isAdmin || isManager
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -847,6 +853,22 @@ export default function PcmProjectPage() {
       setEditProjectDueDate(toDateInput(project.due_date))
     }
   }, [editProjectDueDateOpen, project?.due_date])
+
+  // Sync the start date when dialog opens
+  React.useEffect(() => {
+    if (startDateDialogOpen) {
+      // Default to today's date if no start date is set
+      const defaultDate = project?.start_date ? toDateInput(project.start_date) : toDateInput(new Date().toISOString())
+      setSelectedStartDate(defaultDate)
+    }
+  }, [startDateDialogOpen, project?.start_date])
+
+  // Sync the start date when edit dialog opens
+  React.useEffect(() => {
+    if (editStartDateDialogOpen && project?.start_date) {
+      setSelectedStartDate(toDateInput(project.start_date))
+    }
+  }, [editStartDateDialogOpen, project?.start_date])
 
   // Dialog component for editing project due date
   const renderEditDueDateDialog = () => (
@@ -899,6 +921,124 @@ export default function PcmProjectPage() {
               }}
             >
               {savingProjectDueDate ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  // Dialog component for setting project start date
+  const renderStartDateDialog = () => (
+    <Dialog open={startDateDialogOpen} onOpenChange={setStartDateDialogOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Set Project Start Date</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Input
+              type="date"
+              value={selectedStartDate}
+              onChange={(e) => setSelectedStartDate(normalizeDueDateInput(e.target.value))}
+            />
+            <p className="text-xs text-muted-foreground">
+              All task dates will be calculated automatically based on this start date.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setStartDateDialogOpen(false)} disabled={savingStartDate}>
+              Cancel
+            </Button>
+            <Button
+              disabled={savingStartDate || !selectedStartDate.trim()}
+              onClick={async () => {
+                if (!project || !selectedStartDate.trim()) return
+                setSavingStartDate(true)
+                try {
+                  const startDateValue = new Date(selectedStartDate).toISOString()
+                  const res = await apiFetch(`/projects/${project.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ start_date: startDateValue }),
+                  })
+                  if (!res.ok) {
+                    toast.error("Failed to set project start date")
+                    return
+                  }
+                  const updated = (await res.json()) as Project
+                  setProject(updated)
+                  setStartDateDialogOpen(false)
+                  toast.success("Project start date set! Task dates will be calculated automatically.")
+                } catch (err) {
+                  console.error("Failed to set project start date", err)
+                  toast.error("Failed to set project start date")
+                } finally {
+                  setSavingStartDate(false)
+                }
+              }}
+            >
+              {savingStartDate ? "Saving..." : "Set Start Date"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  // Dialog component for editing project start date (admin only)
+  const renderEditStartDateDialog = () => (
+    <Dialog open={editStartDateDialogOpen} onOpenChange={setEditStartDateDialogOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Project Start Date</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Input
+              type="date"
+              value={selectedStartDate}
+              onChange={(e) => setSelectedStartDate(normalizeDueDateInput(e.target.value))}
+            />
+            <p className="text-xs text-muted-foreground">
+              All task dates will be recalculated automatically based on this start date.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditStartDateDialogOpen(false)} disabled={savingStartDate}>
+              Cancel
+            </Button>
+            <Button
+              disabled={savingStartDate || !selectedStartDate.trim()}
+              onClick={async () => {
+                if (!project || !selectedStartDate.trim()) return
+                setSavingStartDate(true)
+                try {
+                  const startDateValue = new Date(selectedStartDate).toISOString()
+                  const res = await apiFetch(`/projects/${project.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ start_date: startDateValue }),
+                  })
+                  if (!res.ok) {
+                    toast.error("Failed to update project start date")
+                    return
+                  }
+                  const updated = (await res.json()) as Project
+                  setProject(updated)
+                  setEditStartDateDialogOpen(false)
+                  toast.success("Project start date updated! Task dates will be recalculated automatically.")
+                } catch (err) {
+                  console.error("Failed to update project start date", err)
+                  toast.error("Failed to update project start date")
+                } finally {
+                  setSavingStartDate(false)
+                }
+              }}
+            >
+              {savingStartDate ? "Saving..." : "Save"}
             </Button>
           </div>
         </div>
@@ -1562,6 +1702,11 @@ export default function PcmProjectPage() {
 
   React.useEffect(() => {
     if (!isVsVl || !project?.id) return
+    
+    // Use project.start_date as the base date for calculating all task dates
+    const baseDate = project.start_date
+    if (!baseDate) return
+
     const baseTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.base)
     if (baseTask?.dependency_task_id) {
       void (async () => {
@@ -1575,9 +1720,7 @@ export default function PcmProjectPage() {
         setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       })()
     }
-    if (!baseTask?.due_date) return
 
-    const baseDate = baseTask.due_date
     const templateTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.template)
     const pricesTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.prices)
     const photosTask = findVsVlTask(tasks, VS_VL_TASK_TITLES.photos)
@@ -1590,7 +1733,7 @@ export default function PcmProjectPage() {
 
     const updates: Array<{ task: Task; patch: Record<string, unknown> }> = []
 
-    if (baseTask.dependency_task_id) {
+    if (baseTask?.dependency_task_id) {
       updates.push({ task: baseTask, patch: { dependency_task_id: null } })
     }
 
@@ -1614,10 +1757,14 @@ export default function PcmProjectPage() {
       }
     }
 
-    applyRule(templateTask, 2, baseTask.id)
+    // Base task (ANALIZIMI) should be on day 0 (project start date)
+    if (baseTask) {
+      applyRule(baseTask, 0, null)
+    }
+    applyRule(templateTask, 2, baseTask?.id)
     applyRule(pricesTask, 3, null)
     applyRule(photosTask, 3, null)
-    applyRule(ko1Task, 4, baseTask.id)
+    applyRule(ko1Task, 4, baseTask?.id)
     if (ko2Task && ko1Task) {
       applyRule(ko2Task, 4, ko1Task.id)
     } else {
@@ -1653,7 +1800,7 @@ export default function PcmProjectPage() {
     return () => {
       cancelled = true
     }
-  }, [apiFetch, isVsVl, project?.id, tasks])
+  }, [apiFetch, isVsVl, project?.id, project?.start_date, tasks])
 
   React.useEffect(() => {
     if (!prompts.length) return
@@ -2960,29 +3107,28 @@ export default function PcmProjectPage() {
               <div className="flex items-center gap-3">
               {!project?.is_template ? (
                 project?.start_date ? (
-                  <div className="text-xs text-slate-500">
-                    Started: {new Date(project.start_date).toLocaleDateString()}
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-slate-500">
+                      Started: {new Date(project.start_date).toLocaleDateString()}
+                    </div>
+                    {isAdmin && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-6 w-6 p-0"
+                        onClick={() => setEditStartDateDialogOpen(true)}
+                        title="Edit start date (Admin only)"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
                     className="text-xs h-7"
-                    onClick={async () => {
-                      if (!project) return
-                      const res = await apiFetch(`/projects/${project.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ start_date: new Date().toISOString() }),
-                      })
-                      if (res.ok) {
-                        const updated = (await res.json()) as Project
-                        setProject(updated)
-                        toast.success("Project started!")
-                      } else {
-                        toast.error("Failed to start project")
-                      }
-                    }}
+                    onClick={() => setStartDateDialogOpen(true)}
                   >
                     Start Project
                   </Button>
@@ -3005,12 +3151,12 @@ export default function PcmProjectPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <span className="text-3xl font-semibold">{title}</span>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
+                  {canEditDueDate && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
                       console.log("Set due date clicked", { project: project?.id, due_date: project?.due_date, isAdmin })
                       const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
                       console.log("Setting due date to:", currentDueDate)
@@ -3027,9 +3173,9 @@ export default function PcmProjectPage() {
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
                 )}
-                {!isAdmin && project.due_date && (
-                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
-                )}
+                  {!canEditDueDate && project.due_date && (
+                    <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                  )}
                 {project?.is_template && (
                   <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                 )}
@@ -4612,6 +4758,8 @@ export default function PcmProjectPage() {
         )}
         </div>
         {renderEditDueDateDialog()}
+        {renderStartDateDialog()}
+        {renderEditStartDateDialog()}
       </>
     )
   }
@@ -5288,7 +5436,7 @@ export default function PcmProjectPage() {
               </button>
               <div className="flex items-center gap-3">
                 <div className="text-3xl font-semibold">{title}</div>
-                {isAdmin && (
+                {canEditDueDate && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -5304,7 +5452,7 @@ export default function PcmProjectPage() {
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
                 )}
-                {!isAdmin && project.due_date && (
+                {!canEditDueDate && project.due_date && (
                   <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
                 )}
               </div>
@@ -6243,7 +6391,7 @@ export default function PcmProjectPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2 font-semibold" title={row.detyrat}>
+                              <div className="col-span-2 min-w-0 font-semibold" title={row.detyrat}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.detyrat}
@@ -6251,8 +6399,10 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="flex-1 whitespace-normal break-words">{row.detyrat}</span>
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="flex-1 whitespace-normal break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.detyrat}
+                                    </span>
                                     {row.detyrat && row.detyrat.length > 20 && (
                                       <Button
                                         size="icon"
@@ -6267,7 +6417,7 @@ export default function PcmProjectPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2" title={row.keywords}>
+                              <div className="col-span-2 min-w-0" title={row.keywords}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.keywords}
@@ -6276,7 +6426,7 @@ export default function PcmProjectPage() {
                                   />
                                 ) : (
                                   <div
-                                    className="flex items-start gap-1"
+                                    className="flex items-start gap-1 min-w-0"
                                     role="button"
                                     tabIndex={0}
                                     onClick={() => {
@@ -7143,6 +7293,8 @@ export default function PcmProjectPage() {
         )}
         </div>
         {renderEditDueDateDialog()}
+        {renderStartDateDialog()}
+        {renderEditStartDateDialog()}
       </>
     )
   }
@@ -7155,23 +7307,27 @@ export default function PcmProjectPage() {
           <div className="mt-3 flex items-center gap-3">
             <span className="text-3xl font-semibold">{title}</span>
             {isAdmin && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
-                  setEditProjectDueDate(currentDueDate)
-                  setEditProjectDueDateOpen(true)
-                }}
-                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
-                title="Edit project due date"
-              >
-                {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
-              </button>
-            )}
-            {!isAdmin && project.due_date && (
-              <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+              <>
+                {canEditDueDate && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
+                      setEditProjectDueDate(currentDueDate)
+                      setEditProjectDueDateOpen(true)
+                    }}
+                    className="text-sm text-muted-foreground hover:text-foreground cursor-pointer underline"
+                    title="Edit project due date"
+                  >
+                    {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
+                  </button>
+                )}
+                {!canEditDueDate && project.due_date && (
+                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                )}
+              </>
             )}
             {project?.is_template && (
               <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>

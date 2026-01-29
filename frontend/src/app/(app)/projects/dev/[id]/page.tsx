@@ -263,6 +263,8 @@ export default function DevelopmentProjectPage() {
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const canEditDueDate = isAdmin || isManager
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -1168,7 +1170,7 @@ export default function DevelopmentProjectPage() {
                   </button>
                   <div className="flex items-center gap-3 mb-4">
                     <h1 className="text-4xl font-bold text-slate-800 tracking-tight">{title}</h1>
-                    {isAdmin && (
+                    {canEditDueDate && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1181,7 +1183,7 @@ export default function DevelopmentProjectPage() {
                         {project.due_date ? `Due: ${new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}` : "Set due date"}
                       </button>
                     )}
-                    {!isAdmin && project.due_date && (
+                    {!canEditDueDate && project.due_date && (
                       <span className="text-sm text-slate-600">Due: {new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}</span>
                     )}
                   </div>

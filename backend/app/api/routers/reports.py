@@ -211,6 +211,9 @@ async def daily_report(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
                 title=tmpl.title,
+                frequency=tmpl.frequency,
+                department_id=tmpl.department_id,
+                scope=tmpl.scope,
                 occurrence_date=occ.occurrence_date,
                 status=occ.status,
                 comment=occ.comment,
@@ -220,13 +223,21 @@ async def daily_report(
             )
         )
 
+    today_template_ids = {tmpl.id for _, tmpl in occ_today_rows}
+    seen_templates: set[uuid.UUID] = set()
     system_overdue: list[DailyReportSystemOccurrence] = []
     for occ, tmpl in occ_overdue_rows:
+        if tmpl.id in today_template_ids or tmpl.id in seen_templates:
+            continue
+        seen_templates.add(tmpl.id)
         late_days = (day - occ.occurrence_date).days
         system_overdue.append(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
                 title=tmpl.title,
+                frequency=tmpl.frequency,
+                department_id=tmpl.department_id,
+                scope=tmpl.scope,
                 occurrence_date=occ.occurrence_date,
                 status=occ.status,
                 comment=occ.comment,

@@ -27,6 +27,7 @@ export interface SystemTaskTemplate {
   internal_notes?: string | null
   department_id?: string | null
   default_assignee_id?: string | null
+  created_by?: string | null
   assignees?: TaskAssignee[] | null
   scope: SystemTaskScope
   frequency: SystemTaskFrequency
@@ -183,6 +184,9 @@ export interface DailyReportTaskItem {
 export interface DailyReportSystemOccurrence {
   template_id: string
   title: string
+  frequency?: string | null
+  department_id?: string | null
+  scope?: SystemTaskScope | null
   occurrence_date: string
   status: DailyReportSystemOccurrenceStatus
   comment?: string | null

@@ -306,6 +306,8 @@ export default function DesignProjectPage() {
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
 
   const isAdmin = user?.role === "ADMIN"
+  const isManager = user?.role === "MANAGER"
+  const canEditDueDate = isAdmin || isManager
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -1422,7 +1424,7 @@ export default function DesignProjectPage() {
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
           <div className="mt-3 flex items-center gap-3">
             <div className="text-3xl font-semibold">{title}</div>
-            {isAdmin && (
+            {canEditDueDate && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1438,7 +1440,7 @@ export default function DesignProjectPage() {
                 {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
               </button>
             )}
-            {!isAdmin && project.due_date && (
+            {!canEditDueDate && project.due_date && (
               <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
             )}
           </div>

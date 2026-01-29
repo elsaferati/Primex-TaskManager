@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
@@ -323,6 +324,22 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function formatMeetingDateTime(meeting: Meeting): string {
+  if (!meeting.starts_at) return "-"
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return "-"
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const dateLabel = sameDay
+    ? "Today"
+    : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return `${dateLabel} ${timeLabel}`
+}
+
 function formatMsEventWindow(event: MicrosoftEvent) {
   if (!event.starts_at) return "Time not set"
   const start = new Date(event.starts_at)
@@ -573,6 +590,10 @@ export default function DepartmentKanban() {
   const isTabId = Boolean(normalizedTab && TABS.some((tab) => tab.id === normalizedTab))
   const returnToTasks = `${pathname}?tab=no-project`
   const printedAt = React.useMemo(() => new Date(), [])
+  const printInitials = React.useMemo(
+    () => initials(user?.full_name || user?.username || ""),
+    [user?.full_name, user?.username]
+  )
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
@@ -582,6 +603,7 @@ export default function DepartmentKanban() {
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+  const [pendingPrint, setPendingPrint] = React.useState(false)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
@@ -607,6 +629,8 @@ export default function DepartmentKanban() {
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [allUsersDailyReports, setAllUsersDailyReports] = React.useState<Map<string, DailyReportResponse>>(new Map())
+  const [loadingAllUsersDailyReports, setLoadingAllUsersDailyReports] = React.useState(false)
   const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
   const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
@@ -627,6 +651,10 @@ export default function DepartmentKanban() {
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
+  const departmentCode = React.useMemo(
+    () => (department?.code || department?.name || departmentName || "DEV").toUpperCase(),
+    [department?.code, department?.name, departmentName]
+  )
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
   const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
@@ -648,6 +676,7 @@ export default function DepartmentKanban() {
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
   const [meetingProjectId, setMeetingProjectId] = React.useState("__none__")
   const [creatingMeeting, setCreatingMeeting] = React.useState(false)
+  const [showAddMeetingForm, setShowAddMeetingForm] = React.useState(false)
   const [editingMeetingId, setEditingMeetingId] = React.useState<string | null>(null)
   const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
   const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
@@ -760,7 +789,7 @@ export default function DepartmentKanban() {
       if (!container) return
       const dpi = 96
       const measuredHeight = printMeasureRef.current?.offsetHeight
-      const pageHeightPx = measuredHeight ?? (11 * dpi - (0.36 + 0.51) * dpi)
+      const pageHeightPx = measuredHeight ?? (8.5 * dpi - (0.25 + 0.35) * dpi)
       const footerOffsetPx = 0.2 * dpi
       const totalPages = Math.max(1, Math.ceil(container.scrollHeight / pageHeightPx))
       const markers = Array.from({ length: totalPages }, (_, index) => ({
@@ -942,10 +971,14 @@ export default function DepartmentKanban() {
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
     if (viewMode === "mine" && user?.id) {
-      return projects.filter((p) => p.manager_id === user.id)
+      return projects.filter((p) => {
+        if (p.manager_id === user.id) return true
+        const members = projectMembers[p.id] || []
+        return members.some((m) => m.id === user.id)
+      })
     }
     return projects
-  }, [projects, user?.id, viewMode])
+  }, [projects, projectMembers, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
     () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
@@ -1062,6 +1095,7 @@ export default function DepartmentKanban() {
       typeLabel: string
       subtype: string
       period: string
+      department: string
       title: string
       description: string
       status: string
@@ -1069,6 +1103,7 @@ export default function DepartmentKanban() {
       kohaBz: string
       tyo: string
       comment?: string | null
+      userInitials?: string
       taskId?: string
       systemTemplateId?: string
       systemOccurrenceDate?: string
@@ -1140,6 +1175,7 @@ export default function DepartmentKanban() {
         typeLabel: "SYS",
         subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
         period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
+        department: departmentCode,
         title: occ.title || "-",
         description: tmpl?.description || "-",
         status: formatSystemOccurrenceStatus(occ.status),
@@ -1153,6 +1189,7 @@ export default function DepartmentKanban() {
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
         comment: occ.comment ?? null,
+        userInitials: printInitials,
         systemTemplateId: occ.template_id,
         systemOccurrenceDate: occ.occurrence_date,
         systemStatus: occ.status,
@@ -1173,6 +1210,7 @@ export default function DepartmentKanban() {
         typeLabel: "SYS",
         subtype: systemFrequencyShortLabel(tmpl.frequency),
         period: resolvePeriod(tmpl.finish_period, todayIso),
+        department: departmentCode,
         title: tmpl.title || "-",
         description: tmpl.description || "-",
         status: tmpl.status ? (STATUS_LABELS[tmpl.status] || tmpl.status) : "-",
@@ -1186,6 +1224,7 @@ export default function DepartmentKanban() {
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
         comment: occ?.comment ?? null,
+        userInitials: printInitials,
         systemTemplateId: templateId,
         systemOccurrenceDate: occ?.occurrence_date || todayIso,
         systemStatus: occ?.status || "OPEN",
@@ -1201,6 +1240,7 @@ export default function DepartmentKanban() {
           typeLabel: "FT",
           subtype: fastReportSubtypeShort(task),
           period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
+          department: departmentCode,
           title: task.title || "-",
           description: task.description || "-",
           status: taskStatusLabel(task),
@@ -1208,6 +1248,7 @@ export default function DepartmentKanban() {
           kohaBz: "-",
           tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
           comment: task.user_comment ?? null,
+          userInitials: printInitials,
           taskId: task.id,
         },
       })
@@ -1222,6 +1263,7 @@ export default function DepartmentKanban() {
         typeLabel: "PRJK",
         subtype: "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        department: departmentCode,
         title: `${projectLabel} - ${task.title || "-"}`,
         description: task.description || "-",
         status: taskStatusLabel(task),
@@ -1229,6 +1271,7 @@ export default function DepartmentKanban() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
         comment: task.user_comment ?? null,
+        userInitials: printInitials,
         taskId: task.id,
       })
     }
@@ -1251,7 +1294,192 @@ export default function DepartmentKanban() {
     todayIso,
     todaySystemTasks,
     userMap,
+    departmentCode,
+    printInitials,
   ])
+
+  // Helper function to convert DailyReportResponse to rows for print view
+  const convertDailyReportToRows = React.useCallback(
+    (report: DailyReportResponse, userId: string): Array<{
+      typeLabel: string
+      subtype: string
+      period: string
+      department: string
+      title: string
+      description: string
+      status: string
+      bz: string
+      kohaBz: string
+      tyo: string
+      comment?: string | null
+      userInitials: string
+      taskId?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      systemStatus?: string
+    }> => {
+      const rows: ReturnType<typeof convertDailyReportToRows> = []
+      const systemAmRows: typeof rows = []
+      const systemPmRows: typeof rows = []
+      const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
+      const projectRows: typeof rows = []
+      let fastIndex = 0
+      const reportUser = userMap.get(userId)
+      const rowUserInitials = initials(reportUser?.full_name || reportUser?.username || "")
+
+      const pushSystemRow = (row: (typeof rows)[number]) => {
+        if (row.period === "PM") {
+          systemPmRows.push(row)
+          return
+        }
+        systemAmRows.push(row)
+      }
+
+      const fastTypeOrder = (task: Task) => {
+        const label = noProjectTypeLabel(task)
+        if (label === "BLLOK") return 0
+        if (label === "1H") return 1
+        if (label === "Personal") return 2
+        if (label === "R1") return 3
+        if (label === "Normal") return 4
+        return 5
+      }
+
+      // Process system tasks
+      const allSystemOccurrences = [
+        ...(report.system_today || []),
+        ...(report.system_overdue || []),
+      ]
+      const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
+      for (const occ of report.system_today || []) {
+        systemTodayByTemplate.set(occ.template_id, occ)
+      }
+
+      for (const occ of allSystemOccurrences) {
+        const tmpl = systemTemplateById.get(occ.template_id) || null
+        const baseDate = toDate(occ.occurrence_date)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
+        const alignmentEnabled = Boolean(
+          tmpl?.requires_alignment ||
+          tmpl?.alignment_time ||
+          (tmpl?.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+          (tmpl?.alignment_roles && tmpl.alignment_roles.length)
+        )
+        const bzUsers = formatAlignmentUsers(tmpl?.alignment_user_ids, userMap)
+        pushSystemRow({
+          typeLabel: "SYS",
+          subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
+          period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
+          department: departmentCode,
+          title: occ.title || "-",
+          description: tmpl?.description || "-",
+          status: formatSystemOccurrenceStatus(occ.status),
+          bz: alignmentEnabled
+            ? bzUsers !== "-"
+              ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
+              : tmpl?.alignment_roles?.length
+                ? tmpl.alignment_roles.join(", ")
+              : "-"
+            : "-",
+          kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
+          tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
+          comment: occ.comment ?? null,
+          userInitials: rowUserInitials,
+          systemTemplateId: occ.template_id,
+          systemOccurrenceDate: occ.occurrence_date,
+          systemStatus: occ.status,
+        })
+      }
+
+      // Process tasks from API response
+      const allTasks = [
+        ...(report.tasks_today || []).map((item) => item.task),
+        ...(report.tasks_overdue || []).map((item) => item.task),
+      ]
+
+      for (const task of allTasks) {
+        const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+          continue
+        }
+        const isProject = Boolean(task.project_id)
+        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+        const projectLabel = project?.title || project?.name || "-"
+
+        if (isProject) {
+          projectRows.push({
+            typeLabel: "PRJK",
+            subtype: "-",
+            period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+            department: departmentCode,
+            title: `${projectLabel} - ${task.title || "-"}`,
+            description: task.description || "-",
+            status: taskStatusLabel(task),
+            bz: "-",
+            kohaBz: "-",
+            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            comment: task.user_comment ?? null,
+            userInitials: rowUserInitials,
+            taskId: task.id,
+          })
+        } else {
+          fastRows.push({
+            order: fastTypeOrder(task),
+            index: fastIndex,
+            row: {
+              typeLabel: "FT",
+              subtype: fastReportSubtypeShort(task),
+              period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+              department: departmentCode,
+              title: task.title || "-",
+              description: task.description || "-",
+              status: taskStatusLabel(task),
+              bz: "-",
+              kohaBz: "-",
+              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              comment: task.user_comment ?? null,
+              userInitials: rowUserInitials,
+              taskId: task.id,
+            },
+          })
+          fastIndex += 1
+        }
+      }
+
+      const tyoRank = (value: string) => {
+        const trimmed = value.trim()
+        if (!trimmed || trimmed === "-") return 3
+        if (trimmed === "Y") return 1
+        if (trimmed === "T") return 2
+        if (/^\d+$/.test(trimmed)) return 0
+        return 3
+      }
+      const tyoNumber = (value: string) => {
+        const trimmed = value.trim()
+        return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+      }
+      const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+        const rankA = tyoRank(a.tyo)
+        const rankB = tyoRank(b.tyo)
+        if (rankA !== rankB) return rankA - rankB
+        if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+        return 0
+      }
+
+      fastRows
+        .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
+        .forEach((entry) => rows.push(entry.row))
+      rows.push(...systemAmRows.sort(sortByTyo))
+      rows.push(...projectRows.sort(sortByTyo))
+      rows.push(...systemPmRows.sort(sortByTyo))
+
+      return rows
+    },
+    [departmentCode, projects, systemTemplateById, todayDate, userMap]
+  )
+
   const weekProjectTasks = React.useMemo(() => {
     return weekDates.map((date) => {
       return projectTasks
@@ -1734,7 +1962,76 @@ export default function DepartmentKanban() {
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
 
-  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER"
+  // Fetch daily reports for all users when showing All Today print view
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!showAllTodayPrint || !department?.id || allTodayPrintBaseUsers.length === 0) {
+        setAllUsersDailyReports(new Map())
+        setLoadingAllUsersDailyReports(false)
+        return
+      }
+      setLoadingAllUsersDailyReports(true)
+      try {
+        const reportsMap = new Map<string, DailyReportResponse>()
+        await Promise.all(
+          allTodayPrintBaseUsers.map(async (member) => {
+            try {
+              const qs = new URLSearchParams({
+                day: todayIso,
+                department_id: department.id,
+                user_id: member.id,
+              })
+              const res = await apiFetch(`/reports/daily?${qs.toString()}`)
+              if (res.ok && !cancelled) {
+                const payload = (await res.json()) as DailyReportResponse
+                reportsMap.set(member.id, payload)
+              }
+            } catch {
+              // Ignore errors for individual users
+            }
+          })
+        )
+        if (!cancelled) {
+          setAllUsersDailyReports(reportsMap)
+        }
+      } catch {
+        if (!cancelled) {
+          setAllUsersDailyReports(new Map())
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAllUsersDailyReports(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
+
+  const handlePrint = React.useCallback(() => {
+    if (showAllTodayPrint && loadingAllUsersDailyReports) {
+      setPendingPrint(true)
+      return
+    }
+    window.print()
+  }, [loadingAllUsersDailyReports, showAllTodayPrint])
+
+  React.useEffect(() => {
+    if (!pendingPrint) return
+    if (loadingAllUsersDailyReports) return
+    if (!showAllTodayPrint) {
+      setPendingPrint(false)
+      return
+    }
+    setPendingPrint(false)
+    const timer = window.setTimeout(() => window.print(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadingAllUsersDailyReports, pendingPrint, showAllTodayPrint])
+
+  const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const showSystemActions = viewMode === "mine"
@@ -2157,9 +2454,51 @@ export default function DepartmentKanban() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
-      const initialsLabel = initials(user.full_name || user.username || "user")
       link.href = url
-      link.download = `daily_report_${todayIso}_${initialsLabel || "user"}.xlsx`
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
+    }
+  }
+
+  const exportAllTodayReport = async () => {
+    if (!department?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+      })
+      if (selectedUserId && selectedUserId !== "__all__") {
+        qs.set("user_id", selectedUserId)
+      } else {
+        qs.set("all_users", "true")
+      }
+      const res = await apiFetch(`/exports/daily-report.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      }
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -2544,6 +2883,7 @@ export default function DepartmentKanban() {
       setMeetingPlatform("")
       setMeetingStartsAt("")
       setMeetingProjectId("__none__")
+      setShowAddMeetingForm(false)
       toast.success("Meeting created")
     } finally {
       setCreatingMeeting(false)
@@ -2965,26 +3305,26 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen">
       <div className="sticky top-0 z-[100] print:hidden ">
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
+        <div className="relative overflow-hidden rounded-[1.5rem] sm:rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-4 sm:p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
           <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
           <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
-          <div className="relative space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="relative space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
                   Department
                 </div>
-                <div className="text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
                   {departmentName}
                 </div>
                 <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
               </div>
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950 w-full sm:w-auto justify-center">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
                     viewMode === "department"
                       ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                       : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
@@ -2996,7 +3336,7 @@ export default function DepartmentKanban() {
                   type="button"
                   onClick={() => setViewMode("mine")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
                     viewMode === "mine"
                       ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                       : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
@@ -3007,8 +3347,8 @@ export default function DepartmentKanban() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
-              <div className="flex flex-wrap gap-2">
+            <div className="rounded-xl sm:rounded-2xl border border-stone-200/70 bg-white p-0.5 sm:p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+              <div className="flex flex-nowrap sm:flex-wrap gap-1 sm:gap-1.5 md:gap-2 overflow-x-auto pb-1 sm:pb-0 -mx-0.5 sm:mx-0 px-0.5 sm:px-0">
                 {TABS.map((tab) => {
                   const isActive = tab.id === activeTab
                   const badgeTone =
@@ -3026,14 +3366,14 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
                       className={[
-                        "relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
+                        "relative flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold transition-colors",
                         isActive
                           ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
                           : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
                       ].join(" ")}
                     >
-                      <span className="uppercase tracking-wide">{tab.label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${badgeClass}`}>{counts[tab.id]}</span>
+                      <span className="uppercase tracking-wide whitespace-nowrap">{tab.label}</span>
+                      <span className={`rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs ${badgeClass}`}>{counts[tab.id]}</span>
                     </button>
                   )
                 })}
@@ -3042,15 +3382,15 @@ export default function DepartmentKanban() {
           </div>
         </div>
       </div>
-      <div className="px-6 pb-6 print:hidden">
+      <div className="px-4 sm:px-6 pb-4 sm:pb-6 print:hidden">
         {activeTab === "projects" ? (
-            <div className="mb-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xl font-semibold text-slate-800">Active Projects</div>
+            <div className="mb-4 sm:mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl px-6">
+                    <Button className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm rounded-xl px-4 sm:px-6 w-full sm:w-auto">
                       + New Project
                     </Button>
                   </DialogTrigger>
@@ -3147,15 +3487,14 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Due Date</Label>
-                        <Input
-                          type="date"
-                          value={projectDueDate}
-                          onChange={(e) => setProjectDueDate(e.target.value)}
-                          placeholder="Select due date"
-                          className="border-slate-200 focus:border-slate-400 rounded-xl"
-                          disabled={user?.role !== "ADMIN"}
-                        />
-                      </div>
+                          <Input
+                            type="date"
+                            value={projectDueDate}
+                            onChange={(e) => setProjectDueDate(e.target.value)}
+                            placeholder="Select due date"
+                            className="border-slate-200 focus:border-slate-400 rounded-xl"
+                          />
+                        </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
@@ -3173,8 +3512,8 @@ export default function DepartmentKanban() {
           ) : null}
 
         {activeTab === "projects" ? (
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const membersForProject = projectMembers[project.id] || []
@@ -3185,16 +3524,20 @@ export default function DepartmentKanban() {
                 const phase = project.current_phase || "MEETINGS"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
-                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 sm:p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
                           <div className="h-3 w-3 rounded-full bg-slate-400 mt-2 flex-shrink-0"></div>
-                          <div>
-                            <div className="text-lg font-semibold text-slate-800">{project.title || project.name}</div>
-                            <div className="mt-1 text-sm text-slate-600">{project.description || "-"}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-base sm:text-lg font-semibold text-slate-800 truncate">{project.title || project.name}</div>
+                            <div className="mt-1 text-xs sm:text-sm text-slate-600 line-clamp-2">
+                              {project.description
+                                ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
+                                : "-"}
+                            </div>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
                           {canDeleteProjects ? (
                             <Button
                               variant="outline"
@@ -3205,30 +3548,32 @@ export default function DepartmentKanban() {
                                 event.stopPropagation()
                                 void deleteProject(project.id)
                               }}
-                              className="h-7 rounded-full border-red-200 px-3 text-xs text-red-600 hover:bg-red-50"
+                              className="h-7 rounded-full border-red-200 px-2 sm:px-3 text-xs text-red-600 hover:bg-red-50"
                             >
                               {deletingProjectId === project.id ? "Deleting..." : "Delete"}
                             </Button>
                           ) : null}
-                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs">
+                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs whitespace-nowrap">
                             {PHASE_LABELS[phase] || "Meetings"}
                           </Badge>
                         </div>
                       </div>
-                      <div className="mt-4 text-xs text-slate-600">
-                        {PHASES.map((p, idx) => {
-                          const isCurrent = p === phase
-                          return (
-                            <span key={p}>
-                              <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
-                                {PHASE_LABELS[p]}
+                      <div className="mt-3 sm:mt-4 text-xs text-slate-600 overflow-x-auto">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          {PHASES.map((p, idx) => {
+                            const isCurrent = p === phase
+                            return (
+                              <span key={p}>
+                                <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
+                                  {PHASE_LABELS[p]}
+                                </span>
+                                {idx < PHASES.length - 1 ? " > " : ""}
                               </span>
-                              {idx < PHASES.length - 1 ? " > " : ""}
-                            </span>
-                          )
-                        })}
+                            )
+                          })}
+                        </div>
                       </div>
-                      <div className="mt-4 flex items-center justify-between">
+                      <div className="mt-3 sm:mt-4 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           {visibleMembers.length ? (
                             <div className="flex -space-x-2">
@@ -3236,25 +3581,25 @@ export default function DepartmentKanban() {
                                 <div
                                   key={member.id}
                                   title={member.full_name || member.username || "-"}
-                                  className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] sm:text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
                                 >
                                   {initials(member.full_name || member.username || "-")}
                                 </div>
                               ))}
                               {remainingMembers > 0 ? (
-                                <div className="h-8 w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                                <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
                                   +{remainingMembers}
                                 </div>
                               ) : null}
                             </div>
                           ) : (
-                            <div className="h-8 w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
+                            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
                               -
                             </div>
                           )}
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline">
+                          <span className="text-xs sm:text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline whitespace-nowrap">
                             View details -&gt;
                           </span>
                         </div>
@@ -3268,26 +3613,26 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "all" ? (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-2xl font-bold tracking-tight text-slate-800">
+                <div className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800">
                   {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
                 </div>
-                <div className="text-sm text-slate-600 mt-1">
+                <div className="text-xs sm:text-sm text-slate-600 mt-1">
                   {viewMode === "department"
                     ? "All of today's tasks for the department team."
                     : "All of today's tasks, organized in one place."}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold text-slate-600 shadow-sm">
                   {formatToday()}
                 </div>
                 {viewMode === "department" ? (
                   <>
                     <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl">
+                      <SelectTrigger className="h-8 sm:h-9 w-full sm:w-48 border-slate-200 focus:border-slate-400 rounded-xl text-xs sm:text-sm">
                         <SelectValue placeholder="All users" />
                       </SelectTrigger>
                       <SelectContent>
@@ -3301,11 +3646,19 @@ export default function DepartmentKanban() {
                     </Select>
                     <Button
                       variant="outline"
-                      className="h-9 rounded-xl border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                      onClick={() => window.print()}
+                      className="h-8 sm:h-9 rounded-xl border-slate-300 bg-white px-2 sm:px-3 text-xs sm:text-sm text-slate-900 shadow-sm hover:bg-slate-50 flex-1 sm:flex-none"
+                      onClick={handlePrint}
                     >
-                      <Printer className="mr-2 h-4 w-4" />
+                      <Printer className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                       Print
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-8 sm:h-9 rounded-xl border-slate-300 bg-white px-2 sm:px-3 text-xs sm:text-sm text-slate-900 shadow-sm hover:bg-slate-50 flex-1 sm:flex-none"
+                      onClick={exportAllTodayReport}
+                      disabled={exportingDailyReport}
+                    >
+                      {exportingDailyReport ? "Exporting..." : "Export Excel"}
                     </Button>
                   </>
                 ) : null}
@@ -3327,17 +3680,16 @@ export default function DepartmentKanban() {
                       <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
                       <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
                         <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                          <SelectValue placeholder="This Week" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="today">Today</SelectItem>
-                        <SelectItem value="week">This Week</SelectItem>
-                      </SelectContent>
-                    </Select>
+                          <SelectValue placeholder="Today" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="today">Today</SelectItem>
+                        </SelectContent>
+                      </Select>
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                      onClick={() => window.print()}
+                      onClick={handlePrint}
                     >
                       <Printer className="mr-2 h-4 w-4" />
                       Print
@@ -3393,16 +3745,15 @@ export default function DepartmentKanban() {
                 >
                   <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
+                      <col className="w-[28px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[32px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[44px]" />
-                      <col className="w-[56px]" />
-                      <col className="w-[56px]" />
                       <col className="w-[150px]" />
-                      <col className="w-[110px]" />
-                      <col className="w-[60px]" />
-                      <col className="w-[40px]" />
-                      <col className="w-[52px]" />
                       <col className="w-[48px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[48px]" />
+                      <col className="w-[32px]" />
                       <col className="w-[140px]" />
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
@@ -3417,12 +3768,12 @@ export default function DepartmentKanban() {
                           <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                          T/Y/O
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          <span className="block">T/Y</span>
+                          <span className="block">/O</span>
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                       </tr>
@@ -3447,7 +3798,6 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                              <td className="border border-slate-200 px-2 py-2 align-top">{row.description}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -3823,18 +4173,18 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "system" ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-xl font-semibold text-slate-900">System Tasks</div>
-                <div className="text-sm text-muted-foreground">
+                <div className="text-lg sm:text-xl font-semibold text-slate-900">System Tasks</div>
+                <div className="text-xs sm:text-sm text-muted-foreground">
                   Department tasks organized by frequency and date.
                 </div>
               </div>
               {canManage ? (
                 <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline">+ Add Task</Button>
+                    <Button variant="outline" className="w-full sm:w-auto">+ Add Task</Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
@@ -4137,18 +4487,18 @@ export default function DepartmentKanban() {
         </Dialog>
 
         {activeTab === "no-project" ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
-                <div className="text-sm text-slate-600">
+                <div className="text-lg sm:text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                <div className="text-xs sm:text-sm text-slate-600">
                   Use these buckets to track non-project tasks and special cases.
                 </div>
               </div>
               {!isReadOnly ? (
                 <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                    <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-4 sm:px-6 w-full sm:w-auto">
                       + Add Task
                     </Button>
                   </DialogTrigger>
@@ -4486,13 +4836,13 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "ga-ka" ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-lg font-semibold">GA/KA Notes</div>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-base sm:text-lg font-semibold">GA/KA Notes</div>
               {!isReadOnly ? (
                 <Dialog open={gaNoteOpen} onOpenChange={setGaNoteOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline">+ Add Note</Button>
+                    <Button variant="outline" className="w-full sm:w-auto">+ Add Note</Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
@@ -4829,48 +5179,186 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "meetings" ? (
-          <div className="space-y-4">
-            <div className="text-xl font-semibold">Meetings</div>
-            <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="text-lg sm:text-xl font-semibold">Meetings</div>
+            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">External Meetings</div>
+                {visibleMeetings.length ? (
+                  <div className="rounded-md border border-slate-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[30%]">Title</TableHead>
+                          <TableHead className="w-[15%]">Platform</TableHead>
+                          <TableHead className="w-[20%]">Date & Time</TableHead>
+                          <TableHead className="w-[20%]">Project</TableHead>
+                          {!isReadOnly ? <TableHead className="w-[15%] text-right">Actions</TableHead> : null}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visibleMeetings.map((meeting) => {
+                          const project = meeting.project_id
+                            ? projects.find((p) => p.id === meeting.project_id) || null
+                            : null
+                          const isEditing = !isReadOnly && editingMeetingId === meeting.id
+                          return (
+                            <TableRow key={meeting.id}>
+                              {isEditing ? (
+                                <>
+                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
+                                    <div className="space-y-3">
+                                      <Input
+                                        value={editMeetingTitle}
+                                        onChange={(e) => setEditMeetingTitle(e.target.value)}
+                                        placeholder="Meeting title"
+                                      />
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Input
+                                          value={editMeetingPlatform}
+                                          onChange={(e) => setEditMeetingPlatform(e.target.value)}
+                                          placeholder="Platform"
+                                        />
+                                        <Input
+                                          type="datetime-local"
+                                          value={editMeetingStartsAt}
+                                          onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Project (optional)" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="__none__">No project</SelectItem>
+                                            {filteredProjects.map((p) => (
+                                              <SelectItem key={p.id} value={p.id}>
+                                                {p.title || p.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <div className="flex gap-2">
+                                          <Button variant="outline" onClick={cancelEditMeeting} className="flex-1">
+                                            Cancel
+                                          </Button>
+                                          <Button onClick={() => void saveMeeting(meeting.id)} className="flex-1">
+                                            Save
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                </>
+                              ) : (
+                                <>
+                                  <TableCell className="font-medium">{meeting.title}</TableCell>
+                                  <TableCell>{meeting.platform || "-"}</TableCell>
+                                  <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                                  <TableCell>{project ? project.title || project.name : "-"}</TableCell>
+                                  {!isReadOnly ? (
+                                    <TableCell className="text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          onClick={() => startEditMeeting(meeting)}
+                                          aria-label="Edit meeting"
+                                          title="Edit"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          onClick={() => void deleteMeeting(meeting.id)}
+                                          aria-label="Delete meeting"
+                                          title="Delete"
+                                          className="text-red-600 border-red-200 hover:bg-red-50"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  ) : null}
+                                </>
+                              )}
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                )}
                 {!isReadOnly ? (
-                  <div className="grid gap-3">
-                    <Input
-                      placeholder="Meeting title"
-                      value={meetingTitle}
-                      onChange={(e) => setMeetingTitle(e.target.value)}
-                    />
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Input
-                        placeholder="Platform (Zoom, Meet, Office...)"
-                        value={meetingPlatform}
-                        onChange={(e) => setMeetingPlatform(e.target.value)}
-                      />
-                      <Input
-                        type="datetime-local"
-                        value={meetingStartsAt}
-                        onChange={(e) => setMeetingStartsAt(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Project (optional)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">No project</SelectItem>
-                          {filteredProjects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                        {creatingMeeting ? "Saving..." : "Add"}
+                  <div className="border-t border-slate-200 pt-4">
+                    {!showAddMeetingForm ? (
+                      <Button onClick={() => setShowAddMeetingForm(true)} variant="outline">
+                        Add
                       </Button>
-                    </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="text-sm font-semibold">Add</div>
+                        <div className="grid gap-3">
+                          <Input
+                            placeholder="Meeting title"
+                            value={meetingTitle}
+                            onChange={(e) => setMeetingTitle(e.target.value)}
+                          />
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Input
+                              placeholder="Platform (Zoom, Meet, Office...)"
+                              value={meetingPlatform}
+                              onChange={(e) => setMeetingPlatform(e.target.value)}
+                            />
+                            <Input
+                              type="datetime-local"
+                              value={meetingStartsAt}
+                              onChange={(e) => setMeetingStartsAt(e.target.value)}
+                            />
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Project (optional)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">No project</SelectItem>
+                                {filteredProjects.map((project) => (
+                                  <SelectItem key={project.id} value={project.id}>
+                                    {project.title || project.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
+                              <Button 
+                                disabled={!meetingTitle.trim() || creatingMeeting} 
+                                onClick={() => void submitMeeting()}
+                                className="flex-1"
+                              >
+                                {creatingMeeting ? "Saving..." : "Add"}
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                onClick={() => {
+                                  setShowAddMeetingForm(false)
+                                  setMeetingTitle("")
+                                  setMeetingPlatform("")
+                                  setMeetingStartsAt("")
+                                  setMeetingProjectId("__none__")
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
@@ -4934,95 +5422,6 @@ export default function DepartmentKanban() {
                     <div className="text-xs text-muted-foreground">
                       Connect your Microsoft account to read calendar events.
                     </div>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {visibleMeetings.length ? (
-                    visibleMeetings.map((meeting) => {
-                      const project = meeting.project_id
-                        ? projects.find((p) => p.id === meeting.project_id) || null
-                        : null
-                      const isEditing = !isReadOnly && editingMeetingId === meeting.id
-                      return (
-                        <Card key={meeting.id} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
-                          {isEditing ? (
-                            <div className="space-y-3">
-                              <Input
-                                value={editMeetingTitle}
-                                onChange={(e) => setEditMeetingTitle(e.target.value)}
-                              />
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <Input
-                                  value={editMeetingPlatform}
-                                  onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                  placeholder="Platform"
-                                />
-                                <Input
-                                  type="datetime-local"
-                                  value={editMeetingStartsAt}
-                                  onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                                />
-                              </div>
-                              <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Project (optional)" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">No project</SelectItem>
-                                  {filteredProjects.map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.title || p.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="flex justify-end gap-2">
-                                <Button variant="outline" onClick={cancelEditMeeting}>
-                                  Cancel
-                                </Button>
-                                <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
-                                {project ? (
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    Project: {project.title || project.name}
-                                  </div>
-                                ) : null}
-                              </div>
-                              {!isReadOnly ? (
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => startEditMeeting(meeting)}
-                                    aria-label="Edit meeting"
-                                    title="Edit"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => void deleteMeeting(meeting.id)}
-                                    aria-label="Delete meeting"
-                                    title="Delete"
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ) : null}
-                            </div>
-                          )}
-                        </Card>
-                      )
-                    })
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No external meetings yet.</div>
                   )}
                 </div>
               </Card>
@@ -5240,214 +5639,152 @@ export default function DepartmentKanban() {
             ) : (
               <div>User: {user?.full_name || user?.username || "-"}</div>
             )}
-            <div>
-              {showAllTodayPrint
-                ? ""
-                : `${printRange === "today" ? "Date" : "Week"}: ${printRangeLabel}`}
-            </div>
+            {null}
           </div>
           {showAllTodayPrint ? (
             <>
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Day</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Type</th>
-                  {allTodayPrintColumns.map((column) => (
-                    <th key={column.id} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allTodayPrintCategories.map((category, categoryIndex) => (
-                  <tr key={category.id}>
-                    {categoryIndex === 0 ? (
-                      <td
-                        rowSpan={allTodayPrintCategories.length}
-                        className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase"
-                      >
-                        {formatPrintDay(todayDate)}
-                      </td>
-                    ) : null}
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                      {category.label}
-                    </td>
-                    {allTodayPrintColumns.map((column) => {
-                      const bucket = allTodayPrintByUser.get(column.id)
-                      const items = bucket ? bucket[category.id] : []
-                      const amItems = items.filter((item) => item.period === "AM")
-                      const pmItems = items.filter((item) => item.period === "PM")
-                      return (
-                        <td key={`${column.id}-${category.id}`} className="border border-slate-900 px-2 py-2 align-top">
-                          {items.length ? (
-                            <div className="space-y-2">
-                              <div>
-                                <div className="text-[10px] font-semibold uppercase text-slate-600">AM</div>
-                                {amItems.length ? (
-                                  <div className="space-y-1 mt-1">
-                                  {amItems.map((item, itemIndex) => {
-                                    const fastType = item.fastType?.toUpperCase() || "NORMAL"
-                                    const fastBadgeClass =
-                                      fastType === "BLLOK" || fastType === "BLL"
-                                        ? "bg-rose-100 text-rose-700 border-rose-200"
-                                        : fastType === "1H"
-                                          ? "bg-amber-100 text-amber-700 border-amber-200"
-                                          : fastType === "R1"
-                                            ? "bg-blue-100 text-blue-700 border-blue-200"
-                                            : fastType === "GA"
-                                              ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                                              : fastType === "PERSONAL"
-                                                ? "bg-violet-100 text-violet-700 border-violet-200"
-                                                : "bg-slate-100 text-slate-700 border-slate-200"
-                                    const fastBadgeLabel =
-                                      fastType === "BLLOK" || fastType === "BLL"
-                                        ? "BLL"
-                                        : fastType === "PERSONAL"
-                                          ? "P"
-                                          : fastType
-                                    return (
-                                      <div
-                                        key={`${column.id}-${category.id}-am-${itemIndex}`}
-                                        className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                      >
-                                        <div className="flex items-start gap-1 leading-tight">
-                                          <span className="text-[10px] font-semibold">
-                                            {itemIndex + 1}.
-                                          </span>
-                                          {category.id === "FT" ? (
-                                            <>
-                                              <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
-                                              {fastBadgeLabel}
-                                              </span>
-                                              <span className="ml-1">{item.label}</span>
-                                            </>
-                                          ) : (
-                                            <span>{item.label}</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                  </div>
-                                ) : (
-                                  <div className="italic text-slate-600">-</div>
-                                )}
-                              </div>
-                              <div className="border-t border-slate-200 pt-2">
-                                <div className="text-[10px] font-semibold uppercase text-slate-600">PM</div>
-                                {pmItems.length ? (
-                                  <div className="space-y-1 mt-1">
-                                  {pmItems.map((item, itemIndex) => {
-                                    const fastType = item.fastType?.toUpperCase() || "NORMAL"
-                                    const fastBadgeClass =
-                                      fastType === "BLLOK" || fastType === "BLL"
-                                        ? "bg-rose-100 text-rose-700 border-rose-200"
-                                        : fastType === "1H"
-                                          ? "bg-amber-100 text-amber-700 border-amber-200"
-                                          : fastType === "R1"
-                                            ? "bg-blue-100 text-blue-700 border-blue-200"
-                                            : fastType === "GA"
-                                              ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                                              : fastType === "PERSONAL"
-                                                ? "bg-violet-100 text-violet-700 border-violet-200"
-                                                : "bg-slate-100 text-slate-700 border-slate-200"
-                                    const fastBadgeLabel =
-                                      fastType === "BLLOK" || fastType === "BLL"
-                                        ? "BLL"
-                                        : fastType === "PERSONAL"
-                                          ? "P"
-                                          : fastType
-                                    return (
-                                      <div
-                                        key={`${column.id}-${category.id}-pm-${itemIndex}`}
-                                        className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                      >
-                                        <div className="flex items-start gap-1 leading-tight">
-                                          <span className="text-[10px] font-semibold">
-                                            {itemIndex + 1}.
-                                          </span>
-                                          {category.id === "FT" ? (
-                                            <>
-                                              <span className={`ml-1 rounded-full border px-1.5 text-[9px] font-semibold ${fastBadgeClass}`}>
-                                              {fastBadgeLabel}
-                                              </span>
-                                              <span className="ml-1">{item.label}</span>
-                                            </>
-                                          ) : (
-                                            <span>{item.label}</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                  </div>
-                                ) : (
-                                  <div className="italic text-slate-600">-</div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="italic text-slate-600">-</div>
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {selectedUserId !== "__all__" && dailyReport && (dailyReport.tasks_overdue.length || dailyReport.system_overdue.length) ? (
-              <div className="mt-6">
-                <div className="text-sm font-semibold text-slate-900">Daily Report (Overdue)</div>
-                <div className="text-xs text-slate-700 mt-1">
-                  Late items for the selected user. (Planned date is preserved.)
-                </div>
-
-                {dailyReport.tasks_overdue.length ? (
-                  <div className="mt-3">
-                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue tasks</div>
-                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
-                      {dailyReport.tasks_overdue.slice(0, 20).map((item) => (
-                        <li key={item.task.id}>
-                          {item.task.title} — late {item.late_days ?? 0}d (planned end: {item.planned_end || "-"})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {dailyReport.system_overdue.length ? (
-                  <div className="mt-3">
-                    <div className="text-xs font-semibold uppercase text-slate-700">Overdue system tasks</div>
-                    <ul className="mt-1 text-[11px] text-slate-900 list-disc pl-5 space-y-1">
-                      {dailyReport.system_overdue.slice(0, 20).map((occ) => (
-                        <li key={`${occ.template_id}-${occ.occurrence_date}`}>
-                          {occ.title} — late {occ.late_days ?? 0}d (was planned for: {occ.occurrence_date})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+              {loadingAllUsersDailyReports ? (
+                <div className="text-sm text-slate-600 py-4">Loading daily reports...</div>
+              ) : (() => {
+                // Collect all rows from all users into a single array
+                const allRows: Array<{
+                  typeLabel: string
+                  subtype: string
+                  period: string
+                  department: string
+                  title: string
+                  description: string
+                  status: string
+                  bz: string
+                  kohaBz: string
+                  tyo: string
+                  comment?: string | null
+                  taskId?: string
+                  systemTemplateId?: string
+                  systemOccurrenceDate?: string
+                  systemStatus?: string
+                  userName: string
+                  userInitials: string
+                }> = []
+                
+                for (const member of allTodayPrintBaseUsers) {
+                  const userReport = allUsersDailyReports.get(member.id)
+                  if (!userReport) continue
+                  const userRows = convertDailyReportToRows(userReport, member.id)
+                  const userName = member.full_name || member.username || "-"
+                  const userInitials = initials(userName)
+                  // Add userName to each row and add to allRows
+                  for (const row of userRows) {
+                    allRows.push({ ...row, userName, userInitials })
+                  }
+                }
+                
+                // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
+                allRows.sort((a, b) => {
+                  // First sort by typeLabel (LL)
+                  if (a.typeLabel !== b.typeLabel) {
+                    return a.typeLabel.localeCompare(b.typeLabel)
+                  }
+                  // Then by subtype (NLL)
+                  if (a.subtype !== b.subtype) {
+                    return a.subtype.localeCompare(b.subtype)
+                  }
+                  // Finally by tyo (T/Y/O)
+                  return a.tyo.localeCompare(b.tyo)
+                })
+                
+                return (
+                  <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+                    <colgroup>
+                      <col className="w-[32px]" />
+                      <col className="w-[40px]" />
+                      <col className="w-[28px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[170px]" />
+                      <col className="w-[60px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[50px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[90px]" />
+                      <col className="w-[40px]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-slate-100">
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                          Nr
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                        <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                          NLL
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                          <span className="block">AM/</span>
+                          <span className="block">PM</span>
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                          T/Y/O
+                        </th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allRows.length ? (
+                        allRows.map((row, index) => (
+                          <tr key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}>
+                            <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.subtype}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.period}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.tyo}
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">
+                              <div className="h-4 w-full border-b border-slate-400" />
+                            </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                              {row.userInitials}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                            No data available.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                )
+              })()}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+            <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
               <colgroup>
                 <col className="w-[36px]" />
                 <col className="w-[44px]" />
                 <col className="w-[30px]" />
                 <col className="w-[36px]" />
-                <col className="w-[150px]" />
-                <col className="w-[110px]" />
-              <col className="w-[60px]" />
-              <col className="w-[30px]" />
-              <col className="w-[52px]" />
-              <col className="w-[36px]" />
-              <col className="w-[140px]" />
-            </colgroup>
+                <col className="w-[200px]" />
+                <col className="w-[60px]" />
+                <col className="w-[40px]" />
+                <col className="w-[52px]" />
+                <col className="w-[40px]" />
+                <col className="w-[140px]" />
+              </colgroup>
             <thead>
               <tr className="bg-slate-100">
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
@@ -5462,7 +5799,6 @@ export default function DepartmentKanban() {
                     <span className="block">PM</span>
                   </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                 <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
@@ -5472,91 +5808,25 @@ export default function DepartmentKanban() {
             </thead>
             <tbody>
               {dailyUserReportRows.length ? (
-                dailyUserReportRows.map((row, index) => {
-                  const commentKey = row.taskId
-                    ? `task:${row.taskId}`
-                    : row.systemTemplateId && row.systemOccurrenceDate
-                      ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
-                      : ""
-                  const previousValue = row.comment ?? ""
-                  const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
-                  const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
-                  return (
-                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            aria-label="Koment"
-                            className="h-4 w-full border-b border-slate-400 bg-transparent"
-                            value={commentValue}
-                            onChange={(e) => {
-                              if (!commentKey) return
-                              const nextValue = e.target.value
-                              setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
-                            }}
-                            onBlur={(e) => {
-                              if (!commentKey) return
-                              const nextValue = e.target.value
-                              if (row.taskId) {
-                                void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                return
-                              }
-                              if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                void saveDailyReportSystemComment(
-                                  row.systemTemplateId,
-                                  row.systemOccurrenceDate,
-                                  row.systemStatus || "OPEN",
-                                  nextValue,
-                                  previousValue,
-                                  commentKey
-                                )
-                              }
-                            }}
-                            disabled={!commentKey}
-                          />
-                          <button
-                            type="button"
-                            className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
-                            disabled={!commentKey || isSaving}
-                            onClick={() => {
-                              if (!commentKey) return
-                              if (row.taskId) {
-                                void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
-                                return
-                              }
-                              if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                void saveDailyReportSystemComment(
-                                  row.systemTemplateId,
-                                  row.systemOccurrenceDate,
-                                  row.systemStatus || "OPEN",
-                                  commentValue,
-                                  previousValue,
-                                  commentKey
-                                )
-                              }
-                            }}
-                          >
-                            {isSaving ? "Saving" : "Save"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
+                dailyUserReportRows.map((row, index) => (
+                  <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                    <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top">
+                      <div className="h-4 w-full border-b border-slate-400" />
+                    </td>
+                  </tr>
+                ))
               ) : (
                   <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
                       No data available.
                     </td>
                   </tr>
@@ -5643,7 +5913,7 @@ export default function DepartmentKanban() {
             <span />
             <div className="print-page-count">1/{printTotalPages}</div>
             <div className="print-initials">
-              PUNOI: <span className="print-signature-line" />
+              PUNOI: {printInitials || "-"}
             </div>
           </div>
         </div>
@@ -5654,6 +5924,23 @@ export default function DepartmentKanban() {
           vertical-align: bottom;
           padding-bottom: 0;
           padding-top: 15px;
+          direction: ltr;
+          text-align: left;
+        }
+        .weekly-report-table th,
+        .weekly-report-table td {
+          vertical-align: bottom;
+          padding-bottom: 0;
+          padding-top: 15px;
+          padding-left: 4px;
+          padding-right: 4px;
+          direction: ltr;
+          text-align: left;
+        }
+        .daily-report-table th:nth-child(3),
+        .daily-report-table td:nth-child(3) {
+          padding-left: 2px;
+          padding-right: 2px;
         }
         .daily-report-table thead th {
           border-width: 2px;
@@ -5668,24 +5955,37 @@ export default function DepartmentKanban() {
           border-bottom: 2px solid #e2e8f0;
         }
         @media print {
-          body {
+          * {
+            box-sizing: border-box;
+          }
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white;
           }
-          aside {
+          aside, header, nav {
             display: none !important;
           }
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.25in 0.1in 0.35in 0.1in;
+            size: landscape;
           }
           .print-page {
             position: relative;
-            padding-bottom: 0.35in;
+            padding: 0.1in !important;
+            margin: 0 !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+            padding-bottom: 0.6in;
           }
           .print-page-measure {
             position: absolute;
             top: 0;
             left: 0;
-            height: calc(11in - 0.36in - 0.51in);
+            height: calc(8.5in - 0.25in - 0.35in);
             width: 1px;
             visibility: hidden;
             pointer-events: none;
@@ -5695,7 +5995,7 @@ export default function DepartmentKanban() {
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
             margin-top: 0.15in;
-            margin-bottom: 0.15in;
+            margin-bottom: 0.2in;
           }
           .print-title {
             font-size: 16px;
@@ -5718,15 +6018,21 @@ export default function DepartmentKanban() {
           }
           .print-footer {
             position: fixed;
+            bottom: 0.1in;
             left: 0;
             right: 0;
-            bottom: 0.1in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.1in;
-            padding-right: 0.1in;
+            padding-left: 0.2in;
+            padding-right: 0.2in;
             font-size: 10px;
             color: #334155;
+          }
+          .print-page-count {
+            text-align: center;
+          }
+          .print-initials {
+            text-align: right;
           }
           .print-page-marker {
             position: absolute;
@@ -5738,22 +6044,6 @@ export default function DepartmentKanban() {
             z-index: 5;
             display: none;
           }
-          .print-page-count {
-            grid-column: 2;
-            text-align: center;
-          }
-          .print-initials {
-            grid-column: 3;
-            text-align: right;
-          }
-          .print-signature-line {
-            display: inline-block;
-            min-width: 1.2in;
-            border-bottom: 1px solid #334155;
-            height: 0.6em;
-            margin-left: 0.1in;
-            vertical-align: bottom;
-          }
           .weekly-report-table thead {
             display: table-header-group;
           }
@@ -5762,21 +6052,61 @@ export default function DepartmentKanban() {
           .daily-report-table th,
           .daily-report-table td {
             vertical-align: bottom !important;
+            direction: ltr;
+            text-align: left;
+          }
+          .weekly-report-table th,
+          .weekly-report-table td {
+            padding-bottom: 0;
+            padding-top: 15px;
+            padding-left: 4px;
+            padding-right: 4px;
+          }
+          .daily-report-table th:nth-child(3),
+          .daily-report-table td:nth-child(3) {
+            padding-left: 2px;
+            padding-right: 2px;
           }
           .weekly-report-table,
           .daily-report-table {
             table-layout: fixed;
+            margin-bottom: 0.6in;
+            page-break-inside: auto;
+          }
+          .daily-report-table tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          .daily-report-table thead {
+            display: table-header-group;
+          }
+          .daily-report-table tfoot {
+            display: table-footer-group;
           }
           .weekly-report-table thead th {
             border-width: 2px;
           }
           .daily-report-table thead th {
-            border-width: 2px;
-            border-color: #0f172a;
+            border: 2px solid #0f172a !important;
+            background-color: #f1f5f9 !important;
+            box-shadow: none !important;
+            position: static !important;
+            border-left: 2px solid #0f172a !important;
+            border-right: 2px solid #0f172a !important;
           }
           .daily-report-table thead tr {
-            border-top: 2px solid #0f172a;
-            border-bottom: 2px solid #0f172a;
+            border-top: 3px solid #0f172a !important;
+            border-bottom: 3px solid #0f172a !important;
+          }
+          .daily-report-table th,
+          .daily-report-table td {
+            border: 1px solid #0f172a !important;
+          }
+          .daily-report-table {
+            border-width: 2px;
+            border-color: #0f172a;
+            border-collapse: collapse !important;
+            border-spacing: 0 !important;
           }
           .weekly-report-table {
             -webkit-print-color-adjust: exact;
