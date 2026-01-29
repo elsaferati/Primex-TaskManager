@@ -659,6 +659,7 @@ export default function DepartmentKanban() {
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
   const [meetingProjectId, setMeetingProjectId] = React.useState("__none__")
   const [creatingMeeting, setCreatingMeeting] = React.useState(false)
+  const [showAddMeetingForm, setShowAddMeetingForm] = React.useState(false)
   const [editingMeetingId, setEditingMeetingId] = React.useState<string | null>(null)
   const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
   const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
@@ -2865,6 +2866,7 @@ export default function DepartmentKanban() {
       setMeetingPlatform("")
       setMeetingStartsAt("")
       setMeetingProjectId("__none__")
+      setShowAddMeetingForm(false)
       toast.success("Meeting created")
     } finally {
       setCreatingMeeting(false)
@@ -5165,108 +5167,6 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">External Meetings</div>
-                {!isReadOnly ? (
-                  <div className="grid gap-3">
-                    <Input
-                      placeholder="Meeting title"
-                      value={meetingTitle}
-                      onChange={(e) => setMeetingTitle(e.target.value)}
-                    />
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Input
-                        placeholder="Platform (Zoom, Meet, Office...)"
-                        value={meetingPlatform}
-                        onChange={(e) => setMeetingPlatform(e.target.value)}
-                      />
-                      <Input
-                        type="datetime-local"
-                        value={meetingStartsAt}
-                        onChange={(e) => setMeetingStartsAt(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Project (optional)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">No project</SelectItem>
-                          {filteredProjects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button disabled={!meetingTitle.trim() || creatingMeeting} onClick={() => void submitMeeting()}>
-                        {creatingMeeting ? "Saving..." : "Add"}
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-                <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
-                    <div className="flex items-center gap-2">
-                      {msConnected ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void loadMicrosoftEvents()}
-                          disabled={loadingMsEvents}
-                          className="rounded-full border-slate-200"
-                        >
-                          {loadingMsEvents ? "Syncing..." : "Sync"}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void connectMicrosoft()}
-                          disabled={checkingMsStatus}
-                          className="rounded-full border-slate-200"
-                        >
-                          {checkingMsStatus ? "Checking..." : "Connect"}
-                        </Button>
-                      )}
-                      {msConnected ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void disconnectMicrosoft()}
-                          className="rounded-full text-slate-500"
-                        >
-                          Disconnect
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {msConnected ? (
-                    loadingMsEvents ? (
-                      <div className="text-xs text-muted-foreground">Loading events...</div>
-                    ) : msEvents.length ? (
-                      <div className="space-y-2">
-                        {msEvents.map((event) => (
-                          <div key={event.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                            <div className="text-sm font-semibold text-slate-800">
-                              {event.subject || "Untitled event"}
-                            </div>
-                            <div className="text-xs text-slate-600">{formatMsEventWindow(event)}</div>
-                            {event.location ? (
-                              <div className="text-xs text-slate-500">Location: {event.location}</div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">No upcoming events.</div>
-                    )
-                  ) : (
-                    <div className="text-xs text-muted-foreground">
-                      Connect your Microsoft account to read calendar events.
-                    </div>
-                  )}
-                </div>
                 <div className="space-y-3">
                   {visibleMeetings.length ? (
                     visibleMeetings.map((meeting) => {
@@ -5354,6 +5254,137 @@ export default function DepartmentKanban() {
                     })
                   ) : (
                     <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                  )}
+                </div>
+                {!isReadOnly ? (
+                  <div className="border-t border-slate-200 pt-4">
+                    {!showAddMeetingForm ? (
+                      <Button onClick={() => setShowAddMeetingForm(true)} variant="outline">
+                        Add
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="text-sm font-semibold">Add</div>
+                        <div className="grid gap-3">
+                          <Input
+                            placeholder="Meeting title"
+                            value={meetingTitle}
+                            onChange={(e) => setMeetingTitle(e.target.value)}
+                          />
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Input
+                              placeholder="Platform (Zoom, Meet, Office...)"
+                              value={meetingPlatform}
+                              onChange={(e) => setMeetingPlatform(e.target.value)}
+                            />
+                            <Input
+                              type="datetime-local"
+                              value={meetingStartsAt}
+                              onChange={(e) => setMeetingStartsAt(e.target.value)}
+                            />
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Project (optional)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">No project</SelectItem>
+                                {filteredProjects.map((project) => (
+                                  <SelectItem key={project.id} value={project.id}>
+                                    {project.title || project.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
+                              <Button 
+                                disabled={!meetingTitle.trim() || creatingMeeting} 
+                                onClick={() => void submitMeeting()}
+                                className="flex-1"
+                              >
+                                {creatingMeeting ? "Saving..." : "Add"}
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                onClick={() => {
+                                  setShowAddMeetingForm(false)
+                                  setMeetingTitle("")
+                                  setMeetingPlatform("")
+                                  setMeetingStartsAt("")
+                                  setMeetingProjectId("__none__")
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-800">Microsoft Calendar</div>
+                    <div className="flex items-center gap-2">
+                      {msConnected ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void loadMicrosoftEvents()}
+                          disabled={loadingMsEvents}
+                          className="rounded-full border-slate-200"
+                        >
+                          {loadingMsEvents ? "Syncing..." : "Sync"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void connectMicrosoft()}
+                          disabled={checkingMsStatus}
+                          className="rounded-full border-slate-200"
+                        >
+                          {checkingMsStatus ? "Checking..." : "Connect"}
+                        </Button>
+                      )}
+                      {msConnected ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void disconnectMicrosoft()}
+                          className="rounded-full text-slate-500"
+                        >
+                          Disconnect
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {msConnected ? (
+                    loadingMsEvents ? (
+                      <div className="text-xs text-muted-foreground">Loading events...</div>
+                    ) : msEvents.length ? (
+                      <div className="space-y-2">
+                        {msEvents.map((event) => (
+                          <div key={event.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <div className="text-sm font-semibold text-slate-800">
+                              {event.subject || "Untitled event"}
+                            </div>
+                            <div className="text-xs text-slate-600">{formatMsEventWindow(event)}</div>
+                            {event.location ? (
+                              <div className="text-xs text-slate-500">Location: {event.location}</div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">No upcoming events.</div>
+                    )
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      Connect your Microsoft account to read calendar events.
+                    </div>
                   )}
                 </div>
               </Card>
