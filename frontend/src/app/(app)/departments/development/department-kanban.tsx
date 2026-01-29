@@ -970,14 +970,22 @@ export default function DepartmentKanban() {
   }, [todayDate])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const filteredProjects = React.useMemo(() => {
+    let filtered = projects
     if (viewMode === "mine" && user?.id) {
-      return projects.filter((p) => {
+      filtered = projects.filter((p) => {
         if (p.manager_id === user.id) return true
         const members = projectMembers[p.id] || []
         return members.some((m) => m.id === user.id)
       })
     }
-    return projects
+    // Sort: closed projects at the end, active projects first
+    return [...filtered].sort((a, b) => {
+      const aIsClosed = (a.current_phase || "").toUpperCase() === "CLOSED"
+      const bIsClosed = (b.current_phase || "").toUpperCase() === "CLOSED"
+      if (aIsClosed && !bIsClosed) return 1
+      if (!aIsClosed && bIsClosed) return -1
+      return 0
+    })
   }, [projects, projectMembers, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
@@ -3522,14 +3530,18 @@ export default function DepartmentKanban() {
                 const visibleMembers = uniqueMembers.slice(0, 4)
                 const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
+                const isClosed = phase.toUpperCase() === "CLOSED"
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
-                    <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 sm:p-5 transition-all hover:shadow-md hover:-translate-y-0.5">
+                    <Card className={`bg-white border rounded-2xl p-4 sm:p-5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5"}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
-                          <div className="h-3 w-3 rounded-full bg-slate-400 mt-2 flex-shrink-0"></div>
+                          <div className={`h-3 w-3 rounded-full mt-2 flex-shrink-0 ${isClosed ? "bg-slate-300" : "bg-slate-400"}`}></div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-base sm:text-lg font-semibold text-slate-800 truncate">{project.title || project.name}</div>
+                            <div className={`text-base sm:text-lg font-semibold truncate ${isClosed ? "text-slate-500" : "text-slate-800"}`}>
+                              {project.title || project.name}
+                              {isClosed && <span className="ml-2 text-xs font-normal text-slate-400">(Closed)</span>}
+                            </div>
                             <div className="mt-1 text-xs sm:text-sm text-slate-600 line-clamp-2">
                               {project.description
                                 ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
@@ -3553,7 +3565,7 @@ export default function DepartmentKanban() {
                               {deletingProjectId === project.id ? "Deleting..." : "Delete"}
                             </Button>
                           ) : null}
-                          <Badge className="bg-slate-100 text-slate-700 border border-slate-200 text-xs whitespace-nowrap">
+                          <Badge className={`text-xs whitespace-nowrap ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
                             {PHASE_LABELS[phase] || "Meetings"}
                           </Badge>
                         </div>
