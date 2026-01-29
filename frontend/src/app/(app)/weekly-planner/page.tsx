@@ -797,6 +797,7 @@ export default function WeeklyPlannerPage() {
               width: 100%;
               border-collapse: collapse;
               table-layout: fixed;
+              margin-bottom: 0.05in;
             }
             thead {
               display: table-header-group;
@@ -970,7 +971,7 @@ export default function WeeklyPlannerPage() {
       const meta = doc.createElement("div")
       meta.className = showMeta ? "print-meta" : "print-meta compact"
       meta.innerHTML = showMeta
-        ? `<strong>Week:</strong> ${weekRange}`
+        ? `<strong>Week:</strong> ${weekRange} | <strong>Department:</strong> ${selectedDept}`
         : ""
       return meta
     }
@@ -1259,28 +1260,18 @@ export default function WeeklyPlannerPage() {
       })
       const allUsers = Array.from(userMap.values())
 
-      let deptTitle = doc.createElement("div")
-      deptTitle.className = "print-dept-title"
-      deptTitle.textContent = formatDepartmentName(dept.department_name)
-
       let table = createTable(allUsers)
       if (currentContent) {
-        currentContent.appendChild(deptTitle)
         currentContent.appendChild(table)
       }
 
       if (isContentOverflowing(currentContent)) {
         if (currentContent) {
-          currentContent.removeChild(deptTitle)
           currentContent.removeChild(table)
         }
         startNewPage()
-        deptTitle = doc.createElement("div")
-        deptTitle.className = "print-dept-title"
-        deptTitle.textContent = formatDepartmentName(dept.department_name)
         table = createTable(allUsers)
         if (currentContent) {
-          currentContent.appendChild(deptTitle)
           currentContent.appendChild(table)
         }
       }
@@ -1294,12 +1285,8 @@ export default function WeeklyPlannerPage() {
         if (isContentOverflowing(currentContent)) {
           table.removeChild(tbody)
           startNewPage()
-          const nextDeptTitle = doc.createElement("div")
-          nextDeptTitle.className = "print-dept-title"
-          nextDeptTitle.textContent = formatDepartmentName(dept.department_name)
           const nextTable = createTable(allUsers)
           if (currentContent) {
-            currentContent.appendChild(nextDeptTitle)
             currentContent.appendChild(nextTable)
           }
           nextTable.appendChild(tbody)
