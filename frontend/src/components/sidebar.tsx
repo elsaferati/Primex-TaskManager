@@ -139,15 +139,15 @@ export function Sidebar({ role }: { role: UserRole }) {
       {/* Mobile backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="fixed inset-0 bg-black/50 z-[110] md:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}
       
       <aside
         className={cn(
-          "fixed md:sticky top-0 left-0 z-50 w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen print:hidden transition-transform duration-300 ease-in-out",
-          "md:relative md:translate-x-0",
+          "fixed md:sticky md:top-0 left-0 z-[110] md:z-50 w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen md:h-[100vh] print:hidden transition-transform duration-300 ease-in-out",
+          "md:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}
       >

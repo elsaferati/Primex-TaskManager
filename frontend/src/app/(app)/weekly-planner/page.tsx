@@ -721,28 +721,32 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { size: letter landscape; margin: 0.36in 0.25in 0.3in 0.25in; }
+              @page { size: letter landscape; margin: 0.15in; }
               body { margin: 0; padding: 0; }
-              .print-page { page-break-after: always; }
-              .print-page:last-child { page-break-after: auto; }
+              .print-page { page-break-after: avoid; page-break-inside: avoid; }
+              .print-page:last-child { page-break-after: avoid; }
+              table { page-break-inside: avoid; }
+              tr { page-break-inside: avoid; }
+              tbody { page-break-inside: avoid; }
             }
             * {
               box-sizing: border-box;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
+              line-height: 1.1;
             }
             body {
               font-family: Arial, sans-serif;
-              font-size: 10pt;
+              font-size: 5pt;
               margin: 0;
               padding: 0;
-              width: calc(11in - 0.5in);
+              width: calc(11in - 0.3in);
               margin-left: auto;
               margin-right: auto;
             }
             .print-page {
               position: relative;
-              height: calc(8.5in - 0.66in);
+              height: calc(8.5in - 0.3in);
               display: grid;
               grid-template-rows: auto auto 1fr auto;
             }
@@ -750,33 +754,34 @@ export default function WeeklyPlannerPage() {
               display: grid;
               grid-template-columns: 1fr auto 1fr;
               align-items: center;
-              margin-bottom: 8px;
+              margin-bottom: 2px;
             }
             .print-header.compact {
               grid-template-columns: 1fr auto;
-              margin-bottom: 4px;
+              margin-bottom: 2px;
             }
             .print-title {
               margin: 0;
-              font-size: 16pt;
+              font-size: 7pt;
               font-weight: 700;
               text-transform: uppercase;
               text-align: center;
               color: #0f172a;
+              line-height: 1.1;
             }
             .print-datetime {
               text-align: right;
-              font-size: 10pt;
+              font-size: 5pt;
               color: #334155;
             }
             .print-meta {
               text-align: center;
-              margin-bottom: 8px;
-              font-size: 10pt;
+              margin-bottom: 2px;
+              font-size: 5pt;
               color: #334155;
             }
             .print-meta.compact {
-              margin-bottom: 4px;
+              margin-bottom: 2px;
               font-size: 0;
               line-height: 0;
               height: 0;
@@ -786,18 +791,22 @@ export default function WeeklyPlannerPage() {
               width: 100%;
               min-height: 0;
               overflow: hidden;
+              max-height: calc(8.5in - 0.3in - 60px);
+              transform: scale(0.85);
+              transform-origin: top left;
+              width: 117.65%;
             }
             .print-dept-title {
-              margin-top: 8px;
-              margin-bottom: 6px;
-              font-size: 14pt;
+              margin-top: 2px;
+              margin-bottom: 1px;
+              font-size: 6pt;
               font-weight: 700;
             }
             table {
               width: 100%;
               border-collapse: collapse;
               table-layout: fixed;
-              margin-bottom: 0.05in;
+              margin-bottom: 0.01in;
             }
             thead {
               display: table-header-group;
@@ -810,21 +819,27 @@ export default function WeeklyPlannerPage() {
               break-inside: avoid;
               page-break-inside: avoid;
             }
+            .print-content {
+              max-height: calc(8.5in - 0.3in - 60px);
+              overflow: hidden;
+            }
             th {
               background-color: #e2e8f0;
-              border: 1px solid #000;
-              padding: 8px;
+              border: 0.5px solid #000;
+              padding: 2px;
               text-align: center;
               font-weight: bold;
-              font-size: 9pt;
+              font-size: 5pt;
               text-transform: uppercase;
               vertical-align: bottom;
+              line-height: 1.1;
             }
             td {
-              border: 1px solid #000;
-              padding: 6px;
+              border: 0.5px solid #000;
+              padding: 1px;
               vertical-align: top;
-              font-size: 9pt;
+              font-size: 5pt;
+              line-height: 1.1;
             }
             .day-cell {
               font-weight: bold;
@@ -841,47 +856,50 @@ export default function WeeklyPlannerPage() {
             .time-cell {
               width: 32px;
               text-align: center;
-              padding-left: 4px;
-              padding-right: 4px;
+              padding-left: 1px;
+              padding-right: 1px;
             }
             .print-subhead {
               font-weight: bold;
               text-transform: uppercase;
-              font-size: 9pt;
+              font-size: 5pt;
             }
             .project-card {
-              margin: 4px 0;
-              padding: 4px;
+              margin: 1px 0;
+              padding: 1px;
               background-color: #f5f5f5;
-              border: 1px solid #ddd;
-              border-radius: 3px;
+              border: 0.5px solid #ddd;
+              border-radius: 2px;
               break-inside: avoid;
               page-break-inside: avoid;
             }
             .project-title {
               font-weight: bold;
-              margin-bottom: 2px;
+              margin-bottom: 0.5px;
+              line-height: 1.1;
             }
             .task-item {
-              font-size: 8pt;
-              margin: 2px 0;
-              padding: 2px 4px;
-              border: 1px solid #000;
-              border-radius: 3px;
+              font-size: 4pt;
+              margin: 0.5px 0;
+              padding: 0.5px 1px;
+              border: 0.5px solid #000;
+              border-radius: 2px;
               background-color: #fff;
               break-inside: avoid;
               page-break-inside: avoid;
+              line-height: 1.1;
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-done { background-color: #C4FDC4; }
             .badge {
               display: inline-block;
-              padding: 2px 6px;
-              border-radius: 3px;
-              font-size: 7pt;
+              padding: 0.5px 2px;
+              border-radius: 2px;
+              font-size: 4pt;
               font-weight: bold;
-              margin-left: 4px;
+              margin-left: 1px;
+              line-height: 1.1;
             }
             .badge-bll { background-color: #fee2e2; color: #991b1b; }
             .badge-r1 { background-color: #e0e7ff; color: #3730a3; }
@@ -892,23 +910,23 @@ export default function WeeklyPlannerPage() {
             .products {
               color: #2563eb;
               font-weight: bold;
-              font-size: 8pt;
+              font-size: 4pt;
             }
             .empty-cell {
               text-align: center;
               color: #999;
             }
             .pm-row {
-              border-top: 2px solid #000 !important;
+              border-top: 1px solid #000 !important;
             }
             .print-footer {
               margin-top: auto;
               display: grid;
               grid-template-columns: 1fr auto 1fr;
-              padding-left: 0.2in;
-              padding-right: 0.08in;
-              padding-bottom: 0.1in;
-              font-size: 10pt;
+              padding-left: 0.1in;
+              padding-right: 0.04in;
+              padding-bottom: 0.05in;
+              font-size: 5pt;
               color: #334155;
               background: #fff;
             }
@@ -1047,10 +1065,10 @@ export default function WeeklyPlannerPage() {
 
       let html = `
         <tr>
-          <td class="day-cell" rowspan="4" style="text-align: left; padding: 8px;">
+          <td class="day-cell" rowspan="4" style="text-align: left; padding: 1px;">
             <div style="display: flex; flex-direction: column;">
               <strong class="print-subhead">${dayName}</strong>
-              <span class="print-subhead" style="margin-top: 2px;">${dayDate}</span>
+              <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
             </div>
           </td>
           <td class="ll-cell print-subhead">PRJK</td>
@@ -1067,7 +1085,7 @@ export default function WeeklyPlannerPage() {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
             if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
             }
             html += `</div>`
             if (project.tasks && project.tasks.length > 0) {
@@ -1094,7 +1112,7 @@ export default function WeeklyPlannerPage() {
             html += `</div>`
           })
           if (systemTasks.length > 0) {
-            html += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+            html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
               html += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
             })
@@ -1116,7 +1134,7 @@ export default function WeeklyPlannerPage() {
 
         html += `<td>`
         if (fastTasks.length > 0) {
-          html += `<div style="font-size: 8pt; color: #0f172a;">`
+          html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
             const statusClass =
@@ -1154,7 +1172,7 @@ export default function WeeklyPlannerPage() {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
             if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
             }
             html += `</div>`
             if (project.tasks && project.tasks.length > 0) {
@@ -1181,7 +1199,7 @@ export default function WeeklyPlannerPage() {
             html += `</div>`
           })
           if (systemTasks.length > 0) {
-            html += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+            html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
               html += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
             })
@@ -1203,7 +1221,7 @@ export default function WeeklyPlannerPage() {
 
         html += `<td>`
         if (fastTasks.length > 0) {
-          html += `<div style="font-size: 8pt; color: #0f172a;">`
+          html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
             const statusClass =
@@ -1265,33 +1283,12 @@ export default function WeeklyPlannerPage() {
         currentContent.appendChild(table)
       }
 
-      if (isContentOverflowing(currentContent)) {
-        if (currentContent) {
-          currentContent.removeChild(table)
-        }
-        startNewPage()
-        table = createTable(allUsers)
-        if (currentContent) {
-          currentContent.appendChild(table)
-        }
-      }
-
+      // Force everything onto first page - no page breaks
       dept.days.forEach((day, dayIndex) => {
         const tbody = doc.createElement("tbody")
         tbody.className = "day-group"
         tbody.innerHTML = renderDayGroupHtml(day, dayIndex, allUsers)
         table.appendChild(tbody)
-
-        if (isContentOverflowing(currentContent)) {
-          table.removeChild(tbody)
-          startNewPage()
-          const nextTable = createTable(allUsers)
-          if (currentContent) {
-            currentContent.appendChild(nextTable)
-          }
-          nextTable.appendChild(tbody)
-          table = nextTable
-        }
       })
     })
 

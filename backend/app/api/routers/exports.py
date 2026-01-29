@@ -2023,7 +2023,9 @@ async def export_weekly_planner_xlsx(
     week_start_date = data.week_start
     week_end_date = data.week_end
 
-    title_label = f"{dept_label} {week_start_date.day:02d}-{week_start_date.month:02d}-{week_start_date.year} - {week_end_date.day:02d}-{week_end_date.month:02d}-{week_end_date.year}"
+    # Add "THIS WEEK PLAN" or "NEXT WEEK PLAN" label
+    week_label = "THIS WEEK PLAN" if is_this_week else "NEXT WEEK PLAN"
+    title_label = f"{dept_label} {week_start_date.day:02d}-{week_start_date.month:02d}-{week_start_date.year} - {week_end_date.day:02d}-{week_end_date.month:02d}-{week_end_date.year} - {week_label}"
     title_upper = title_label.upper()
 
     # Collect users in stable order
@@ -2049,18 +2051,19 @@ async def export_weekly_planner_xlsx(
     # Title row
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value=title_upper)
-    title_cell.font = Font(bold=True, size=16)
+    title_cell.font = Font(bold=True, size=12)  # Reduced from 16 to help fit on one page
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.row_dimensions[1].height = 24
-    ws.row_dimensions[2].height = 6
-    ws.row_dimensions[3].height = 6
+    # Reduced row heights to help fit on one page when printing
+    ws.row_dimensions[1].height = 18
+    ws.row_dimensions[2].height = 4
+    ws.row_dimensions[3].height = 4
 
     header_row = 4
     data_start_row = 5
-    ws.row_dimensions[header_row].height = 20
+    ws.row_dimensions[header_row].height = 15
 
-    headers = ["NR", "DAY", "LL", "TIME"] + [name.upper() for name in user_names]
+    headers = ["NR", "DAY", "LLOJI", "TIME"] + [name.upper() for name in user_names]
     for col_idx, label in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=label)
         cell.font = Font(bold=True)
@@ -2218,17 +2221,20 @@ async def export_weekly_planner_xlsx(
     ws.freeze_panes = "B5"
     ws.print_title_rows = f"{header_row}:{header_row}"
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
+    # Minimal margins to maximize printable area for fitting on one page
     ws.page_margins.left = 0.1
     ws.page_margins.right = 0.1
-    ws.page_margins.top = 0.36
-    ws.page_margins.bottom = 0.51
-    ws.page_margins.header = 0.15
-    ws.page_margins.footer = 0.2
+    ws.page_margins.top = 0.1
+    ws.page_margins.bottom = 0.1
+    ws.page_margins.header = 0.1
+    ws.page_margins.footer = 0.1
+    # Force fit to exactly 1 page (width and height) - Excel will scale down as needed
+    # This is the key setting to ensure everything fits on one page
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
 
     user_initials = _initials(user.full_name or user.username or "")
     ws.oddHeader.right.text = "&D &T"
