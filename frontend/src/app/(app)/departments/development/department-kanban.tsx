@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
@@ -321,6 +322,22 @@ function formatMeetingLabel(meeting: Meeting) {
   const weekdayLabel = date.toLocaleDateString("en-US", { weekday: "long" })
   const prefix = sameDay ? timeLabel : weekdayLabel
   return `${prefix} - ${meeting.title}${platformLabel}`
+}
+
+function formatMeetingDateTime(meeting: Meeting): string {
+  if (!meeting.starts_at) return "-"
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return "-"
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const dateLabel = sameDay
+    ? "Today"
+    : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return `${dateLabel} ${timeLabel}`
 }
 
 function formatMsEventWindow(event: MicrosoftEvent) {
@@ -5167,95 +5184,115 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">External Meetings</div>
-                <div className="space-y-3">
-                  {visibleMeetings.length ? (
-                    visibleMeetings.map((meeting) => {
-                      const project = meeting.project_id
-                        ? projects.find((p) => p.id === meeting.project_id) || null
-                        : null
-                      const isEditing = !isReadOnly && editingMeetingId === meeting.id
-                      return (
-                        <Card key={meeting.id} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
-                          {isEditing ? (
-                            <div className="space-y-3">
-                              <Input
-                                value={editMeetingTitle}
-                                onChange={(e) => setEditMeetingTitle(e.target.value)}
-                              />
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <Input
-                                  value={editMeetingPlatform}
-                                  onChange={(e) => setEditMeetingPlatform(e.target.value)}
-                                  placeholder="Platform"
-                                />
-                                <Input
-                                  type="datetime-local"
-                                  value={editMeetingStartsAt}
-                                  onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                                />
-                              </div>
-                              <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Project (optional)" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">No project</SelectItem>
-                                  {filteredProjects.map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.title || p.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="flex justify-end gap-2">
-                                <Button variant="outline" onClick={cancelEditMeeting}>
-                                  Cancel
-                                </Button>
-                                <Button onClick={() => void saveMeeting(meeting.id)}>Save</Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
-                                {project ? (
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    Project: {project.title || project.name}
-                                  </div>
-                                ) : null}
-                              </div>
-                              {!isReadOnly ? (
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => startEditMeeting(meeting)}
-                                    aria-label="Edit meeting"
-                                    title="Edit"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => void deleteMeeting(meeting.id)}
-                                    aria-label="Delete meeting"
-                                    title="Delete"
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ) : null}
-                            </div>
-                          )}
-                        </Card>
-                      )
-                    })
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No external meetings yet.</div>
-                  )}
-                </div>
+                {visibleMeetings.length ? (
+                  <div className="rounded-md border border-slate-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[30%]">Title</TableHead>
+                          <TableHead className="w-[15%]">Platform</TableHead>
+                          <TableHead className="w-[20%]">Date & Time</TableHead>
+                          <TableHead className="w-[20%]">Project</TableHead>
+                          {!isReadOnly ? <TableHead className="w-[15%] text-right">Actions</TableHead> : null}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visibleMeetings.map((meeting) => {
+                          const project = meeting.project_id
+                            ? projects.find((p) => p.id === meeting.project_id) || null
+                            : null
+                          const isEditing = !isReadOnly && editingMeetingId === meeting.id
+                          return (
+                            <TableRow key={meeting.id}>
+                              {isEditing ? (
+                                <>
+                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
+                                    <div className="space-y-3">
+                                      <Input
+                                        value={editMeetingTitle}
+                                        onChange={(e) => setEditMeetingTitle(e.target.value)}
+                                        placeholder="Meeting title"
+                                      />
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Input
+                                          value={editMeetingPlatform}
+                                          onChange={(e) => setEditMeetingPlatform(e.target.value)}
+                                          placeholder="Platform"
+                                        />
+                                        <Input
+                                          type="datetime-local"
+                                          value={editMeetingStartsAt}
+                                          onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Project (optional)" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="__none__">No project</SelectItem>
+                                            {filteredProjects.map((p) => (
+                                              <SelectItem key={p.id} value={p.id}>
+                                                {p.title || p.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <div className="flex gap-2">
+                                          <Button variant="outline" onClick={cancelEditMeeting} className="flex-1">
+                                            Cancel
+                                          </Button>
+                                          <Button onClick={() => void saveMeeting(meeting.id)} className="flex-1">
+                                            Save
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                </>
+                              ) : (
+                                <>
+                                  <TableCell className="font-medium">{meeting.title}</TableCell>
+                                  <TableCell>{meeting.platform || "-"}</TableCell>
+                                  <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                                  <TableCell>{project ? project.title || project.name : "-"}</TableCell>
+                                  {!isReadOnly ? (
+                                    <TableCell className="text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          onClick={() => startEditMeeting(meeting)}
+                                          aria-label="Edit meeting"
+                                          title="Edit"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          onClick={() => void deleteMeeting(meeting.id)}
+                                          aria-label="Delete meeting"
+                                          title="Delete"
+                                          className="text-red-600 border-red-200 hover:bg-red-50"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  ) : null}
+                                </>
+                              )}
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                )}
                 {!isReadOnly ? (
                   <div className="border-t border-slate-200 pt-4">
                     {!showAddMeetingForm ? (
