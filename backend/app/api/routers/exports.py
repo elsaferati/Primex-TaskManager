@@ -602,10 +602,14 @@ async def export_tasks_xlsx(
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    user_initials = _initials(user.full_name or user.username or "") or "USER"
+    filename = f"TASKS_{filename_date}_{user_initials}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="tasks_export.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
 
@@ -1318,10 +1322,9 @@ async def export_daily_report_xlsx(
     wb.save(bio)
     bio.seek(0)
     date_label = day.strftime("%d_%m_%y")
-    title_label = title_text.upper()
     user_initials = _initials(user.full_name or user.username or "")
-    initials_label = user_initials or "USER"
-    filename = f"{title_label}_{date_label}_{initials_label}.xlsx"
+    initials_label = (user_initials or "USER").upper()
+    filename = f"DAILY_REPORT_{date_label}_{initials_label}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2391,17 +2394,17 @@ async def export_ga_notes_xlsx(
     thin = Side(style="thin", color="475569")
     thick = Side(style="thick", color="1e293b")
     
-    # Title row (row 1)
-    title_row = 1
+    # First two rows are empty
+    # Title row (row 3)
+    title_row = 3
     last_col = len(headers)
     ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
     title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES")
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="left", vertical="bottom")
     
-    # Empty row 2 for spacing
-    # Header row (row 3, but we'll use row 3 as header_row variable)
-    header_row = 3
+    # Header row (row 4)
+    header_row = 4
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header.upper())
         cell.font = Font(bold=True)
@@ -2440,7 +2443,7 @@ async def export_ga_notes_xlsx(
     ws.column_dimensions["H"].width = 15  # MBYLL SHENIM
     
     # Freeze panes: freeze column A (NR) and header row
-    ws.freeze_panes = "B4"
+    ws.freeze_panes = "B5"
     
     # Auto filter for all columns
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
@@ -2483,10 +2486,10 @@ async def export_ga_notes_xlsx(
     wb.save(bio)
     bio.seek(0)
     
-    # Generate filename: TITLE DD_MM_YY_EF (USER INITIALS) in uppercase
+    # Generate filename: GA/KA_NOTES DD_MM_YY_USER_INITIALS
     today = datetime.now(timezone.utc).date()
     filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
-    filename = f"GA/KA NOTES {filename_date}_EF ({user_initials}).xlsx"
+    filename = f"GA/KA_NOTES {filename_date}_{user_initials}.xlsx"
     
     return StreamingResponse(
         bio,
