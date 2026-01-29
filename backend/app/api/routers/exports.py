@@ -131,16 +131,14 @@ def _fast_task_badge(task) -> str:
     return ""
 
 
-def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: bool) -> list[tuple[str, str, str]]:
+def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: bool, day_date: date) -> list[dict[str, str | None]]:
     """
-    Returns list of tuples: (number_part, title_part, rest_part)
-    - number_part: "1", "2", etc.
-    - title_part: the title that should be bold (e.g., "IWF", "PROJECT_TITLE")
-    - rest_part: the rest of the text after the colon (e.g., "XML UPDATE", "TASK_NAME")
+    Returns list of task display items with status for coloring.
+    Each item has: number, title, rest, status.
     """
-    lines: list[tuple[str, str, str]] = []
+    items: list[dict[str, str | None]] = []
     task_num = 1
-    
+
     for project in projects:
         project_title = project.project_title or ""
         for task in project.tasks or []:
@@ -148,20 +146,40 @@ def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: boo
             task_name = task_title
             if task.daily_products is not None:
                 task_name = f"{task_name} {task.daily_products} pcs"
-            # Format: "1. PROJECT_TITLE: TASK_NAME" or "1. TASK_NAME" if no project
+            status_value = _effective_status(task.status, task.completed_at, day_date)
             if project_title:
-                lines.append((str(task_num), project_title, task_name))
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": project_title,
+                        "rest": task_name,
+                        "status": status_value,
+                    }
+                )
             else:
-                # If no project title, use task name as title
-                lines.append((str(task_num), task_name, ""))
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": task_name,
+                        "rest": "",
+                        "status": status_value,
+                    }
+                )
             task_num += 1
-    
+
     for task in system_tasks:
         title = task.title or ""
         if title:
-            lines.append((str(task_num), title, ""))
+            items.append(
+                {
+                    "number": str(task_num),
+                    "title": title,
+                    "rest": "",
+                    "status": _effective_status(task.status, task.completed_at, day_date),
+                }
+            )
             task_num += 1
-    
+
     if include_fast:
         for task in fast_tasks:
             label = task.title or ""
@@ -169,10 +187,17 @@ def _planner_cell_lines(*, projects, system_tasks, fast_tasks, include_fast: boo
             if badge:
                 label = f"{label} [{badge}]"
             if label:
-                lines.append((str(task_num), label, ""))
+                items.append(
+                    {
+                        "number": str(task_num),
+                        "title": label,
+                        "rest": "",
+                        "status": _effective_status(task.status, task.completed_at, day_date),
+                    }
+                )
                 task_num += 1
-    
-    return lines
+
+    return items
 
 
 def _create_rich_text_cell(lines: list[tuple[str, str, str]]) -> CellRichText | str:
@@ -200,6 +225,13 @@ def _create_rich_text_cell(lines: list[tuple[str, str, str]]) -> CellRichText | 
     return CellRichText(rich_text_parts)
 
 
+def _planner_item_rich_text(item: dict[str, str | None]) -> CellRichText | str:
+    number = item.get("number") or ""
+    title = item.get("title") or ""
+    rest = item.get("rest") or ""
+    return _create_rich_text_cell([(number, title, rest)])
+
+
 def _effective_status(status: str | None, completed_at: datetime | None, day_date: date) -> str:
     normalized = (status or "TODO").upper()
     if normalized != "DONE":
@@ -207,26 +239,6 @@ def _effective_status(status: str | None, completed_at: datetime | None, day_dat
     if not completed_at:
         return "IN_PROGRESS"
     return "DONE" if completed_at.date() == day_date else "IN_PROGRESS"
-
-
-def _cell_status(*, projects, system_tasks, fast_tasks, include_fast: bool, day_date: date) -> str | None:
-    statuses: list[str] = []
-    for project in projects:
-        for task in project.tasks or []:
-            statuses.append(_effective_status(task.status, task.completed_at, day_date))
-    for task in system_tasks:
-        statuses.append(_effective_status(task.status, task.completed_at, day_date))
-    if include_fast:
-        for task in fast_tasks:
-            statuses.append(_effective_status(task.status, task.completed_at, day_date))
-
-    if not statuses:
-        return None
-    if "DONE" in statuses:
-        return "DONE"
-    if "IN_PROGRESS" in statuses:
-        return "IN_PROGRESS"
-    return "TODO"
 
 
 def _scope_label(template: SystemTaskTemplate) -> str:
@@ -2061,38 +2073,25 @@ async def export_weekly_planner_xlsx(
     for idx in range(5, last_col + 1):
         ws.column_dimensions[get_column_letter(idx)].width = 28
 
-    # Fill data rows
+    # Fill data rows (expand rows so each task can be colored by status)
+    current_row = data_start_row
     for day_index, day in enumerate(dept.days, start=1):
-        base_row = data_start_row + (day_index - 1) * 4
         day_name = DAY_NAMES[day_index - 1].upper() if 0 <= day_index - 1 < len(DAY_NAMES) else ""
         day_date = f"{day.date.day:02d}-{day.date.month:02d}-{day.date.year}"
         day_label = f"{day_name}\n{day_date}".strip()
 
-        # Merge NR and DAY across 4 rows
-        ws.merge_cells(start_row=base_row, start_column=1, end_row=base_row + 3, end_column=1)
-        ws.merge_cells(start_row=base_row, start_column=2, end_row=base_row + 3, end_column=2)
-        nr_cell = ws.cell(row=base_row, column=1, value=day_index)
-        nr_cell.font = Font(bold=True)
-        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
-        day_cell = ws.cell(row=base_row, column=2, value=day_label)
-        day_cell.font = Font(bold=True)
-        day_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
-
-        row_specs = [
+        slot_specs = [
             ("PRJK", "AM", False),
             ("FT", "AM", True),
             ("PRJK", "PM", False),
             ("FT", "PM", True),
         ]
 
-        for offset, (ll_label, time_label, include_fast) in enumerate(row_specs):
-            row_idx = base_row + offset
-            ws.cell(row=row_idx, column=3, value=ll_label).font = Font(bold=True)
-            ws.cell(row=row_idx, column=4, value=time_label).font = Font(bold=True)
-            ws.cell(row=row_idx, column=3).alignment = Alignment(horizontal="left", vertical="bottom")
-            ws.cell(row=row_idx, column=4).alignment = Alignment(horizontal="left", vertical="bottom")
-
-            for u_idx, user_id in enumerate(user_ids):
+        slot_rows: list[dict[str, object]] = []
+        for ll_label, time_label, include_fast in slot_specs:
+            per_user_items: list[list[dict[str, str | None]]] = []
+            max_items = 0
+            for user_id in user_ids:
                 user_day = next((u for u in day.users if u.user_id == user_id), None)
                 projects = []
                 system_tasks = []
@@ -2111,26 +2110,74 @@ async def export_weekly_planner_xlsx(
                     projects = []
                     system_tasks = []
 
-                lines = _planner_cell_lines(
-                    projects=projects,
-                    system_tasks=system_tasks,
-                    fast_tasks=fast_tasks,
-                    include_fast=include_fast,
-                )
-                status_value = _cell_status(
+                items = _planner_cell_items(
                     projects=projects,
                     system_tasks=system_tasks,
                     fast_tasks=fast_tasks,
                     include_fast=include_fast,
                     day_date=day.date,
                 )
-                cell_value = _create_rich_text_cell(lines)
-                cell = ws.cell(row=row_idx, column=5 + u_idx, value=cell_value)
-                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
-                if status_value in status_fills and lines:
-                    cell.fill = status_fills[status_value]
+                per_user_items.append(items)
+                max_items = max(max_items, len(items))
 
-    last_row = data_start_row + len(dept.days) * 4 - 1
+            slot_rows.append(
+                {
+                    "ll_label": ll_label,
+                    "time_label": time_label,
+                    "include_fast": include_fast,
+                    "row_count": max(1, max_items),
+                    "per_user_items": per_user_items,
+                }
+            )
+
+        total_day_rows = sum(slot["row_count"] for slot in slot_rows)
+        base_row = current_row
+
+        # Merge NR and DAY across all rows for this day
+        ws.merge_cells(start_row=base_row, start_column=1, end_row=base_row + total_day_rows - 1, end_column=1)
+        ws.merge_cells(start_row=base_row, start_column=2, end_row=base_row + total_day_rows - 1, end_column=2)
+        nr_cell = ws.cell(row=base_row, column=1, value=day_index)
+        nr_cell.font = Font(bold=True)
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        day_cell = ws.cell(row=base_row, column=2, value=day_label)
+        day_cell.font = Font(bold=True)
+        day_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+        row_cursor = base_row
+        for slot in slot_rows:
+            slot_start = row_cursor
+            row_count = slot["row_count"]
+            ll_label = slot["ll_label"]
+            time_label = slot["time_label"]
+            per_user_items = slot["per_user_items"]
+
+            if row_count > 1:
+                ws.merge_cells(start_row=slot_start, start_column=3, end_row=slot_start + row_count - 1, end_column=3)
+                ws.merge_cells(start_row=slot_start, start_column=4, end_row=slot_start + row_count - 1, end_column=4)
+
+            ll_cell = ws.cell(row=slot_start, column=3, value=ll_label)
+            ll_cell.font = Font(bold=True)
+            ll_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+            time_cell = ws.cell(row=slot_start, column=4, value=time_label)
+            time_cell.font = Font(bold=True)
+            time_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+
+            for offset in range(row_count):
+                row_idx = slot_start + offset
+                for u_idx, _ in enumerate(user_ids):
+                    items = per_user_items[u_idx]
+                    item = items[offset] if offset < len(items) else None
+                    cell_value = _planner_item_rich_text(item) if item else ""
+                    cell = ws.cell(row=row_idx, column=5 + u_idx, value=cell_value)
+                    cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+                    if item and item.get("status") in status_fills:
+                        cell.fill = status_fills[item["status"]]
+
+            row_cursor += row_count
+
+        current_row = base_row + total_day_rows
+
+    last_row = current_row - 1
 
     # Borders
     thin = Side(style="thin", color="000000")
