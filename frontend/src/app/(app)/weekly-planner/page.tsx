@@ -721,7 +721,7 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { size: letter landscape; margin: 0.36in 0.08in 0.3in 0.2in; }
+              @page { size: letter landscape; margin: 0.36in 0.25in 0.3in 0.25in; }
               body { margin: 0; padding: 0; }
               .print-page { page-break-after: always; }
               .print-page:last-child { page-break-after: auto; }
@@ -736,7 +736,7 @@ export default function WeeklyPlannerPage() {
               font-size: 10pt;
               margin: 0;
               padding: 0;
-              width: calc(11in - 0.28in);
+              width: calc(11in - 0.5in);
               margin-left: auto;
               margin-right: auto;
             }
@@ -923,7 +923,7 @@ export default function WeeklyPlannerPage() {
               left: -9999px;
               top: 0;
               visibility: hidden;
-              width: calc(11in - 0.28in);
+              width: calc(11in - 0.5in);
             }
           </style>
         </head>
