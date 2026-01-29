@@ -37,14 +37,14 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
           pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-      # --- SWITCHED TO POWERSHELL FOR RELIABILITY ---
-      - name: Update Frontend (PowerShell)
+      - name: Update Frontend (PowerShell Fix)
         shell: powershell
         run: |
           Set-Location frontend
           
-          Write-Host "1. Stopping Frontend..."
-          pm2 delete frontend 2>$null
+          Write-Host "1. Stopping Frontend (Safe Mode)..."
+          # We use cmd /c here to safely swallow the error if the process doesn't exist
+          cmd /c "pm2 delete frontend 2>NUL || ver > NUL"
           
           Write-Host "2. Installing Dependencies..."
           npm install
@@ -53,13 +53,13 @@ jobs:
           Write-Host "3. Cleaning Old Build..."
           if (Test-Path .next) { Remove-Item .next -Recurse -Force }
 
-          Write-Host "4. Building New Version (Please Wait)..."
+          Write-Host "4. Building New Version (This takes time)..."
           npm run build
           if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
 
           Write-Host "5. Starting Frontend..."
-          # Get current full path for PM2
           $CurrentPath = (Get-Location).Path
-          pm2 start node_modules/next/dist/bin/next --name frontend --cwd $CurrentPath -- start
+          # We restart via cmd to ensure the path is set correctly
+          cmd /c "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
           
           pm2 save
