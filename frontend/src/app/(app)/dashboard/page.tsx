@@ -49,7 +49,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 bg-red-100">
+      <div className="grid gap-4 md:grid-cols-2 bg-blue-100">
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">Quick links</CardTitle>
