@@ -39,6 +39,7 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
+from app.models.ga_note import GaNote
 from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope
 from app.api.routers.planners import weekly_table_planner
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
@@ -2254,6 +2255,173 @@ async def export_weekly_planner_xlsx(
     filename_title = _safe_filename(title_upper)
     filename = f"{filename_title}_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({initials_value}).xlsx"
 
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/ga-notes.xlsx")
+async def export_ga_notes_xlsx(
+    department_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Export GA/KA notes to Excel"""
+    from datetime import timedelta
+    from app.models.enums import GaNoteStatus
+    
+    # Build query
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    closed_cutoff = datetime.utcnow() - timedelta(days=5)
+    
+    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
+    
+    # Exclude closed notes that are older than 5 days
+    stmt = stmt.where(
+        or_(
+            GaNote.status != GaNoteStatus.CLOSED,
+            GaNote.completed_at.is_(None),
+            GaNote.completed_at >= closed_cutoff,
+        )
+    )
+    
+    if project_id is not None:
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        stmt = stmt.where(GaNote.project_id == project_id)
+    elif department_id is not None:
+        ensure_department_access(user, department_id)
+        stmt = stmt.where(GaNote.department_id == department_id)
+    elif user.role == UserRole.STAFF:
+        # STAFF users can only see their department's notes
+        if user.department_id:
+            stmt = stmt.where(GaNote.department_id == user.department_id)
+    
+    notes = (await db.execute(stmt)).scalars().all()
+    
+    # Get related data
+    user_ids = {n.created_by for n in notes if n.created_by}
+    department_ids = {n.department_id for n in notes if n.department_id}
+    project_ids = {n.project_id for n in notes if n.project_id}
+    
+    users_map = {}
+    if user_ids:
+        users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users_map = {u.id: u for u in users}
+    
+    departments_map = {}
+    if department_ids:
+        departments = (await db.execute(select(Department).where(Department.id.in_(department_ids)))).scalars().all()
+        departments_map = {d.id: d for d in departments}
+    
+    projects_map = {}
+    if project_ids:
+        projects = (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()
+        projects_map = {p.id: p for p in projects}
+    
+    # Helper functions
+    def get_user_initials(user_id: uuid.UUID | None) -> str:
+        if not user_id or user_id not in users_map:
+            return "-"
+        u = users_map[user_id]
+        return _initials(u.full_name or u.username or "")
+    
+    def get_department_abbrev(dept_id: uuid.UUID | None) -> str:
+        if not dept_id or dept_id not in departments_map:
+            return "-"
+        dept_name = departments_map[dept_id].name
+        key = dept_name.strip().upper()
+        return {
+            "DEVELOPMENT": "DEV",
+            "GRAPHIC DESIGN": "GDS",
+            "PRODUCT CONTENT": "PCM",
+            "PROJECT CONTENT": "PCM",
+        }.get(key, dept_name[:3].upper() if dept_name else "-")
+    
+    def format_note_date(dt: datetime | None) -> str:
+        if not dt:
+            return "-"
+        return dt.strftime("%d.%m, %I:%M %p")
+    
+    # Build rows
+    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "DEP", "PRJK", "KRIJO DETYRE", "MBYLL SHENIM"]
+    rows = []
+    
+    for idx, note in enumerate(notes, start=1):
+        creator_initials = get_user_initials(note.created_by)
+        dept_abbrev = get_department_abbrev(note.department_id) if note.department_id else "-"
+        project_name = "-"
+        if note.project_id and note.project_id in projects_map:
+            p = projects_map[note.project_id]
+            project_name = p.title or p.name or "Project"
+        
+        task_status = "Task Created" if note.is_converted_to_task else "No Task"
+        note_status = "Closed" if note.status == GaNoteStatus.CLOSED else "Open"
+        
+        # Clean content (remove HTML if any)
+        content = _strip_html(note.content) if note.content else ""
+        
+        rows.append([
+            str(idx),
+            content,
+            format_note_date(note.created_at),
+            creator_initials,
+            dept_abbrev,
+            project_name,
+            task_status,
+            note_status,
+        ])
+    
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "GA-KA Notes"
+    
+    # Title row
+    title_row = 1
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
+    title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES REPORT")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Header row
+    header_row = 3
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+    
+    # Data rows
+    for row_idx, row_data in enumerate(rows, start=header_row + 1):
+        for col_idx, value in enumerate(row_data, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+    
+    # Column widths
+    ws.column_dimensions["A"].width = 5  # NR
+    ws.column_dimensions["B"].width = 50  # SHENIMI
+    ws.column_dimensions["C"].width = 18  # DATA,ORA
+    ws.column_dimensions["D"].width = 8   # NGA
+    ws.column_dimensions["E"].width = 8   # DEP
+    ws.column_dimensions["F"].width = 20  # PRJK
+    ws.column_dimensions["G"].width = 15  # KRIJO DETYRE
+    ws.column_dimensions["H"].width = 15  # MBYLL SHENIM
+    
+    # Save to bytes
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    
+    # Generate filename
+    today = datetime.now(timezone.utc).date()
+    user_initials = _initials(user.full_name or user.username or "") or "USER"
+    filename = f"GA_KA_NOTES_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({user_initials}).xlsx"
+    
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

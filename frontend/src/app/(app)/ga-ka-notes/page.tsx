@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Clock } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { Clock, Printer } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -54,12 +56,15 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
 function formatDate(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  const day = date.getDate().toString().padStart(2, "0")
+  const month = (date.getMonth() + 1).toString().padStart(2, "0")
+  let hours = date.getHours()
+  const minutes = date.getMinutes().toString().padStart(2, "0")
+  const ampm = hours >= 12 ? "PM" : "AM"
+  hours = hours % 12
+  hours = hours ? hours : 12 // the hour '0' should be '12'
+  const hoursStr = hours.toString().padStart(2, "0")
+  return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
 }
 
 function getInitials(label: string) {
@@ -80,16 +85,29 @@ function getDueTone(value?: string | null) {
   return hoursLeft <= 24 ? "text-amber-600" : "text-slate-600"
 }
 
+function abbreviateDepartmentName(name: string): string {
+  const lowerName = name.toLowerCase()
+  if (lowerName.includes("development")) return "DEV"
+  if (lowerName.includes("graphic") && lowerName.includes("design")) return "GDS"
+  if (lowerName.includes("product") && lowerName.includes("content")) return "PCM"
+  if (lowerName.includes("project content")) return "PCM"
+  // Return first 3 letters as fallback
+  return name.slice(0, 3).toUpperCase()
+}
+
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
+  const searchParams = useSearchParams()
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
-  const [tasks, setTasks] = React.useState<Task[]>([])
-  const [loadingTasks, setLoadingTasks] = React.useState(false)
-  const [departmentId, setDepartmentId] = React.useState("ALL")
-  const [projectId, setProjectId] = React.useState("NONE")
+
+  // Initialize from URL parameters if present
+  const urlDepartmentId = searchParams.get("department_id")
+  const urlProjectId = searchParams.get("project_id")
+  const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
+  const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
   const [content, setContent] = React.useState("")
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
@@ -98,7 +116,10 @@ export default function GaKaNotesPage() {
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
-  const [showClosed, setShowClosed] = React.useState(true)
+  const [statusFilter, setStatusFilter] = React.useState<"all" | "open" | "closed">("all")
+  const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
+  const [taskFilter, setTaskFilter] = React.useState<"all" | "with_tasks" | "without_tasks">("all")
+  const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
   const [taskPriority, setTaskPriority] = React.useState<TaskPriority>("NORMAL")
@@ -110,12 +131,7 @@ export default function GaKaNotesPage() {
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
 
-  // Default department for staff
-  React.useEffect(() => {
-    if (user?.department_id && departmentId === "ALL") {
-      setDepartmentId(user.department_id)
-    }
-  }, [departmentId, user])
+
 
   const loadDepartments = React.useCallback(async () => {
     const res = await apiFetch("/departments")
@@ -142,44 +158,18 @@ export default function GaKaNotesPage() {
     [apiFetch]
   )
 
-  const loadTasks = React.useCallback(
-    async (noteIds: string[]) => {
-      if (!noteIds.length) {
-        setTasks([])
-        return
-      }
-      setLoadingTasks(true)
-      try {
-        const res = await apiFetch("/tasks")
-        if (res?.ok) {
-          const allTasks = (await res.json()) as Task[]
-          const allowedIds = new Set(noteIds)
-          setTasks(allTasks.filter((task) => task.ga_note_origin_id && allowedIds.has(task.ga_note_origin_id)))
-        }
-      } finally {
-        setLoadingTasks(false)
-      }
-    },
-    [apiFetch]
-  )
+
 
   const fetchNotes = React.useCallback(async () => {
     if (!user) return
-    // Staff must always query by their department to satisfy backend requirements.
-    const enforcedDepartmentId =
-      user.role === "STAFF" ? user.department_id ?? null : departmentId !== "ALL" ? departmentId : null
-    if (user.role === "STAFF" && !enforcedDepartmentId) {
-      toast.error("Your department is required to load notes.")
-      return
-    }
     setLoading(true)
     try {
       let url = "/ga-notes"
       const params = new URLSearchParams()
       if (projectId !== "NONE") {
         params.set("project_id", projectId)
-      } else if (enforcedDepartmentId) {
-        params.set("department_id", enforcedDepartmentId)
+      } else if (departmentId !== "ALL") {
+        params.set("department_id", departmentId)
       }
       url += params.toString() ? `?${params}` : ""
       const res = await apiFetch(url)
@@ -192,6 +182,18 @@ export default function GaKaNotesPage() {
       setLoading(false)
     }
   }, [apiFetch, departmentId, projectId, user])
+
+  // Sync state with URL parameters when they change
+  React.useEffect(() => {
+    const urlDeptId = searchParams.get("department_id")
+    const urlProjId = searchParams.get("project_id")
+    if (urlDeptId) {
+      setDepartmentId(urlDeptId)
+    }
+    if (urlProjId) {
+      setProjectId(urlProjId)
+    }
+  }, [searchParams])
 
   React.useEffect(() => {
     void loadDepartments()
@@ -209,17 +211,30 @@ export default function GaKaNotesPage() {
     void fetchNotes()
   }, [fetchNotes])
 
-  React.useEffect(() => {
-    const noteIds = notes.filter((note) => note.is_converted_to_task).map((note) => note.id)
-    void loadTasks(noteIds)
-  }, [loadTasks, notes])
+
 
   const createNote = async () => {
     if (!content.trim()) {
       toast.error("Content is required")
       return
     }
-    const departmentForNote = user?.role === "STAFF" ? user.department_id ?? null : null
+    // Use URL parameters if present, otherwise determine based on user role
+    const departmentForNote = searchParams.get("department_id") || null
+    const projectForNote = searchParams.get("project_id") || null
+    
+    // Determine department_id to send to backend
+    let finalDepartmentId = departmentForNote
+    let finalProjectId = projectForNote
+    
+    // If no URL params, send user's department_id for STAFF users (for backend validation)
+    // but we'll hide it in the display if it matches the user's auto-assigned department
+    if (!departmentForNote && !projectForNote) {
+      const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
+      if (!isAdminOrManager && user?.department_id) {
+        finalDepartmentId = user.department_id
+      }
+    }
+    
     setPosting(true)
     try {
       const res = await apiFetch("/ga-notes", {
@@ -229,12 +244,21 @@ export default function GaKaNotesPage() {
           content: content.trim(),
           note_type: noteType,
           priority: priority === "NONE" ? null : priority,
-          department_id: departmentForNote,
-          project_id: null,
+          department_id: finalDepartmentId,
+          project_id: finalProjectId,
         }),
       })
       if (!res?.ok) {
-        toast.error("Failed to create note")
+        let errorMessage = "Failed to create note"
+        try {
+          const errorData = (await res.json()) as { detail?: string }
+          if (errorData?.detail) {
+            errorMessage = errorData.detail
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(errorMessage)
         return
       }
       const created = (await res.json()) as GaNote
@@ -314,13 +338,6 @@ export default function GaKaNotesPage() {
           prev.map((n) => (n.id === note.id ? { ...n, is_converted_to_task: true } : n))
         )
       }
-      setTasks((prev) => {
-        if (createdTask.ga_note_origin_id) {
-          const filtered = prev.filter((task) => task.ga_note_origin_id !== createdTask.ga_note_origin_id)
-          return [createdTask, ...filtered]
-        }
-        return [createdTask, ...prev]
-      })
       setTaskDialogNoteId(null)
       toast.success("Task created from note")
     } finally {
@@ -339,6 +356,48 @@ export default function GaKaNotesPage() {
       setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)))
     } else {
       toast.error("Failed to update note")
+    }
+  }
+
+  const exportDailyReport = async () => {
+    if (!user?.id) return
+    setExportingDailyReport(true)
+    try {
+      const qs = new URLSearchParams()
+      if (departmentId !== "ALL") {
+        qs.set("department_id", departmentId)
+      }
+      if (projectId !== "NONE") {
+        qs.set("project_id", projectId)
+      }
+      // Note: You'll need to create a backend endpoint /exports/ga-notes.xlsx
+      // For now, using a placeholder - adjust the endpoint as needed
+      const res = await apiFetch(`/exports/ga-notes.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export report")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      if (match?.[1]) {
+        link.download = match[1]
+      } else {
+        const today = new Date().toISOString().split('T')[0]
+        link.download = `ga_notes_export_${today}.xlsx`
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export report", error)
+      toast.error("Failed to export report")
+    } finally {
+      setExportingDailyReport(false)
     }
   }
 
@@ -376,26 +435,42 @@ export default function GaKaNotesPage() {
       const created = note.created_at ? new Date(note.created_at).getTime() : 0
       return created >= weekAgo
     }
+    const matchesStatus = (note: GaNote) => {
+      if (statusFilter === "all") return true
+      if (statusFilter === "open") return note.status !== "CLOSED"
+      if (statusFilter === "closed") return note.status === "CLOSED"
+      return true
+    }
+    const matchesNoteType = (note: GaNote) => {
+      if (noteTypeFilter === "all") return true
+      return note.note_type === noteTypeFilter
+    }
+    const matchesTaskFilter = (note: GaNote) => {
+      if (taskFilter === "all") return true
+      if (taskFilter === "with_tasks") return note.is_converted_to_task === true
+      if (taskFilter === "without_tasks") return note.is_converted_to_task === false
+      return true
+    }
     const sorted = [...notes]
       .filter(withinRange)
+      .filter(matchesStatus)
+      .filter(matchesNoteType)
+      .filter(matchesTaskFilter)
       .sort((a, b) => {
+        // First, sort by status: open notes first, closed notes last
+        const aIsClosed = a.status === "CLOSED"
+        const bIsClosed = b.status === "CLOSED"
+        if (aIsClosed !== bIsClosed) {
+          return aIsClosed ? 1 : -1 // Closed notes go to the end
+        }
+        // Then sort by creation date (newest first) within each group
         const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
         const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
         return bCreated - aCreated
       })
-    const openNotes = sorted.filter((note) => note.status !== "CLOSED")
-    const closedNotes = showClosed ? sorted.filter((note) => note.status === "CLOSED") : []
-    return [...openNotes, ...closedNotes]
-  }, [notes, rangeFilter, showClosed])
-  const taskByNoteId = React.useMemo(() => {
-    const map = new Map<string, Task>()
-    tasks.forEach((task) => {
-      if (task.ga_note_origin_id) {
-        map.set(task.ga_note_origin_id, task)
-      }
-    })
-    return map
-  }, [tasks])
+    return sorted
+  }, [notes, rangeFilter, statusFilter, noteTypeFilter, taskFilter])
+
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const projectMap = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
@@ -405,12 +480,12 @@ export default function GaKaNotesPage() {
       <div className="rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Department Notes</div>
+            <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Notes for all</div>
             <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">GA/KA Notes</div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Badge variant="secondary" className="px-3 py-1 rounded-full shadow-sm bg-emerald-100 text-emerald-800">
-              Open: {notes.filter((n) => n.status !== "CLOSED").length}
+              Open {notes.filter((n) => n.status !== "CLOSED").length}
             </Badge>
             <Badge variant="outline" className="px-3 py-1 rounded-full border-indigo-200 text-indigo-800">
               Total: {notes.length}
@@ -421,11 +496,11 @@ export default function GaKaNotesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">New note</CardTitle>
+          <CardTitle className="text-sm">New Note
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label>Content</Label>
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -449,216 +524,283 @@ export default function GaKaNotesPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="space-y-1">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Range</Label>
               <Select value={rangeFilter} onValueChange={(v) => setRangeFilter(v as "week" | "all")}>
                 <SelectTrigger className="h-9 w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="week">This week (default)</SelectItem>
-                  <SelectItem value="all">All time</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="show-closed-notes"
-                checked={showClosed}
-                onCheckedChange={(v) => setShowClosed(Boolean(v))}
-              />
-              <Label htmlFor="show-closed-notes" className="text-sm">
-                Show closed
-              </Label>
+            <div className="space-y-1">
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | "open" | "closed")}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+            <div className="space-y-1">
+              <Select value={noteTypeFilter} onValueChange={(v) => setNoteTypeFilter(v as "all" | "GA" | "KA")}>
+                <SelectTrigger className="h-9 w-[120px]">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">GA/KA</SelectItem>
+                  <SelectItem value="GA">GA</SelectItem>
+                  <SelectItem value="KA">KA</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Select value={taskFilter} onValueChange={(v) => setTaskFilter(v as "all" | "with_tasks" | "without_tasks")}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder="Tasks" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Notes</SelectItem>
+                  <SelectItem value="with_tasks">Tasks</SelectItem>
+                  <SelectItem value="without_tasks">Notes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+              onClick={() => {
+                const printWindow = window.open('', '_blank')
+                if (!printWindow) return
+                
+                const tableContainer = document.querySelector('.notes-table-container')
+                if (!tableContainer) return
+                
+                const table = tableContainer.querySelector('table')
+                if (!table) return
+                
+                // Clone the table and clean up React-specific attributes
+                const clonedTable = table.cloneNode(true) as HTMLElement
+                const allElements = clonedTable.querySelectorAll('*')
+                allElements.forEach((el) => {
+                  // Remove React event handlers and other attributes
+                  Array.from(el.attributes).forEach((attr) => {
+                    if (attr.name.startsWith('data-') || attr.name.startsWith('on') || attr.name === 'class') {
+                      // Keep class for styling
+                      return
+                    }
+                    if (['style', 'colspan', 'rowspan'].includes(attr.name)) {
+                      return
+                    }
+                    el.removeAttribute(attr.name)
+                  })
+                })
+                
+                // Extract text content from badges and buttons, replace with plain text
+                clonedTable.querySelectorAll('[class*="Badge"], button').forEach((el) => {
+                  const text = el.textContent?.trim() || ''
+                  const span = document.createElement('span')
+                  span.textContent = text
+                  el.parentNode?.replaceChild(span, el)
+                })
+                
+                printWindow.document.write(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <title>GA/KA Notes</title>
+                      <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; font-size: 12px; }
+                        table { border-collapse: collapse; width: 100%; min-width: 1050px; border: 2px solid #1e293b; }
+                        th, td { border: 1px solid #475569; padding: 8px; text-align: left; vertical-align: bottom; }
+                        th { background-color: white; font-weight: bold; border-bottom: 1px solid #334155; }
+                        td:first-child { border-left: 1px solid #475569; font-weight: bold; }
+                        td:last-child { border-right: 1px solid #475569; }
+                        /* Thick outside border for table - top */
+                        thead tr:first-child th { border-top: 2px solid #1e293b; }
+                        /* Thick outside border for table - left */
+                        thead tr:first-child th:first-child,
+                        tbody tr td:first-child { border-left: 2px solid #1e293b; }
+                        /* Thick outside border for table - right */
+                        thead tr:first-child th:last-child,
+                        tbody tr td:last-child { border-right: 2px solid #1e293b; }
+                        /* Thick outside border for table - bottom */
+                        tbody tr:last-child td { border-bottom: 2px solid #1e293b; }
+                        /* Thick border for header row - bottom */
+                        thead tr:first-child { border-bottom: 4px solid #1e293b; }
+                        thead tr:first-child th { border-bottom: 4px solid #1e293b !important; }
+                        @media print {
+                          body { margin: 0; padding: 10px; }
+                          @page { margin: 1cm; size: landscape; }
+                          table { font-size: 10px; }
+                          th, td { padding: 4px; }
+                        }
+                      </style>
+                    </head>
+                    <body>
+                      <h1 style="margin-bottom: 15px; font-size: 18px;">GA/KA Notes</h1>
+                      ${clonedTable.outerHTML}
+                    </body>
+                  </html>
+                `)
+                printWindow.document.close()
+                setTimeout(() => {
+                  printWindow.print()
+                  setTimeout(() => printWindow.close(), 100)
+                }, 250)
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+              disabled={exportingDailyReport}
+              onClick={() => void exportDailyReport()}
+            >
+              {exportingDailyReport ? "Exporting..." : "Export Excel"}
+            </Button>
           </div>
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading notes...</div>
           ) : notes.length === 0 ? (
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
-            <div className="grid gap-3">
-              {visibleNotes.map((note) => {
-                const creator = note.created_by ? userMap.get(note.created_by) : null
-                const creatorLabel =
-                  creator?.full_name || creator?.username || creator?.email || "Unknown user"
-                const creatorInitials = getInitials(creatorLabel)
-                const creatorBadgeClasses =
-                  creatorInitials === "GA"
-                    ? "bg-rose-100 text-rose-800 border border-rose-200"
-                    : creatorInitials === "KA"
-                      ? "bg-blue-100 text-blue-800 border border-blue-200"
-                      : "bg-slate-200 text-slate-700"
-                const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
-                const noteProject = note.project_id ? projectMap.get(note.project_id) : null
-                if (note.is_converted_to_task) {
-                  return (
-                    <div
-                      key={note.id}
-                      className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
-                    >
-                      {(() => {
-                        const task = taskByNoteId.get(note.id)
-                        if (!task) {
-                          return (
-                            <div className="text-xs text-slate-500">
-                              {loadingTasks ? "Loading task details..." : "Task details not available."}
-                            </div>
-                          )
-                        }
-                        const department = task.department_id ? departmentMap.get(task.department_id) : null
-                        const project = task.project_id ? projectMap.get(task.project_id) : null
-                        const assigneeNames =
-                          task.assignees?.length
-                            ? task.assignees
-                              .map((assignee) => assignee.full_name || assignee.username || assignee.email || "")
-                              .filter(Boolean)
-                            : []
-                        const fallbackAssignee = task.assigned_to ? userMap.get(task.assigned_to) : null
-                        const assigneeLabel =
-                          assigneeNames.length > 0
-                            ? assigneeNames.join(", ")
-                            : fallbackAssignee?.full_name ||
-                            fallbackAssignee?.username ||
-                            fallbackAssignee?.email ||
-                            "-"
-                        const assigneeInitials = getInitials(assigneeLabel)
-                        const departmentLabel = department ? formatDepartmentName(department.name) : "No department"
-                        const projectLabel = project?.title || project?.name || ""
-                        const priorityLabel = task.priority || "NORMAL"
-                        const priorityStyle = TASK_PRIORITY_STYLES[priorityLabel] || "bg-slate-100 text-slate-700"
-                        const statusStyle =
-                          TASK_STATUS_STYLES[task.status || ""] ||
-                          { label: task.status || "Unknown", dot: "bg-slate-400", pill: "bg-slate-100 text-slate-600" }
-                        const dueTone = getDueTone(task.due_date)
-                        return (
-                          <div className="space-y-3 text-sm">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="truncate text-base font-semibold text-slate-900">
-                                  {task.title}
-                                </div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                                  <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${priorityStyle}`}>
-                                    {priorityLabel === "HIGH" ? "High" : "Normal"}
-                                  </span>
-                                  <span
-                                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${statusStyle.pill}`}
-                                  >
-                                    <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
-                                    {statusStyle.label}
-                                  </span>
-                                </div>
-                              </div>
-                              <Link
-                                href={`/tasks/${task.id}`}
-                                className="text-xs font-medium text-slate-500 hover:text-slate-700"
-                              >
-                                View details
-                              </Link>
-                            </div>
+            <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full md:w-fit">
+              <div className="w-full md:w-[1050px] min-w-[1050px]">
+                <table className="w-full caption-bottom text-sm min-w-[1050px]">
+                  <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
+                    <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
+                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NR</th>
+                      <th className="w-[calc(100vw-80px)] md:w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
+                      <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
+                      <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
+                      <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL SHENIM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  {visibleNotes.map((note, idx) => {
+                    const creator = note.created_by ? userMap.get(note.created_by) : null
+                    const creatorLabel =
+                      creator?.full_name || creator?.username || "Unknown user"
+                    const creatorInitials = getInitials(creatorLabel)
+                    const creatorBadgeClasses =
+                      creatorInitials === "GA"
+                        ? "bg-rose-100 text-rose-800 border border-rose-200"
+                        : creatorInitials === "KA"
+                          ? "bg-blue-100 text-blue-800 border border-blue-200"
+                          : "bg-slate-200 text-slate-700"
+                    const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
+                    const noteProject = note.project_id ? projectMap.get(note.project_id) : null
 
-                            <div className="flex items-center gap-2 text-xs text-slate-600">
-                              <div
-                                className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
-                              >
-                                {creatorInitials}
-                              </div>
-                              <span className="font-medium text-slate-800">Added by {creatorLabel}</span>
-                            </div>
+                    // Only show department if:
+                    // 1. Note has a project (always show projects)
+                    // 2. We're currently filtering by department/project (on a specific page)
+                    // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
+                    const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
+                    const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
+                    const shouldShowDepartment = noteDepartment && (noteProject || isFilteredView || isExplicitDepartment)
 
-                            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-700">
-                                  {assigneeInitials}
-                                </div>
-                                <span className="font-medium text-slate-800">{assigneeLabel}</span>
-                                <span className="text-slate-400">-</span>
-                                <span className="text-slate-500">{departmentLabel}</span>
-                                {projectLabel ? <span className="text-slate-400">-</span> : null}
-                                {projectLabel ? <span className="text-slate-500">{projectLabel}</span> : null}
-                              </div>
-                              <div className={`flex items-center gap-1 ${dueTone}`}>
-                                <Clock className="h-4 w-4" />
-                                <span className="font-medium">{formatDate(task.due_date)}</span>
-                              </div>
+                    return (
+                      <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
+                        <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
+                        <td className="whitespace-pre-wrap break-words w-[calc(100vw-80px)] md:w-[450px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-sm">{note.content}</span>
+                            <div className="flex items-center gap-2">
+                              {note.priority ? (
+                                <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}`}>
+                                  {note.priority}
+                                </Badge>
+                              ) : null}
+
+
                             </div>
                           </div>
-                        )
-                      })()}
-                    </div>
-                  )
-                }
-                return (
-                  <Card
-                    key={note.id}
-                    className="border border-primary/10 bg-gradient-to-br from-white via-primary/5 to-transparent shadow-sm"
-                  >
-                    <CardContent className="flex flex-col gap-3 py-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            {note.priority && note.priority !== "NONE" ? (
-                              <Badge className={PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}>
-                                {note.priority}
-                              </Badge>
-                            ) : null}
-                            <span>Created: {formatDate(note.created_at)}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
+                        <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex items-center gap-2 text-xs">
                             <div
-                              className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${creatorBadgeClasses}`}
+                              className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
+                              title={creatorLabel}
                             >
                               {creatorInitials}
                             </div>
-                            <span className="font-semibold text-slate-800">{creatorLabel}</span>
                           </div>
-                          <div className="text-base font-medium leading-relaxed">{note.content}</div>
-                          {(noteProject || noteDepartment) && (
-                            <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
-                              {noteProject ? (
-                                <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
-                                  Project: {noteProject.title || noteProject.name || "Unnamed project"}
-                                </Badge>
-                              ) : null}
-                              {noteDepartment ? (
-                                <Badge className="bg-amber-100 text-amber-800 border-amber-200">
-                                  Department: {formatDepartmentName(noteDepartment.name)}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-indigo-300 text-indigo-800 hover:bg-indigo-50"
-                            onClick={() => openTaskDialog(note)}
-                          >
-                            Create task
-                          </Button>
-                          {note.status !== "CLOSED" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="border-emerald-200 text-emerald-800 hover:bg-emerald-50"
-                              onClick={() => void closeNote(note.id)}
-                            >
-                              Close
-                            </Button>
-                          ) : (
-                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Closed</Badge>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          {shouldShowDepartment && noteDepartment ? (
+                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
+                              {abbreviateDepartmentName(noteDepartment.name)}
+                            </Badge>
+                          ) : null}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          {noteProject ? (
+                            <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
+                              {noteProject.title || noteProject.name || "Project"}
+                            </Badge>
+                          ) : null}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {!note.is_converted_to_task ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                onClick={() => openTaskDialog(note)}
+                              >
+                                Create Task
+                              </Button>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
+                                Task Created
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {note.status !== "CLOSED" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => void closeNote(note.id)}
+                              >
+                                Close
+                              </Button>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 h-7 flex items-center">
+                                Closed
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
+
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -802,7 +944,7 @@ export default function GaKaNotesPage() {
                     ) : (
                       taskAssigneeIds.map((id) => {
                         const person = taskAssigneeOptions.find((p) => p.id === id)
-                        const label = person?.full_name || person?.username || person?.email || id
+                        const label = person?.full_name || person?.username || id
                         return (
                           <button
                             key={id}
@@ -846,7 +988,7 @@ export default function GaKaNotesPage() {
                         .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
                         .map((person) => (
                           <SelectItem key={person.id} value={person.id}>
-                            {person.full_name || person.username || person.email || person.id}
+                            {person.full_name || person.username || person.id}
                           </SelectItem>
                         ))}
                     </SelectContent>
