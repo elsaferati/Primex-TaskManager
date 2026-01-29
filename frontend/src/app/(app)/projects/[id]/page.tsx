@@ -10,10 +10,12 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { ChevronDown } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
@@ -32,6 +34,14 @@ const PHASE_LABELS: Record<string, string> = {
   CONTROL: "Control",
   FINAL: "Final",
   CLOSED: "Closed",
+}
+
+function getInitials(name: string | null | undefined): string {
+  if (!name) return "?"
+  const parts = name.trim().split(/\s+/)
+  if (parts.length === 0) return "?"
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
 }
 
 const TABS = [
@@ -340,7 +350,7 @@ export default function ProjectPage() {
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
-  const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
+  const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [newFinishPeriod, setNewFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
@@ -353,7 +363,7 @@ export default function ProjectPage() {
   const [editDescription, setEditDescription] = React.useState("")
   const [editStatus, setEditStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [editPriority, setEditPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
-  const [editAssignedTo, setEditAssignedTo] = React.useState<string>("__unassigned__")
+  const [editAssignees, setEditAssignees] = React.useState<string[]>([])
   const [editPhase, setEditPhase] = React.useState<string>("")
   const [editDueDate, setEditDueDate] = React.useState("")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
@@ -639,7 +649,18 @@ export default function ProjectPage() {
 
   const submitCreateTask = async () => {
     if (!project) return
-    if (!newTitle.trim()) return
+    if (!newTitle.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (!newAssignees || newAssignees.length === 0) {
+      toast.error("Please assign the task to at least one user")
+      return
+    }
+    if (!newDueDate || !newDueDate.trim()) {
+      toast.error("Due date is required")
+      return
+    }
     setCreating(true)
     try {
       const payload = {
@@ -647,7 +668,7 @@ export default function ProjectPage() {
         description: newDescription.trim() || null,
         project_id: project.id,
         department_id: project.department_id,
-        assigned_to: newAssignedTo === "__unassigned__" ? null : newAssignedTo,
+        assignees: newAssignees,
         status: newStatus,
         priority: newPriority,
         phase: newTaskPhase || activePhase,
@@ -677,7 +698,7 @@ export default function ProjectPage() {
       setNewDescription("")
       setNewStatus("TODO")
       setNewPriority("NORMAL")
-      setNewAssignedTo("__unassigned__")
+      setNewAssignees([])
       setNewTaskPhase("")
       setNewDueDate("")
       setNewFinishPeriod(FINISH_PERIOD_NONE_VALUE)
@@ -769,7 +790,15 @@ export default function ProjectPage() {
   }
 
   const updateTaskStatus = async (taskId: string, nextStatus: Task["status"]) => {
-    const previousStatus = tasks.find((task) => task.id === taskId)?.status
+    const task = tasks.find((t) => t.id === taskId)
+    const previousStatus = task?.status
+    
+    // Only admins can change tasks from DONE to any other status
+    if (previousStatus === "DONE" && nextStatus !== "DONE" && user?.role !== "ADMIN") {
+      toast.error("Only admins can change tasks from DONE to another status")
+      return
+    }
+    
     setUpdatingTaskId(taskId)
     setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)))
     try {
@@ -866,7 +895,11 @@ export default function ProjectPage() {
     setEditDescription(task.description || "")
     setEditStatus(task.status || "TODO")
     setEditPriority(task.priority || "NORMAL")
-    setEditAssignedTo(task.assigned_to || task.assigned_to_user_id || "__unassigned__")
+    // Get assignees from assignees array, fallback to assigned_to for backward compatibility
+    const assigneeIds = task.assignees && task.assignees.length > 0
+      ? task.assignees.map(a => a.id)
+      : (task.assigned_to || task.assigned_to_user_id ? [task.assigned_to || task.assigned_to_user_id!] : [])
+    setEditAssignees(assigneeIds)
     setEditPhase(task.phase || activePhase)
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
@@ -874,7 +907,19 @@ export default function ProjectPage() {
   }
 
   const saveEditTask = async () => {
-    if (!editingTaskId || !editTitle.trim()) return
+    if (!editingTaskId) return
+    if (!editTitle.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (!editAssignees || editAssignees.length === 0) {
+      toast.error("Please assign the task to at least one user")
+      return
+    }
+    if (!editDueDate || !editDueDate.trim()) {
+      toast.error("Due date is required")
+      return
+    }
     setSavingEdit(true)
     try {
       const payload = {
@@ -882,7 +927,7 @@ export default function ProjectPage() {
         description: editDescription.trim() || null,
         status: editStatus,
         priority: editPriority,
-        assigned_to: editAssignedTo === "__unassigned__" ? null : editAssignedTo,
+        assignees: editAssignees,
         phase: editPhase || activePhase,
         due_date: editDueDate || null,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
@@ -2641,8 +2686,8 @@ export default function ProjectPage() {
                 </DialogHeader>
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                    <Label>Title <span className="text-red-500">*</span></Label>
+                    <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value.toUpperCase())} />
                   </div>
                   <div className="space-y-2">
                     <Label>Description</Label>
@@ -2682,20 +2727,61 @@ export default function ProjectPage() {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Assign to</Label>
-                      <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Unassigned" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                      <Label>Assign to <span className="text-red-500">*</span></Label>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between">
+                            <span className="truncate text-left flex-1">
+                              {newAssignees.length > 0 
+                                ? (() => {
+                                    const selectedNames = newAssignees
+                                      .map(id => {
+                                        const user = allUsers.find(u => u.id === id)
+                                        return user?.full_name || user?.username || user?.email || id
+                                      })
+                                      .join(", ")
+                                    return selectedNames.length > 50 
+                                      ? `${selectedNames.substring(0, 50)}... (${newAssignees.length})`
+                                      : selectedNames
+                                  })()
+                                : "Select users"}
+                            </span>
+                            <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-full max-h-64 overflow-y-auto">
+                          <DropdownMenuLabel>Select Users</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
                           {allUsers.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
+                            <DropdownMenuCheckboxItem
+                              key={m.id}
+                              checked={newAssignees.includes(m.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setNewAssignees([...newAssignees, m.id])
+                                } else {
+                                  setNewAssignees(newAssignees.filter(id => id !== m.id))
+                                }
+                              }}
+                            >
                               {m.full_name || m.username || m.email}
-                            </SelectItem>
+                            </DropdownMenuCheckboxItem>
                           ))}
-                        </SelectContent>
-                      </Select>
+                          {newAssignees.length > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault()
+                                  setNewAssignees([])
+                                }}
+                              >
+                                Clear selection
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="space-y-2">
                       <Label>Phase</Label>
@@ -2713,11 +2799,12 @@ export default function ProjectPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Due date</Label>
+                      <Label>Due date <span className="text-red-500">*</span></Label>
                       <Input
                         type="date"
                         value={newDueDate}
                         onChange={(e) => setNewDueDate(normalizeDueDateInput(e.target.value))}
+                        required
                       />
                     </div>
                     <div className="space-y-2">
@@ -2743,7 +2830,10 @@ export default function ProjectPage() {
                     </div>
                   </div>
                   <div className="flex justify-end">
-                    <Button disabled={!newTitle.trim() || creating} onClick={() => void submitCreateTask()}>
+                    <Button 
+                      disabled={!newTitle.trim() || !newAssignees || newAssignees.length === 0 || !newDueDate || !newDueDate.trim() || creating} 
+                      onClick={() => void submitCreateTask()}
+                    >
                       {creating ? "Creating..." : "Create"}
                     </Button>
                   </div>
@@ -2757,8 +2847,8 @@ export default function ProjectPage() {
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Title</Label>
-                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                    <Label>Title <span className="text-red-500">*</span></Label>
+                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value.toUpperCase())} />
                   </div>
                   <div className="space-y-2">
                     <Label>Description</Label>
@@ -2798,20 +2888,61 @@ export default function ProjectPage() {
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Assign to</Label>
-                      <Select value={editAssignedTo} onValueChange={setEditAssignedTo}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Unassigned" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                      <Label>Assign to <span className="text-red-500">*</span></Label>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between">
+                            <span className="truncate text-left flex-1">
+                              {editAssignees.length > 0 
+                                ? (() => {
+                                    const selectedNames = editAssignees
+                                      .map(id => {
+                                        const user = allUsers.find(u => u.id === id)
+                                        return user?.full_name || user?.username || user?.email || id
+                                      })
+                                      .join(", ")
+                                    return selectedNames.length > 50 
+                                      ? `${selectedNames.substring(0, 50)}... (${editAssignees.length})`
+                                      : selectedNames
+                                  })()
+                                : "Select users"}
+                            </span>
+                            <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-full max-h-64 overflow-y-auto">
+                          <DropdownMenuLabel>Select Users</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
                           {allUsers.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
+                            <DropdownMenuCheckboxItem
+                              key={m.id}
+                              checked={editAssignees.includes(m.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setEditAssignees([...editAssignees, m.id])
+                                } else {
+                                  setEditAssignees(editAssignees.filter(id => id !== m.id))
+                                }
+                              }}
+                            >
                               {m.full_name || m.username || m.email}
-                            </SelectItem>
+                            </DropdownMenuCheckboxItem>
                           ))}
-                        </SelectContent>
-                      </Select>
+                          {editAssignees.length > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault()
+                                  setEditAssignees([])
+                                }}
+                              >
+                                Clear selection
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="space-y-2">
                       <Label>Phase</Label>
@@ -2829,11 +2960,12 @@ export default function ProjectPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Due date</Label>
+                      <Label>Due date <span className="text-red-500">*</span></Label>
                       <Input
                         type="date"
                         value={editDueDate}
                         onChange={(e) => setEditDueDate(normalizeDueDateInput(e.target.value))}
+                        required
                       />
                     </div>
                     <div className="space-y-2">
@@ -2862,7 +2994,10 @@ export default function ProjectPage() {
                     <Button variant="outline" onClick={() => setEditOpen(false)} disabled={savingEdit}>
                       Cancel
                     </Button>
-                    <Button disabled={!editTitle.trim() || savingEdit} onClick={() => void saveEditTask()}>
+                    <Button 
+                      disabled={!editTitle.trim() || !editAssignees || editAssignees.length === 0 || !editDueDate || !editDueDate.trim() || savingEdit} 
+                      onClick={() => void saveEditTask()}
+                    >
                       {savingEdit ? "Saving..." : "Save"}
                     </Button>
                   </div>
@@ -2874,8 +3009,15 @@ export default function ProjectPage() {
             <div className="divide-y">
               {visibleTasks.length ? (
                 visibleTasks.map((task) => {
-                  const assignedId = task.assigned_to || task.assigned_to_user_id || null
-                  const assigned = assignedId ? userMap.get(assignedId) : null
+                  // Get all assignees from the assignees array, fallback to assigned_to for backward compatibility
+                  const assignees = task.assignees && task.assignees.length > 0
+                    ? task.assignees
+                    : (() => {
+                        const assignedId = task.assigned_to || task.assigned_to_user_id || null
+                        if (!assignedId) return []
+                        const assignedUser = userMap.get(assignedId)
+                        return assignedUser ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }] : []
+                      })()
                   const overdue = isOverdue(task)
                   const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
                   const isHighPriority = taskPriority === "HIGH"
@@ -2899,8 +3041,20 @@ export default function ProjectPage() {
                           </Badge>
                         )}
                       </div>
-                      <div className="text-muted-foreground">
-                        {assigned?.full_name || assigned?.username || "-"}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {assignees.length > 0 ? (
+                          assignees.map((assignee, idx) => {
+                            const displayName = assignee.full_name || assignee.username || assignee.email || "-"
+                            const initials = getInitials(displayName)
+                            return (
+                              <Badge key={assignee.id || idx} variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200 text-xs" title={displayName}>
+                                {initials}
+                              </Badge>
+                            )
+                          })
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </div>
                       <div>
                         <Select
@@ -2912,11 +3066,15 @@ export default function ProjectPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {TASK_STATUSES.map((status) => (
-                              <SelectItem key={status} value={status}>
-                                {statusLabel(status)}
-                              </SelectItem>
-                            ))}
+                            {TASK_STATUSES.map((status) => {
+                              // Disable all non-DONE options if task is DONE and user is not admin
+                              const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
+                              return (
+                                <SelectItem key={status} value={status} disabled={isDisabled}>
+                                  {statusLabel(status)}
+                                </SelectItem>
+                              )
+                            })}
                           </SelectContent>
                         </Select>
                       </div>

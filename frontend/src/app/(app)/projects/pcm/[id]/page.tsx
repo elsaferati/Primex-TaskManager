@@ -1858,7 +1858,18 @@ export default function PcmProjectPage() {
 
   const submitCreateTask = async () => {
     if (!project) return
-    if (!newTitle.trim()) return
+    if (!newTitle.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (newAssignedTo === "__unassigned__" || !newAssignedTo) {
+      toast.error("Please assign the task to a user")
+      return
+    }
+    if (!newDueDate || !newDueDate.trim()) {
+      toast.error("Due date is required")
+      return
+    }
     setCreating(true)
     try {
       const payload = {
