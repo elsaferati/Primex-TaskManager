@@ -631,6 +631,25 @@ export default function WeeklyPlannerPage() {
     [getStatusCardClasses]
   )
 
+  const getStatusValueForDay = React.useCallback(
+    (status?: string | null, completedAt?: string | null, dayDate?: string | null) => {
+      const normalized = (status || "TODO").toUpperCase()
+      if (normalized !== "DONE") {
+        return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
+      }
+      if (!completedAt || !dayDate) {
+        return "IN_PROGRESS"
+      }
+      const completedDate = completedAt.slice(0, 10)
+      const currentDate = dayDate.slice(0, 10)
+      if (completedDate === currentDate) {
+        return "DONE"
+      }
+      return "IN_PROGRESS"
+    },
+    []
+  )
+
   const getTaskStatusBadge = React.useCallback((task: {
     is_bllok?: boolean
     is_1h_report?: boolean
@@ -700,17 +719,23 @@ export default function WeeklyPlannerPage() {
       <html>
         <head>
           <title>Weekly Planner - ${weekRange}</title>
-          <style>
-            @media print {
-              @page { margin: 0.36in 0.08in 0.8in 0.2in; }
-              body { margin: 0; padding: 0; }
-            }
-            body {
-              font-family: Arial, sans-serif;
-              font-size: 10pt;
-              margin: 0;
-              padding: 0 0 0.8in 0;
-            }
+            <style>
+              @media print {
+                @page { margin: 0.36in 0.08in 0.8in 0.2in; }
+                body { margin: 0; padding: 0; }
+              }
+              body {
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+                margin: 0;
+                padding: 0 0 0.8in 0;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              * {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
             .print-header {
               display: grid;
               grid-template-columns: 1fr auto 1fr;
@@ -736,12 +761,13 @@ export default function WeeklyPlannerPage() {
               font-size: 10pt;
               color: #334155;
             }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 12px;
-              page-break-inside: auto;
-            }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 12px;
+                page-break-inside: auto;
+                table-layout: fixed;
+              }
             thead {
               display: table-header-group;
             }
@@ -761,24 +787,24 @@ export default function WeeklyPlannerPage() {
               vertical-align: top;
               font-size: 9pt;
             }
-            .day-cell {
-              font-weight: bold;
-              background-color: #f9f9f9;
-              text-align: center;
-              width: 80px;
-            }
-            .ll-cell {
-              font-weight: bold;
-              background-color: #f9f9f9;
-              text-align: center;
-              width: 40px;
-            }
-            .time-cell {
-              width: 36px;
-              text-align: center;
-              padding-left: 4px;
-              padding-right: 4px;
-            }
+              .day-cell {
+                font-weight: bold;
+                background-color: #f9f9f9;
+                text-align: center;
+                width: 70px;
+              }
+              .ll-cell {
+                font-weight: bold;
+                background-color: #f9f9f9;
+                text-align: center;
+                width: 32px;
+              }
+              .time-cell {
+                width: 32px;
+                text-align: center;
+                padding-left: 4px;
+                padding-right: 4px;
+              }
             .print-subhead {
               font-weight: bold;
               text-transform: uppercase;
@@ -795,11 +821,17 @@ export default function WeeklyPlannerPage() {
               font-weight: bold;
               margin-bottom: 2px;
             }
-            .task-item {
-              font-size: 8pt;
-              margin: 2px 0;
-              padding-left: 8px;
-            }
+              .task-item {
+                font-size: 8pt;
+                margin: 2px 0;
+                padding: 2px 4px;
+                border: 1px solid #000;
+                border-radius: 3px;
+                background-color: #fff;
+              }
+              .task-status-todo { background-color: #FFC4ED; }
+              .task-status-in-progress { background-color: #FFFF00; }
+              .task-status-done { background-color: #C4FDC4; }
             .badge {
               display: inline-block;
               padding: 2px 6px;
@@ -881,31 +913,32 @@ export default function WeeklyPlannerPage() {
 
       printContent += `
         <h2 style="margin-top: 20px; margin-bottom: 10px; font-size: 14pt;">${formatDepartmentName(dept.department_name)}</h2>
-        <table>
-          <colgroup>
-            <col style="width: 90px;" />
-            <col style="width: 36px;" />
-            <col style="width: 36px;" />
-            ${allUsers.map(() => `<col style="width: 220px;" />`).join("")}
-          </colgroup>
-          <thead>
-            <tr>
-              <th class="day-cell" rowspan="2">Day</th>
-              <th style="width: 40px;">LL</th>
-              <th class="time-cell">Time</th>
+          <table>
+            <colgroup>
+              <col style="width: 70px;" />
+              <col style="width: 32px;" />
+              <col style="width: 32px;" />
+              ${allUsers.map(() => `<col style="width: 200px;" />`).join("")}
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="day-cell" rowspan="2">Day</th>
+                <th style="width: 32px;">LL</th>
+                <th class="time-cell">Time</th>
               ${allUsers.map(user => `<th>${user.user_name}</th>`).join("")}
             </tr>
           </thead>
           <tbody>
       `
 
-      dept.days.forEach((day, dayIndex) => {
-        const dayName = DAY_NAMES[dayIndex]
-        const dayDate = formatDate(day.date)
+        dept.days.forEach((day, dayIndex) => {
+          const dayName = DAY_NAMES[dayIndex]
+          const dayDate = formatDate(day.date)
+          const dayIso = day.date
 
-        // AM PRJK Row
-        printContent += `
-          <tr>
+          // AM PRJK Row
+          printContent += `
+            <tr>
             <td class="day-cell" rowspan="4" style="text-align: left; padding: 8px;">
               <div style="display: flex; flex-direction: column;">
                 <strong class="print-subhead">${dayName}</strong>
@@ -923,19 +956,27 @@ export default function WeeklyPlannerPage() {
 
           printContent += `<td>`
           if (projects.length > 0 || systemTasks.length > 0) {
-            projects.forEach((project) => {
-              printContent += `<div class="project-card">
-                <div class="project-title">${project.project_title}`
-              if (project.project_total_products) {
-                printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
-              }
-              printContent += `</div>`
-              if (project.tasks && project.tasks.length > 0) {
-                project.tasks.forEach((task) => {
-                  printContent += `<div class="task-item">${task.task_title}`
-                  if (task.daily_products) {
-                    printContent += ` <span class="products">${task.daily_products} pcs</span>`
-                  }
+              projects.forEach((project, projectIndex) => {
+                printContent += `<div class="project-card">
+                  <div class="project-title">${projectIndex + 1}. ${project.project_title}`
+                if (project.project_total_products) {
+                  printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+                }
+                printContent += `</div>`
+                if (project.tasks && project.tasks.length > 0) {
+                  project.tasks.forEach((task, taskIndex) => {
+                    const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                    const statusClass =
+                      statusValue === "DONE"
+                        ? "task-status-done"
+                        : statusValue === "IN_PROGRESS"
+                          ? "task-status-in-progress"
+                          : "task-status-todo"
+                    const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
+                    printContent += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
+                    if (task.daily_products) {
+                      printContent += ` <span class="products">${task.daily_products} pcs</span>`
+                    }
                   const badge = getTaskStatusBadge(task)
                   if (badge) {
                     const badgeClass = badge.label === "BLL" ? "badge-bll" :
@@ -952,12 +993,12 @@ export default function WeeklyPlannerPage() {
               printContent += `</div>`
             })
             if (systemTasks.length > 0) {
-              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
-              systemTasks.forEach((task) => {
-                printContent += `<div class="task-item">${task.title}</div>`
-              })
-              printContent += `</div>`
-            }
+                printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+                systemTasks.forEach((task, taskIndex) => {
+                  printContent += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
+                })
+                printContent += `</div>`
+              }
           } else {
             printContent += `<div class="empty-cell">—</div>`
           }
@@ -969,18 +1010,25 @@ export default function WeeklyPlannerPage() {
         printContent += `<tr>`
         printContent += `<td class="ll-cell print-subhead">FT</td>`
         printContent += `<td class="print-subhead time-cell">AM</td>`
-        allUsers.forEach((user) => {
-          const userDay = day.users.find(u => u.user_id === user.user_id)
-          const fastTasks = userDay?.am_fast_tasks || []
+          allUsers.forEach((user) => {
+            const userDay = day.users.find(u => u.user_id === user.user_id)
+            const fastTasks = userDay?.am_fast_tasks || []
 
-          printContent += `<td>`
-          if (fastTasks.length > 0) {
-            printContent += `<div style="font-size: 8pt; color: #0f172a;">`
-            fastTasks.forEach((task) => {
-              printContent += `<div class="task-item">${task.title}`
-              const badge = getFastTaskBadge(task)
-              if (badge) {
-                const badgeClass = badge.label === "BLL" ? "badge-bll" :
+            printContent += `<td>`
+            if (fastTasks.length > 0) {
+              printContent += `<div style="font-size: 8pt; color: #0f172a;">`
+              fastTasks.forEach((task, taskIndex) => {
+                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                const statusClass =
+                  statusValue === "DONE"
+                    ? "task-status-done"
+                    : statusValue === "IN_PROGRESS"
+                      ? "task-status-in-progress"
+                      : "task-status-todo"
+                printContent += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+                const badge = getFastTaskBadge(task)
+                if (badge) {
+                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
                   badge.label === "R1" ? "badge-r1" :
                     badge.label === "1H" ? "badge-1h" :
                       badge.label === "GA" ? "badge-ga" :
@@ -1009,20 +1057,28 @@ export default function WeeklyPlannerPage() {
           const fastTasks = userDay?.pm_fast_tasks || []
 
           printContent += `<td>`
-          if (projects.length > 0 || systemTasks.length > 0) {
-            projects.forEach((project) => {
-              printContent += `<div class="project-card">
-                <div class="project-title">${project.project_title}`
-              if (project.project_total_products) {
-                printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
-              }
-              printContent += `</div>`
-              if (project.tasks && project.tasks.length > 0) {
-                project.tasks.forEach((task) => {
-                  printContent += `<div class="task-item">${task.task_title}`
-                  if (task.daily_products) {
-                    printContent += ` <span class="products">${task.daily_products} pcs</span>`
-                  }
+            if (projects.length > 0 || systemTasks.length > 0) {
+              projects.forEach((project, projectIndex) => {
+                printContent += `<div class="project-card">
+                  <div class="project-title">${projectIndex + 1}. ${project.project_title}`
+                if (project.project_total_products) {
+                  printContent += ` <span style="color: #666; font-size: 8pt;">(${project.project_total_products})</span>`
+                }
+                printContent += `</div>`
+                if (project.tasks && project.tasks.length > 0) {
+                  project.tasks.forEach((task, taskIndex) => {
+                    const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                    const statusClass =
+                      statusValue === "DONE"
+                        ? "task-status-done"
+                        : statusValue === "IN_PROGRESS"
+                          ? "task-status-in-progress"
+                          : "task-status-todo"
+                    const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
+                    printContent += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
+                    if (task.daily_products) {
+                      printContent += ` <span class="products">${task.daily_products} pcs</span>`
+                    }
                   const badge = getTaskStatusBadge(task)
                   if (badge) {
                     const badgeClass = badge.label === "BLL" ? "badge-bll" :
@@ -1039,12 +1095,12 @@ export default function WeeklyPlannerPage() {
               printContent += `</div>`
             })
             if (systemTasks.length > 0) {
-              printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
-              systemTasks.forEach((task) => {
-                printContent += `<div class="task-item">${task.title}</div>`
-              })
-              printContent += `</div>`
-            }
+                printContent += `<div style="margin-top: 4px; font-size: 8pt; color: #1e40af;"><strong>System Tasks:</strong>`
+                systemTasks.forEach((task, taskIndex) => {
+                  printContent += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
+                })
+                printContent += `</div>`
+              }
           } else {
             printContent += `<div class="empty-cell">—</div>`
           }
@@ -1056,18 +1112,25 @@ export default function WeeklyPlannerPage() {
         printContent += `<tr>`
         printContent += `<td class="ll-cell print-subhead">FT</td>`
         printContent += `<td class="print-subhead time-cell">PM</td>`
-        allUsers.forEach((user) => {
-          const userDay = day.users.find(u => u.user_id === user.user_id)
-          const fastTasks = userDay?.pm_fast_tasks || []
+          allUsers.forEach((user) => {
+            const userDay = day.users.find(u => u.user_id === user.user_id)
+            const fastTasks = userDay?.pm_fast_tasks || []
 
-          printContent += `<td>`
-          if (fastTasks.length > 0) {
-            printContent += `<div style="font-size: 8pt; color: #0f172a;">`
-            fastTasks.forEach((task) => {
-              printContent += `<div class="task-item">${task.title}`
-              const badge = getFastTaskBadge(task)
-              if (badge) {
-                const badgeClass = badge.label === "BLL" ? "badge-bll" :
+            printContent += `<td>`
+            if (fastTasks.length > 0) {
+              printContent += `<div style="font-size: 8pt; color: #0f172a;">`
+              fastTasks.forEach((task, taskIndex) => {
+                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                const statusClass =
+                  statusValue === "DONE"
+                    ? "task-status-done"
+                    : statusValue === "IN_PROGRESS"
+                      ? "task-status-in-progress"
+                      : "task-status-todo"
+                printContent += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+                const badge = getFastTaskBadge(task)
+                if (badge) {
+                  const badgeClass = badge.label === "BLL" ? "badge-bll" :
                   badge.label === "R1" ? "badge-r1" :
                     badge.label === "1H" ? "badge-1h" :
                       badge.label === "GA" ? "badge-ga" :
@@ -1613,7 +1676,7 @@ export default function WeeklyPlannerPage() {
                             return (
                               <div className="space-y-2 min-h-20">
                                 {/* Projects */}
-                                {projectsList.map((project, idx) => {
+                                {projectsList.map((project, projectIndex) => {
                                   // Debug: log if project should be late
                                   if (project.project_title.includes("LATE") || project.project_title.includes("PRJK")) {
                                     console.log("Project:", project.project_title, "is_late:", project.is_late, "project_id:", project.project_id)
@@ -1628,9 +1691,9 @@ export default function WeeklyPlannerPage() {
                                           : "bg-primary/5 border border-primary/20 hover:bg-primary/10",
                                       ].join(" ")}
                                     >
-                                      <div className="font-semibold text-sm text-slate-900 flex items-start justify-between gap-2">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <span className="truncate whitespace-nowrap">{project.project_title}</span>
+                                        <div className="font-semibold text-sm text-slate-900 flex items-start justify-between gap-2">
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <span className="truncate whitespace-nowrap">{projectIndex + 1}. {project.project_title}</span>
                                           {project.is_late && (
                                             <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
                                               LATE
@@ -1652,19 +1715,20 @@ export default function WeeklyPlannerPage() {
                                           </button>
                                         )}
                                       </div>
-                                      {project.tasks && project.tasks.length > 0 && (
-                                        <div className="mt-1 space-y-0.5">
-                                          {project.tasks.map((task) => {
-                                            const statusBadge = getTaskStatusBadge(task)
-                                            return (
-                                              <div
-                                                key={task.task_id}
+                                        {project.tasks && project.tasks.length > 0 && (
+                                          <div className="mt-1 space-y-0.5">
+                                          {project.tasks.map((task, taskIndex) => {
+                                              const statusBadge = getTaskStatusBadge(task)
+                                              const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
+                                              return (
+                                                <div
+                                                  key={task.task_id}
                                                 className={[
                                                   "text-[11px] flex justify-between items-center gap-1 rounded border px-1.5 py-0.5 group/task",
                                                   getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
                                                 ].join(" ")}
                                               >
-                                                <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.task_title}</span>
+                                                  <span className="truncate whitespace-nowrap font-semibold text-slate-900">{taskNumber}. {task.task_title}</span>
                                                 <div className="flex items-center gap-1">
                                                   {statusBadge && (
                                                     <span
@@ -1713,17 +1777,17 @@ export default function WeeklyPlannerPage() {
                                 {systemTasksList.length > 0 && (
                                   <div className="space-y-1">
                                     <div className="text-[11px] font-semibold text-slate-900 mb-1">System Tasks</div>
-                                    {systemTasksList.map((task, idx) => {
-                                      const statusBadge = getTaskStatusBadge(task)
-                                      return (
-                                        <div
-                                          key={task.task_id || idx}
+                                      {systemTasksList.map((task, idx) => {
+                                        const statusBadge = getTaskStatusBadge(task)
+                                        return (
+                                          <div
+                                            key={task.task_id || idx}
                                           className={[
                                             "p-1 rounded border text-[11px] flex justify-between items-center group/task",
                                             getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
                                           ].join(" ")}
                                         >
-                                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.title}</span>
+                                            <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
                                           <div className="flex items-center gap-1">
                                             {statusBadge && (
                                               <span
@@ -1760,17 +1824,17 @@ export default function WeeklyPlannerPage() {
                                 {/* Fast Tasks */}
                                 {fastTasksList.length > 0 && (
                                   <div className="space-y-1">
-                                    {fastTasksList.map((task, idx) => {
-                                      const statusBadge = getFastTaskBadge(task)
-                                      return (
-                                        <div
-                                          key={task.task_id || idx}
+                                  {fastTasksList.map((task, idx) => {
+                                    const statusBadge = getFastTaskBadge(task)
+                                    return (
+                                      <div
+                                        key={task.task_id || idx}
                                           className={[
                                             "p-1 rounded border text-[11px] flex justify-between items-center group/task",
                                             getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
                                           ].join(" ")}
                                         >
-                                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">{task.title}</span>
+                                        <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
                                           <div className="flex items-center gap-1">
                                             {statusBadge && (
                                               <span

@@ -6245,7 +6245,7 @@ export default function PcmProjectPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2 font-semibold" title={row.detyrat}>
+                              <div className="col-span-2 min-w-0 font-semibold" title={row.detyrat}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.detyrat}
@@ -6253,8 +6253,10 @@ export default function PcmProjectPage() {
                                     className="h-8 text-xs"
                                   />
                                 ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="flex-1 whitespace-normal break-words">{row.detyrat}</span>
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="flex-1 whitespace-normal break-words max-h-10 overflow-hidden text-ellipsis">
+                                      {row.detyrat}
+                                    </span>
                                     {row.detyrat && row.detyrat.length > 20 && (
                                       <Button
                                         size="icon"
@@ -6269,7 +6271,7 @@ export default function PcmProjectPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="col-span-2" title={row.keywords}>
+                              <div className="col-span-2 min-w-0" title={row.keywords}>
                                 {isEditing ? (
                                   <Input
                                     value={editingMstChecklistRow.keywords}
@@ -6278,7 +6280,7 @@ export default function PcmProjectPage() {
                                   />
                                 ) : (
                                   <div
-                                    className="flex items-start gap-1"
+                                    className="flex items-start gap-1 min-w-0"
                                     role="button"
                                     tabIndex={0}
                                     onClick={() => {

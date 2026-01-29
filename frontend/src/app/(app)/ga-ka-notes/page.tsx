@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -96,6 +97,8 @@ export default function GaKaNotesPage() {
   const [posting, setPosting] = React.useState(false)
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
+  const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
+  const [showClosed, setShowClosed] = React.useState(true)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
   const [taskPriority, setTaskPriority] = React.useState<TaskPriority>("NORMAL")
@@ -104,7 +107,7 @@ export default function GaKaNotesPage() {
   )
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
-  const [taskDepartmentId, setTaskDepartmentId] = React.useState("__none__")
+  const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
 
   // Default department for staff
@@ -248,7 +251,7 @@ export default function GaKaNotesPage() {
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskDueDate("")
     setTaskAssigneeIds([])
-    setTaskDepartmentId(note.department_id ?? "__none__")
+    setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
   }
 
@@ -258,12 +261,17 @@ export default function GaKaNotesPage() {
       toast.error("Task title is required")
       return
     }
-    const effectiveDepartmentId =
-      taskDepartmentId !== "__none__" ? taskDepartmentId : note.department_id ?? null
-    if (!effectiveDepartmentId) {
-      toast.error("Select a department before creating a task")
+    const effectiveDepartments =
+      taskDepartmentIds.length > 0
+        ? taskDepartmentIds
+        : note.department_id
+          ? [note.department_id]
+          : []
+    if (effectiveDepartments.length === 0) {
+      toast.error("Select at least one department before creating a task")
       return
     }
+    const primaryDepartmentId = effectiveDepartments[0]
     setCreatingTask(true)
     try {
       const dueDateValue = taskDueDate ? new Date(taskDueDate).toISOString() : null
@@ -280,7 +288,7 @@ export default function GaKaNotesPage() {
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
           ga_note_origin_id: note.id,
-          department_id: effectiveDepartmentId,
+          department_id: primaryDepartmentId,
           project_id: taskProjectId !== "NONE" ? taskProjectId : null,
         }),
       })
@@ -333,36 +341,48 @@ export default function GaKaNotesPage() {
   // Project list is used only in the task creation dialog (filtered separately).
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
   const taskDepartmentLocked = false
-  const effectiveTaskDepartmentId =
-    taskDepartmentId !== "__none__"
-      ? taskDepartmentId
-      : taskDialogNote?.department_id ?? ""
+  const effectiveTaskDepartmentIds = React.useMemo(() => {
+    if (taskDepartmentIds.length > 0) return taskDepartmentIds
+    if (taskDialogNote?.department_id) return [taskDialogNote.department_id]
+    return []
+  }, [taskDepartmentIds, taskDialogNote?.department_id])
   const taskAssigneeOptions = users
 
   // Projects filtered by the department chosen in the task dialog
+  const primaryDepartmentId = effectiveTaskDepartmentIds[0] || null
   const taskProjectOptions = React.useMemo(() => {
-    if (effectiveTaskDepartmentId) {
-      return projects.filter((p) => p.department_id === effectiveTaskDepartmentId)
+    if (primaryDepartmentId) {
+      return projects.filter((p) => p.department_id === primaryDepartmentId)
     }
     return projects
-  }, [effectiveTaskDepartmentId, projects])
+  }, [primaryDepartmentId, projects])
 
   // Keep projects in sync when opening dialog or changing department
   React.useEffect(() => {
     if (!taskDialogNoteId) return
-    const dep = effectiveTaskDepartmentId || undefined
+    const dep =
+      effectiveTaskDepartmentIds.length === 1 ? effectiveTaskDepartmentIds[0] : undefined
     void loadProjects(dep)
-  }, [effectiveTaskDepartmentId, loadProjects, taskDialogNoteId])
+  }, [effectiveTaskDepartmentIds, loadProjects, taskDialogNoteId])
   const visibleNotes = React.useMemo(() => {
-    const sorted = [...notes].sort((a, b) => {
-      const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
-      const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
-      return bCreated - aCreated
-    })
-    const regularNotes = sorted.filter((note) => !note.is_converted_to_task)
-    const taskNotes = sorted.filter((note) => note.is_converted_to_task)
-    return [...regularNotes, ...taskNotes]
-  }, [notes])
+    const now = Date.now()
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000
+    const withinRange = (note: GaNote) => {
+      if (rangeFilter === "all") return true
+      const created = note.created_at ? new Date(note.created_at).getTime() : 0
+      return created >= weekAgo
+    }
+    const sorted = [...notes]
+      .filter(withinRange)
+      .sort((a, b) => {
+        const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+        const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+        return bCreated - aCreated
+      })
+    const openNotes = sorted.filter((note) => note.status !== "CLOSED")
+    const closedNotes = showClosed ? sorted.filter((note) => note.status === "CLOSED") : []
+    return [...openNotes, ...closedNotes]
+  }, [notes, rangeFilter, showClosed])
   const taskByNoteId = React.useMemo(() => {
     const map = new Map<string, Task>()
     tasks.forEach((task) => {
@@ -430,6 +450,30 @@ export default function GaKaNotesPage() {
           <CardTitle className="text-sm">Notes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Range</Label>
+              <Select value={rangeFilter} onValueChange={(v) => setRangeFilter(v as "week" | "all")}>
+                <SelectTrigger className="h-9 w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="week">This week (default)</SelectItem>
+                  <SelectItem value="all">All time</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-closed-notes"
+                checked={showClosed}
+                onCheckedChange={(v) => setShowClosed(Boolean(v))}
+              />
+              <Label htmlFor="show-closed-notes" className="text-sm">
+                Show closed
+              </Label>
+            </div>
+          </div>
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading notes...</div>
           ) : notes.length === 0 ? (
@@ -649,37 +693,65 @@ export default function GaKaNotesPage() {
                   <Label>Due date (optional)</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
-                <div className="space-y-2">
-                  <Label>Department</Label>
-                <Select
-                  value={effectiveTaskDepartmentId || "__none__"}
-                  onValueChange={(value) => {
-                    setTaskDepartmentId(value)
-                    setTaskAssigneeIds([])
-                    setTaskProjectId("NONE")
-                  }}
-                  disabled={taskDepartmentLocked}
-                >
+              <div className="space-y-2">
+                <Label>Departments</Label>
+                <div className="rounded-md border bg-white p-2">
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {taskDepartmentIds.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">No departments selected.</span>
+                    ) : (
+                      taskDepartmentIds.map((id) => {
+                        const dept = departments.find((d) => d.id === id)
+                        const label = dept?.name || id
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                            onClick={() =>
+                              setTaskDepartmentIds((prev) => prev.filter((item) => item !== id))
+                            }
+                          >
+                            {label}
+                            <span className="text-slate-500">×</span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                  <Select
+                    value="__dept_picker__"
+                    onValueChange={(value) => {
+                      if (value === "__dept_picker__") return
+                      setTaskProjectId("NONE")
+                      setTaskDepartmentIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                    }}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select department" />
+                      <SelectValue placeholder="Add department" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Select department</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.name}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="__dept_picker__" disabled>
+                        Add department
+                      </SelectItem>
+                      {departments
+                        .filter((dept) => !taskDepartmentIds.includes(dept.id))
+                        .map((dept) => (
+                          <SelectItem key={dept.id} value={dept.id}>
+                            {dept.name}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
               </div>
               <div className="space-y-2">
                 <Label>Project (optional)</Label>
                 <Select
                   value={taskProjectId}
                   onValueChange={(value) => setTaskProjectId(value)}
-                  disabled={!effectiveTaskDepartmentId && taskProjectOptions.length === 0}
+                  disabled={effectiveTaskDepartmentIds.length === 0 && taskProjectOptions.length === 0}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select project" />
@@ -693,7 +765,7 @@ export default function GaKaNotesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {!effectiveTaskDepartmentId ? (
+                {effectiveTaskDepartmentIds.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Choose a department to filter its projects.</p>
                 ) : null}
               </div>
@@ -728,6 +800,14 @@ export default function GaKaNotesPage() {
                       onValueChange={(value) => {
                         if (value === "__picker__") return
                         setTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                        const person = users.find((u) => u.id === value)
+                        if (person?.department_id) {
+                          setTaskDepartmentIds((prev) =>
+                            prev.includes(person.department_id as string)
+                              ? prev
+                              : [...prev, person.department_id as string]
+                          )
+                        }
                       }}
                       disabled={taskAssigneeOptions.length === 0}
                     >
@@ -748,10 +828,10 @@ export default function GaKaNotesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {!effectiveTaskDepartmentId ? (
-                    <p className="text-xs text-muted-foreground">Select a department or pick an assignee to set it automatically.</p>
-                  ) : null}
-                </div>
+                {taskDepartmentIds.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
+                ) : null}
+              </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel
