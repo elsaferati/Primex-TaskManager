@@ -674,6 +674,11 @@ export default function DepartmentKanban() {
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
+  const [meetingUrl, setMeetingUrl] = React.useState("")
+  const [meetingRecurrenceType, setMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly">("none")
+  const [meetingRecurrenceDaysOfWeek, setMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [meetingRecurrenceDaysOfMonth, setMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [meetingParticipantIds, setMeetingParticipantIds] = React.useState<string[]>([])
   const [meetingProjectId, setMeetingProjectId] = React.useState("__none__")
   const [creatingMeeting, setCreatingMeeting] = React.useState(false)
   const [showAddMeetingForm, setShowAddMeetingForm] = React.useState(false)
@@ -681,7 +686,15 @@ export default function DepartmentKanban() {
   const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
   const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
+  const [editMeetingUrl, setEditMeetingUrl] = React.useState("")
+  const [editMeetingRecurrenceType, setEditMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly">("none")
+  const [editMeetingRecurrenceDaysOfWeek, setEditMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [editMeetingRecurrenceDaysOfMonth, setEditMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [editMeetingParticipantIds, setEditMeetingParticipantIds] = React.useState<string[]>([])
   const [editMeetingProjectId, setEditMeetingProjectId] = React.useState("__none__")
+  const [savingMeeting, setSavingMeeting] = React.useState(false)
+  const [showParticipantDialog, setShowParticipantDialog] = React.useState(false)
+  const [showEditParticipantDialog, setShowEditParticipantDialog] = React.useState(false)
   const [internalSlot, setInternalSlot] = React.useState<keyof typeof INTERNAL_MEETING.slots>("M1")
   const [internalMeetingChecklistId, setInternalMeetingChecklistId] = React.useState<string | null>(null)
   const [internalMeetingItems, setInternalMeetingItems] = React.useState<ChecklistItem[]>([])
@@ -689,6 +702,7 @@ export default function DepartmentKanban() {
   const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
   const [editingInternalMeetingItemId, setEditingInternalMeetingItemId] = React.useState<string | null>(null)
   const [editingInternalMeetingItem, setEditingInternalMeetingItem] = React.useState("")
+  const [savingInternalMeetingItem, setSavingInternalMeetingItem] = React.useState(false)
   const [noProjectOpen, setNoProjectOpen] = React.useState(false)
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
   const [noProjectDescription, setNoProjectDescription] = React.useState("")
@@ -2866,8 +2880,13 @@ export default function DepartmentKanban() {
         title: meetingTitle.trim(),
         platform: meetingPlatform.trim() || null,
         starts_at: startsAt,
+        meeting_url: meetingUrl.trim() || null,
+        recurrence_type: meetingRecurrenceType === "none" ? null : meetingRecurrenceType,
+        recurrence_days_of_week: meetingRecurrenceType === "weekly" && meetingRecurrenceDaysOfWeek.length > 0 ? meetingRecurrenceDaysOfWeek : null,
+        recurrence_days_of_month: meetingRecurrenceType === "monthly" && meetingRecurrenceDaysOfMonth.length > 0 ? meetingRecurrenceDaysOfMonth : null,
         department_id: department.id,
         project_id: meetingProjectId === "__none__" ? null : meetingProjectId,
+        participant_ids: meetingParticipantIds,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -2890,6 +2909,11 @@ export default function DepartmentKanban() {
       setMeetingTitle("")
       setMeetingPlatform("")
       setMeetingStartsAt("")
+      setMeetingUrl("")
+      setMeetingRecurrenceType("none")
+      setMeetingRecurrenceDaysOfWeek([])
+      setMeetingRecurrenceDaysOfMonth([])
+      setMeetingParticipantIds([])
       setMeetingProjectId("__none__")
       setShowAddMeetingForm(false)
       toast.success("Meeting created")
@@ -2903,6 +2927,11 @@ export default function DepartmentKanban() {
     setEditMeetingTitle(meeting.title)
     setEditMeetingPlatform(meeting.platform || "")
     setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at))
+    setEditMeetingUrl(meeting.meeting_url || "")
+    setEditMeetingRecurrenceType((meeting.recurrence_type as "none" | "weekly" | "monthly") || "none")
+    setEditMeetingRecurrenceDaysOfWeek(meeting.recurrence_days_of_week || [])
+    setEditMeetingRecurrenceDaysOfMonth(meeting.recurrence_days_of_month || [])
+    setEditMeetingParticipantIds(meeting.participant_ids || [])
     setEditMeetingProjectId(meeting.project_id || "__none__")
   }
 
@@ -2911,37 +2940,70 @@ export default function DepartmentKanban() {
     setEditMeetingTitle("")
     setEditMeetingPlatform("")
     setEditMeetingStartsAt("")
+    setEditMeetingUrl("")
+    setEditMeetingRecurrenceType("none")
+    setEditMeetingRecurrenceDaysOfWeek([])
+    setEditMeetingRecurrenceDaysOfMonth([])
+    setEditMeetingParticipantIds([])
     setEditMeetingProjectId("__none__")
   }
 
   const saveMeeting = async (meetingId: string) => {
-    if (!editMeetingTitle.trim()) return
-    const startsAt = editMeetingStartsAt ? new Date(editMeetingStartsAt).toISOString() : null
-    const payload = {
-      title: editMeetingTitle.trim(),
-      platform: editMeetingPlatform.trim() || null,
-      starts_at: startsAt,
-      project_id: editMeetingProjectId === "__none__" ? null : editMeetingProjectId,
-    }
-    const res = await apiFetch(`/meetings/${meetingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      let detail = "Failed to update meeting"
-      try {
-        const data = (await res.json()) as { detail?: string }
-        if (data?.detail) detail = data.detail
-      } catch {
-        // ignore
-      }
-      toast.error(detail)
+    if (!editMeetingTitle.trim()) {
+      toast.error("Meeting title is required")
       return
     }
-    const updated = (await res.json()) as Meeting
-    setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
-    cancelEditMeeting()
+    if (!department) return
+    setSavingMeeting(true)
+    try {
+      const startsAt = editMeetingStartsAt ? new Date(editMeetingStartsAt).toISOString() : null
+      const payload = {
+        title: editMeetingTitle.trim(),
+        platform: editMeetingPlatform.trim() || null,
+        starts_at: startsAt,
+        meeting_url: editMeetingUrl.trim() || null,
+        recurrence_type: editMeetingRecurrenceType === "none" ? null : editMeetingRecurrenceType,
+        recurrence_days_of_week: editMeetingRecurrenceType === "weekly" && editMeetingRecurrenceDaysOfWeek.length > 0 ? editMeetingRecurrenceDaysOfWeek : null,
+        recurrence_days_of_month: editMeetingRecurrenceType === "monthly" && editMeetingRecurrenceDaysOfMonth.length > 0 ? editMeetingRecurrenceDaysOfMonth : null,
+        project_id: editMeetingProjectId === "__none__" ? null : editMeetingProjectId,
+        participant_ids: editMeetingParticipantIds,
+      }
+      const res = await apiFetch(`/meetings/${meetingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update meeting"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Meeting
+      console.log("Updated meeting from API:", updated)
+      // Reload meetings to ensure we have the latest data including participants and recurrence
+      const meetingsRes = await apiFetch(`/meetings?department_id=${department.id}`)
+      if (meetingsRes.ok) {
+        const refreshedMeetings = (await meetingsRes.json()) as Meeting[]
+        console.log("Refreshed meetings:", refreshedMeetings)
+        const updatedMeeting = refreshedMeetings.find(m => m.id === meetingId)
+        console.log("Updated meeting in refreshed list:", updatedMeeting)
+        setMeetings(refreshedMeetings)
+      } else {
+        console.warn("Failed to reload meetings, using updated meeting:", updated)
+        // Fallback to updating just the one meeting if reload fails
+        setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+      }
+      cancelEditMeeting()
+      toast.success("Meeting updated successfully")
+    } finally {
+      setSavingMeeting(false)
+    }
   }
 
   const deleteMeeting = async (meetingId: string) => {
@@ -3026,19 +3088,28 @@ export default function DepartmentKanban() {
   const saveInternalMeetingItem = async () => {
     if (!editingInternalMeetingItemId) return
     const title = editingInternalMeetingItem.trim()
-    if (!title) return
-    const res = await apiFetch(`/checklist-items/${editingInternalMeetingItemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
-    })
-    if (!res.ok) {
-      toast.error("Failed to update internal meeting item")
+    if (!title) {
+      toast.error("Checklist item title is required")
       return
     }
-    const updated = (await res.json()) as ChecklistItem
-    setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-    cancelEditInternalMeetingItem()
+    setSavingInternalMeetingItem(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${editingInternalMeetingItemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update internal meeting item")
+        return
+      }
+      const updated = (await res.json()) as ChecklistItem
+      setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditInternalMeetingItem()
+      toast.success("Checklist item updated")
+    } finally {
+      setSavingInternalMeetingItem(false)
+    }
   }
 
   const deleteInternalMeetingItem = async (itemId: string) => {
@@ -5201,10 +5272,11 @@ export default function DepartmentKanban() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[30%]">Title</TableHead>
-                          <TableHead className="w-[15%]">Platform</TableHead>
-                          <TableHead className="w-[20%]">Date & Time</TableHead>
-                          <TableHead className="w-[20%]">Project</TableHead>
+                          <TableHead className="w-[20%]">Title</TableHead>
+                          <TableHead className="w-[12%]">Platform</TableHead>
+                          <TableHead className="w-[18%]">Date & Time</TableHead>
+                          <TableHead className="w-[15%]">Project</TableHead>
+                          <TableHead className="w-[20%]">Details</TableHead>
                           {!isReadOnly ? <TableHead className="w-[15%] text-right">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
@@ -5218,7 +5290,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id}>
                               {isEditing ? (
                                 <>
-                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
+                                  <TableCell colSpan={!isReadOnly ? 6 : 5}>
                                     <div className="space-y-3">
                                       <Input
                                         value={editMeetingTitle}
@@ -5237,6 +5309,109 @@ export default function DepartmentKanban() {
                                           onChange={(e) => setEditMeetingStartsAt(e.target.value)}
                                         />
                                       </div>
+                                      <Input
+                                        type="url"
+                                        placeholder="Meeting URL (optional)"
+                                        value={editMeetingUrl}
+                                        onChange={(e) => setEditMeetingUrl(e.target.value)}
+                                      />
+                                      <div className="grid gap-3">
+                                        <Label>Recurrence</Label>
+                                        <Select value={editMeetingRecurrenceType} onValueChange={(v) => setEditMeetingRecurrenceType(v as "none" | "weekly" | "monthly")}>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="none">One time</SelectItem>
+                                            <SelectItem value="weekly">Every week</SelectItem>
+                                            <SelectItem value="monthly">Every month</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                        {editMeetingRecurrenceType === "weekly" && (
+                                          <div className="space-y-2">
+                                            <Label>Days of week</Label>
+                                            <div className="flex flex-wrap gap-2">
+                                              {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, idx) => (
+                                                <div key={idx} className="flex items-center space-x-2">
+                                                  <Checkbox
+                                                    checked={editMeetingRecurrenceDaysOfWeek.includes(idx)}
+                                                    onCheckedChange={(checked) => {
+                                                      if (checked) {
+                                                        setEditMeetingRecurrenceDaysOfWeek([...editMeetingRecurrenceDaysOfWeek, idx])
+                                                      } else {
+                                                        setEditMeetingRecurrenceDaysOfWeek(editMeetingRecurrenceDaysOfWeek.filter(d => d !== idx))
+                                                      }
+                                                    }}
+                                                  />
+                                                  <Label className="text-sm">{day}</Label>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {editMeetingRecurrenceType === "monthly" && (
+                                          <div className="space-y-2">
+                                            <Label>Days of month (1-31)</Label>
+                                            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                                              {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                                <div key={day} className="flex items-center space-x-2">
+                                                  <Checkbox
+                                                    checked={editMeetingRecurrenceDaysOfMonth.includes(day)}
+                                                    onCheckedChange={(checked) => {
+                                                      if (checked) {
+                                                        setEditMeetingRecurrenceDaysOfMonth([...editMeetingRecurrenceDaysOfMonth, day])
+                                                      } else {
+                                                        setEditMeetingRecurrenceDaysOfMonth(editMeetingRecurrenceDaysOfMonth.filter(d => d !== day))
+                                                      }
+                                                    }}
+                                                  />
+                                                  <Label className="text-sm">{day}</Label>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Participants</Label>
+                                        <Dialog open={showEditParticipantDialog} onOpenChange={setShowEditParticipantDialog}>
+                                          <DialogTrigger asChild>
+                                            <Button variant="outline" className="w-full justify-between">
+                                              {editMeetingParticipantIds.length > 0 
+                                                ? `${editMeetingParticipantIds.length} participant${editMeetingParticipantIds.length > 1 ? 's' : ''} selected`
+                                                : "Select participants"}
+                                            </Button>
+                                          </DialogTrigger>
+                                          <DialogContent className="sm:max-w-md">
+                                            <DialogHeader>
+                                              <DialogTitle>Select Participants</DialogTitle>
+                                            </DialogHeader>
+                                            <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                              {users.map((u) => {
+                                                const isSelected = editMeetingParticipantIds.includes(u.id)
+                                                return (
+                                                  <div
+                                                    key={u.id}
+                                                    className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                                    onClick={() => {
+                                                      if (isSelected) {
+                                                        setEditMeetingParticipantIds((prev) => prev.filter((id) => id !== u.id))
+                                                      } else {
+                                                        setEditMeetingParticipantIds((prev) => [...prev, u.id])
+                                                      }
+                                                    }}
+                                                  >
+                                                    <Checkbox checked={isSelected} />
+                                                    <Label className="cursor-pointer flex-1">
+                                                      {u.full_name || u.username || "-"}
+                                                    </Label>
+                                                  </div>
+                                                )
+                                              })}
+                                            </div>
+                                          </DialogContent>
+                                        </Dialog>
+                                      </div>
                                       <div className="grid gap-3 md:grid-cols-2">
                                         <Select value={editMeetingProjectId} onValueChange={setEditMeetingProjectId}>
                                           <SelectTrigger>
@@ -5252,11 +5427,22 @@ export default function DepartmentKanban() {
                                           </SelectContent>
                                         </Select>
                                         <div className="flex gap-2">
-                                          <Button variant="outline" onClick={cancelEditMeeting} className="flex-1">
+                                          <Button 
+                                            variant="outline" 
+                                            onClick={cancelEditMeeting} 
+                                            className="flex-1"
+                                            type="button"
+                                            disabled={savingMeeting}
+                                          >
                                             Cancel
                                           </Button>
-                                          <Button onClick={() => void saveMeeting(meeting.id)} className="flex-1">
-                                            Save
+                                          <Button 
+                                            onClick={() => void saveMeeting(meeting.id)} 
+                                            className="flex-1"
+                                            type="button"
+                                            disabled={!editMeetingTitle.trim() || savingMeeting}
+                                          >
+                                            {savingMeeting ? "Saving..." : "Save"}
                                           </Button>
                                         </div>
                                       </div>
@@ -5269,6 +5455,40 @@ export default function DepartmentKanban() {
                                   <TableCell>{meeting.platform || "-"}</TableCell>
                                   <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
                                   <TableCell>{project ? project.title || project.name : "-"}</TableCell>
+                                  <TableCell>
+                                    <div className="space-y-1 text-xs">
+                                      {meeting.meeting_url && (
+                                        <div>
+                                          <a
+                                            href={meeting.meeting_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:underline"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            🔗 Join meeting
+                                          </a>
+                                        </div>
+                                      )}
+                                      {meeting.recurrence_type && meeting.recurrence_type !== "none" && (
+                                        <div className="text-slate-600">
+                                          {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
+                                            ? `🔄 Weekly: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
+                                            : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
+                                            ? `🔄 Monthly: ${meeting.recurrence_days_of_month.join(", ")}`
+                                            : ""}
+                                        </div>
+                                      )}
+                                      {meeting.participant_ids && Array.isArray(meeting.participant_ids) && meeting.participant_ids.length > 0 && (
+                                        <div className="text-slate-600">
+                                          👥 {meeting.participant_ids.map(pid => {
+                                            const participant = users.find(u => u.id === pid)
+                                            return participant ? (participant.full_name || participant.username || "-") : null
+                                          }).filter(Boolean).join(", ") || `${meeting.participant_ids.length} participant${meeting.participant_ids.length > 1 ? 's' : ''}`}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
                                   {!isReadOnly ? (
                                     <TableCell className="text-right">
                                       <div className="flex items-center justify-end gap-2">
@@ -5332,6 +5552,109 @@ export default function DepartmentKanban() {
                               onChange={(e) => setMeetingStartsAt(e.target.value)}
                             />
                           </div>
+                          <Input
+                            type="url"
+                            placeholder="Meeting URL (optional)"
+                            value={meetingUrl}
+                            onChange={(e) => setMeetingUrl(e.target.value)}
+                          />
+                          <div className="grid gap-3">
+                            <Label>Recurrence</Label>
+                            <Select value={meetingRecurrenceType} onValueChange={(v) => setMeetingRecurrenceType(v as "none" | "weekly" | "monthly")}>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">One time</SelectItem>
+                                <SelectItem value="weekly">Every week</SelectItem>
+                                <SelectItem value="monthly">Every month</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {meetingRecurrenceType === "weekly" && (
+                              <div className="space-y-2">
+                                <Label>Days of week</Label>
+                                <div className="flex flex-wrap gap-2">
+                                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, idx) => (
+                                    <div key={idx} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        checked={meetingRecurrenceDaysOfWeek.includes(idx)}
+                                        onCheckedChange={(checked) => {
+                                          if (checked) {
+                                            setMeetingRecurrenceDaysOfWeek([...meetingRecurrenceDaysOfWeek, idx])
+                                          } else {
+                                            setMeetingRecurrenceDaysOfWeek(meetingRecurrenceDaysOfWeek.filter(d => d !== idx))
+                                          }
+                                        }}
+                                      />
+                                      <Label className="text-sm">{day}</Label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {meetingRecurrenceType === "monthly" && (
+                              <div className="space-y-2">
+                                <Label>Days of month (1-31)</Label>
+                                <div className="flex flex-wrap gap-2">
+                                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                    <div key={day} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        checked={meetingRecurrenceDaysOfMonth.includes(day)}
+                                        onCheckedChange={(checked) => {
+                                          if (checked) {
+                                            setMeetingRecurrenceDaysOfMonth([...meetingRecurrenceDaysOfMonth, day])
+                                          } else {
+                                            setMeetingRecurrenceDaysOfMonth(meetingRecurrenceDaysOfMonth.filter(d => d !== day))
+                                          }
+                                        }}
+                                      />
+                                      <Label className="text-sm">{day}</Label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Participants</Label>
+                            <Dialog open={showParticipantDialog} onOpenChange={setShowParticipantDialog}>
+                              <DialogTrigger asChild>
+                                <Button variant="outline" className="w-full justify-between">
+                                  {meetingParticipantIds.length > 0 
+                                    ? `${meetingParticipantIds.length} participant${meetingParticipantIds.length > 1 ? 's' : ''} selected`
+                                    : "Select participants"}
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="sm:max-w-md">
+                                <DialogHeader>
+                                  <DialogTitle>Select Participants</DialogTitle>
+                                </DialogHeader>
+                                <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                  {users.map((u) => {
+                                    const isSelected = meetingParticipantIds.includes(u.id)
+                                    return (
+                                      <div
+                                        key={u.id}
+                                        className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setMeetingParticipantIds((prev) => prev.filter((id) => id !== u.id))
+                                          } else {
+                                            setMeetingParticipantIds((prev) => [...prev, u.id])
+                                          }
+                                        }}
+                                      >
+                                        <Checkbox checked={isSelected} />
+                                        <Label className="cursor-pointer flex-1">
+                                          {u.full_name || u.username || "-"}
+                                        </Label>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </DialogContent>
+                            </Dialog>
+                          </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             <Select value={meetingProjectId} onValueChange={setMeetingProjectId}>
                               <SelectTrigger>
@@ -5351,6 +5674,7 @@ export default function DepartmentKanban() {
                                 disabled={!meetingTitle.trim() || creatingMeeting} 
                                 onClick={() => void submitMeeting()}
                                 className="flex-1"
+                                type="button"
                               >
                                 {creatingMeeting ? "Saving..." : "Add"}
                               </Button>
@@ -5361,8 +5685,15 @@ export default function DepartmentKanban() {
                                   setMeetingTitle("")
                                   setMeetingPlatform("")
                                   setMeetingStartsAt("")
+                                  setMeetingUrl("")
+                                  setMeetingRecurrenceType("none")
+                                  setMeetingRecurrenceDaysOfWeek([])
+                                  setMeetingRecurrenceDaysOfMonth([])
+                                  setMeetingParticipantIds([])
                                   setMeetingProjectId("__none__")
                                 }}
+                                type="button"
+                                disabled={creatingMeeting}
                               >
                                 Cancel
                               </Button>
@@ -5477,6 +5808,7 @@ export default function DepartmentKanban() {
                         variant="outline"
                         disabled={!newInternalMeetingItem.trim() || addingInternalMeetingItem}
                         onClick={() => void addInternalMeetingItem()}
+                        type="button"
                       >
                         {addingInternalMeetingItem ? "Adding..." : "Add"}
                       </Button>
@@ -5512,10 +5844,22 @@ export default function DepartmentKanban() {
                               <div className="flex items-center gap-2">
                                 {isEditing ? (
                                   <>
-                                    <Button size="sm" variant="outline" onClick={() => void saveInternalMeetingItem()}>
-                                      Save
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline" 
+                                      onClick={() => void saveInternalMeetingItem()}
+                                      type="button"
+                                      disabled={!editingInternalMeetingItem.trim() || savingInternalMeetingItem}
+                                    >
+                                      {savingInternalMeetingItem ? "Saving..." : "Save"}
                                     </Button>
-                                    <Button size="sm" variant="ghost" onClick={cancelEditInternalMeetingItem}>
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost" 
+                                      onClick={cancelEditInternalMeetingItem}
+                                      type="button"
+                                      disabled={savingInternalMeetingItem}
+                                    >
                                       Cancel
                                     </Button>
                                   </>

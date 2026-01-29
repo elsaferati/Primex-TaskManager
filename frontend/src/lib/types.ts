@@ -308,9 +308,14 @@ export interface Meeting {
   title: string
   platform?: string | null
   starts_at?: string | null
+  meeting_url?: string | null
+  recurrence_type?: string | null // "none", "weekly", "monthly"
+  recurrence_days_of_week?: number[] | null
+  recurrence_days_of_month?: number[] | null
   department_id: string
   project_id?: string | null
   created_by?: string | null
   created_at: string
   updated_at: string
+  participant_ids?: string[]
 }
