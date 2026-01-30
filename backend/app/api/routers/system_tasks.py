@@ -229,9 +229,7 @@ async def list_system_tasks(
     template_stmt = select(SystemTaskTemplate)
 
     if department_id is not None:
-        if user.role != UserRole.ADMIN:
-            if not (user.role == UserRole.MANAGER and user.department_id is None):
-                ensure_department_access(user, department_id)
+        # Allow all users to view system tasks from any department (for department kanban views)
         template_stmt = template_stmt.where(
             or_(
                 and_(
@@ -241,21 +239,8 @@ async def list_system_tasks(
                 SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
             )
         )
-    elif user.role != UserRole.ADMIN:
-        if user.department_id is None:
-            if user.role != UserRole.MANAGER:
-                return []
-        else:
-            template_stmt = template_stmt.where(
-                or_(
-                    SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
-                    SystemTaskTemplate.scope == SystemTaskScope.GA.value,
-                    and_(
-                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
-                        SystemTaskTemplate.department_id == user.department_id,
-                    ),
-                )
-            )
+    # When no department_id is provided (main system tasks view), show all system tasks to all users
+    # No filtering needed - everyone can see all system tasks
 
     templates = (await db.execute(template_stmt)).scalars().all()
     if not templates:
