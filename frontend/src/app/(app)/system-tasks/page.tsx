@@ -77,22 +77,26 @@ const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   NORMAL: "Normal",
   HIGH: "High",
+  BLLOK: "Bllok",
 }
 
 const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
   NORMAL: "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]",
   HIGH: "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C]",
+  BLLOK: "border-[#A78BFA] bg-[#EDE9FE] text-[#6D28D9]",
 }
 
 // Restored specific left-border colors
 const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   NORMAL: "border-l-[#F97316]", // Specific Orange
   HIGH: "border-l-[#EF4444]",   // Specific Red
+  BLLOK: "border-l-[#8B5CF6]",  // Specific Purple
 }
 
 const PRIORITY_SORT_ORDER: Record<TaskPriority, number> = {
   HIGH: 0,
   NORMAL: 1,
+  BLLOK: 2,
 }
 
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -676,39 +680,21 @@ export function SystemTasksView({
 
   const validateOwners = React.useCallback(
     (deptId: string, ownerIds: string[]) => {
-      if (!ownerIds.length) return { ok: true }
-      if (!deptId || isGlobalScopeValue(deptId)) return { ok: true }
-      const allMatch = ownerIds.every((id) => isAssigneeAllowedForDepartment(deptId, id))
-      if (!allMatch) {
-        return {
-          ok: false,
-          message: "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.",
-        }
-      }
+      // Allow users from different departments - no validation needed
       return { ok: true }
     },
-    [isAssigneeAllowedForDepartment]
+    []
   )
 
   const handleDepartmentChange = (nextDeptId: string) => {
     setDepartmentId(nextDeptId)
-    if (isGlobalScopeValue(nextDeptId)) {
-      setAssigneeIds([])
-      setAssigneeError(null)
-      return
-    }
-    setAssigneeIds((prev) => prev.filter((id) => isAssigneeAllowedForDepartment(nextDeptId, id)))
+    // Allow users from any department - no filtering needed
     setAssigneeError(null)
   }
 
   const handleEditDepartmentChange = (nextDeptId: string) => {
     setEditDepartmentId(nextDeptId)
-    if (isGlobalScopeValue(nextDeptId)) {
-      setEditAssigneeIds([])
-      setEditAssigneeError(null)
-      return
-    }
-    setEditAssigneeIds((prev) => prev.filter((id) => isAssigneeAllowedForDepartment(nextDeptId, id)))
+    // Allow users from any department - no filtering needed
     setEditAssigneeError(null)
   }
 
@@ -718,20 +704,17 @@ export function SystemTasksView({
       setAssigneeError(null)
       return
     }
-    if (isGlobalScopeValue(departmentId)) {
-      for (const id of nextOwnerIds) {
-        const assigneeDeptId = ownerDepartmentId(id)
-        if (assigneeDeptId) {
-          setDepartmentId(assigneeDeptId)
-          break
-        }
+    // Check if assignees are from different departments
+    const assigneeDepartments = new Set<string>()
+    for (const id of nextOwnerIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) {
+        assigneeDepartments.add(deptId)
       }
-    } else {
-      const allMatch = nextOwnerIds.every((id) => isAssigneeAllowedForDepartment(departmentId, id))
-      if (!allMatch) {
-        setAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
-        return
-      }
+    }
+    // If assignees are from multiple departments, automatically switch to "ALL departments"
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(departmentId)) {
+      setDepartmentId(ALL_DEPARTMENTS_VALUE)
     }
     setAssigneeIds(nextOwnerIds)
     setAssigneeError(null)
@@ -743,20 +726,17 @@ export function SystemTasksView({
       setEditAssigneeError(null)
       return
     }
-    if (isGlobalScopeValue(editDepartmentId)) {
-      for (const id of nextOwnerIds) {
-        const assigneeDeptId = ownerDepartmentId(id)
-        if (assigneeDeptId) {
-          setEditDepartmentId(assigneeDeptId)
-          break
-        }
+    // Check if assignees are from different departments
+    const assigneeDepartments = new Set<string>()
+    for (const id of nextOwnerIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) {
+        assigneeDepartments.add(deptId)
       }
-    } else {
-      const allMatch = nextOwnerIds.every((id) => isAssigneeAllowedForDepartment(editDepartmentId, id))
-      if (!allMatch) {
-        setEditAssigneeError("Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin.")
-        return
-      }
+    }
+    // If assignees are from multiple departments, automatically switch to "ALL departments"
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(editDepartmentId)) {
+      setEditDepartmentId(ALL_DEPARTMENTS_VALUE)
     }
     setEditAssigneeIds(nextOwnerIds)
     setEditAssigneeError(null)
@@ -927,14 +907,19 @@ export function SystemTasksView({
 
   const submit = async () => {
     if (!departmentId) return
-    const validation = validateOwners(departmentId, assigneeIds)
-    if (!validation.ok) {
-      setAssigneeError(
-        validation.message || "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin."
-      )
-      return
+    // Check if assignees are from different departments - if so, use ALL scope
+    const assigneeDepartments = new Set<string>()
+    for (const id of assigneeIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) {
+        assigneeDepartments.add(deptId)
+      }
     }
-    const finalDeptId = departmentId
+    // If assignees are from multiple departments, use ALL scope
+    let finalDeptId = departmentId
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(departmentId)) {
+      finalDeptId = ALL_DEPARTMENTS_VALUE
+    }
     const scope = resolveScope(finalDeptId)
     const weeklyDays = frequency === "WEEKLY" ? normalizeDayValues(daysOfWeek) : []
     if (requiresAlignment && !alignmentTime) {
@@ -1046,14 +1031,19 @@ export function SystemTasksView({
 
   const submitEdit = async () => {
     if (!editTemplate || !editTitle.trim()) return
-    const validation = validateOwners(editDepartmentId, editAssigneeIds)
-    if (!validation.ok) {
-      setEditAssigneeError(
-        validation.message || "Owners duhet me qene prej te njejtit departament. Ndrysho departamentin ose hiq ownerin."
-      )
-      return
+    // Check if assignees are from different departments - if so, use ALL scope
+    const assigneeDepartments = new Set<string>()
+    for (const id of editAssigneeIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) {
+        assigneeDepartments.add(deptId)
+      }
     }
-    const finalDeptId = editDepartmentId
+    // If assignees are from multiple departments, use ALL scope
+    let finalDeptId = editDepartmentId
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(editDepartmentId)) {
+      finalDeptId = ALL_DEPARTMENTS_VALUE
+    }
     const scope = resolveScope(finalDeptId)
     const weeklyDays = editFrequency === "WEEKLY" ? normalizeDayValues(editDaysOfWeek) : []
     if (editRequiresAlignment && !editAlignmentTime) {
