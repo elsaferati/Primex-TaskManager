@@ -1761,7 +1761,7 @@ export default function PcmProjectPage() {
     if (baseTask) {
       applyRule(baseTask, 0, null)
     }
-    applyRule(templateTask, 2, baseTask?.id)
+    applyRule(templateTask, 1, baseTask?.id)
     applyRule(pricesTask, 3, null)
     applyRule(photosTask, 3, null)
     applyRule(ko1Task, 4, baseTask?.id)
@@ -1772,13 +1772,13 @@ export default function PcmProjectPage() {
     }
     if (kontrolTask) {
       const dependencyId = ko2Task?.id
-      applyRule(kontrolTask, 5, dependencyId ?? undefined)
+      applyRule(kontrolTask, 4, dependencyId ?? undefined)
     }
     if (dreamVsTask || dreamVlTask || dreamWeightsTask) {
       const dependencyId = kontrolTask?.id
-      applyRule(dreamVsTask, 6, dependencyId ?? undefined)
-      applyRule(dreamVlTask, 6, dependencyId ?? undefined)
-      applyRule(dreamWeightsTask, 6, null)
+      applyRule(dreamVsTask, 4, dependencyId ?? undefined)
+      applyRule(dreamVlTask, 4, dependencyId ?? undefined)
+      applyRule(dreamWeightsTask, 4, null)
     }
 
     if (!updates.length) return
