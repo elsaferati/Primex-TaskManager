@@ -1027,41 +1027,52 @@ export default function CommonViewPage() {
             const assignees = Array.from(entry.assignees)
             
             // Check if this is MST or VS/VL project in Product Content Manager
-            const isMst = project.project_type === "MST"
+            const isMstByType = project.project_type === "MST"
             const titleUpper = (project.title || "").toUpperCase()
+            const isMstByTitle = titleUpper.includes("MST")
+            const isMst = isMstByType || isMstByTitle
             const isVsVl = titleUpper.includes("VS") || titleUpper.includes("VL")
             const isProductContent = project.department_id === productContentDeptId
             
             let datesToUse: string[] = []
             
-            if ((isMst || isVsVl) && isProductContent && project.due_date) {
-              // For MST/VS/VL in Product Content, generate all dates from today until due date
-              const today = new Date()
-              today.setHours(0, 0, 0, 0)
-              const dueDate = new Date(project.due_date)
-              dueDate.setHours(0, 0, 0, 0)
-              
-              // Start from today, end at due date (or today if due date is in the past)
-              const startDate = today
-              const endDate = dueDate >= today ? dueDate : today
-              
-              // Generate all dates from start to end (weekdays only: Monday-Friday)
-              const currentDate = new Date(startDate)
-              while (currentDate <= endDate) {
-                const dayOfWeek = currentDate.getDay()
-                // Only include weekdays (Monday=1 to Friday=5)
-                if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-                  datesToUse.push(toISODate(currentDate))
+            if ((isMst || isVsVl) && isProductContent) {
+              if (project.due_date) {
+                // For MST/VS/VL in Product Content with due_date, generate all dates from today until due date
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                const dueDate = new Date(project.due_date)
+                dueDate.setHours(0, 0, 0, 0)
+                
+                // Start from today, end at due date (or today if due date is in the past)
+                const startDate = today
+                const endDate = dueDate >= today ? dueDate : today
+                
+                // Generate all dates from start to end (weekdays only: Monday-Friday)
+                const currentDate = new Date(startDate)
+                while (currentDate <= endDate) {
+                  const dayOfWeek = currentDate.getDay()
+                  // Only include weekdays (Monday=1 to Friday=5)
+                  if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                    datesToUse.push(toISODate(currentDate))
+                  }
+                  currentDate.setDate(currentDate.getDate() + 1)
                 }
-                currentDate.setDate(currentDate.getDate() + 1)
+              } else if (entry.dates.size > 0) {
+                // MST/VS/VL without due_date but with tasks - use task dates
+                datesToUse = Array.from(entry.dates).sort()
+              } else {
+                // MST/VS/VL without due_date and no tasks - show on today
+                datesToUse = [toISODate(new Date())]
               }
             } else {
-              // For other projects, use dates from tasks (or today if no tasks)
+              // For other projects, use dates from tasks
+              // Only show projects that have actual task dates
               if (entry.dates.size > 0) {
                 datesToUse = Array.from(entry.dates).sort()
               } else {
-                // If no tasks, show on today's date
-                datesToUse = [toISODate(new Date())]
+                // Skip projects with no tasks/dates - don't show them
+                continue
               }
             }
             
