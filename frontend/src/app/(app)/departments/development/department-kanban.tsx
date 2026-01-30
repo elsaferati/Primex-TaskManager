@@ -144,9 +144,6 @@ const INTERNAL_MEETING = {
       items: [
         "A ka mungesa, a ndryshon plani per sot?",
         "A ka shenime GA/KA ne grupe/Trello?",
-        "A ka e-mails te reja ne IT?",
-        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
       ],
     },
     M2: {
@@ -905,6 +902,30 @@ export default function DepartmentKanban() {
         if (cancelled) return
         setInternalMeetingChecklistId(selected.id)
         let items = selected.items || []
+        
+        // Delete the items that were highlighted for removal
+        const itemsToDelete = [
+          "A ka e-mails te reja ne IT?",
+          "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
+          "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+          "dssdgsdg",
+        ]
+        const deletePromises: Promise<Response>[] = []
+        for (const item of items) {
+          const itemTitle = (item.title || "").trim()
+          if (itemsToDelete.some((toDelete) => itemTitle.toLowerCase() === toDelete.toLowerCase())) {
+            deletePromises.push(apiFetch(`/checklist-items/${item.id}`, { method: "DELETE" }))
+          }
+        }
+        if (deletePromises.length > 0) {
+          await Promise.all(deletePromises)
+          // Reload items after deletion
+          const reloadRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
+          if (reloadRes.ok) {
+            items = (await reloadRes.json()) as ChecklistItem[]
+          }
+        }
+        
         const existingKeys = new Set(
           items.map((item) => `${item.day || ""}|${(item.title || "").trim().toLowerCase()}`)
         )
@@ -5817,10 +5838,12 @@ export default function DepartmentKanban() {
                   <div className="space-y-2">
                     {internalMeetingItems
                       .filter((item) => (item.day || internalSlot) === internalSlot)
-                      .filter((item) => (internalSlot === "M1" ? !/[a-z]/.test(item.title || "") : true))
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
+                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3") 
+                          ? (item.title || "").toUpperCase() 
+                          : (item.title || "")
                         return (
                           <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                             <Checkbox
@@ -5836,7 +5859,7 @@ export default function DepartmentKanban() {
                                 />
                               ) : (
                                 <div className="text-sm text-muted-foreground">
-                                  {idx + 1}. {item.title || ""}
+                                  {idx + 1}. {displayTitle}
                                 </div>
                               )}
                             </div>
