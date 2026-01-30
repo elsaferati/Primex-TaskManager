@@ -823,7 +823,8 @@ async def seed() -> None:
                                 meta = {}
                             if meta.get("vs_vl_phase") != phase:
                                 meta["vs_vl_phase"] = phase
-                            if unlock_after_days is not None and meta.get("unlock_after_days") is None:
+                            # Always update unlock_after_days from offsets dictionary if provided
+                            if unlock_after_days is not None:
                                 meta["unlock_after_days"] = unlock_after_days
                             task.internal_notes = f"{VS_VL_META_PREFIX}{json.dumps(meta)}"
                         if not task.phase:
