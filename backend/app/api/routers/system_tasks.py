@@ -173,8 +173,8 @@ async def _sync_task_for_template(
     task.assigned_to = template.default_assignee_id
     task.finish_period = _enum_value(template.finish_period)
     task.is_active = active_value
-    if task.priority is None:
-        task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
+    # Always sync priority from template to task
+    task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
     if active_value and should_reopen_system_task(task, template, now):
         task.status = _enum_value(TaskStatus.TODO)
         task.completed_at = None
@@ -229,9 +229,7 @@ async def list_system_tasks(
     template_stmt = select(SystemTaskTemplate)
 
     if department_id is not None:
-        if user.role != UserRole.ADMIN:
-            if not (user.role == UserRole.MANAGER and user.department_id is None):
-                ensure_department_access(user, department_id)
+        # Allow all users to view system tasks from any department (for department kanban views)
         template_stmt = template_stmt.where(
             or_(
                 and_(
@@ -241,21 +239,8 @@ async def list_system_tasks(
                 SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
             )
         )
-    elif user.role != UserRole.ADMIN:
-        if user.department_id is None:
-            if user.role != UserRole.MANAGER:
-                return []
-        else:
-            template_stmt = template_stmt.where(
-                or_(
-                    SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
-                    SystemTaskTemplate.scope == SystemTaskScope.GA.value,
-                    and_(
-                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
-                        SystemTaskTemplate.department_id == user.department_id,
-                    ),
-                )
-            )
+    # When no department_id is provided (main system tasks view), show all system tasks to all users
+    # No filtering needed - everyone can see all system tasks
 
     templates = (await db.execute(template_stmt)).scalars().all()
     if not templates:
@@ -553,31 +538,7 @@ async def update_system_task_template(
     if template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
 
-    # Permission check: allow managers/admins, template creator, or assigned users to edit.
-    task = (
-        await db.execute(
-            select(Task)
-            .where(Task.system_template_origin_id == template.id)
-            .order_by(Task.created_at.desc())
-        )
-    ).scalars().first()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
-
-    explicit_assignees = (
-        await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
-    ).scalars().all()
-    assignee_ids = {uid for uid in explicit_assignees}
-    if task.assigned_to:
-        assignee_ids.add(task.assigned_to)
-
-    has_edit_rights = (
-        user.role in (UserRole.ADMIN, UserRole.MANAGER)
-        or (task.created_by is not None and task.created_by == user.id)
-        or (user.id in assignee_ids)
-    )
-    if not has_edit_rights:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Allow all users to edit all system tasks - no permission restrictions
 
     fields_set = payload.__fields_set__
     scope_set = "scope" in fields_set
@@ -612,7 +573,7 @@ async def update_system_task_template(
         target_department = None
 
     if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
-        ensure_department_access(user, target_department)
+        # Allow all users to edit tasks from any department
         department = (
             await db.execute(select(Department).where(Department.id == target_department))
         ).scalar_one_or_none()
@@ -633,15 +594,7 @@ async def update_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
-            for assignee in assignee_users:
-                if assignee.department_id is None:
-                    continue
-                if assignee.department_id != target_department:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Assignee must belong to the selected department",
-                    )
+        # Allow assigning users from any department - no department restriction
 
     if payload.title is not None:
         template.title = payload.title
@@ -708,6 +661,7 @@ async def update_system_task_template(
         await _replace_task_assignees(db, task, assignee_ids)
         task.assigned_to = assignee_ids[0] if assignee_ids else None
     await db.commit()
+    await db.refresh(template)
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:

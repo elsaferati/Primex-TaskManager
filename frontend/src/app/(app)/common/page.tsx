@@ -115,6 +115,22 @@ export default function CommonViewPage() {
     const [y, m, d] = s.split("-").map(Number)
     return new Date(y, m - 1, d)
   }
+  // Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY
+  const toDDMMYYYY = (isoDate: string) => {
+    if (!isoDate) return ""
+    const [y, m, d] = isoDate.split("-").map(Number)
+    return `${pad2(d)}/${pad2(m)}/${y}`
+  }
+  // Convert DD/MM/YYYY to ISO date (YYYY-MM-DD)
+  const fromDDMMYYYY = (ddmmyyyy: string) => {
+    if (!ddmmyyyy) return ""
+    const parts = ddmmyyyy.split("/")
+    if (parts.length !== 3) return ""
+    const [d, m, y] = parts.map(Number)
+    if (isNaN(d) || isNaN(m) || isNaN(y)) return ""
+    if (d < 1 || d > 31 || m < 1 || m > 12) return ""
+    return `${y}-${pad2(m)}-${pad2(d)}`
+  }
   const addDays = (d: Date, n: number) => {
     const x = new Date(d)
     x.setDate(x.getDate() + n)
@@ -181,11 +197,13 @@ export default function CommonViewPage() {
   const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "problem" | "feedback">("late")
   const [formPerson, setFormPerson] = React.useState("")
   const [formDate, setFormDate] = React.useState(toISODate(new Date()))
+  const [formDateDisplay, setFormDateDisplay] = React.useState(toDDMMYYYY(toISODate(new Date())))
   const [formDelayStart, setFormDelayStart] = React.useState("08:00")
   const [formUntil, setFormUntil] = React.useState("09:00")
   const [formFrom, setFormFrom] = React.useState("08:00")
   const [formTo, setFormTo] = React.useState("12:00")
   const [formEndDate, setFormEndDate] = React.useState("")
+  const [formEndDateDisplay, setFormEndDateDisplay] = React.useState("")
   const [formFullDay, setFormFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
@@ -1161,11 +1179,13 @@ export default function CommonViewPage() {
     setFormType("late")
     setFormPerson("")
     setFormDate(toISODate(new Date()))
+    setFormDateDisplay(toDDMMYYYY(toISODate(new Date())))
     setFormDelayStart("08:00")
     setFormUntil("09:00")
     setFormFrom("08:00")
     setFormTo("12:00")
     setFormEndDate("")
+    setFormEndDateDisplay("")
     setFormFullDay(false)
     setFormTitle("")
     setFormNote("")
@@ -4473,13 +4493,22 @@ export default function CommonViewPage() {
                   )}
 
                   <div className="form-row">
-                    <label htmlFor="cv-date">Date</label>
+                    <label htmlFor="cv-date">Date (DD/MM/YYYY)</label>
                     <input
                       id="cv-date"
                       className="input"
-                      type="date"
-                      value={formDate}
-                      onChange={(e) => setFormDate(e.target.value)}
+                      type="text"
+                      placeholder="DD/MM/YYYY"
+                      value={formDateDisplay}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setFormDateDisplay(value)
+                        const isoDate = fromDDMMYYYY(value)
+                        if (isoDate) {
+                          setFormDate(isoDate)
+                        }
+                      }}
+                      pattern="\d{2}/\d{2}/\d{4}"
                       required
                     />
                   </div>
@@ -4512,7 +4541,7 @@ export default function CommonViewPage() {
                   {formType === "absent" && (
                     <>
                       <div className="form-row">
-                        <label htmlFor="cv-from">From (for absence/AL with hours)</label>
+                        <label htmlFor="cv-from">From </label>
                         <input
                           id="cv-from"
                           className="input"
@@ -4522,7 +4551,7 @@ export default function CommonViewPage() {
                         />
                       </div>
                       <div className="form-row">
-                        <label htmlFor="cv-to">Until (for absence/AL with hours)</label>
+                        <label htmlFor="cv-to">Until (</label>
                         <input
                           id="cv-to"
                           className="input"
@@ -4537,13 +4566,24 @@ export default function CommonViewPage() {
                   {formType === "leave" && (
                     <>
                       <div className="form-row">
-                        <label htmlFor="cv-enddate">Until (optional)</label>
+                        <label htmlFor="cv-enddate">Until (optional) (DD/MM/YYYY)</label>
                         <input
                           id="cv-enddate"
                           className="input"
-                          type="date"
-                          value={formEndDate}
-                          onChange={(e) => setFormEndDate(e.target.value)}
+                          type="text"
+                          placeholder="DD/MM/YYYY"
+                          value={formEndDateDisplay}
+                          onChange={(e) => {
+                            const value = e.target.value
+                            setFormEndDateDisplay(value)
+                            const isoDate = fromDDMMYYYY(value)
+                            if (isoDate) {
+                              setFormEndDate(isoDate)
+                            } else if (!value) {
+                              setFormEndDate("")
+                            }
+                          }}
+                          pattern="\d{2}/\d{2}/\d{4}"
                         />
                       </div>
                       <div className="form-row span-2 leave-inline">

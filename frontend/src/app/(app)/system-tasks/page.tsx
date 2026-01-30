@@ -434,10 +434,13 @@ export function SystemTasksView({
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
+      const templateMetaPromise = isManagerOrAdmin 
+        ? apiFetch("/system-tasks/templates")
+        : Promise.resolve({ ok: false } as Response)
       const [templatesRes, departmentsRes, templateMetaRes] = await Promise.all([
         apiFetch("/system-tasks"),
         apiFetch("/departments"),
-        apiFetch("/system-tasks/templates"),
+        templateMetaPromise,
       ])
       if (templatesRes.ok) {
         const rows = (await templatesRes.json()) as SystemTaskTemplate[]
@@ -450,7 +453,8 @@ export function SystemTasksView({
             alignment_user_ids?: string[] | null
           }
         >()
-        if (templateMetaRes.ok) {
+        // Only process template metadata if we got a response (user is manager/admin)
+        if (templateMetaRes && templateMetaRes.ok) {
           const metas = (await templateMetaRes.json()) as Array<{
             id: string
             requires_alignment?: boolean | null
@@ -1104,7 +1108,14 @@ export function SystemTasksView({
         return
       }
       const updated = (await res.json()) as SystemTaskTemplate
-      setTemplates((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      // Match by template_id first, then fall back to id (task id)
+      const matchId = updated.template_id ?? updated.id
+      setTemplates((prev) =>
+        prev.map((item) => {
+          const itemTemplateId = item.template_id ?? item.id
+          return itemTemplateId === matchId ? updated : item
+        })
+      )
       setEditOpen(false)
       setEditTemplate(null)
       setEditAssigneeError(null)
