@@ -72,5 +72,5 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    assignees = relationship("TaskAssignee", backref="task", lazy="selectin")
+    assignees = relationship("TaskAssignee", backref="task", lazy="selectin", passive_deletes=True)
 

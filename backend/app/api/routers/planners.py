@@ -703,9 +703,6 @@ async def weekly_table_planner(
         if task.due_date is None:
             return None, None
         due = task.due_date.date()
-        if task.project_id is None and task.system_template_origin_id is None:
-            # Fast tasks should only show on their due date.
-            return due, due
         
         # For Product Content department, tasks should only show on due_date, not from start_date to due_date
         # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
@@ -727,7 +724,7 @@ async def weekly_table_planner(
             # Product Content project tasks: show only on due_date (ignore start_date)
             return due, due
         
-        # For non-Product Content tasks, use start_date if available
+        # For all other tasks (including fast tasks), use start_date if available
         if task.start_date is not None:
             start = task.start_date.date()
             # Only treat start_date as planning start if it forms a valid interval.

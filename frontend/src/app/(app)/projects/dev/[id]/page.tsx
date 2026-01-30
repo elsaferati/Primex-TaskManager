@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
@@ -265,10 +266,13 @@ export default function DevelopmentProjectPage() {
   const [savingDocumentationItem, setSavingDocumentationItem] = React.useState(false)
   const [documentationFilePath, setDocumentationFilePath] = React.useState("")
   const [documentationFilePaths, setDocumentationFilePaths] = React.useState<string[]>([])
+  const [gaPromptTitle, setGaPromptTitle] = React.useState("")
   const [gaPromptContent, setGaPromptContent] = React.useState("")
+  const [devPromptTitle, setDevPromptTitle] = React.useState("")
   const [devPromptContent, setDevPromptContent] = React.useState("")
   const [savingGaPrompt, setSavingGaPrompt] = React.useState(false)
   const [savingDevPrompt, setSavingDevPrompt] = React.useState(false)
+  const [expandedPrompts, setExpandedPrompts] = React.useState<Set<string>>(new Set())
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
@@ -1098,7 +1102,12 @@ export default function DevelopmentProjectPage() {
   const savePrompt = async (type: "GA_PROMPT" | "ZHVILLIM_PROMPT") => {
     if (!project) return
     const isGa = type === "GA_PROMPT"
+    const title = (isGa ? gaPromptTitle : devPromptTitle).trim()
     const content = (isGa ? gaPromptContent : devPromptContent).trim()
+    if (!title) {
+      toast.error("Prompt title is required")
+      return
+    }
     if (!content) {
       toast.error("Prompt content is required")
       return
@@ -1109,7 +1118,7 @@ export default function DevelopmentProjectPage() {
       const res = await apiFetch("/project-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: project.id, type, content }),
+        body: JSON.stringify({ project_id: project.id, type, title, content }),
       })
       if (!res.ok) {
         let detail = "Failed to save prompt"
@@ -1124,13 +1133,30 @@ export default function DevelopmentProjectPage() {
       }
       const created = (await res.json()) as ProjectPrompt
       setPrompts((prev) => [created, ...prev])
-      if (isGa) setGaPromptContent("")
-      else setDevPromptContent("")
+      if (isGa) {
+        setGaPromptTitle("")
+        setGaPromptContent("")
+      } else {
+        setDevPromptTitle("")
+        setDevPromptContent("")
+      }
       toast.success("Prompt saved")
     } finally {
       if (isGa) setSavingGaPrompt(false)
       else setSavingDevPrompt(false)
     }
+  }
+
+  const togglePromptExpanded = (promptId: string) => {
+    setExpandedPrompts((prev) => {
+      const next = new Set(prev)
+      if (next.has(promptId)) {
+        next.delete(promptId)
+      } else {
+        next.add(promptId)
+      }
+      return next
+    })
   }
 
   if (project.current_phase === "CLOSED" && !showClosedDetails) {
@@ -2305,7 +2331,13 @@ export default function DevelopmentProjectPage() {
             <div className="grid gap-6 md:grid-cols-2">
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-6 space-y-4">
                 <div className="text-lg font-semibold text-slate-800">GA Prompt</div>
-                <Textarea value={gaPromptContent} onChange={(e) => setGaPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                <Input
+                  value={gaPromptTitle}
+                  onChange={(e) => setGaPromptTitle(e.target.value)}
+                  placeholder="Enter prompt title..."
+                  className="border-sky-200 focus:border-sky-400 rounded-xl"
+                />
+                <Textarea value={gaPromptContent} onChange={(e) => setGaPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" placeholder="Enter prompt content..." />
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -2321,20 +2353,42 @@ export default function DevelopmentProjectPage() {
                   <div className="space-y-3 pt-2">
                     {prompts
                       .filter((p) => p.type === "GA_PROMPT")
-                      .map((prompt) => (
-                        <Card key={prompt.id} className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl">
-                          <div className="text-xs text-slate-500">
-                            {new Date(prompt.created_at).toLocaleString("sq-AL")}
-                          </div>
-                          <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
-                        </Card>
-                      ))}
+                      .map((prompt) => {
+                        const isExpanded = expandedPrompts.has(prompt.id)
+                        return (
+                          <Card
+                            key={prompt.id}
+                            className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl cursor-pointer hover:bg-sky-50/50 transition-colors"
+                            onClick={() => togglePromptExpanded(prompt.id)}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="font-medium text-slate-800 mb-1">{prompt.title || "Untitled"}</div>
+                                <div className="text-xs text-slate-500">
+                                  {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                                </div>
+                                {isExpanded ? (
+                                  <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
+                                ) : (
+                                  <div className="mt-2 text-xs text-sky-600 hover:text-sky-700">Click to view description</div>
+                                )}
+                              </div>
+                            </div>
+                          </Card>
+                        )
+                      })}
                   </div>
                 ) : null}
               </Card>
               <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden p-6 space-y-4">
                 <div className="text-lg font-semibold text-slate-800">Development Prompt</div>
-                <Textarea value={devPromptContent} onChange={(e) => setDevPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" />
+                <Input
+                  value={devPromptTitle}
+                  onChange={(e) => setDevPromptTitle(e.target.value)}
+                  placeholder="Enter prompt title..."
+                  className="border-sky-200 focus:border-sky-400 rounded-xl"
+                />
+                <Textarea value={devPromptContent} onChange={(e) => setDevPromptContent(e.target.value)} rows={8} className="border-sky-200 focus:border-sky-400 rounded-xl" placeholder="Enter prompt content..." />
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -2350,14 +2404,30 @@ export default function DevelopmentProjectPage() {
                   <div className="space-y-3 pt-2">
                     {prompts
                       .filter((p) => p.type === "ZHVILLIM_PROMPT")
-                      .map((prompt) => (
-                        <Card key={prompt.id} className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl">
-                          <div className="text-xs text-slate-500">
-                            {new Date(prompt.created_at).toLocaleString("sq-AL")}
-                          </div>
-                          <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
-                        </Card>
-                      ))}
+                      .map((prompt) => {
+                        const isExpanded = expandedPrompts.has(prompt.id)
+                        return (
+                          <Card
+                            key={prompt.id}
+                            className="border border-sky-100 bg-sky-50/30 p-4 rounded-xl cursor-pointer hover:bg-sky-50/50 transition-colors"
+                            onClick={() => togglePromptExpanded(prompt.id)}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="font-medium text-slate-800 mb-1">{prompt.title || "Untitled"}</div>
+                                <div className="text-xs text-slate-500">
+                                  {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                                </div>
+                                {isExpanded ? (
+                                  <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
+                                ) : (
+                                  <div className="mt-2 text-xs text-sky-600 hover:text-sky-700">Click to view description</div>
+                                )}
+                              </div>
+                            </div>
+                          </Card>
+                        )
+                      })}
                   </div>
                 ) : null}
               </Card>
