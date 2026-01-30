@@ -1165,25 +1165,30 @@ export default function CommonViewPage() {
             }
             
             // Create one priority entry per date for this project
-            // Always show project members, plus any additional assignees for that date
+            // Logic: Project members ALWAYS appear on every date
+            //        Additionally, if a task is assigned to someone who is NOT a project member,
+            //        that person should also appear on that specific date
             for (const date of datesToUse) {
-              // Start with project members (base members that appear every day)
+              // Start with ALL project members (they appear on every date, regardless of tasks)
               const finalAssignees = new Set<string>(entry.projectMembers)
               
-              // Get assignees for this specific date
+              // Get assignees for this specific date (from tasks on that date)
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
               
-              // Add any date-specific assignees who are NOT project members
+              // Add any date-specific assignees who are NOT already project members
+              // This handles cases where a task is assigned to someone outside the project team
               for (const name of dateAssignees) {
                 if (!entry.projectMembers.has(name)) {
                   finalAssignees.add(name)
                 }
+                // Note: If a project member has a task on this date, they're already in finalAssignees
+                // because we started with all projectMembers above
               }
               
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: Array.from(finalAssignees), // Project members + additional date-specific assignees
+                assignees: Array.from(finalAssignees), // Always includes project members + any date-specific non-members
               })
             }
           }
@@ -2432,7 +2437,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.05in 0.1in 0.51in 0.1in;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -2446,14 +2451,22 @@ export default function CommonViewPage() {
           .view-container { padding: 0; background: white; }
           .print-page {
             position: relative;
+            padding-top: 0;
             padding-bottom: 0.35in;
+            page-break-before: avoid;
           }
-          .week-table-view { display: block !important; padding-bottom: 0.35in; }
+          .week-table-view { 
+            display: block !important; 
+            padding-top: 0;
+            padding-bottom: 0.35in; 
+            page-break-before: avoid;
+          }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 6px;
+            margin-top: 0;
           }
           .print-title {
             font-size: 16px;
@@ -3073,6 +3086,11 @@ export default function CommonViewPage() {
           display: flex;
           align-items: center;
           gap: 6px;
+          border: 1px solid #cbd5e1;
+          border-radius: 4px;
+          padding: 4px 6px;
+          background: #ffffff;
+          margin-bottom: 2px;
         }
         .week-table-entry span {
           flex: 1;
@@ -3134,6 +3152,13 @@ export default function CommonViewPage() {
           .week-table th,
           .week-table td {
             border: 1px solid #111827 !important;
+          }
+          .week-table-entry {
+            border: 1px solid #111827 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            page-break-inside: avoid;
+            margin-bottom: 3px;
           }
         }
           align-items: center;
