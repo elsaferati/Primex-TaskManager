@@ -426,15 +426,13 @@ async def create_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        if scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
-            for assignee in assignee_users:
-                if assignee.department_id is None:
-                    continue
-                if assignee.department_id != department_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Assignee must belong to the selected department",
-                    )
+        # If assignees are from different departments, automatically change scope to ALL
+        if assignee_users and scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
+            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
+            if len(assignee_departments) > 1 or (len(assignee_departments) == 1 and list(assignee_departments)[0] != department_id):
+                # Multiple departments or different department - change to ALL scope
+                scope_value = SystemTaskScope.ALL
+                department_id = None
 
     priority_value = payload.priority or TaskPriority.NORMAL
 

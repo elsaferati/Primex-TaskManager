@@ -3669,7 +3669,7 @@ export default function DepartmentKanban() {
                     ) : null}
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {filteredProjects.map((project) => {
                   const manager = project.manager_id ? userMap.get(project.manager_id) : null
                   const phase = project.current_phase || "MEETINGS"
@@ -3685,23 +3685,23 @@ export default function DepartmentKanban() {
                   return (
                     <Card
                       key={project.id}
-                      className="rounded-2xl border border-stone-200/70 bg-white/80 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-stone-800/70 dark:bg-stone-900/70"
+                      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold leading-tight">{project.title || project.name}</span>
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100 truncate">{project.title || project.name}</span>
                             {project.is_template && (
-                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50 flex-shrink-0">Template</Badge>
                             )}
                           </div>
-                          <div className="mt-1 text-[11px] text-muted-foreground line-clamp-3">
+                          <div className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 leading-relaxed">
                             {project.description
                               ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
                               : "-"}
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
                           {canDeleteProjects ? (
                             <Button
                               variant="outline"
@@ -3718,22 +3718,22 @@ export default function DepartmentKanban() {
                           </Badge>
                         </div>
                       </div>
-                      <div className="mt-2 text-[11px] text-muted-foreground">
+                      <div className="mt-3 text-xs text-slate-600 dark:text-slate-400">
                         {projectPhases.map((p, idx) => {
                           const isCurrent = p === phase
                           return (
                             <span key={p}>
-                              <span className={isCurrent ? "text-rose-600 font-semibold" : ""}>
+                              <span className={isCurrent ? "text-rose-600 dark:text-rose-400 font-semibold" : ""}>
                                 {PHASE_LABELS[p] || p}
                               </span>
-                              {idx < projectPhases.length - 1 ? " -> " : ""}
+                              {idx < projectPhases.length - 1 ? " → " : ""}
                             </span>
                           )
                         })}
                       </div>
-                      <div className="mt-2">
-                        <div className="text-[10px] uppercase tracking-wide text-stone-500">Members</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Members</div>
+                        <div className="flex flex-wrap items-center gap-2">
                           {membersForProject.length ? (
                             <>
                               {membersForProject.map((member, idx) => (
@@ -3754,14 +3754,14 @@ export default function DepartmentKanban() {
                           )}
                         </div>
                       </div>
-                      <div className="mt-2 flex items-center justify-between">
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           {manager ? (
-                            <div className="h-6 w-6 rounded-full bg-amber-100 text-[9px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200">
+                            <div className="h-7 w-7 rounded-full bg-amber-100 text-xs font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200 shadow-sm">
                               {initials(manager.full_name || manager.username || "-")}
                             </div>
                           ) : (
-                            <div className="h-6 w-6 rounded-full bg-muted text-[9px] font-semibold flex items-center justify-center">
+                            <div className="h-7 w-7 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center dark:bg-slate-700 dark:text-slate-400">
                               -
                             </div>
                           )}
@@ -3769,9 +3769,9 @@ export default function DepartmentKanban() {
                         <div className="flex items-center gap-3">
                           <Link
                             href={`/projects/pcm/${project.id}`}
-                            className="text-[11px] font-semibold text-rose-700 transition-colors hover:text-rose-800 hover:underline dark:text-rose-200 dark:hover:text-rose-100"
+                            className="text-xs font-semibold text-rose-600 transition-colors hover:text-rose-700 hover:underline dark:text-rose-400 dark:hover:text-rose-300"
                           >
-                            View details -&gt;
+                            View details →
                           </Link>
                         </div>
                       </div>

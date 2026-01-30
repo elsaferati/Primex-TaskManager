@@ -3484,80 +3484,163 @@ export default function DepartmentKanban() {
 
   return (
     <div className="min-h-screen">
-      <div className="sticky top-0 z-[100] print:hidden ">
-        <div className="relative overflow-hidden rounded-[1.5rem] sm:rounded-[2.25rem] border border-stone-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-stone-50 p-4 sm:p-6 shadow-lg dark:border-stone-800/70 dark:from-stone-950 dark:via-stone-950 dark:to-rose-950">
-          <div className="pointer-events-none absolute -top-24 right-0 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-900/30" />
-          <div className="pointer-events-none absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-rose-200/35 blur-3xl dark:bg-rose-900/20" />
-          <div className="relative space-y-4 sm:space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-[0.25em] text-stone-500 dark:text-stone-400">
-                  Department
-                </div>
-                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-100">
-                  {departmentName}
-                </div>
-                <div className="text-sm text-stone-600 dark:text-stone-400">Manage projects and daily tasks.</div>
-              </div>
-              <div className="inline-flex rounded-full border border-stone-200/70 bg-white p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950 w-full sm:w-auto justify-center">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("department")}
-                  className={[
-                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
-                    viewMode === "department"
-                      ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                      : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                  ].join(" ")}
-                >
-                  Department
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("mine")}
-                  className={[
-                    "rounded-full px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors flex-1 sm:flex-none",
-                    viewMode === "mine"
-                      ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                      : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200",
-                  ].join(" ")}
-                >
-                  My View
-                </button>
-              </div>
-            </div>
+      <style jsx>{`
+        .common-sticky {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #ffffff;
+        }
+        .top-header { 
+          background: linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%);
+          padding: 12px 24px; 
+          display: flex; 
+          justify-content: space-between; 
+          align-items: center; 
+          flex-shrink: 0;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .page-title h1 { 
+          font-size: 20px; 
+          margin-bottom: 2px; 
+          color: white;
+          font-weight: 700;
+          letter-spacing: -0.5px;
+        }
+        .page-title p { 
+          font-size: 11px; 
+          color: rgba(255, 255, 255, 0.9); 
+          margin: 0; 
+        }
+        .btn-primary { 
+          background: white; 
+          color: #475569; 
+          border: none; 
+          padding: 6px 14px; 
+          border-radius: 6px; 
+          font-size: 12px; 
+          font-weight: 600;
+          cursor: pointer; 
+          transition: all 0.2s ease;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .btn-primary:hover { 
+          background: #f8f9fa;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        .btn-outline { 
+          background: rgba(255, 255, 255, 0.2); 
+          color: white; 
+          border: 1px solid rgba(255, 255, 255, 0.3); 
+          padding: 6px 14px; 
+          border-radius: 6px; 
+          font-size: 12px; 
+          font-weight: 600;
+          cursor: pointer; 
+          transition: all 0.2s ease;
+        }
+        .btn-outline:hover { 
+          background: rgba(255, 255, 255, 0.3);
+          border-color: rgba(255, 255, 255, 0.5);
+        }
+        .btn-outline.active {
+          background: #ffffff;
+          color: #0f172a;
+          border-color: #ffffff;
+          box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2);
+        }
+        .common-toolbar {
+          background: #ffffff;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 12px 24px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 16px;
+          align-items: center;
+        }
+        .toolbar-group {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .chip {
+          background: #f1f5f9;
+          color: #475569;
+          border: 1px solid #cbd5e1;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .chip:hover {
+          background: #e2e8f0;
+          border-color: #94a3b8;
+        }
+        .chip.active {
+          background: #475569;
+          color: white;
+          border-color: #475569;
+        }
+        .switch {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #64748b;
+          cursor: pointer;
+        }
+        .switch input[type="checkbox"] {
+          cursor: pointer;
+        }
+      `}</style>
+      <div className="common-sticky print:hidden">
+        <header className="top-header">
+          <div className="page-title">
+            <h1>{departmentName}</h1>
+            <p>Manage projects and daily tasks.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-outline no-print"
+              type="button"
+              onClick={() => setViewMode("department")}
+            >
+              Department
+            </button>
+            <button
+              className={`btn-outline no-print ${viewMode === "mine" ? "active" : ""}`}
+              type="button"
+              onClick={() => setViewMode("mine")}
+            >
+              My View
+            </button>
+          </div>
+        </header>
 
-            <div className="rounded-xl sm:rounded-2xl border border-stone-200/70 bg-white p-0.5 sm:p-1 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
-              <div className="flex flex-nowrap sm:flex-wrap gap-1 sm:gap-1.5 md:gap-2 overflow-x-auto pb-1 sm:pb-0 -mx-0.5 sm:mx-0 px-0.5 sm:px-0">
-                {TABS.map((tab) => {
-                  const isActive = tab.id === activeTab
-                  const badgeTone =
-                    tab.tone === "blue"
-                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
-                      : tab.tone === "red"
-                        ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200"
-                        : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-200"
-                  const badgeClass = isActive
-                    ? "bg-white text-stone-900 dark:bg-stone-100 dark:text-stone-900"
-                    : badgeTone
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setActiveTab(tab.id)}
-                      className={[
-                        "relative flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold transition-colors",
-                        isActive
-                          ? "bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900"
-                          : "text-stone-600 hover:text-stone-900 hover:bg-white/80 dark:text-stone-400 dark:hover:text-stone-200 dark:hover:bg-stone-900/40",
-                      ].join(" ")}
-                    >
-                      <span className="uppercase tracking-wide whitespace-nowrap">{tab.label}</span>
-                      <span className={`rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs ${badgeClass}`}>{counts[tab.id]}</span>
-                    </button>
-                  )
-                })}
-              </div>
+        <div className="common-toolbar no-print">
+          <div className="toolbar-group">
+            <div className="chip-row">
+              {TABS.map((tab) => {
+                const isActive = tab.id === activeTab
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`chip ${isActive ? "active" : ""}`}
+                  >
+                    {tab.label} ({counts[tab.id]})
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -3693,7 +3776,7 @@ export default function DepartmentKanban() {
 
         {activeTab === "projects" ? (
           <div className="space-y-4 sm:space-y-6">
-            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
                 const membersForProject = projectMembers[project.id] || []
@@ -3703,90 +3786,104 @@ export default function DepartmentKanban() {
                 const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
                 const isClosed = phase.toUpperCase() === "CLOSED"
+                
+                // Count tasks for this project
+                const taskCount = departmentTasks.filter(t => t.project_id === project.id).length
+                
+                // Count GA notes for this project
+                const gaNoteCount = gaNotes.filter(n => n.project_id === project.id).length
+                
+                // Format deadline
+                const formatDeadline = (dateStr?: string | null) => {
+                  if (!dateStr) return "-"
+                  const date = new Date(dateStr)
+                  if (Number.isNaN(date.getTime())) return "-"
+                  return date.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" })
+                }
+                
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
-                    <Card className={`bg-white border rounded-2xl p-4 sm:p-5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5"}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
-                          <div className={`h-3 w-3 rounded-full mt-2 flex-shrink-0 ${isClosed ? "bg-slate-300" : "bg-slate-400"}`}></div>
-                          <div className="min-w-0 flex-1">
-                            <div className={`text-base sm:text-lg font-semibold truncate ${isClosed ? "text-slate-500" : "text-slate-800"}`}>
-                              {project.title || project.name}
-                              {isClosed && <span className="ml-2 text-xs font-normal text-slate-400">(Closed)</span>}
-                            </div>
-                            <div className="mt-1 text-xs sm:text-sm text-slate-600 line-clamp-2">
-                              {project.description
-                                ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
-                                : "-"}
-                            </div>
+                    <Card className={`bg-white border rounded-lg p-2.5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1"}`}>
+                      {/* Header: Title and Delete button */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-semibold truncate ${isClosed ? "text-slate-500" : "text-slate-900 dark:text-slate-100"}`}>
+                            {project.title || project.name}
+                            {isClosed && <span className="ml-1.5 text-xs font-normal text-slate-400">(Closed)</span>}
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                          {canDeleteProjects ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={deletingProjectId === project.id}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteProject(project.id)
-                              }}
-                              className="h-7 rounded-full border-red-200 px-2 sm:px-3 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              {deletingProjectId === project.id ? "Deleting..." : "Delete"}
-                            </Button>
-                          ) : null}
-                          <Badge className={`text-xs whitespace-nowrap ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
-                            {PHASE_LABELS[phase] || "Meetings"}
-                          </Badge>
+                        {canDeleteProjects ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={deletingProjectId === project.id}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              void deleteProject(project.id)
+                            }}
+                            className="h-5 w-5 rounded-full border-red-200 p-0 text-xs text-red-600 hover:bg-red-50 flex-shrink-0 flex items-center justify-center"
+                          >
+                            {deletingProjectId === project.id ? "..." : "×"}
+                          </Button>
+                        ) : null}
+                      </div>
+                      
+                      {/* Current Phase */}
+                      <div className="mb-2">
+                        <Badge className={`text-xs whitespace-nowrap px-2 py-0.5 ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-blue-100 text-blue-700 border border-blue-200"}`}>
+                          {PHASE_LABELS[phase] || "Meetings"}
+                        </Badge>
+                      </div>
+                      
+                      {/* Stats Grid: Tasks, GA Notes, Deadline */}
+                      <div className="grid grid-cols-3 gap-1.5 mb-2">
+                        <div className="text-center p-1.5 bg-slate-50 dark:bg-slate-800 rounded-md">
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-0.5">Tasks</div>
+                          <div className="text-base font-semibold text-slate-900 dark:text-slate-100">{taskCount}</div>
+                        </div>
+                        <div className="text-center p-1.5 bg-slate-50 dark:bg-slate-800 rounded-md">
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-0.5">GA Notes</div>
+                          <div className="text-base font-semibold text-slate-900 dark:text-slate-100">{gaNoteCount}</div>
+                        </div>
+                        <div className="text-center p-1.5 bg-slate-50 dark:bg-slate-800 rounded-md">
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-0.5">Deadline</div>
+                          <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 leading-tight">{formatDeadline(project.due_date)}</div>
                         </div>
                       </div>
-                      <div className="mt-3 sm:mt-4 text-xs text-slate-600 overflow-x-auto">
-                        <div className="flex items-center gap-1 whitespace-nowrap">
-                          {PHASES.map((p, idx) => {
-                            const isCurrent = p === phase
-                            return (
-                              <span key={p}>
-                                <span className={isCurrent ? "text-slate-800 font-semibold" : ""}>
-                                  {PHASE_LABELS[p]}
-                                </span>
-                                {idx < PHASES.length - 1 ? " > " : ""}
-                              </span>
-                            )
-                          })}
-                        </div>
-                      </div>
-                      <div className="mt-3 sm:mt-4 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          {visibleMembers.length ? (
-                            <div className="flex -space-x-2">
+                      
+                      {/* Members */}
+                      <div className="mb-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Members</div>
+                        <div className="flex items-center gap-1.5">
+                          {visibleMembers.length > 0 ? (
+                            <div className="flex -space-x-1.5">
                               {visibleMembers.map((member) => (
                                 <div
                                   key={member.id}
                                   title={member.full_name || member.username || "-"}
-                                  className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] sm:text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm"
+                                  className="h-6 w-6 rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600 flex items-center justify-center shadow-sm dark:border-slate-800 dark:bg-slate-700 dark:text-slate-300"
                                 >
                                   {initials(member.full_name || member.username || "-")}
                                 </div>
                               ))}
-                              {remainingMembers > 0 ? (
-                                <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm">
+                              {remainingMembers > 0 && (
+                                <div className="h-6 w-6 rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600 flex items-center justify-center shadow-sm dark:border-slate-800 dark:bg-slate-700 dark:text-slate-300">
                                   +{remainingMembers}
                                 </div>
-                              ) : null}
+                              )}
                             </div>
                           ) : (
-                            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center">
-                              -
-                            </div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">No members</div>
                           )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs sm:text-sm font-semibold text-slate-600 transition-colors group-hover:text-slate-800 group-hover:underline whitespace-nowrap">
-                            View details -&gt;
-                          </span>
-                        </div>
+                      </div>
+                      
+                      {/* View Details Link */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 group-hover:underline">
+                          View details →
+                        </span>
                       </div>
                     </Card>
                   </Link>

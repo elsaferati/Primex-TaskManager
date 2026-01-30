@@ -217,6 +217,13 @@ export default function CommonViewPage() {
   const [externalMeetingStartsAt, setExternalMeetingStartsAt] = React.useState("")
   const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
+  const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
+  const [editingExternalMeetingTitle, setEditingExternalMeetingTitle] = React.useState("")
+  const [editingExternalMeetingPlatform, setEditingExternalMeetingPlatform] = React.useState("")
+  const [editingExternalMeetingStartsAt, setEditingExternalMeetingStartsAt] = React.useState("")
+  const [editingExternalMeetingDepartmentId, setEditingExternalMeetingDepartmentId] = React.useState("")
+  const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
+  const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
   const [externalMeetingChecklist, setExternalMeetingChecklist] = React.useState<MeetingChecklist | null>(null)
   const [externalMeetingChecklistItems, setExternalMeetingChecklistItems] = React.useState<
     Map<string, boolean>
@@ -903,10 +910,48 @@ export default function CommonViewPage() {
           // This ensures all users see the same projects
           const priorityMap = new Map<string, { 
             project: string; 
+            projectMembers: Set<string>; // All unique assignees from all tasks (base members that appear every day)
             assigneesByDate: Map<string, Set<string>>; // Track assignees per date
             dates: Set<string> 
           }>()
 
+          // First pass: collect project members from ALL tasks (including completed ones)
+          // This ensures project members appear even if all tasks are completed
+          for (const t of tasks) {
+            if (!t.project_id) continue
+            
+            const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
+            const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
+            const ownerName = assignee?.full_name || assignee?.username || null
+            const assigneeNames = t.assignees?.length
+              ? t.assignees.map((a) => a.full_name || a.username || a.email || "Unknown")
+              : ownerName
+              ? [ownerName]
+              : []
+            
+            const projectName = projectNameById.get(t.project_id)
+            if (!projectName) continue
+            
+            const projectKey = t.project_id
+            
+            if (!priorityMap.has(projectKey)) {
+              priorityMap.set(projectKey, {
+                project: projectName,
+                projectMembers: new Set<string>(), // Base members (all assignees from all tasks)
+                assigneesByDate: new Map<string, Set<string>>(),
+                dates: new Set<string>(),
+              })
+            }
+            
+            const entry = priorityMap.get(projectKey)!
+            
+            // Add assignees to project members from ALL tasks (including completed)
+            for (const name of assigneeNames) {
+              entry.projectMembers.add(name)
+            }
+          }
+
+          // Second pass: process active tasks for date-specific data and other categories
           for (const t of tasks) {
             // Only show tasks that are in progress (not completed)
             // Skip tasks that are done (have completed_at set or status is "Done")
@@ -926,53 +971,94 @@ export default function CommonViewPage() {
               : ownerName
               ? [ownerName]
               : []
-            const taskDateSource = t.planned_for || t.due_date || t.start_date || t.created_at
-            const taskDate = taskDateSource ? toISODate(new Date(taskDateSource)) : today
+            
+            // Helper function to generate dates from start_date to due_date
+            const getTaskDates = (task: Task): string[] => {
+              const startDate = task.start_date ? new Date(task.start_date) : null
+              const dueDate = task.due_date ? new Date(task.due_date) : null
+              
+              // If both start and due dates exist and are different, generate range
+              if (startDate && dueDate && !Number.isNaN(startDate.getTime()) && !Number.isNaN(dueDate.getTime())) {
+                const start = new Date(startDate)
+                start.setHours(0, 0, 0, 0)
+                const end = new Date(dueDate)
+                end.setHours(0, 0, 0, 0)
+                
+                // If start is after end, swap them
+                if (start > end) {
+                  const temp = start
+                  start.setTime(end.getTime())
+                  end.setTime(temp.getTime())
+                }
+                
+                const dates: string[] = []
+                const current = new Date(start)
+                while (current <= end) {
+                  const dayOfWeek = current.getDay()
+                  // Only include weekdays (Monday=1 to Friday=5)
+                  if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                    dates.push(toISODate(current))
+                  }
+                  current.setDate(current.getDate() + 1)
+                }
+                return dates.length > 0 ? dates : [toISODate(start)]
+              }
+              
+              // Fallback to single date
+              const taskDateSource = task.planned_for || task.due_date || task.start_date || task.created_at
+              return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
+            }
+            
+            const taskDates = getTaskDates(t)
 
-            if (t.is_bllok) {
-              allData.blocked.push({
-                title: t.title,
-                person: ownerName || "Unknown",
-                date: taskDate,
-                note: t.description || undefined,
-              })
-            }
-            if (t.is_1h_report) {
-              allData.oneH.push({
-                title: t.title,
-                person: ownerName || "Unknown",
-                date: taskDate,
-                note: t.description || undefined,
-              })
-            }
-            if (t.is_personal) {
-              allData.personal.push({
-                title: t.title,
-                person: ownerName || "Unknown",
-                date: taskDate,
-                note: t.description || undefined,
-              })
-            }
-            if (t.is_r1) {
-              allData.r1.push({
-                title: t.title,
-                date: taskDate,
-                owner: ownerName || "Unknown",
-                note: t.description || undefined,
-              })
+            // Create entries for each date in the range
+            for (const taskDate of taskDates) {
+              if (t.is_bllok) {
+                allData.blocked.push({
+                  title: t.title,
+                  person: ownerName || "Unknown",
+                  date: taskDate,
+                  note: t.description || undefined,
+                })
+              }
+              if (t.is_1h_report) {
+                allData.oneH.push({
+                  title: t.title,
+                  person: ownerName || "Unknown",
+                  date: taskDate,
+                  note: t.description || undefined,
+                })
+              }
+              if (t.is_personal) {
+                allData.personal.push({
+                  title: t.title,
+                  person: ownerName || "Unknown",
+                  date: taskDate,
+                  note: t.description || undefined,
+                })
+              }
+              if (t.is_r1) {
+                allData.r1.push({
+                  title: t.title,
+                  date: taskDate,
+                  owner: ownerName || "Unknown",
+                  note: t.description || undefined,
+                })
+              }
             }
             if (t.task_type === "adhoc" && t.project_id) {
+              // External tasks use the first date from the range
+              const externalDate = taskDates[0] || today
               allData.external.push({
                 title: t.title,
-                date: taskDate,
+                date: externalDate,
                 time: "14:00",
                 platform: "Zoom",
                 owner: ownerName || "Unknown",
               })
             }
 
-            // Priority items - group by project_id, tracking assignees per date
-            // This ensures all users see the same projects on the same dates
+            // Priority items - track dates and date-specific assignees for active tasks
             if (t.project_id) {
               const projectName = projectNameById.get(t.project_id)
               // Skip if project name is not found (project might be deleted or inaccessible)
@@ -983,26 +1069,21 @@ export default function CommonViewPage() {
               // Use project_id as the key (not project_id-date)
               const projectKey = t.project_id
               
-              if (!priorityMap.has(projectKey)) {
-                priorityMap.set(projectKey, {
-                  project: projectName,
-                  assigneesByDate: new Map<string, Set<string>>(),
-                  dates: new Set<string>(),
-                })
-              }
+              const entry = priorityMap.get(projectKey)
+              if (!entry) continue
               
-              const entry = priorityMap.get(projectKey)!
-              
-              // Add this task's date to the project's dates
-              entry.dates.add(taskDate)
-              
-              // Track assignees for this specific date
-              if (!entry.assigneesByDate.has(taskDate)) {
-                entry.assigneesByDate.set(taskDate, new Set<string>())
-              }
-              const dateAssignees = entry.assigneesByDate.get(taskDate)!
-              for (const name of assigneeNames) {
-                dateAssignees.add(name)
+              // Add all task dates to the project's dates
+              for (const taskDate of taskDates) {
+                entry.dates.add(taskDate)
+                
+                // Track assignees for this specific date
+                if (!entry.assigneesByDate.has(taskDate)) {
+                  entry.assigneesByDate.set(taskDate, new Set<string>())
+                }
+                const dateAssignees = entry.assigneesByDate.get(taskDate)!
+                for (const name of assigneeNames) {
+                  dateAssignees.add(name)
+                }
               }
             }
           }
@@ -1019,6 +1100,7 @@ export default function CommonViewPage() {
               
               priorityMap.set(projectId, {
                 project: projectName,
+                projectMembers: new Set<string>(), // Empty if no tasks
                 assigneesByDate: new Map<string, Set<string>>(),
                 dates: new Set<string>(),
               })
@@ -1083,16 +1165,30 @@ export default function CommonViewPage() {
             }
             
             // Create one priority entry per date for this project
-            // Only include assignees who have tasks on that specific date
+            // Logic: Project members ALWAYS appear on every date
+            //        Additionally, if a task is assigned to someone who is NOT a project member,
+            //        that person should also appear on that specific date
             for (const date of datesToUse) {
-              // Get assignees for this specific date, or empty array if no tasks on this date
+              // Start with ALL project members (they appear on every date, regardless of tasks)
+              const finalAssignees = new Set<string>(entry.projectMembers)
+              
+              // Get assignees for this specific date (from tasks on that date)
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
-              const assigneesForDate = Array.from(dateAssignees)
+              
+              // Add any date-specific assignees who are NOT already project members
+              // This handles cases where a task is assigned to someone outside the project team
+              for (const name of dateAssignees) {
+                if (!entry.projectMembers.has(name)) {
+                  finalAssignees.add(name)
+                }
+                // Note: If a project member has a task on this date, they're already in finalAssignees
+                // because we started with all projectMembers above
+              }
               
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: assigneesForDate, // Only assignees with tasks on this date
+                assignees: Array.from(finalAssignees), // Always includes project members + any date-specific non-members
               })
             }
           }
@@ -1553,6 +1649,113 @@ export default function CommonViewPage() {
     externalMeetingChecklist,
   ])
 
+  const startEditExternalMeeting = React.useCallback((meeting: Meeting) => {
+    if (!isAdmin) return
+    setEditingExternalMeetingId(meeting.id)
+    setEditingExternalMeetingTitle(meeting.title || "")
+    setEditingExternalMeetingPlatform(meeting.platform || "")
+    if (meeting.starts_at) {
+      const date = new Date(meeting.starts_at)
+      const localDateTime = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+        .toISOString()
+        .slice(0, 16)
+      setEditingExternalMeetingStartsAt(localDateTime)
+    } else {
+      setEditingExternalMeetingStartsAt("")
+    }
+    setEditingExternalMeetingDepartmentId(meeting.department_id || "")
+  }, [isAdmin])
+
+  const cancelEditExternalMeeting = React.useCallback(() => {
+    setEditingExternalMeetingId(null)
+    setEditingExternalMeetingTitle("")
+    setEditingExternalMeetingPlatform("")
+    setEditingExternalMeetingStartsAt("")
+    setEditingExternalMeetingDepartmentId("")
+  }, [])
+
+  const saveExternalMeeting = React.useCallback(async () => {
+    if (!editingExternalMeetingId || !editingExternalMeetingTitle.trim()) return
+    setUpdatingExternalMeeting(true)
+    try {
+      const startsAt = editingExternalMeetingStartsAt
+        ? new Date(editingExternalMeetingStartsAt).toISOString()
+        : null
+      const payload = {
+        title: editingExternalMeetingTitle.trim(),
+        platform: editingExternalMeetingPlatform.trim() || null,
+        starts_at: startsAt,
+        department_id: editingExternalMeetingDepartmentId || null,
+      }
+      const res = await apiFetch(`/meetings/${editingExternalMeetingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res?.ok) {
+        console.error("Failed to update meeting", res?.status)
+        alert("Failed to update meeting. Only admins can edit meetings.")
+        return
+      }
+      const updated = (await res.json()) as Meeting
+      setExternalMeetings((prev) =>
+        prev.map((m) => (m.id === editingExternalMeetingId ? updated : m))
+      )
+      cancelEditExternalMeeting()
+      // Reload external meetings to update the list
+      const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setExternalMeetings(meetings)
+      }
+    } catch (err) {
+      console.error("Error updating meeting:", err)
+      alert("Failed to update meeting. Please try again.")
+    } finally {
+      setUpdatingExternalMeeting(false)
+    }
+  }, [
+    editingExternalMeetingId,
+    editingExternalMeetingTitle,
+    editingExternalMeetingPlatform,
+    editingExternalMeetingStartsAt,
+    editingExternalMeetingDepartmentId,
+    apiFetch,
+    cancelEditExternalMeeting,
+  ])
+
+  const deleteExternalMeeting = React.useCallback(
+    async (meetingId: string) => {
+      if (!isAdmin) return
+      const confirmed = window.confirm("Delete this external meeting? This action cannot be undone.")
+      if (!confirmed) return
+      setDeletingExternalMeetingId(meetingId)
+      try {
+        const res = await apiFetch(`/meetings/${meetingId}`, {
+          method: "DELETE",
+        })
+        if (!res?.ok) {
+          console.error("Failed to delete meeting", res?.status)
+          alert("Failed to delete meeting. Only admins can delete meetings.")
+          return
+        }
+        setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
+        // Reload external meetings to update the list
+        const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+        if (meetingsRes?.ok) {
+          const meetings = (await meetingsRes.json()) as Meeting[]
+          setExternalMeetings(meetings)
+        }
+      } catch (err) {
+        console.error("Error deleting meeting:", err)
+        alert("Failed to delete meeting. Please try again.")
+      } finally {
+        setDeletingExternalMeetingId(null)
+      }
+    },
+    [isAdmin, apiFetch]
+  )
+
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
     const baseItems = items.length ? items : [{ title: "No data available.", placeholder: true }]
     const totalCells = Math.max(3, Math.ceil(baseItems.length / 3) * 3)
@@ -1592,28 +1795,33 @@ export default function CommonViewPage() {
       }
     })
     const blockedItems: SwimlaneCell[] = filtered.blocked.map((x) => ({
-      title: x.title,
-      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      title: `${initials(x.person || "")}: ${x.title}`,
+      assignees: x.person ? [x.person] : [],
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent blocked",
     }))
     const oneHItems: SwimlaneCell[] = filtered.oneH.map((x) => ({
-      title: x.title,
-      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      title: `${initials(x.person || "")}: ${x.title}`,
+      assignees: x.person ? [x.person] : [],
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent oneh",
     }))
     const personalItems: SwimlaneCell[] = filtered.personal.map((x) => ({
-      title: x.title,
-      subtitle: `Owner: ${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      title: `${initials(x.person || "")}: ${x.title}`,
+      assignees: x.person ? [x.person] : [],
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent personal",
     }))
     const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
-      title: x.title,
-      subtitle: `${x.time} - ${formatDateHuman(x.date)} - ${x.platform} - ${x.owner}`,
+      title: `${initials(x.owner || "")}: ${x.title} ${x.time}`,
+      assignees: x.owner ? [x.owner] : [],
+      subtitle: `${formatDateHuman(x.date)} - ${x.platform}`,
       accentClass: "swimlane-accent external",
     }))
     const r1Items: SwimlaneCell[] = filtered.r1.map((x) => ({
-      title: x.title,
-      subtitle: `Owner: ${x.owner} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      title: `${initials(x.owner || "")}: ${x.title}`,
+      assignees: x.owner ? [x.owner] : [],
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent r1",
     }))
     const problemItems: SwimlaneCell[] = filtered.problems.map((x) => ({
@@ -2229,7 +2437,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.05in 0.1in 0.51in 0.1in;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -2243,14 +2451,22 @@ export default function CommonViewPage() {
           .view-container { padding: 0; background: white; }
           .print-page {
             position: relative;
+            padding-top: 0;
             padding-bottom: 0.35in;
+            page-break-before: avoid;
           }
-          .week-table-view { display: block !important; padding-bottom: 0.35in; }
+          .week-table-view { 
+            display: block !important; 
+            padding-top: 0;
+            padding-bottom: 0.35in; 
+            page-break-before: avoid;
+          }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 6px;
+            margin-top: 0;
           }
           .print-title {
             font-size: 16px;
@@ -2870,6 +3086,11 @@ export default function CommonViewPage() {
           display: flex;
           align-items: center;
           gap: 6px;
+          border: 1px solid #cbd5e1;
+          border-radius: 4px;
+          padding: 4px 6px;
+          background: #ffffff;
+          margin-bottom: 2px;
         }
         .week-table-entry span {
           flex: 1;
@@ -2931,6 +3152,13 @@ export default function CommonViewPage() {
           .week-table th,
           .week-table td {
             border: 1px solid #111827 !important;
+          }
+          .week-table-entry {
+            border: 1px solid #111827 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            page-break-inside: avoid;
+            margin-bottom: 3px;
           }
         }
           align-items: center;
@@ -4290,17 +4518,107 @@ export default function CommonViewPage() {
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
+                    const isEditing = editingExternalMeetingId === meeting.id
                     return (
                       <div key={meeting.id} className="external-meeting-card">
-                        <div className="external-meeting-title">{meeting.title || "External meeting"}</div>
-                        <div className="external-meeting-meta">
-                          <span>{formatExternalMeetingWhen(meeting)}</span>
-                          <span>{meeting.platform || "Platform TBD"}</span>
-                        </div>
-                        <div className="external-meeting-meta">
-                          <span>{department?.name || "Department TBD"}</span>
-                          <span>Owner: {ownerName}</span>
-                        </div>
+                        {isEditing ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <input
+                              className="input"
+                              type="text"
+                              placeholder="Meeting title"
+                              value={editingExternalMeetingTitle}
+                              onChange={(e) => setEditingExternalMeetingTitle(e.target.value)}
+                            />
+                            <div className="external-meeting-row">
+                              <input
+                                className="input"
+                                type="text"
+                                placeholder="Platform (Zoom, Meet, Office...)"
+                                value={editingExternalMeetingPlatform}
+                                onChange={(e) => setEditingExternalMeetingPlatform(e.target.value)}
+                              />
+                              <input
+                                className="input"
+                                type="datetime-local"
+                                value={editingExternalMeetingStartsAt}
+                                onChange={(e) => setEditingExternalMeetingStartsAt(e.target.value)}
+                              />
+                            </div>
+                            <div className="external-meeting-row">
+                              <select
+                                className="input"
+                                value={editingExternalMeetingDepartmentId}
+                                onChange={(e) => setEditingExternalMeetingDepartmentId(e.target.value)}
+                              >
+                                <option value="">Select department</option>
+                                {departments.map((dep) => (
+                                  <option key={dep.id} value={dep.id}>
+                                    {dep.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                className="btn-surface"
+                                type="button"
+                                onClick={() => void saveExternalMeeting()}
+                                disabled={updatingExternalMeeting || !editingExternalMeetingTitle.trim()}
+                                style={{ flex: 1 }}
+                              >
+                                {updatingExternalMeeting ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                className="btn-surface"
+                                type="button"
+                                onClick={cancelEditExternalMeeting}
+                                disabled={updatingExternalMeeting}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div style={{ flex: 1 }}>
+                                <div className="external-meeting-title">{meeting.title || "External meeting"}</div>
+                                <div className="external-meeting-meta">
+                                  <span>{formatExternalMeetingWhen(meeting)}</span>
+                                  <span>{meeting.platform || "Platform TBD"}</span>
+                                </div>
+                                <div className="external-meeting-meta">
+                                  <span>{department?.name || "Department TBD"}</span>
+                                  <span>Owner: {ownerName}</span>
+                                </div>
+                              </div>
+                              {isAdmin ? (
+                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => startEditExternalMeeting(meeting)}
+                                    disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                    title="Edit meeting"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => void deleteExternalMeeting(meeting.id)}
+                                    disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                    title="Delete meeting"
+                                    style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                  >
+                                    {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </>
+                        )}
                       </div>
                     )
                   })}
@@ -4437,7 +4755,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
+                            <span>{initials(e.person || "")}: {e.title}</span>
                           </div>
                         ))
                       } else if (row.id === "problem" || row.id === "feedback") {
@@ -4460,19 +4778,19 @@ export default function CommonViewPage() {
                       } else if (row.id === "oneH" || row.id === "r1") {
                         return entries.map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {e.title} ({initials(e.person || e.owner || "")})
+                            {initials(e.person || e.owner || "")}: {e.title}
                           </div>
                         ))
                       } else if (row.id === "personal") {
                         return entries.map((e: PersonalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {e.title} ({initials(e.person || "")})
+                            {initials(e.person || "")}: {e.title}
                           </div>
                         ))
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {e.title} {e.time} ({initials(e.owner || "")})
+                            {initials(e.owner || "")}: {e.title} {e.time}
                           </div>
                         ))
                       } else if (row.id === "priority") {
