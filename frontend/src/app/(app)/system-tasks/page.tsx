@@ -2168,7 +2168,19 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>Title</Label>
-                        <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
+                        <Input
+                          value={title}
+                          onChange={(event) => {
+                            const input = event.target
+                            const cursorPosition = input.selectionStart || 0
+                            const newValue = event.target.value.toUpperCase()
+                            setTitle(newValue)
+                            // Restore cursor position after React updates
+                            setTimeout(() => {
+                              input.setSelectionRange(cursorPosition, cursorPosition)
+                            }, 0)
+                          }}
+                        />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -2540,7 +2552,19 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>Title</Label>
-                        <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value.toUpperCase())} />
+                        <Input
+                          value={editTitle}
+                          onChange={(event) => {
+                            const input = event.target
+                            const cursorPosition = input.selectionStart || 0
+                            const newValue = event.target.value.toUpperCase()
+                            setEditTitle(newValue)
+                            // Restore cursor position after React updates
+                            setTimeout(() => {
+                              input.setSelectionRange(cursorPosition, cursorPosition)
+                            }, 0)
+                          }}
+                        />
                       </div>
                     </div>
                     <div className="space-y-2">
