@@ -649,9 +649,31 @@ async def create_checklist_item(
         if checklist is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
         # Global template-style checklists (group_key set, no project/task) are admin-only.
+        # Exception: Internal meeting checklists allow department members to create items
         if checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
+            if is_internal_meeting:
+                # Determine department from group_key
+                if checklist.group_key == "development_internal_meetings":
+                    dept_name = "Development"
+                elif checklist.group_key == "pcm_internal_meetings":
+                    dept_name = "Project Content Manager"
+                else:
+                    dept_name = None
+                
+                if dept_name:
+                    dept = (await db.execute(select(Department).where(Department.name == dept_name))).scalar_one_or_none()
+                    if dept:
+                        ensure_department_access(user, dept.id)
+                    else:
+                        if user.role != "ADMIN":
+                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                else:
+                    if user.role != "ADMIN":
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            else:
+                if user.role != "ADMIN":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
@@ -777,9 +799,36 @@ async def update_checklist_item(
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
         # Global template-style checklists (group_key set, no project/task) are admin-only to edit.
+        # Exception: Internal meeting checklists allow department members to update is_checked field
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
+            # For internal meetings, allow department members to update is_checked, but require admin for other fields
+            if is_internal_meeting:
+                # Determine department from group_key
+                if checklist.group_key == "development_internal_meetings":
+                    dept_name = "Development"
+                elif checklist.group_key == "pcm_internal_meetings":
+                    dept_name = "Project Content Manager"
+                else:
+                    dept_name = None
+                
+                if dept_name:
+                    dept = (await db.execute(select(Department).where(Department.name == dept_name))).scalar_one_or_none()
+                    if dept:
+                        ensure_department_access(user, dept.id)
+                        # If only updating is_checked, allow it. Otherwise require admin for other fields.
+                        if payload.is_checked is None and (payload.title is not None or payload.position is not None or payload.comment is not None or payload.item_type is not None):
+                            if user.role != "ADMIN":
+                                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only for editing internal meeting items")
+                    else:
+                        if user.role != "ADMIN":
+                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                else:
+                    if user.role != "ADMIN":
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            else:
+                if user.role != "ADMIN":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
