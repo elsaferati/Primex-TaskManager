@@ -1235,23 +1235,11 @@ export default function CommonViewPage() {
           title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
           description: description || null,
           entry_date: formDate || null,
+          assigned_to_user_id: assignedUserId || null,
         }),
       })
 
       if (res.ok) {
-        const createdEntry = (await res.json()) as CommonEntry
-
-        // If we have a user to assign, assign them
-        if (assignedUserId && createdEntry.id) {
-          await apiFetch(`/common-entries/${createdEntry.id}/assign`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              assigned_to_user_id: assignedUserId,
-            }),
-          })
-        }
-
         // Trigger a reload
         window.location.reload()
       }
@@ -4549,7 +4537,7 @@ export default function CommonViewPage() {
                   {formType === "leave" && (
                     <>
                       <div className="form-row">
-                        <label htmlFor="cv-enddate">Deri me (opsionale)</label>
+                        <label htmlFor="cv-enddate">Until (optional)</label>
                         <input
                           id="cv-enddate"
                           className="input"
@@ -4565,12 +4553,12 @@ export default function CommonViewPage() {
                             checked={formFullDay}
                             onChange={(e) => setFormFullDay(e.target.checked)}
                           />
-                          Pushim gjithe diten
+                          All day
                         </label>
                         {!formFullDay && (
                           <div className="leave-times">
                             <div className="mini-row">
-                              <label htmlFor="cv-leave-from">Nga ora</label>
+                              <label htmlFor="cv-leave-from">From time</label>
                               <input
                                 id="cv-leave-from"
                                 className="input"
@@ -4581,7 +4569,7 @@ export default function CommonViewPage() {
                               />
                             </div>
                             <div className="mini-row">
-                              <label htmlFor="cv-leave-to">Deri ora</label>
+                              <label htmlFor="cv-leave-to">Until time</label>
                               <input
                                 id="cv-leave-to"
                                 className="input"

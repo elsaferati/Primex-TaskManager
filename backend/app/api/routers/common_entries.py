@@ -65,12 +65,20 @@ async def create_entry(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> CommonEntryOut:
+    # Validate assigned user if provided
+    assigned_to_user_id = payload.assigned_to_user_id
+    if assigned_to_user_id is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == assigned_to_user_id))).scalar_one_or_none()
+        if assigned_user is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    
     entry = CommonEntry(
         category=payload.category,
         title=payload.title,
         description=payload.description,
         entry_date=payload.entry_date,
         created_by_user_id=user.id,
+        assigned_to_user_id=assigned_to_user_id,
         approval_status=CommonApprovalStatus.pending,
     )
     db.add(entry)
@@ -82,11 +90,33 @@ async def create_entry(
         entity_type="common_entry",
         entity_id=entry.id,
         action="created",
-        after={"category": entry.category.value, "title": entry.title},
+        after={"category": entry.category.value, "title": entry.title, "assigned_to_user_id": str(assigned_to_user_id) if assigned_to_user_id else None},
     )
+
+    # Send notification to assigned user if entry is created for someone else
+    created_notifications: list[Notification] = []
+    if assigned_to_user_id is not None and assigned_to_user_id != user.id:
+        created_notifications.append(
+            add_notification(
+                db=db,
+                user_id=assigned_to_user_id,
+                type=NotificationType.assignment,
+                title="Common entry assigned",
+                body=entry.title,
+                data={"common_entry_id": str(entry.id)},
+            )
+        )
 
     await db.commit()
     await db.refresh(entry)
+
+    # Publish notifications
+    for n in created_notifications:
+        try:
+            await publish_notification(user_id=n.user_id, notification=n)
+        except Exception:
+            pass
+
     return _to_out(entry)
 
 
