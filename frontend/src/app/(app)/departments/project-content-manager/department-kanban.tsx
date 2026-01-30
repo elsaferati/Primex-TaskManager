@@ -465,6 +465,99 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   return false
 }
 
+function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
+  const today = new Date(fromDate)
+  today.setHours(0, 0, 0, 0)
+  
+  if (t.frequency === "DAILY") {
+    return today
+  }
+  
+  if (t.frequency === "WEEKLY") {
+    const days = t.days_of_week && t.days_of_week.length
+      ? t.days_of_week
+      : t.day_of_week != null
+        ? [t.day_of_week]
+        : [0] // Monday by default
+    
+    const currentDayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
+    const sortedDays = [...days].sort((a, b) => a - b)
+    
+    // Find next day in this week
+    for (const dayIdx of sortedDays) {
+      if (dayIdx >= currentDayIdx) {
+        const nextDate = new Date(today)
+        nextDate.setDate(today.getDate() + (dayIdx - currentDayIdx))
+        return nextDate
+      }
+    }
+    
+    // If no day found this week, use first day of next week
+    const nextDate = new Date(today)
+    const daysUntilNextWeek = 7 - currentDayIdx + sortedDays[0]
+    nextDate.setDate(today.getDate() + daysUntilNextWeek)
+    return nextDate
+  }
+  
+  if (t.frequency === "MONTHLY") {
+    const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+    if (current && current >= today) {
+      return current
+    }
+    const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+    return next || today
+  }
+  
+  if (t.frequency === "YEARLY") {
+    if (t.day_of_month === 0) {
+      const current = getYearEndDate(today.getFullYear())
+      if (current && current >= today) {
+        return current
+      }
+      return getYearEndDate(today.getFullYear() + 1)
+    }
+    if (t.month_of_year == null) {
+      const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+      if (current && current >= today) {
+        return current
+      }
+      const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+      if (next) return next
+      return getScheduledDateForMonth(t, today.getFullYear() + 1, 0) || today
+    }
+    const targetMonth = t.month_of_year - 1
+    const current = getScheduledDateForMonth(t, today.getFullYear(), targetMonth)
+    if (current && current >= today) {
+      return current
+    }
+    return getScheduledDateForMonth(t, today.getFullYear() + 1, targetMonth) || today
+  }
+  
+  if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
+    const interval = t.frequency === "3_MONTHS" ? 3 : 6
+    let checkMonth = today.getMonth()
+    let checkYear = today.getFullYear()
+    
+    // Check up to 2 years ahead
+    for (let i = 0; i < 24; i++) {
+      const monthValue = checkMonth + 1
+      if (monthValue % interval === 0) {
+        const candidate = getScheduledDateForMonth(t, checkYear, checkMonth)
+        if (candidate && candidate >= today) {
+          return candidate
+        }
+      }
+      checkMonth++
+      if (checkMonth >= 12) {
+        checkMonth = 0
+        checkYear++
+      }
+    }
+  }
+  
+  return today
+}
+
 function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
   const dateLabel = date.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" })
@@ -4378,7 +4471,7 @@ export default function DepartmentKanban() {
                               </div>
                               <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
                               <div className="whitespace-pre-line text-muted-foreground">
-                                {formatSchedule(item, systemDate)}
+                                {formatSchedule(item, showAllSystem ? getNextOccurrenceDate(item) : systemDate)}
                               </div>
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
