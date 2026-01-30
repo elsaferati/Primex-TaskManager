@@ -173,8 +173,8 @@ async def _sync_task_for_template(
     task.assigned_to = template.default_assignee_id
     task.finish_period = _enum_value(template.finish_period)
     task.is_active = active_value
-    if task.priority is None:
-        task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
+    # Always sync priority from template to task
+    task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
     if active_value and should_reopen_system_task(task, template, now):
         task.status = _enum_value(TaskStatus.TODO)
         task.completed_at = None
@@ -553,7 +553,18 @@ async def update_system_task_template(
     if template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
 
-    # Permission check: allow managers/admins, template creator, or assigned users to edit.
+    # Permission check: allow managers/admins, template assignees, or task creator/assignees to edit.
+    has_edit_rights = False
+    
+    # Check if user is admin or manager
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        has_edit_rights = True
+    
+    # Check template's default assignee
+    if not has_edit_rights and template.default_assignee_id == user.id:
+        has_edit_rights = True
+    
+    # Check if a task exists and user has rights through the task
     task = (
         await db.execute(
             select(Task)
@@ -561,21 +572,21 @@ async def update_system_task_template(
             .order_by(Task.created_at.desc())
         )
     ).scalars().first()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
-
-    explicit_assignees = (
-        await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
-    ).scalars().all()
-    assignee_ids = {uid for uid in explicit_assignees}
-    if task.assigned_to:
-        assignee_ids.add(task.assigned_to)
-
-    has_edit_rights = (
-        user.role in (UserRole.ADMIN, UserRole.MANAGER)
-        or (task.created_by is not None and task.created_by == user.id)
-        or (user.id in assignee_ids)
-    )
+    
+    if task is not None:
+        explicit_assignees = (
+            await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
+        ).scalars().all()
+        assignee_ids = {uid for uid in explicit_assignees}
+        if task.assigned_to:
+            assignee_ids.add(task.assigned_to)
+        
+        if not has_edit_rights:
+            if task.created_by is not None and task.created_by == user.id:
+                has_edit_rights = True
+            elif user.id in assignee_ids:
+                has_edit_rights = True
+    
     if not has_edit_rights:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -708,6 +719,7 @@ async def update_system_task_template(
         await _replace_task_assignees(db, task, assignee_ids)
         task.assigned_to = assignee_ids[0] if assignee_ids else None
     await db.commit()
+    await db.refresh(template)
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
