@@ -42,6 +42,33 @@ from app.schemas.weekly_plan import WeeklyPlanCreate, WeeklyPlanOut, WeeklyPlanU
 
 router = APIRouter()
 
+# VS/VL template task titles (normalized)
+VS_VL_TEMPLATE_TITLES = {
+    "analizimi dhe identifikimi i kolonave",
+    "plotesimi i template-it te amazonit",
+    "kalkulimi i cmimeve",
+    "gjenerimi i fotove",
+    "kontrollimi i prod. egzsistuese dhe postimi ne amazon",
+    "ko1 e projektit vs",
+    "ko2 e projektit vs",
+    "dream robot vs",
+    "dream robot vl",
+    "kalkulimi i peshave",
+}
+
+
+def _normalize_title(title: str | None) -> str:
+    """Normalize task title for comparison."""
+    if not title:
+        return ""
+    return " ".join(title.strip().lower().split())
+
+
+def _is_vs_vl_task(task: Task) -> bool:
+    """Check if a task is a VS/VL template task by comparing normalized titles."""
+    normalized_title = _normalize_title(task.title)
+    return normalized_title in VS_VL_TEMPLATE_TITLES
+
 
 def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
@@ -315,11 +342,11 @@ async def weekly_planner(
                 )
             )
 
-    # Fast tasks (tasks without project_id)
+    # Fast tasks (tasks without project_id, excluding VS/VL tasks)
     fast_tasks = [
         _task_to_out(t, assignee_map.get(t.id, []))
         for t in week_tasks
-        if t.project_id is None
+        if t.project_id is None and not _is_vs_vl_task(t)
     ]
 
     # Organize tasks by day for the days view
@@ -1013,8 +1040,8 @@ async def weekly_table_planner(
                     # System tasks (have system_template_origin_id)
                     if task.system_template_origin_id is not None:
                         continue
-                    # Fast tasks (no project_id and no system_template_origin_id)
-                    elif task.project_id is None:
+                    # Fast tasks (no project_id and no system_template_origin_id, excluding VS/VL tasks)
+                    elif task.project_id is None and not _is_vs_vl_task(task):
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
