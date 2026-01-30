@@ -634,15 +634,39 @@ export default function CommonViewPage() {
           if (mounted) setUsers(loadedUsers)
         }
         const depRes = await apiFetch("/departments")
+        let loadedDepartments: Department[] = []
         if (depRes?.ok) {
-          const loadedDepartments = (await depRes.json()) as Department[]
+          loadedDepartments = (await depRes.json()) as Department[]
           if (mounted) setDepartments(loadedDepartments)
         }
-        const projectsEndpoint =
-          user?.role && user.role !== "STAFF"
-            ? "/projects?include_all_departments=true"
-            : "/projects"
-        const projectsRes = await apiFetch(projectsEndpoint)
+        
+        // Find Product Content Manager department ID
+        let productContentDeptId: string | null = null
+        if (loadedDepartments.length > 0) {
+          const pcmDept = loadedDepartments.find(
+            (d) => d.name?.toLowerCase().includes("project content") || 
+                   d.name?.toLowerCase().includes("content manager") ||
+                   d.code === "PCM"
+          )
+          productContentDeptId = pcmDept?.id || null
+        }
+        
+        // For priority items (PRJK), we want everyone to see all projects,
+        // so try to fetch all projects first, fallback if needed
+        let projectsEndpoint = "/projects?include_all_departments=true"
+        let projectsRes = await apiFetch(projectsEndpoint)
+        
+        // If 403 (forbidden), fallback to user's department projects
+        if (!projectsRes?.ok && projectsRes?.status === 403) {
+          projectsEndpoint =
+            user?.role && user.role !== "STAFF"
+              ? "/projects?include_all_departments=true"
+              : "/projects"
+          projectsRes = await apiFetch(projectsEndpoint)
+        }
+        
+        // Store full project info for MST/VS/VL date generation
+        const projectInfoById = new Map<string, Project>()
         if (projectsRes?.ok) {
           const projects = (await projectsRes.json()) as Project[]
           projectNameById = new Map(
@@ -653,6 +677,8 @@ export default function CommonViewPage() {
                 const title = p.project_type === "MST" && p.total_products != null && p.total_products > 0
                   ? `${baseTitle} - ${p.total_products}`
                   : baseTitle
+                // Store full project info
+                projectInfoById.set(p.id, p)
                 return [p.id, title] as [string, string]
               })
               .filter((entry): entry is [string, string] => entry !== null && entry[1] !== "")
@@ -822,11 +848,20 @@ export default function CommonViewPage() {
         }
 
         // Load tasks for blocked, 1H, R1, external, and priority
-        const tasksEndpoint =
-          user?.role && user.role !== "STAFF"
-            ? "/tasks?include_done=true&include_all_departments=true"
-            : "/tasks?include_done=true"
-        const tasksRes = await apiFetch(tasksEndpoint)
+        // For priority items (PRJK), we want everyone to see the same projects,
+        // so try to fetch all tasks first, fallback to user's tasks if 403
+        let tasksEndpoint = "/tasks?include_done=true&include_all_departments=true"
+        let tasksRes = await apiFetch(tasksEndpoint)
+        
+        // If 403 (forbidden), fallback to user's department tasks
+        if (!tasksRes?.ok && tasksRes?.status === 403) {
+          tasksEndpoint =
+            user?.role && user.role !== "STAFF"
+              ? "/tasks?include_done=true&include_all_departments=true"
+              : "/tasks?include_done=true"
+          tasksRes = await apiFetch(tasksEndpoint)
+        }
+        
         if (tasksRes?.ok) {
           const tasks = (await tasksRes.json()) as Task[]
           
@@ -851,6 +886,8 @@ export default function CommonViewPage() {
                       ? `${baseTitle} - ${project.total_products}`
                       : baseTitle
                     projectNameById.set(projectId, projectName)
+                    // Store full project info
+                    projectInfoById.set(projectId, project)
                   }
                 }
               } catch (err) {
@@ -862,7 +899,9 @@ export default function CommonViewPage() {
           }
           
           const today = toISODate(new Date())
-          const priorityMap = new Map<string, PriorityItem>()
+          // Group priority items by project_id only (not by project_id-date)
+          // This ensures all users see the same projects
+          const priorityMap = new Map<string, { project: string; assignees: Set<string>; dates: Set<string> }>()
 
           for (const t of tasks) {
             // Only show tasks that are in progress (not completed)
@@ -928,31 +967,115 @@ export default function CommonViewPage() {
               })
             }
 
-            // Priority items - only include if we have a project name
+            // Priority items - group by project_id only (not by date)
+            // This ensures all users see the same projects on the same dates
             if (t.project_id) {
               const projectName = projectNameById.get(t.project_id)
               // Skip if project name is not found (project might be deleted or inaccessible)
               if (!projectName) {
                 continue
               }
-              const key = `${t.project_id}-${taskDate}`
-              if (!priorityMap.has(key)) {
-                priorityMap.set(key, {
+              
+              // Use project_id as the key (not project_id-date)
+              const projectKey = t.project_id
+              
+              if (!priorityMap.has(projectKey)) {
+                priorityMap.set(projectKey, {
                   project: projectName,
-                  date: taskDate,
-                  assignees: [],
+                  assignees: new Set<string>(),
+                  dates: new Set<string>(),
                 })
               }
-              const entry = priorityMap.get(key)!
+              
+              const entry = priorityMap.get(projectKey)!
+              
+              // Add this task's date to the project's dates
+              entry.dates.add(taskDate)
+              
+              // Collect all assignees
               for (const name of assigneeNames) {
-                if (!entry.assignees.includes(name)) {
-                  entry.assignees.push(name)
-                }
+                entry.assignees.add(name)
               }
             }
           }
           
-          allData.priority = Array.from(priorityMap.values())
+          // Include ALL projects in priority list, not just those with tasks
+          // This ensures all users see all projects
+          for (const [projectId, project] of projectInfoById.entries()) {
+            if (!priorityMap.has(projectId)) {
+              const baseTitle = (project.title || project.name || "").trim()
+              if (!baseTitle) continue
+              const projectName = project.project_type === "MST" && project.total_products != null && project.total_products > 0
+                ? `${baseTitle} - ${project.total_products}`
+                : baseTitle
+              
+              priorityMap.set(projectId, {
+                project: projectName,
+                assignees: new Set<string>(),
+                dates: new Set<string>(),
+              })
+            }
+          }
+          
+          // Expand priority items: create one entry per project-date combination
+          // For MST and VS/VL projects in Product Content, show every day until due date
+          const expandedPriority: PriorityItem[] = []
+          for (const [projectKey, entry] of priorityMap.entries()) {
+            const project = projectInfoById.get(projectKey)
+            if (!project) continue // Skip if project info not available
+            
+            const assignees = Array.from(entry.assignees)
+            
+            // Check if this is MST or VS/VL project in Product Content Manager
+            const isMst = project.project_type === "MST"
+            const titleUpper = (project.title || "").toUpperCase()
+            const isVsVl = titleUpper.includes("VS") || titleUpper.includes("VL")
+            const isProductContent = project.department_id === productContentDeptId
+            
+            let datesToUse: string[] = []
+            
+            if ((isMst || isVsVl) && isProductContent && project.due_date) {
+              // For MST/VS/VL in Product Content, generate all dates from today until due date
+              const today = new Date()
+              today.setHours(0, 0, 0, 0)
+              const dueDate = new Date(project.due_date)
+              dueDate.setHours(0, 0, 0, 0)
+              
+              // Start from today, end at due date (or today if due date is in the past)
+              const startDate = today
+              const endDate = dueDate >= today ? dueDate : today
+              
+              // Generate all dates from start to end (weekdays only: Monday-Friday)
+              const currentDate = new Date(startDate)
+              while (currentDate <= endDate) {
+                const dayOfWeek = currentDate.getDay()
+                // Only include weekdays (Monday=1 to Friday=5)
+                if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                  datesToUse.push(toISODate(currentDate))
+                }
+                currentDate.setDate(currentDate.getDate() + 1)
+              }
+            } else {
+              // For other projects, use dates from tasks (or today if no tasks)
+              if (entry.dates.size > 0) {
+                datesToUse = Array.from(entry.dates).sort()
+              } else {
+                // If no tasks, show on today's date
+                datesToUse = [toISODate(new Date())]
+              }
+            }
+            
+            // Create one priority entry per date for this project
+            for (const date of datesToUse) {
+              expandedPriority.push({
+                project: entry.project,
+                date: date,
+                assignees: assignees, // Same assignees for all dates
+              })
+            }
+          }
+          
+          allData.priority = expandedPriority
         }
 
         const meetingsEndpoint =
