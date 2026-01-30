@@ -304,7 +304,8 @@ async def create_task(
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
-    allow_cross_department = project is not None or payload.ga_note_origin_id is not None
+    # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
+    allow_cross_department = project is not None or payload.ga_note_origin_id is not None or payload.project_id is None
     if payload.assignees is not None:
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
