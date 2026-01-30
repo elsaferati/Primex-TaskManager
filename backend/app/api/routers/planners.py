@@ -624,6 +624,9 @@ async def weekly_table_planner(
     all_dept_rows = (await db.execute(select(Department.id, Department.name))).all()
     dev_dept_names = {"Development"}
     dev_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in dev_dept_names}
+    # Product Content department: tasks should only show on due_date, not from start_date to due_date
+    pc_dept_names = {"Product Content"}
+    pc_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in pc_dept_names}
 
     # Get departments to show
     if user.role == UserRole.STAFF:
@@ -674,6 +677,18 @@ async def weekly_table_planner(
         due = task.due_date.date()
         if task.project_id is None and task.system_template_origin_id is None:
             # Fast tasks should only show on their due date.
+            return due, due
+        # For Product Content department, tasks should only show on due_date, not from start_date to due_date
+        # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
+        task_dept_id = task.department_id
+        project_dept_id = None
+        if task.project_id and task.project_id in project_map:
+            project = project_map[task.project_id]
+            if project:
+                project_dept_id = project.department_id
+        is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
+        if is_pc_task and task.project_id is not None:
+            # Product Content project tasks: show only on due_date
             return due, due
         if task.start_date is not None:
             start = task.start_date.date()
@@ -958,8 +973,22 @@ async def weekly_table_planner(
                 pm_fast_tasks: list[WeeklyTableTaskEntry] = []
 
                 for task in user_tasks:
-                    # Handle finish_period: None or empty defaults to AM
-                    is_pm = task.finish_period and str(task.finish_period).upper() == "PM"
+                    # Handle finish_period: None or empty means both AM and PM
+                    # Check if finish_period is None, empty string, or not a valid AM/PM value
+                    finish_period_value = task.finish_period
+                    
+                    # Normalize the finish_period value
+                    finish_period_upper = None
+                    if finish_period_value:
+                        finish_period_str = str(finish_period_value).strip()
+                        if finish_period_str:
+                            finish_period_upper = finish_period_str.upper()
+                    
+                    # Determine which time slot(s) this task should appear in
+                    is_pm = finish_period_upper == "PM"
+                    is_am = finish_period_upper == "AM"
+                    # If finish_period is None, empty, or not "AM"/"PM", it should appear in both slots
+                    is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
                     
                     # System tasks (have system_template_origin_id)
                     if task.system_template_origin_id is not None:
@@ -979,17 +1008,31 @@ async def weekly_table_planner(
                             is_personal=task.is_personal,
                             ga_note_origin_id=task.ga_note_origin_id,
                         )
-                        if is_pm:
+                        if is_both:
+                            # Add to both AM and PM
+                            am_fast_tasks.append(entry)
+                            pm_fast_tasks.append(entry)
+                        elif is_pm:
                             pm_fast_tasks.append(entry)
                         else:
+                            # Default to AM if not PM and not both
                             am_fast_tasks.append(entry)
                     # Project tasks (have project_id)
                     elif task.project_id is not None:
-                        if is_pm:
+                        if is_both:
+                            # Add to both AM and PM
+                            if task.project_id not in am_projects_map:
+                                am_projects_map[task.project_id] = []
+                            am_projects_map[task.project_id].append(task)
+                            if task.project_id not in pm_projects_map:
+                                pm_projects_map[task.project_id] = []
+                            pm_projects_map[task.project_id].append(task)
+                        elif is_pm:
                             if task.project_id not in pm_projects_map:
                                 pm_projects_map[task.project_id] = []
                             pm_projects_map[task.project_id].append(task)
                         else:
+                            # Default to AM if not PM and not both
                             if task.project_id not in am_projects_map:
                                 am_projects_map[task.project_id] = []
                             am_projects_map[task.project_id].append(task)
