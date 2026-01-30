@@ -2401,7 +2401,7 @@ async def export_ga_notes_xlsx(
     ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
     title_cell = ws.cell(row=title_row, column=1, value="GA/KA NOTES")
     title_cell.font = Font(bold=True, size=16)
-    title_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
     
     # Header row (row 4)
     header_row = 4

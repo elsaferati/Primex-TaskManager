@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
@@ -209,7 +211,7 @@ export default function DesignProjectPage() {
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
-  const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
+  const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
@@ -372,7 +374,18 @@ export default function DesignProjectPage() {
   // Task creation
   const submitCreateTask = async () => {
     if (!project) return
-    if (!newTitle.trim()) return
+    if (!newTitle.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (!newAssignees || newAssignees.length === 0) {
+      toast.error("Please assign the task to at least one user")
+      return
+    }
+    if (!newDueDate || !newDueDate.trim()) {
+      toast.error("Due date is required")
+      return
+    }
     setCreating(true)
     try {
       const payload = {
@@ -380,7 +393,7 @@ export default function DesignProjectPage() {
         description: newDescription.trim() || null,
         project_id: project.id,
         department_id: project.department_id,
-        assigned_to: newAssignedTo === "__unassigned__" ? null : newAssignedTo,
+        assignees: newAssignees,
         status: newStatus,
         priority: newPriority,
         phase: newTaskPhase || activePhase,
@@ -409,7 +422,7 @@ export default function DesignProjectPage() {
       setNewDescription("")
       setNewStatus("TODO")
       setNewPriority("NORMAL")
-      setNewAssignedTo("__unassigned__")
+      setNewAssignees([])
       setNewTaskPhase("")
       setNewDueDate("")
       toast.success("Task created")
@@ -1146,6 +1159,14 @@ export default function DesignProjectPage() {
   }
 
   const updateTaskStatus = async (taskId: string, status: Task["status"]) => {
+    const task = tasks.find((t) => t.id === taskId)
+    
+    // Only admins can change tasks from DONE to any other status
+    if (task?.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN") {
+      toast.error("Only admins can change tasks from DONE to another status")
+      return
+    }
+    
     setTaskStatusSaving((prev) => ({ ...prev, [taskId]: true }))
     try {
       const res = await apiFetch(`/tasks/${taskId}`, {
@@ -1581,10 +1602,10 @@ export default function DesignProjectPage() {
                   </DialogHeader>
                   <div className="space-y-4">
                     <div>
-                      <Label>Title</Label>
+                      <Label>Title <span className="text-red-500">*</span></Label>
                       <Input
                         value={newTitle}
-                        onChange={(e) => setNewTitle(e.target.value)}
+                        onChange={(e) => setNewTitle(e.target.value.toUpperCase())}
                         placeholder="Task title"
                       />
                     </div>
@@ -1621,28 +1642,76 @@ export default function DesignProjectPage() {
                       </div>
                     </div>
                     <div>
-                      <Label>Assignee</Label>
-                      <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                      <Label>Assignee <span className="text-red-500">*</span></Label>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between">
+                            <span className="truncate text-left flex-1">
+                              {newAssignees.length > 0 
+                                ? (() => {
+                                    const selectedNames = newAssignees
+                                      .map(id => {
+                                        const user = assignableUsers.find(u => u.id === id)
+                                        return user?.full_name || user?.email || id
+                                      })
+                                      .join(", ")
+                                    return selectedNames.length > 50 
+                                      ? `${selectedNames.substring(0, 50)}... (${newAssignees.length})`
+                                      : selectedNames
+                                  })()
+                                : "Select users"}
+                            </span>
+                            <ChevronDown className="h-4 w-4 opacity-50 ml-2 flex-shrink-0" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-full max-h-64 overflow-y-auto">
+                          <DropdownMenuLabel>Select Users</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
                           {assignableUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
+                            <DropdownMenuCheckboxItem
+                              key={u.id}
+                              checked={newAssignees.includes(u.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setNewAssignees([...newAssignees, u.id])
+                                } else {
+                                  setNewAssignees(newAssignees.filter(id => id !== u.id))
+                                }
+                              }}
+                            >
+                              {u.full_name || u.email}
+                            </DropdownMenuCheckboxItem>
                           ))}
-                        </SelectContent>
-                      </Select>
+                          {newAssignees.length > 0 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault()
+                                  setNewAssignees([])
+                                }}
+                              >
+                                Clear selection
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div>
-                      <Label>Due Date</Label>
+                      <Label>Due Date <span className="text-red-500">*</span></Label>
                       <Input
                         type="date"
                         value={newDueDate}
                         onChange={(e) => setNewDueDate(e.target.value)}
+                        required
                       />
                     </div>
-                    <Button onClick={() => void submitCreateTask()} disabled={creating} className="w-full">
+                    <Button 
+                      onClick={() => void submitCreateTask()} 
+                      disabled={creating || !newTitle.trim() || !newAssignees || newAssignees.length === 0 || !newDueDate || !newDueDate.trim()} 
+                      className="w-full"
+                    >
                       {creating ? "Creating..." : "Create Task"}
                     </Button>
                   </div>
@@ -1654,7 +1723,15 @@ export default function DesignProjectPage() {
             ) : (
               <div className="space-y-3">
                 {taskList.map((task) => {
-                  const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                  // Get all assignees from the assignees array, fallback to assigned_to for backward compatibility
+                  const assignees = task.assignees && task.assignees.length > 0
+                    ? task.assignees
+                    : (() => {
+                        const assignedId = task.assigned_to || task.assigned_to_user_id || null
+                        if (!assignedId) return []
+                        const assignedUser = userMap.get(assignedId)
+                        return assignedUser ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }] : []
+                      })()
                   const savingStatus = taskStatusSaving[task.id]
                   const taskPhase = task.phase || project?.current_phase || "PLANNING"
                   const canMarkDone = taskPhase === activePhase
@@ -1662,8 +1739,20 @@ export default function DesignProjectPage() {
                     <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
                         <div className="font-medium">{task.title}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {assignee ? assignee.full_name || assignee.email : "Unassigned"}
+                        <div className="text-sm text-muted-foreground flex items-center gap-1 flex-wrap">
+                          {assignees.length > 0 ? (
+                            assignees.map((assignee, idx) => {
+                              const displayName = assignee.full_name || assignee.username || assignee.email || "-"
+                              const assigneeInitials = initials(displayName)
+                              return (
+                                <Badge key={assignee.id || idx} variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200 text-xs" title={displayName}>
+                                  {assigneeInitials}
+                                </Badge>
+                              )
+                            })
+                          ) : (
+                            <span>Unassigned</span>
+                          )}
                           {task.due_date ? ` • Due: ${formatDateTime(task.due_date)}` : ""}
                         </div>
                       </div>
@@ -1680,11 +1769,15 @@ export default function DesignProjectPage() {
                             <SelectValue placeholder="Status" />
                           </SelectTrigger>
                           <SelectContent>
-                            {TASK_STATUSES.map((status) => (
-                              <SelectItem key={status} value={status} disabled={status === "DONE" && !canMarkDone}>
-                                {statusLabel(status)}
-                              </SelectItem>
-                            ))}
+                            {TASK_STATUSES.map((status) => {
+                              // Disable DONE option if can't mark done, or disable all non-DONE options if task is DONE and user is not admin
+                              const isDisabled = (status === "DONE" && !canMarkDone) || (task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN")
+                              return (
+                                <SelectItem key={status} value={status} disabled={isDisabled}>
+                                  {statusLabel(status)}
+                                </SelectItem>
+                              )
+                            })}
                           </SelectContent>
                         </Select>
                       </div>
