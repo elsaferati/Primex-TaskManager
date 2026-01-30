@@ -97,6 +97,14 @@ const PRIORITY_BADGE_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-red-200 bg-red-50 text-red-700",
 }
 
+const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
+  NORMAL: "border-l-amber-500",
+  HIGH: "border-l-red-600",
+}
+
+// Grid layout for system tasks table - matches system-tasks page
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -2012,6 +2020,48 @@ export default function DepartmentKanban() {
     }))
   }, [visibleSystemTasks])
 
+  // Helper function for assignee summary
+  const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
+    if (!list || list.length === 0) return "-"
+    if (list.length <= 2) {
+      return list
+        .map((person) => person.full_name || person.username || ("email" in person ? person.email : ""))
+        .join(", ")
+    }
+    return `${list.length} people`
+  }
+
+  // Flattened and sorted list of all system tasks for table view
+  const sortedSystemTasks = React.useMemo(() => {
+    const frequencyOrder: Record<SystemTaskTemplate["frequency"], number> = {
+      DAILY: 0,
+      WEEKLY: 1,
+      MONTHLY: 2,
+      "3_MONTHS": 3,
+      "6_MONTHS": 4,
+      YEARLY: 5,
+    }
+    const priorityOrder: Record<TaskPriority, number> = {
+      HIGH: 0,
+      NORMAL: 1,
+    }
+    return [...visibleSystemTasks].sort((a, b) => {
+      const aInactive = !a.is_active
+      const bInactive = !b.is_active
+      if (aInactive !== bInactive) return aInactive ? 1 : -1
+      const aFrequency = frequencyOrder[a.frequency] ?? 999
+      const bFrequency = frequencyOrder[b.frequency] ?? 999
+      if (aFrequency !== bFrequency) return aFrequency - bFrequency
+      const aPriority = priorityOrder[normalizePriority(a.priority)]
+      const bPriority = priorityOrder[normalizePriority(b.priority)]
+      if (aPriority !== bPriority) return aPriority - bPriority
+      const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+      if (aCreated !== bCreated) return bCreated - aCreated
+      return a.title.localeCompare(b.title)
+    })
+  }, [visibleSystemTasks])
+
   // --- ACTIONS ---
 
   const submitSystemTask = async () => {
@@ -3364,68 +3414,121 @@ export default function DepartmentKanban() {
                   <Input type="date" className="h-9 w-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0" value={formatDateInput(systemDate)} onChange={(e) => setSystemDate(new Date(e.target.value))} />
                   <div className="ml-auto flex items-center gap-2"><Label className="text-xs text-slate-500">Show All</Label><Checkbox checked={showAllSystem} onCheckedChange={(v) => setShowAllSystem(!!v)} /></div>
                 </div>
-                <div className="space-y-8">
-                  {systemGroups.map(group => (
-                    <div key={group.label} className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-400">{group.label}</span>
-                        <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800"></div>
+                <div className="relative w-full rounded-lg border bg-white shadow-sm">
+                  <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain">
+                    <div className="min-w-[1000px] xl:min-w-0">
+                      <div className="sticky top-0 z-30">
+                        <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4">
+                          <div className={GRID_CLASS + " text-[11px] font-bold uppercase tracking-wider text-slate-500"}>
+                            <div>No.</div>
+                            <div>Task Title</div>
+                            <div>Department</div>
+                            <div>Owner</div>
+                            <div>Frequency</div>
+                            <div>Finish by</div>
+                            <div>Priority</div>
+                            <div className="text-right">Actions</div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        {group.items.map(item => {
-                          const statusValue = item.status || "TODO"
-                          const isClosed = statusValue === "DONE"
-                          const owner = users.find(u => u.id === item.default_assignee_id)
-                          const isAssigned =
-                            Boolean(user?.id) &&
-                            (item.default_assignee_id === user?.id ||
-                              item.assignees?.some((assignee) => assignee.id === user?.id))
-                          return (
-                            <div key={item.id} className="flex flex-col justify-between rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition hover:ring-emerald-200 dark:bg-slate-900 dark:ring-slate-800">
-                              <div className="space-y-2">
-                                <div className="flex items-start justify-between">
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-slate-900 dark:text-white">{item.title}</h4>
-                                    <Badge variant="secondary" className="h-5 text-[10px] uppercase">{statusValue}</Badge>
+
+                      <div className="p-4 space-y-2 bg-slate-50">
+                        {sortedSystemTasks.length ? (
+                          (() => {
+                            let globalIndex = 0
+                            return sortedSystemTasks.map((template) => {
+                              const taskNumber = globalIndex + 1
+                              globalIndex++
+                              const priorityValue = normalizePriority(template.priority)
+                              const departmentLabel = department ? formatDepartmentName(department.name) : "-"
+                              const ownerLabel = assigneeSummary(template.assignees) || 
+                                (template.default_assignee_id ? users.find((u) => u.id === template.default_assignee_id)?.full_name || users.find((u) => u.id === template.default_assignee_id)?.username || "-" : "-")
+                              const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
+                              const statusValue = template.status || "TODO"
+                              const isClosed = statusValue === "DONE"
+                              const isAssigned =
+                                Boolean(user?.id) &&
+                                (template.default_assignee_id === user?.id ||
+                                  template.assignees?.some((assignee) => assignee.id === user?.id))
+                              const isInactive = template.is_active === false
+
+                              return (
+                                <div
+                                  key={template.id}
+                                  className={[
+                                    GRID_CLASS,
+                                    "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
+                                    PRIORITY_BORDER_STYLES[priorityValue],
+                                    isInactive && "opacity-60 grayscale"
+                                  ].join(" ")}
+                                >
+                                  <div className="text-sm font-semibold text-slate-600">
+                                    {taskNumber}
                                   </div>
-                                  <div className={`mt-1 h-2 w-2 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-slate-300"}`}></div>
-                                </div>
-                                <p className="text-xs text-slate-500 line-clamp-2">{item.description || "No description."}</p>
-                              </div>
-                              <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 dark:border-slate-800">
-                                <div className="flex items-center gap-2">
-                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 dark:bg-slate-800">
-                                    {initials(owner?.full_name || "?")}
+                                  <div className="min-w-0 pr-4">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                                        {template.title}
+                                      </div>
+                                      <Badge variant="secondary" className="h-5 text-[10px] uppercase">
+                                        {statusValue}
+                                      </Badge>
+                                    </div>
                                   </div>
-                                  <span className="text-xs text-slate-400">{owner?.full_name || "Unassigned"}</span>
-                                </div>
-                                {viewMode === "mine" ? (
-                                  isClosed ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                      <span className="text-[12px]">✓</span>
-                                      Done
+                                  <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                                    {departmentLabel}
+                                  </div>
+                                  <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                                    {ownerLabel === "-" ? <span className="text-slate-400">-</span> : ownerLabel}
+                                  </div>
+                                  <div>
+                                    <span className="text-sm text-slate-700 font-normal">
+                                      {frequencyLabel}
                                     </span>
-                                  ) : isAssigned ? (
-                                    <button
-                                      type="button"
-                                      disabled={systemStatusUpdatingId === item.id}
-                                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                      onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
+                                  </div>
+                                  <div className="text-sm text-slate-700 font-normal">
+                                    {template.finish_period || "-"}
+                                  </div>
+                                  <div>
+                                    <Badge
+                                      variant="outline"
+                                      className={["px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue]].join(" ")}
                                     >
-                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
-                                        ✓
-                                      </span>
-                                      Mark Done
-                                    </button>
-                                  ) : null
-                                ) : null}
-                              </div>
-                            </div>
-                          )
-                        })}
+                                      {PRIORITY_LABELS[priorityValue]}
+                                    </Badge>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="flex flex-col items-end gap-2">
+                                      {viewMode === "mine" && isAssigned && !isClosed && (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          disabled={systemStatusUpdatingId === template.id}
+                                          onClick={() => void updateSystemTaskStatus(template.id, "DONE")}
+                                          className="h-7 text-xs"
+                                        >
+                                          {systemStatusUpdatingId === template.id
+                                            ? "Updating..."
+                                            : "Mark done"}
+                                        </Button>
+                                      )}
+                                      {isClosed && (
+                                        <span className="text-xs text-emerald-700">Done</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })
+                          })()
+                        ) : (
+                          <div className="py-12 text-center text-sm text-muted-foreground">
+                            No system tasks yet.
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
             )}
