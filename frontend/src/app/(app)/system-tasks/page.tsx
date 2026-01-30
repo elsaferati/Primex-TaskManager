@@ -2168,7 +2168,19 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>Title</Label>
-                        <Input value={title} onChange={(event) => setTitle(event.target.value.toUpperCase())} />
+                        <Input
+                          value={title}
+                          onChange={(event) => {
+                            const input = event.target
+                            const cursorPosition = input.selectionStart || 0
+                            const newValue = event.target.value.toUpperCase()
+                            setTitle(newValue)
+                            // Restore cursor position after React updates
+                            setTimeout(() => {
+                              input.setSelectionRange(cursorPosition, cursorPosition)
+                            }, 0)
+                          }}
+                        />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -2407,7 +2419,9 @@ export function SystemTasksView({
                           ))}
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Label className="text-sm text-muted-foreground">
+                            <span className="uppercase">Question/Answer</span> (optional)
+                          </Label>
                           <Textarea
                             value={internalNotes.QA || ""}
                             onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
@@ -2540,7 +2554,19 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>Title</Label>
-                        <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value.toUpperCase())} />
+                        <Input
+                          value={editTitle}
+                          onChange={(event) => {
+                            const input = event.target
+                            const cursorPosition = input.selectionStart || 0
+                            const newValue = event.target.value.toUpperCase()
+                            setEditTitle(newValue)
+                            // Restore cursor position after React updates
+                            setTimeout(() => {
+                              input.setSelectionRange(cursorPosition, cursorPosition)
+                            }, 0)
+                          }}
+                        />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -2626,7 +2652,7 @@ export function SystemTasksView({
                                 <div className="text-[12px] text-slate-500">Required.</div>
                               </div>
                               <div className="space-y-2">
-                                <Label>BZ me (managers)</Label>
+                                <Label>BZ with (managers)</Label>
                                 <div className="rounded-md border border-slate-200 bg-white p-2">
                                   <div className="flex flex-wrap gap-2">
                                     {editAlignmentManagerIds.map((id) => {
@@ -2789,7 +2815,9 @@ export function SystemTasksView({
                           ))}
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Label className="text-sm text-muted-foreground ">
+                            <span className="uppercase">Question/Answer</span> (optional)
+                          </Label>
                           <Textarea
                             value={editInternalNotes.QA || ""}
                             onChange={(event) => setInternalNoteValue("QA", event.target.value, setEditInternalNotes)}
