@@ -207,8 +207,13 @@ function isNoProjectTask(task: Task) {
 }
 
 function isFastNormalTask(task: Task) {
+  // Exclude VS/VL tasks - check if task title matches VS/VL template task titles
+  const normalizedTitle = normalizeTaskTitle(task.title || "")
+  const isVsVlTask = VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)
+  
   return (
     isNoProjectTask(task) &&
+    !isVsVlTask && // Exclude VS/VL tasks from fast tasks
     task.ga_note_origin_id == null &&
     !task.is_bllok &&
     !task.is_1h_report &&
