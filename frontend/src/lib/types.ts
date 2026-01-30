@@ -2,7 +2,7 @@ export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
 export type TaskType = "adhoc" | "system" | "reminder"
 
-export type TaskPriority = "NORMAL" | "HIGH"
+export type TaskPriority = "NORMAL" | "HIGH" | "BLLOK"
 
 export type TaskFinishPeriod = "AM" | "PM"
 
