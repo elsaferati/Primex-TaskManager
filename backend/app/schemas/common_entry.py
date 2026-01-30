@@ -32,6 +32,7 @@ class CommonEntryCreate(BaseModel):
     title: str = Field(min_length=2, max_length=300)
     description: str | None = Field(default=None, max_length=8000)
     entry_date: date | None = None
+    assigned_to_user_id: uuid.UUID | None = None
 
 
 class CommonEntryAssign(BaseModel):

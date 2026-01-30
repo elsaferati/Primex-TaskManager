@@ -2225,9 +2225,6 @@ export function SystemTasksView({
                         />
                         <div className="flex-1">
                           <div className="text-sm font-semibold text-slate-900">Requires BZ</div>
-                          <div className="text-xs text-slate-500 mt-1">
-                            If enabled, the task should be BZ with managers at the specified time.
-                          </div>
                           {requiresAlignment ? (
                             <div className="mt-4 grid gap-3 md:grid-cols-2">
                               <div className="space-y-2">
@@ -2240,7 +2237,7 @@ export function SystemTasksView({
                                 <div className="text-[12px] text-slate-500">Required.</div>
                               </div>
                               <div className="space-y-2">
-                                <Label>BZ me (managers)</Label>
+                                <Label>BZ with (managers)</Label>
                                 <div className="rounded-md border border-slate-200 bg-white p-2">
                                   <div className="flex flex-wrap gap-2">
                                     {alignmentManagerIds.map((id) => {
