@@ -837,8 +837,9 @@ async def delete_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     if task.department_id is not None:
         ensure_department_access(user, task.department_id)
-    if user.role not in (UserRole.ADMIN, UserRole.MANAGER) and task.created_by != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Only managers and admins can delete tasks
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers and admins can delete tasks")
 
     add_audit_log(
         db=db,
@@ -853,7 +854,19 @@ async def delete_task(
         },
     )
 
+    # Explicitly delete related records to avoid SQLAlchemy relationship synchronization issues
+    # Since TaskAssignee has a composite primary key, SQLAlchemy can't "blank out" the foreign key
     await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+    await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
+    await db.execute(delete(TaskUserComment).where(TaskUserComment.task_id == task.id))
+    
+    # Flush to ensure deletes are processed
+    await db.flush()
+    
+    # Expire the assignees relationship to prevent SQLAlchemy from trying to synchronize it
+    db.expire(task, ["assignees"])
+    
+    # Now delete the task - database CASCADE will handle other related records
     await db.delete(task)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

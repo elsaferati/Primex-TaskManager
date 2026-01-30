@@ -19,6 +19,7 @@ class ProjectPrompt(Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
     type: Mapped[PromptType] = mapped_column(Enum(PromptType, name="prompt_type"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -2,7 +2,7 @@ export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
 export type TaskType = "adhoc" | "system" | "reminder"
 
-export type TaskPriority = "NORMAL" | "HIGH"
+export type TaskPriority = "NORMAL" | "HIGH" | "BLLOK"
 
 export type TaskFinishPeriod = "AM" | "PM"
 
@@ -253,6 +253,7 @@ export interface ProjectPrompt {
   id: string
   project_id: string
   type: "GA_PROMPT" | "ZHVILLIM_PROMPT"
+  title: string
   content: string
   created_at: string
 }

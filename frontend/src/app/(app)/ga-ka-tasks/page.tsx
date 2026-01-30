@@ -18,7 +18,25 @@ import type { DailyReportResponse, Department, Task, TaskFinishPeriod, TaskPrior
 import { SystemTasksView } from "../system-tasks/page"
 
 const FINISH_PERIOD_NONE_VALUE = "__none__"
-const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
+const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH", "BLLOK"]
+
+// Date utility functions
+const pad2 = (n: number) => String(n).padStart(2, "0")
+const toISODate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+const toDDMMYYYY = (isoDate: string) => {
+  if (!isoDate) return ""
+  const [y, m, d] = isoDate.split("-").map(Number)
+  return `${pad2(d)}/${pad2(m)}/${y}`
+}
+const fromDDMMYYYY = (ddmmyyyy: string) => {
+  if (!ddmmyyyy) return ""
+  const parts = ddmmyyyy.split("/")
+  if (parts.length !== 3) return ""
+  const [d, m, y] = parts.map(Number)
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return ""
+  if (d < 1 || d > 31 || m < 1 || m > 12) return ""
+  return `${y}-${pad2(m)}-${pad2(d)}`
+}
 const DAY_OPTIONS = [
   { value: "all", label: "All days" },
   { value: "0", label: "Monday" },
@@ -342,7 +360,10 @@ export default function GaKaTasksPage() {
 
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
+  const [startDate, setStartDate] = React.useState("")
+  const [startDateDisplay, setStartDateDisplay] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
+  const [dueDateDisplay, setDueDateDisplay] = React.useState("")
   const [taskPriority, setTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -353,7 +374,10 @@ export default function GaKaTasksPage() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
+  const [editStartDate, setEditStartDate] = React.useState("")
+  const [editStartDateDisplay, setEditStartDateDisplay] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
+  const [editDueDateDisplay, setEditDueDateDisplay] = React.useState("")
   const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -488,6 +512,7 @@ export default function GaKaTasksPage() {
       }
       const createdNote = (await noteRes.json()) as { id: string }
 
+      const startDateValue = startDate ? new Date(startDate).toISOString() : null
       const dueDateValue = dueDate ? new Date(dueDate).toISOString() : null
       const payload: Record<string, unknown> = {
         title: title.trim(),
@@ -495,6 +520,7 @@ export default function GaKaTasksPage() {
         status: "TODO",
         priority: taskPriority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
+        start_date: startDateValue,
         due_date: dueDateValue,
         ga_note_origin_id: createdNote.id,
         assigned_to: ganeUserId,
@@ -526,7 +552,10 @@ export default function GaKaTasksPage() {
       setCreateOpen(false)
       setTitle("")
       setDescription("")
+      setStartDate("")
+      setStartDateDisplay("")
       setDueDate("")
+      setDueDateDisplay("")
       setTaskPriority("NORMAL")
       setFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -753,7 +782,12 @@ export default function GaKaTasksPage() {
     setEditingTaskId(task.id)
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
-    setEditDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    const taskStartDate = task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : ""
+    setEditStartDate(taskStartDate)
+    setEditStartDateDisplay(taskStartDate ? toDDMMYYYY(taskStartDate) : "")
+    const taskDueDate = task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : ""
+    setEditDueDate(taskDueDate)
+    setEditDueDateDisplay(taskDueDate ? toDDMMYYYY(taskDueDate) : "")
     setEditPriority((task.priority || "NORMAL") as TaskPriority)
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
@@ -763,11 +797,13 @@ export default function GaKaTasksPage() {
     if (!editingTaskId || !editTitle.trim()) return
     setSavingEdit(true)
     try {
+      const startDateValue = editStartDate ? new Date(editStartDate).toISOString() : null
       const dueDateValue = editDueDate ? new Date(editDueDate).toISOString() : null
       const payload = {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
         priority: editPriority,
+        start_date: startDateValue,
         due_date: dueDateValue,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
       }
@@ -1331,9 +1367,134 @@ export default function GaKaTasksPage() {
                           </SelectContent>
                         </Select>
                       </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>Due date (optional)</Label>
-                        <Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+                        <Label>Start date </Label>
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                          <Input
+                            type="text"
+                            placeholder="DD/MM/YYYY"
+                            value={startDateDisplay}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              setStartDateDisplay(value)
+                              const isoDate = fromDDMMYYYY(value)
+                              if (isoDate) {
+                                setStartDate(isoDate)
+                              }
+                            }}
+                            pattern="\d{2}/\d{2}/\d{4}"
+                            style={{ paddingRight: "35px" }}
+                          />
+                          <Input
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              if (value) {
+                                setStartDate(value)
+                                setStartDateDisplay(toDDMMYYYY(value))
+                              }
+                            }}
+                            style={{
+                              position: "absolute",
+                              right: "8px",
+                              opacity: 0,
+                              width: "24px",
+                              height: "24px",
+                              cursor: "pointer",
+                              zIndex: 1
+                            }}
+                            title="Open calendar"
+                          />
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{
+                              position: "absolute",
+                              right: "10px",
+                              pointerEvents: "none",
+                              color: "#666"
+                            }}
+                          >
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Due date (optional) </Label>
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                          <Input
+                            type="text"
+                            placeholder="DD/MM/YYYY"
+                            value={dueDateDisplay}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              setDueDateDisplay(value)
+                              const isoDate = fromDDMMYYYY(value)
+                              if (isoDate) {
+                                setDueDate(isoDate)
+                              }
+                            }}
+                            pattern="\d{2}/\d{2}/\d{4}"
+                            style={{ paddingRight: "35px" }}
+                          />
+                          <Input
+                            type="date"
+                            value={dueDate}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              if (value) {
+                                setDueDate(value)
+                                setDueDateDisplay(toDDMMYYYY(value))
+                              } else {
+                                setDueDate("")
+                                setDueDateDisplay("")
+                              }
+                            }}
+                            style={{
+                              position: "absolute",
+                              right: "8px",
+                              opacity: 0,
+                              width: "24px",
+                              height: "24px",
+                              cursor: "pointer",
+                              zIndex: 1
+                            }}
+                            title="Open calendar"
+                          />
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{
+                              position: "absolute",
+                              right: "10px",
+                              pointerEvents: "none",
+                              color: "#666"
+                            }}
+                          >
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                          </svg>
+                        </div>
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">
@@ -1505,9 +1666,139 @@ export default function GaKaTasksPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Due date (optional)</Label>
-                <Input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} />
+                <Label>Start date (DD/MM/YYYY)</Label>
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                  <Input
+                    type="text"
+                    placeholder="DD/MM/YYYY"
+                    value={editStartDateDisplay}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setEditStartDateDisplay(value)
+                      const isoDate = fromDDMMYYYY(value)
+                      if (isoDate) {
+                        setEditStartDate(isoDate)
+                      }
+                    }}
+                    pattern="\d{2}/\d{2}/\d{4}"
+                    style={{ paddingRight: "35px" }}
+                  />
+                  <Input
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (value) {
+                        setEditStartDate(value)
+                        setEditStartDateDisplay(toDDMMYYYY(value))
+                      } else {
+                        setEditStartDate("")
+                        setEditStartDateDisplay("")
+                      }
+                    }}
+                    style={{
+                      position: "absolute",
+                      right: "8px",
+                      opacity: 0,
+                      width: "24px",
+                      height: "24px",
+                      cursor: "pointer",
+                      zIndex: 1
+                    }}
+                    title="Open calendar"
+                  />
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      position: "absolute",
+                      right: "10px",
+                      pointerEvents: "none",
+                      color: "#666"
+                    }}
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Due date (optional) (DD/MM/YYYY)</Label>
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                  <Input
+                    type="text"
+                    placeholder="DD/MM/YYYY"
+                    value={editDueDateDisplay}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setEditDueDateDisplay(value)
+                      const isoDate = fromDDMMYYYY(value)
+                      if (isoDate) {
+                        setEditDueDate(isoDate)
+                      } else if (!value) {
+                        setEditDueDate("")
+                      }
+                    }}
+                    pattern="\d{2}/\d{2}/\d{4}"
+                    style={{ paddingRight: "35px" }}
+                  />
+                  <Input
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (value) {
+                        setEditDueDate(value)
+                        setEditDueDateDisplay(toDDMMYYYY(value))
+                      } else {
+                        setEditDueDate("")
+                        setEditDueDateDisplay("")
+                      }
+                    }}
+                    style={{
+                      position: "absolute",
+                      right: "8px",
+                      opacity: 0,
+                      width: "24px",
+                      height: "24px",
+                      cursor: "pointer",
+                      zIndex: 1
+                    }}
+                    title="Open calendar"
+                  />
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      position: "absolute",
+                      right: "10px",
+                      pointerEvents: "none",
+                      color: "#666"
+                    }}
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2">

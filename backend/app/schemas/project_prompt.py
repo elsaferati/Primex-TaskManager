@@ -12,6 +12,7 @@ class ProjectPromptOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     type: PromptType
+    title: str
     content: str
     created_at: datetime
 
@@ -19,9 +20,11 @@ class ProjectPromptOut(BaseModel):
 class ProjectPromptCreate(BaseModel):
     project_id: uuid.UUID
     type: PromptType
+    title: str
     content: str
 
 
 class ProjectPromptUpdate(BaseModel):
-    content: str
+    title: str | None = None
+    content: str | None = None
 

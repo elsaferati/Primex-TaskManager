@@ -37,6 +37,7 @@ async def list_project_prompts(
             id=p.id,
             project_id=p.project_id,
             type=p.type,
+            title=p.title,
             content=p.content,
             created_at=p.created_at,
         )
@@ -59,6 +60,7 @@ async def create_project_prompt(
     prompt = ProjectPrompt(
         project_id=payload.project_id,
         type=payload.type,
+        title=payload.title,
         content=payload.content,
     )
     db.add(prompt)
@@ -68,6 +70,7 @@ async def create_project_prompt(
         id=prompt.id,
         project_id=prompt.project_id,
         type=prompt.type,
+        title=prompt.title,
         content=prompt.content,
         created_at=prompt.created_at,
     )
@@ -87,13 +90,17 @@ async def update_project_prompt(
     if project and project.department_id is not None:
         ensure_department_access(user, project.department_id)
 
-    prompt.content = payload.content
+    if payload.title is not None:
+        prompt.title = payload.title
+    if payload.content is not None:
+        prompt.content = payload.content
     await db.commit()
     await db.refresh(prompt)
     return ProjectPromptOut(
         id=prompt.id,
         project_id=prompt.project_id,
         type=prompt.type,
+        title=prompt.title,
         content=prompt.content,
         created_at=prompt.created_at,
     )
