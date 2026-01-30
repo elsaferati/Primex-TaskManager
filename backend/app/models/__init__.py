@@ -12,6 +12,7 @@ from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
+from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
 from app.models.vs_workflow_item import VsWorkflowItem
@@ -23,6 +24,7 @@ from app.models.system_task_template_alignment_user import SystemTaskTemplateAli
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
+from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
@@ -46,6 +48,7 @@ __all__ = [
     "MicrosoftToken",
     "Notification",
     "Project",
+    "ProjectPlannerExclusion",
     "ProjectMember",
     "ProjectPrompt",
     "VsWorkflowItem",
@@ -57,6 +60,7 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskAlignmentUser",
+    "TaskPlannerExclusion",
     "TaskStatus",
     "TaskUserComment",
     "TaskTemplate",

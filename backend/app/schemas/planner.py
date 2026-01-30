@@ -36,6 +36,7 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     completed_at: datetime | None = None
     daily_products: int | None = None
+    finish_period: str | None = None
     is_bllok: bool = False
     is_1h_report: bool = False
     is_r1: bool = False
@@ -60,6 +61,7 @@ class WeeklyTableTaskEntry(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     completed_at: datetime | None = None
     daily_products: int | None = None
+    finish_period: str | None = None
     fast_task_type: str | None = None
     is_bllok: bool = False
     is_1h_report: bool = False

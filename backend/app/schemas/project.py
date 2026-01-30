@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -57,4 +57,10 @@ class ProjectUpdate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
+
+
+class ProjectRemoveFromDayRequest(BaseModel):
+    day_date: date
+    user_id: uuid.UUID
+    time_slot: str | None = None
 
