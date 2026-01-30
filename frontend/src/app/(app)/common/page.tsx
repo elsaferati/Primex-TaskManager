@@ -910,46 +910,11 @@ export default function CommonViewPage() {
           // This ensures all users see the same projects
           const priorityMap = new Map<string, { 
             project: string; 
-            projectMembers: Set<string>; // All unique assignees from all tasks (base members that appear every day)
+            projectMembers: Set<string>; // Assignees who have tasks on MULTIPLE dates (appear every day)
             assigneesByDate: Map<string, Set<string>>; // Track assignees per date
-            dates: Set<string> 
+            dates: Set<string>;
+            assigneeDates: Map<string, Set<string>>; // Track unique dates each assignee appears on
           }>()
-
-          // First pass: collect project members from ALL tasks (including completed ones)
-          // This ensures project members appear even if all tasks are completed
-          for (const t of tasks) {
-            if (!t.project_id) continue
-            
-            const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
-            const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
-            const ownerName = assignee?.full_name || assignee?.username || null
-            const assigneeNames = t.assignees?.length
-              ? t.assignees.map((a) => a.full_name || a.username || a.email || "Unknown")
-              : ownerName
-              ? [ownerName]
-              : []
-            
-            const projectName = projectNameById.get(t.project_id)
-            if (!projectName) continue
-            
-            const projectKey = t.project_id
-            
-            if (!priorityMap.has(projectKey)) {
-              priorityMap.set(projectKey, {
-                project: projectName,
-                projectMembers: new Set<string>(), // Base members (all assignees from all tasks)
-                assigneesByDate: new Map<string, Set<string>>(),
-                dates: new Set<string>(),
-              })
-            }
-            
-            const entry = priorityMap.get(projectKey)!
-            
-            // Add assignees to project members from ALL tasks (including completed)
-            for (const name of assigneeNames) {
-              entry.projectMembers.add(name)
-            }
-          }
 
           // Second pass: process active tasks for date-specific data and other categories
           for (const t of tasks) {
@@ -1069,8 +1034,18 @@ export default function CommonViewPage() {
               // Use project_id as the key (not project_id-date)
               const projectKey = t.project_id
               
-              const entry = priorityMap.get(projectKey)
-              if (!entry) continue
+              // Initialize entry if it doesn't exist
+              if (!priorityMap.has(projectKey)) {
+                priorityMap.set(projectKey, {
+                  project: projectName,
+                  projectMembers: new Set<string>(),
+                  assigneesByDate: new Map<string, Set<string>>(),
+                  dates: new Set<string>(),
+                  assigneeDates: new Map<string, Set<string>>(),
+                })
+              }
+              
+              const entry = priorityMap.get(projectKey)!
               
               // Add all task dates to the project's dates
               for (const taskDate of taskDates) {
@@ -1081,8 +1056,15 @@ export default function CommonViewPage() {
                   entry.assigneesByDate.set(taskDate, new Set<string>())
                 }
                 const dateAssignees = entry.assigneesByDate.get(taskDate)!
+                
+                // Add assignees to this date and track unique dates they appear on
                 for (const name of assigneeNames) {
                   dateAssignees.add(name)
+                  // Track unique dates for this assignee
+                  if (!entry.assigneeDates.has(name)) {
+                    entry.assigneeDates.set(name, new Set<string>())
+                  }
+                  entry.assigneeDates.get(name)!.add(taskDate)
                 }
               }
             }
@@ -1103,6 +1085,7 @@ export default function CommonViewPage() {
                 projectMembers: new Set<string>(), // Empty if no tasks
                 assigneesByDate: new Map<string, Set<string>>(),
                 dates: new Set<string>(),
+                assigneeDates: new Map<string, Set<string>>(),
               })
             }
           }
@@ -1164,31 +1147,45 @@ export default function CommonViewPage() {
               }
             }
             
+            // Determine project members: only assignees who appear on MULTIPLE unique dates
+            // Assignees who only appear on ONE date are NOT project members (they're date-specific)
+            for (const [name, dates] of entry.assigneeDates.entries()) {
+              if (dates.size > 1) {
+                // This assignee has tasks on multiple dates, so they're a project member
+                entry.projectMembers.add(name)
+              }
+            }
+            
             // Create one priority entry per date for this project
-            // Logic: Project members ALWAYS appear on every date
-            //        Additionally, if a task is assigned to someone who is NOT a project member,
-            //        that person should also appear on that specific date
+            // Logic: 
+            //   - Project members (people with tasks on MULTIPLE dates) ALWAYS appear on EVERY date
+            //   - Date-specific assignees (people with tasks on ONLY ONE date) appear ONLY on their specific date
+            // Example: If ES and EP have tasks on Mon, Tue, Wed → they're project members (appear every day)
+            //          If DV has a task only on Friday → DV is NOT a project member (appears only on Friday)
+            //          Result: Mon-Thu show [ES, EP], Friday shows [ES, EP, DV]
             for (const date of datesToUse) {
-              // Start with ALL project members (they appear on every date, regardless of tasks)
+              // ALWAYS start with ALL project members (they appear on every date, regardless of tasks on that date)
               const finalAssignees = new Set<string>(entry.projectMembers)
               
-              // Get assignees for this specific date (from tasks on that date)
+              // Get assignees who have tasks specifically on this date
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
               
-              // Add any date-specific assignees who are NOT already project members
-              // This handles cases where a task is assigned to someone outside the project team
+              // Add date-specific assignees (people who only have tasks on this one date)
+              // These are people who are NOT project members (they only appear on one date, not multiple)
               for (const name of dateAssignees) {
                 if (!entry.projectMembers.has(name)) {
+                  // This person only has tasks on this date (single-date assignee), so add them only to this date
                   finalAssignees.add(name)
                 }
                 // Note: If a project member has a task on this date, they're already in finalAssignees
-                // because we started with all projectMembers above
+                // because we started with all projectMembers above (line 1164)
               }
               
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: Array.from(finalAssignees), // Always includes project members + any date-specific non-members
+                assignees: Array.from(finalAssignees), 
+                // Contains: Project members (appear every day) + Date-specific assignees (appear only on this date)
               })
             }
           }
@@ -2437,7 +2434,8 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0.05in 0.1in 0.51in 0.1in;
+            margin: 0.1in 0.1in 0.51in 0.1in;
+            size: landscape;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -2446,26 +2444,45 @@ export default function CommonViewPage() {
           aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
             display: none !important;
           }
-          body, html { background: white; }
-          main { padding: 0 !important; }
-          .view-container { padding: 0; background: white; }
+          body, html { 
+            background: white;
+            margin: 0;
+            padding: 0;
+          }
+          main { 
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .view-container { 
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white;
+          }
           .print-page {
             position: relative;
             padding-top: 0;
             padding-bottom: 0.35in;
-            page-break-before: avoid;
+            margin: 0;
+            page-break-before: auto;
           }
           .week-table-view { 
             display: block !important; 
             padding-top: 0;
             padding-bottom: 0.35in; 
-            page-break-before: avoid;
+            margin: 0;
+            page-break-before: auto;
           }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
+            margin-top: 0;
+            padding-top: 0;
+            page-break-after: avoid;
+          }
+          .week-table {
+            page-break-inside: avoid;
             margin-top: 0;
           }
           .print-title {
@@ -2561,6 +2578,17 @@ export default function CommonViewPage() {
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;
+          }
+          .swimlane-cell.swimlane-accent.priority {
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .swimlane-cell.swimlane-accent.priority .swimlane-title {
+            flex: 1 !important;
+          }
+          .swimlane-cell.swimlane-accent.priority .swimlane-assignees {
+            flex-shrink: 0 !important;
           }
         }
         
@@ -2945,6 +2973,11 @@ export default function CommonViewPage() {
           background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
           position: relative;
         }
+        .swimlane-cell.swimlane-accent.priority {
+          flex-direction: row;
+          align-items: center;
+          gap: 12px;
+        }
         .swimlane-cell:nth-child(3n) {
           border-right: 0;
         }
@@ -2958,6 +2991,9 @@ export default function CommonViewPage() {
         .swimlane-title {
           font-weight: 700;
           font-size: 14px;
+        }
+        .swimlane-cell.swimlane-accent.priority .swimlane-title {
+          flex: 1;
         }
         .swimlane-subtitle {
           font-size: 12px;
@@ -2991,6 +3027,9 @@ export default function CommonViewPage() {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
+        }
+        .swimlane-cell.swimlane-accent.priority .swimlane-assignees {
+          flex-shrink: 0;
         }
         .swimlane-avatar {
           display: inline-flex;
@@ -3140,11 +3179,18 @@ export default function CommonViewPage() {
         @media print {
           .week-table-view {
             display: block !important;
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          .week-table-view .print-header {
+            page-break-after: avoid;
+            margin-bottom: 8px;
           }
           .week-table {
             page-break-inside: avoid;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            margin-top: 0;
           }
           .week-table thead {
             display: table-header-group;
