@@ -899,9 +899,13 @@ export default function CommonViewPage() {
           }
           
           const today = toISODate(new Date())
-          // Group priority items by project_id only (not by project_id-date)
+          // Group priority items by project_id, tracking assignees per date
           // This ensures all users see the same projects
-          const priorityMap = new Map<string, { project: string; assignees: Set<string>; dates: Set<string> }>()
+          const priorityMap = new Map<string, { 
+            project: string; 
+            assigneesByDate: Map<string, Set<string>>; // Track assignees per date
+            dates: Set<string> 
+          }>()
 
           for (const t of tasks) {
             // Only show tasks that are in progress (not completed)
@@ -967,7 +971,7 @@ export default function CommonViewPage() {
               })
             }
 
-            // Priority items - group by project_id only (not by date)
+            // Priority items - group by project_id, tracking assignees per date
             // This ensures all users see the same projects on the same dates
             if (t.project_id) {
               const projectName = projectNameById.get(t.project_id)
@@ -982,7 +986,7 @@ export default function CommonViewPage() {
               if (!priorityMap.has(projectKey)) {
                 priorityMap.set(projectKey, {
                   project: projectName,
-                  assignees: new Set<string>(),
+                  assigneesByDate: new Map<string, Set<string>>(),
                   dates: new Set<string>(),
                 })
               }
@@ -992,9 +996,13 @@ export default function CommonViewPage() {
               // Add this task's date to the project's dates
               entry.dates.add(taskDate)
               
-              // Collect all assignees
+              // Track assignees for this specific date
+              if (!entry.assigneesByDate.has(taskDate)) {
+                entry.assigneesByDate.set(taskDate, new Set<string>())
+              }
+              const dateAssignees = entry.assigneesByDate.get(taskDate)!
               for (const name of assigneeNames) {
-                entry.assignees.add(name)
+                dateAssignees.add(name)
               }
             }
           }
@@ -1011,7 +1019,7 @@ export default function CommonViewPage() {
               
               priorityMap.set(projectId, {
                 project: projectName,
-                assignees: new Set<string>(),
+                assigneesByDate: new Map<string, Set<string>>(),
                 dates: new Set<string>(),
               })
             }
@@ -1023,8 +1031,6 @@ export default function CommonViewPage() {
           for (const [projectKey, entry] of priorityMap.entries()) {
             const project = projectInfoById.get(projectKey)
             if (!project) continue // Skip if project info not available
-            
-            const assignees = Array.from(entry.assignees)
             
             // Check if this is MST or VS/VL project in Product Content Manager
             const isMstByType = project.project_type === "MST"
@@ -1077,11 +1083,16 @@ export default function CommonViewPage() {
             }
             
             // Create one priority entry per date for this project
+            // Only include assignees who have tasks on that specific date
             for (const date of datesToUse) {
+              // Get assignees for this specific date, or empty array if no tasks on this date
+              const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
+              const assigneesForDate = Array.from(dateAssignees)
+              
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: assignees, // Same assignees for all dates
+                assignees: assigneesForDate, // Only assignees with tasks on this date
               })
             }
           }
@@ -3619,13 +3630,59 @@ export default function CommonViewPage() {
               Multi-select (Types)
             </label>
           </div>
-          <input
-            className="input"
-            type="date"
-            value={toISODate(weekStart)}
-            onChange={(e) => setWeek(e.target.value)}
-            style={{ width: "auto" }}
-          />
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", width: "auto" }}>
+            <input
+              className="input"
+              type="text"
+              placeholder="DD/MM/YYYY"
+              value={toDDMMYYYY(toISODate(weekStart))}
+              onChange={(e) => {
+                const value = e.target.value
+                const isoDate = fromDDMMYYYY(value)
+                if (isoDate) {
+                  setWeek(isoDate)
+                }
+              }}
+              pattern="\d{2}/\d{2}/\d{4}"
+              style={{ width: "140px", paddingRight: "35px" }}
+            />
+            <input
+              type="date"
+              value={toISODate(weekStart)}
+              onChange={(e) => setWeek(e.target.value)}
+              style={{
+                position: "absolute",
+                right: "8px",
+                opacity: 0,
+                width: "24px",
+                height: "24px",
+                cursor: "pointer",
+                zIndex: 1
+              }}
+              title="Open calendar"
+            />
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                position: "absolute",
+                right: "10px",
+                pointerEvents: "none",
+                color: "#666"
+              }}
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+          </div>
           <button className="btn-outline" type="button" onClick={selectAll}>
             All days
           </button>
@@ -4628,23 +4685,68 @@ export default function CommonViewPage() {
 
                   <div className="form-row">
                     <label htmlFor="cv-date">Date (DD/MM/YYYY)</label>
-                    <input
-                      id="cv-date"
-                      className="input"
-                      type="text"
-                      placeholder="DD/MM/YYYY"
-                      value={formDateDisplay}
-                      onChange={(e) => {
-                        const value = e.target.value
-                        setFormDateDisplay(value)
-                        const isoDate = fromDDMMYYYY(value)
-                        if (isoDate) {
-                          setFormDate(isoDate)
-                        }
-                      }}
-                      pattern="\d{2}/\d{2}/\d{4}"
-                      required
-                    />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                      <input
+                        id="cv-date"
+                        className="input"
+                        type="text"
+                        placeholder="DD/MM/YYYY"
+                        value={formDateDisplay}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          setFormDateDisplay(value)
+                          const isoDate = fromDDMMYYYY(value)
+                          if (isoDate) {
+                            setFormDate(isoDate)
+                          }
+                        }}
+                        pattern="\d{2}/\d{2}/\d{4}"
+                        required
+                        style={{ flex: 1 }}
+                      />
+                      <input
+                        type="date"
+                        value={formDate}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          if (value) {
+                            setFormDate(value)
+                            setFormDateDisplay(toDDMMYYYY(value))
+                          }
+                        }}
+                        style={{
+                          position: "absolute",
+                          right: "8px",
+                          opacity: 0,
+                          width: "24px",
+                          height: "24px",
+                          cursor: "pointer",
+                          zIndex: 1
+                        }}
+                        title="Open calendar"
+                      />
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{
+                          position: "absolute",
+                          right: "10px",
+                          pointerEvents: "none",
+                          color: "#666"
+                        }}
+                      >
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </div>
                   </div>
 
                   {formType === "late" && (
@@ -4701,24 +4803,72 @@ export default function CommonViewPage() {
                     <>
                       <div className="form-row">
                         <label htmlFor="cv-enddate">Until (optional) (DD/MM/YYYY)</label>
-                        <input
-                          id="cv-enddate"
-                          className="input"
-                          type="text"
-                          placeholder="DD/MM/YYYY"
-                          value={formEndDateDisplay}
-                          onChange={(e) => {
-                            const value = e.target.value
-                            setFormEndDateDisplay(value)
-                            const isoDate = fromDDMMYYYY(value)
-                            if (isoDate) {
-                              setFormEndDate(isoDate)
-                            } else if (!value) {
-                              setFormEndDate("")
-                            }
-                          }}
-                          pattern="\d{2}/\d{2}/\d{4}"
-                        />
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                          <input
+                            id="cv-enddate"
+                            className="input"
+                            type="text"
+                            placeholder="DD/MM/YYYY"
+                            value={formEndDateDisplay}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              setFormEndDateDisplay(value)
+                              const isoDate = fromDDMMYYYY(value)
+                              if (isoDate) {
+                                setFormEndDate(isoDate)
+                              } else if (!value) {
+                                setFormEndDate("")
+                              }
+                            }}
+                            pattern="\d{2}/\d{2}/\d{4}"
+                            style={{ flex: 1 }}
+                          />
+                          <input
+                            type="date"
+                            value={formEndDate || ""}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              if (value) {
+                                setFormEndDate(value)
+                                setFormEndDateDisplay(toDDMMYYYY(value))
+                              } else {
+                                setFormEndDate("")
+                                setFormEndDateDisplay("")
+                              }
+                            }}
+                            style={{
+                              position: "absolute",
+                              right: "8px",
+                              opacity: 0,
+                              width: "24px",
+                              height: "24px",
+                              cursor: "pointer",
+                              zIndex: 1
+                            }}
+                            title="Open calendar"
+                          />
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{
+                              position: "absolute",
+                              right: "10px",
+                              pointerEvents: "none",
+                              color: "#666"
+                            }}
+                          >
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                          </svg>
+                        </div>
                       </div>
                       <div className="form-row span-2 leave-inline">
                         <label className="checkbox leave-checkbox">
