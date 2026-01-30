@@ -253,6 +253,7 @@ export interface ProjectPrompt {
   id: string
   project_id: string
   type: "GA_PROMPT" | "ZHVILLIM_PROMPT"
+  title: string
   content: string
   created_at: string
 }
