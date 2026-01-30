@@ -1142,13 +1142,13 @@ export default function DepartmentKanban() {
   )
   const noProjectAssigneeLabel = React.useMemo(() => {
     if (noProjectAssignees.length === 0) return "Unassigned"
-    if (departmentUsers.length && noProjectAssignees.length === departmentUsers.length) return "All team"
+    if (users.length && noProjectAssignees.length === users.length) return "All users"
     if (noProjectAssignees.length === 1) {
-      const selected = departmentUsers.find((u) => u.id === noProjectAssignees[0])
+      const selected = users.find((u) => u.id === noProjectAssignees[0])
       return selected?.full_name || selected?.username || "1 selected"
     }
     return `${noProjectAssignees.length} selected`
-  }, [departmentUsers, noProjectAssignees])
+  }, [users, noProjectAssignees])
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const printedAt = React.useMemo(() => new Date(), [])
@@ -4596,8 +4596,8 @@ export default function DepartmentKanban() {
                                   <DialogTitle>Select Assignees</DialogTitle>
                                 </DialogHeader>
                                 <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
-                                  {departmentUsers.length ? (
-                                    departmentUsers.map((u) => {
+                                  {users.length ? (
+                                    users.map((u) => {
                                       const isSelected = noProjectAssignees.includes(u.id)
                                       return (
                                         <div
@@ -4619,7 +4619,7 @@ export default function DepartmentKanban() {
                                       )
                                     })
                                   ) : (
-                                    <div className="text-sm text-slate-600">No team members available.</div>
+                                    <div className="text-sm text-slate-600">No users available.</div>
                                   )}
                                 </div>
                                 <div className="mt-4 flex justify-end gap-2">
@@ -4628,10 +4628,10 @@ export default function DepartmentKanban() {
                                   </Button>
                                   <Button
                                     variant="outline"
-                                    onClick={() => setNoProjectAssignees(departmentUsers.map((u) => u.id))}
-                                    disabled={!departmentUsers.length}
+                                    onClick={() => setNoProjectAssignees(users.map((u) => u.id))}
+                                    disabled={!users.length}
                                   >
-                                    All team
+                                    All users
                                   </Button>
                                   <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
                                     Done
