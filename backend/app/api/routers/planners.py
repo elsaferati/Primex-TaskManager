@@ -625,7 +625,8 @@ async def weekly_table_planner(
     dev_dept_names = {"Development"}
     dev_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in dev_dept_names}
     # Product Content department: tasks should only show on due_date, not from start_date to due_date
-    pc_dept_names = {"Product Content"}
+    # Note: Database may store "Project Content Manager" but display name is "Product Content"
+    pc_dept_names = {"Product Content", "Project Content Manager"}
     pc_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in pc_dept_names}
 
     # Get departments to show
@@ -678,18 +679,28 @@ async def weekly_table_planner(
         if task.project_id is None and task.system_template_origin_id is None:
             # Fast tasks should only show on their due date.
             return due, due
+        
         # For Product Content department, tasks should only show on due_date, not from start_date to due_date
         # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
         task_dept_id = task.department_id
         project_dept_id = None
-        if task.project_id and task.project_id in project_map:
-            project = project_map[task.project_id]
-            if project:
-                project_dept_id = project.department_id
+        if task.project_id:
+            # Try to get project from map
+            if task.project_id in project_map:
+                project = project_map[task.project_id]
+                if project:
+                    project_dept_id = project.department_id
+            # If project not in map, try to find it (shouldn't happen, but defensive)
+            else:
+                # Project should already be in map, but if not, we'll check task's department
+                pass
+        
         is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
         if is_pc_task and task.project_id is not None:
-            # Product Content project tasks: show only on due_date
+            # Product Content project tasks: show only on due_date (ignore start_date)
             return due, due
+        
+        # For non-Product Content tasks, use start_date if available
         if task.start_date is not None:
             start = task.start_date.date()
             # Only treat start_date as planning start if it forms a valid interval.
@@ -699,7 +710,16 @@ async def weekly_table_planner(
         return due, due
 
     def _task_active_range(task: Task) -> tuple[date | None, date | None]:
-        if task.department_id in dev_dept_ids and task.project_id is not None:
+        # Check if task belongs to Development department (check both task and project)
+        task_dept_id = task.department_id
+        project_dept_id = None
+        if task.project_id and task.project_id in project_map:
+            project = project_map[task.project_id]
+            if project:
+                project_dept_id = project.department_id
+        is_dev_task = (task_dept_id in dev_dept_ids) or (project_dept_id in dev_dept_ids)
+        
+        if is_dev_task and task.project_id is not None:
             start = task.created_at.date()
             end = task.completed_at.date() if task.completed_at else week_end
             if end < start:
