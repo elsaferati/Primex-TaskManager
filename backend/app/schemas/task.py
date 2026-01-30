@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -72,6 +72,12 @@ class TaskCreate(BaseModel):
     is_r1: bool | None = None
     is_personal: bool | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
+
+
+class TaskRemoveFromDayRequest(BaseModel):
+    day_date: date
+    user_id: uuid.UUID
+    time_slot: str | None = None
 
 
 class TaskUpdate(BaseModel):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,11 +18,12 @@ from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.meeting import Meeting
 from app.models.project import Project
+from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.task import Task
 from app.models.user import User
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.task_assignee import TaskAssignee
-from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectOut, ProjectRemoveFromDayRequest, ProjectUpdate
 from app.schemas.vs_workflow_item import VsWorkflowItemOut, VsWorkflowItemUpdate
 from app.services.workflow_service import (
     initialize_vs_workflow,
@@ -667,6 +668,50 @@ async def delete_project(
     await db.delete(project)
     await db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/{project_id}/remove-from-day", response_model=None)
+async def remove_project_from_day(
+    project_id: uuid.UUID,
+    payload: ProjectRemoveFromDayRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can remove projects from days")
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.department_id is not None:
+        ensure_department_access(user, project.department_id)
+
+    slot = (payload.time_slot or "ALL").strip().upper()
+    if slot not in ("AM", "PM", "ALL"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid time slot")
+
+    existing = (
+        await db.execute(
+            select(ProjectPlannerExclusion).where(
+                ProjectPlannerExclusion.project_id == project.id,
+                ProjectPlannerExclusion.user_id == payload.user_id,
+                ProjectPlannerExclusion.day_date == payload.day_date,
+                ProjectPlannerExclusion.time_slot == slot,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    exclusion = ProjectPlannerExclusion(
+        project_id=project.id,
+        user_id=payload.user_id,
+        day_date=payload.day_date,
+        time_slot=slot,
+        created_by=user.id,
+    )
+    db.add(exclusion)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{project_id}/workflow-items", response_model=list[VsWorkflowItemOut])

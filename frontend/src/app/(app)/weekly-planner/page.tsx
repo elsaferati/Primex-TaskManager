@@ -32,6 +32,7 @@ type WeeklyTableProjectTaskEntry = {
   status?: string | null
   completed_at?: string | null
   daily_products: number | null
+  finish_period?: string | null
   is_bllok: boolean
   is_1h_report: boolean
   is_r1: boolean
@@ -54,6 +55,7 @@ type WeeklyTableTaskEntry = {
   status?: string | null
   completed_at?: string | null
   daily_products: number | null
+  finish_period?: string | null
   fast_task_type?: string | null
   is_bllok: boolean
   is_1h_report: boolean
@@ -223,62 +225,103 @@ export default function WeeklyPlannerPage() {
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
 
-  const deleteTask = React.useCallback(async (taskId: string, taskTitle?: string) => {
+  const deleteTask = React.useCallback(async (
+    taskId: string,
+    taskTitle?: string,
+    timeSlot?: "am" | "pm",
+    dayDate?: string,
+    userId?: string
+  ) => {
     if (!taskId) return
+    if (!dayDate || !userId) {
+      toast.error("Missing planner context to remove this task.")
+      return
+    }
 
-    // Confirmation dialog
+    const slotLabel = timeSlot ? timeSlot.toUpperCase() : "this slot"
     const confirmed = window.confirm(
       taskTitle
-        ? `Are you sure you want to delete the task "${taskTitle}"?\n\nThis action cannot be undone.`
-        : "Are you sure you want to delete this task?\n\nThis action cannot be undone."
+        ? `Remove task "${taskTitle}" from ${slotLabel} on ${dayDate} for this user?`
+        : `Remove this task from ${slotLabel} on ${dayDate} for this user?`
     )
 
     if (!confirmed) return
 
     setDeletingTaskId(taskId)
     try {
-      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      const body: any = {
+        day_date: dayDate,
+        user_id: userId,
+      }
+      if (timeSlot) {
+        body.time_slot = timeSlot.toUpperCase()
+      }
+      const res = await apiFetch(`/tasks/${taskId}/remove-from-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
       if (!res.ok) {
-        toast.error("Failed to delete task")
+        toast.error("Failed to remove task")
         return
       }
-      toast.success("Task deleted")
-      // Refresh data
-      const params = new URLSearchParams()
+      toast.success("Task removed from this slot")
+      const refreshParams = new URLSearchParams()
       if (departmentId !== ALL_DEPARTMENTS_VALUE) {
-        params.set("department_id", departmentId)
+        refreshParams.set("department_id", departmentId)
       }
-      params.set("is_this_week", isThisWeek.toString())
-      const tableRes = await apiFetch(`/planners/weekly-table?${params.toString()}`)
+      refreshParams.set("is_this_week", isThisWeek.toString())
+      const tableRes = await apiFetch(`/planners/weekly-table?${refreshParams.toString()}`)
       if (tableRes.ok) {
         setData(await tableRes.json())
       }
     } catch {
-      toast.error("Failed to delete task")
+      toast.error("Failed to remove task")
     } finally {
       setDeletingTaskId(null)
     }
   }, [apiFetch, departmentId, isThisWeek])
 
-  const deleteProject = React.useCallback(async (projectId: string, projectTitle?: string) => {
+  const deleteProject = React.useCallback(async (
+    projectId: string,
+    projectTitle?: string,
+    timeSlot?: "am" | "pm",
+    dayDate?: string,
+    userId?: string
+  ) => {
     if (!projectId) return
+    if (!dayDate || !userId) {
+      toast.error("Missing planner context to remove this project.")
+      return
+    }
 
+    const slotLabel = timeSlot ? timeSlot.toUpperCase() : "this slot"
     const confirmed = window.confirm(
       projectTitle
-        ? `Are you sure you want to delete the project "${projectTitle}"?\n\nThis action cannot be undone.`
-        : "Are you sure you want to delete this project?\n\nThis action cannot be undone."
+        ? `Remove project "${projectTitle}" from ${slotLabel} on ${dayDate} for this user?`
+        : `Remove this project from ${slotLabel} on ${dayDate} for this user?`
     )
     if (!confirmed) return
 
     setDeletingProjectId(projectId)
     try {
-      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      const body: any = {
+        day_date: dayDate,
+        user_id: userId,
+      }
+      if (timeSlot) {
+        body.time_slot = timeSlot.toUpperCase()
+      }
+      const res = await apiFetch(`/projects/${projectId}/remove-from-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
       if (!res.ok) {
-        toast.error("Failed to delete project")
+        toast.error("Failed to remove project")
         return
       }
-      toast.success("Project deleted")
-      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      toast.success("Project removed from this slot")
       const params = new URLSearchParams()
       if (departmentId !== ALL_DEPARTMENTS_VALUE) {
         params.set("department_id", departmentId)
@@ -289,7 +332,7 @@ export default function WeeklyPlannerPage() {
         setData(await tableRes.json())
       }
     } catch {
-      toast.error("Failed to delete project")
+      toast.error("Failed to remove project")
     } finally {
       setDeletingProjectId(null)
     }
@@ -694,6 +737,37 @@ export default function WeeklyPlannerPage() {
     }
     return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
   }, [getTaskStatusBadge, fastTaskBadgeStyles])
+
+  const fastTaskSortOrder = ["BLL", "1H", "GA", "P:", "R1", "N"] as const
+  const fastTaskSortRank = new Map<string, number>(
+    fastTaskSortOrder.map((label, index) => [label, index])
+  )
+
+  const getFastTaskSortLabel = React.useCallback((task: {
+    is_bllok?: boolean
+    is_1h_report?: boolean
+    is_r1?: boolean
+    is_personal?: boolean
+    ga_note_origin_id?: string | null
+    fast_task_type?: string | null
+  }) => {
+    const badge = getFastTaskBadge(task)
+    return badge?.label || "N"
+  }, [getFastTaskBadge])
+
+  const sortFastTasks = React.useCallback((tasks: WeeklyTableTaskEntry[]) => (
+    tasks
+      .map((task, index) => ({ task, index }))
+      .sort((a, b) => {
+        const aLabel = getFastTaskSortLabel(a.task)
+        const bLabel = getFastTaskSortLabel(b.task)
+        const aRank = fastTaskSortRank.get(aLabel) ?? fastTaskSortOrder.length
+        const bRank = fastTaskSortRank.get(bLabel) ?? fastTaskSortOrder.length
+        if (aRank !== bRank) return aRank - bRank
+        return a.index - b.index
+      })
+      .map((entry) => entry.task)
+  ), [getFastTaskSortLabel, fastTaskSortOrder.length, fastTaskSortRank])
 
   const handlePrint = React.useCallback(() => {
     if (!data) return
@@ -1130,7 +1204,7 @@ export default function WeeklyPlannerPage() {
       html += `<td class="print-subhead time-cell">AM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const fastTasks = userDay?.am_fast_tasks || []
+        const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
 
         html += `<td>`
         if (fastTasks.length > 0) {
@@ -1217,7 +1291,7 @@ export default function WeeklyPlannerPage() {
       html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const fastTasks = userDay?.pm_fast_tasks || []
+        const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
 
         html += `<td>`
         if (fastTasks.length > 0) {
@@ -1307,7 +1381,7 @@ export default function WeeklyPlannerPage() {
       renderPages()
       printWindow.print()
     }, 200)
-  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge])
+  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge, sortFastTasks])
 
   const parseFilenameFromDisposition = (headerValue: string | null) => {
     if (!headerValue) return null
@@ -1794,12 +1868,13 @@ export default function WeeklyPlannerPage() {
                             systemTasks: WeeklyTableTaskEntry[],
                             fastTasks: WeeklyTableTaskEntry[],
                             timeSlot: "am" | "pm",
-                            dayDate: string
+                            dayDate: string,
+                            userId: string
                           ) => {
                             // Ensure arrays are defined
                             const projectsList = projects || []
                             const systemTasksList = systemTasks || []
-                            const fastTasksList = fastTasks || []
+                            const fastTasksList = sortFastTasks(fastTasks || [])
 
                             const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
 
@@ -1839,7 +1914,7 @@ export default function WeeklyPlannerPage() {
                                             type="button"
                                             onClick={(e) => {
                                               e.stopPropagation()
-                                              void deleteProject(project.project_id, project.project_title)
+                                              void deleteProject(project.project_id, project.project_title, timeSlot, dayDate, userId)
                                             }}
                                             disabled={deletingProjectId === project.project_id}
                                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
@@ -1884,7 +1959,7 @@ export default function WeeklyPlannerPage() {
                                                     type="button"
                                                     onClick={(e) => {
                                                       e.stopPropagation()
-                                                      void deleteTask(task.task_id, task.task_title)
+                                                      void deleteTask(task.task_id, task.task_title, timeSlot, dayDate, userId)
                                                     }}
                                                     disabled={deletingTaskId === task.task_id}
                                                     className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
@@ -1939,7 +2014,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title)
+                                                  void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
@@ -1986,7 +2061,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title)
+                                                  void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
@@ -2008,16 +2083,20 @@ export default function WeeklyPlannerPage() {
                           const renderProjectsAndSystem = (
                             projects: WeeklyTableProjectEntry[],
                             systemTasks: WeeklyTableTaskEntry[],
-                            dayDate: string
+                            dayDate: string,
+                            timeSlot: "am" | "pm",
+                            userId: string
                           ) => (
-                            renderCellContent(projects, systemTasks, [], "am", dayDate)
+                            renderCellContent(projects, systemTasks, [], timeSlot, dayDate, userId)
                           )
 
                           const renderFastOnly = (
                             fastTasks: WeeklyTableTaskEntry[],
-                            dayDate: string
+                            dayDate: string,
+                            timeSlot: "am" | "pm",
+                            userId: string
                           ) => (
-                            renderCellContent([], [], fastTasks, "am", dayDate)
+                            renderCellContent([], [], fastTasks, timeSlot, dayDate, userId)
                           )
 
                           return (
@@ -2047,7 +2126,9 @@ export default function WeeklyPlannerPage() {
                                         ? renderProjectsAndSystem(
                                           userDay.am_projects || [],
                                           userDay.am_system_tasks || [],
-                                          day.date
+                                          day.date,
+                                          "am",
+                                          user.user_id
                                         )
                                         : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                     </TableCell>
@@ -2070,7 +2151,9 @@ export default function WeeklyPlannerPage() {
                                       {userDay
                                         ? renderFastOnly(
                                           userDay.am_fast_tasks || [],
-                                          day.date
+                                          day.date,
+                                          "am",
+                                          user.user_id
                                         )
                                         : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                     </TableCell>
@@ -2094,7 +2177,9 @@ export default function WeeklyPlannerPage() {
                                         ? renderProjectsAndSystem(
                                           userDay.pm_projects || [],
                                           userDay.pm_system_tasks || [],
-                                          day.date
+                                          day.date,
+                                          "pm",
+                                          user.user_id
                                         )
                                         : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                     </TableCell>
@@ -2117,7 +2202,9 @@ export default function WeeklyPlannerPage() {
                                       {userDay
                                         ? renderFastOnly(
                                           userDay.pm_fast_tasks || [],
-                                          day.date
+                                          day.date,
+                                          "pm",
+                                          user.user_id
                                         )
                                         : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
                                     </TableCell>

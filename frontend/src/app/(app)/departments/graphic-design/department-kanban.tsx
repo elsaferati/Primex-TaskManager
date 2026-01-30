@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
@@ -217,6 +218,43 @@ function toDate(value?: string | null) {
 
 function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10)
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  const day = date.getDate().toString().padStart(2, "0")
+  const month = (date.getMonth() + 1).toString().padStart(2, "0")
+  let hours = date.getHours()
+  const minutes = date.getMinutes().toString().padStart(2, "0")
+  const ampm = hours >= 12 ? "PM" : "AM"
+  hours = hours % 12
+  hours = hours ? hours : 12 // the hour '0' should be '12'
+  const hoursStr = hours.toString().padStart(2, "0")
+  return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
+}
+
+function getInitials(label: string) {
+  const trimmed = label.trim()
+  if (!trimmed) return "?"
+  const parts = trimmed.split(/\s+/)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+}
+
+function abbreviateDepartmentName(name: string): string {
+  const lowerName = name.toLowerCase()
+  if (lowerName.includes("development")) return "DEV"
+  if (lowerName.includes("graphic") && lowerName.includes("design")) return "GDS"
+  if (lowerName.includes("product") && lowerName.includes("content")) return "PCM"
+  if (lowerName.includes("project content")) return "PCM"
+  // Return first 3 letters as fallback
+  return name.slice(0, 3).toUpperCase()
+}
+
+const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
+  NORMAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
 
 function formatDayLabel(date: Date) {
@@ -4190,90 +4228,156 @@ export default function DepartmentKanban() {
                     </DialogContent>
                   </Dialog>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {visibleGaNotes.length ? visibleGaNotes.map(note => {
-                    const author = users.find(u => u.id === note.created_by)
-                    const project = note.project_id ? projects.find(p => p.id === note.project_id) : null
-                    const isHighPriority = note.priority === "HIGH"
-                    return (
-                      <Card
-                        key={note.id}
-                        className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border-l-4 p-5 shadow-sm ring-1 transition hover:shadow-md ${
-                          isHighPriority
-                            ? "border-l-red-500 border-0 bg-red-50/60 ring-red-900/5 dark:bg-red-950/60 dark:ring-red-500/10"
-                            : "border-0 bg-white/60 ring-slate-900/5 dark:bg-slate-900/60 dark:ring-white/10"
-                        }`}
-                      >
-                        <div className="absolute top-0 right-0 h-16 w-16 -translate-y-6 translate-x-6 rounded-full bg-slate-50 dark:bg-slate-800"></div>
-                        <div className="relative z-10">
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                              <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${note.note_type === "KA" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
-                                {note.note_type}
-                              </span>
-                              {note.priority && (
-                                <span
-                                  className={`rounded-md px-2 py-1 text-[10px] font-bold ${
-                                    isHighPriority ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"
-                                  }`}
-                                >
-                                  {note.priority}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span>
-                          </div>
-                          <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{note.content}</p>
-                        </div>
-                        <div className="relative z-10 mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-600 dark:bg-slate-800">
-                              {initials(author?.full_name || "?")}
-                            </div>
-                            <span className="text-[10px] text-slate-400">{project ? formatProjectTitleWithProducts(project) : "General"}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {gaNoteTaskMap.has(note.id) ? (
-                              <Link href={`/tasks/${gaNoteTaskMap.get(note.id)!.id}`}>
-                                <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                                  View Task
-                                </Button>
-                              </Link>
-                            ) : !isReadOnly && note.status !== "CLOSED" ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 gap-1 px-2 text-[10px]"
-                                onClick={() => {
-                                  setGaNoteTaskOpenId(note.id)
-                                  setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
-                                  setGaNoteTaskAssigneeId("__unassigned__")
-                                  setGaNoteTaskPriority(note.priority || "NORMAL")
-                                }}
-                              >
-                                Create Task
-                              </Button>
-                            ) : null}
-                            {note.status !== "CLOSED" && !isReadOnly ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-[10px]"
-                                onClick={() => void closeGaNote(note.id)}
-                              >
-                                Archive
-                              </Button>
-                            ) : note.status === "CLOSED" ? (
-                              <Badge variant="secondary" className="h-5 text-[10px]">
-                                Archived
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </div>
-                      </Card>
-                    )
-                  }) : <div className="col-span-full py-12 text-center text-sm text-slate-400">No active notes.</div>}
+                <div className="rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
+                  <div className="w-full min-w-[1050px]">
+                    <table className="w-full caption-bottom text-sm min-w-[1050px]">
+                      <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
+                        <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
+                          <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>Nr</th>
+                          <th className="w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                          <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
+                          <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
+                          <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
+                          <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
+                          <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
+                          <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL SHENIM</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleGaNotes.length ? (
+                          [...visibleGaNotes]
+                            .sort((a, b) => {
+                              // First, sort by status: open notes first, closed notes last
+                              const aIsClosed = a.status === "CLOSED"
+                              const bIsClosed = b.status === "CLOSED"
+                              if (aIsClosed !== bIsClosed) {
+                                return aIsClosed ? 1 : -1 // Closed notes go to the end
+                              }
+                              // Then sort by priority: HIGH first, then NORMAL
+                              const order = ["HIGH", "NORMAL"]
+                              const aRank = a.priority ? order.indexOf(a.priority) : order.length
+                              const bRank = b.priority ? order.indexOf(b.priority) : order.length
+                              if (aRank !== bRank) return aRank - bRank
+                              // Finally sort by creation date (newest first)
+                              const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+                              const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+                              return bTime - aTime
+                            })
+                            .map((note, idx) => {
+                              const author = users.find((u) => u.id === note.created_by) || null
+                              const project = note.project_id ? projects.find((p) => p.id === note.project_id) : null
+                              const linkedTask = gaNoteTaskMap.get(note.id) || null
+                              const creatorLabel = author?.full_name || author?.username || "Unknown user"
+                              const creatorInitials = getInitials(creatorLabel)
+                              const creatorBadgeClasses =
+                                creatorInitials === "GA"
+                                  ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                  : creatorInitials === "KA"
+                                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                    : "bg-slate-200 text-slate-700"
+                              // Use the current department if the note's department_id matches, otherwise show nothing
+                              const noteDepartment = note.department_id === department?.id ? department : null
+
+                              return (
+                                <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
+                                  <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
+                                  <td className="whitespace-pre-wrap break-words w-[450px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: 'bottom' }}>
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-sm">{note.content}</span>
+                                      <div className="flex items-center gap-2">
+                                        {note.priority ? (
+                                          <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as "NORMAL" | "HIGH"]}`}>
+                                            {note.priority}
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
+                                  <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <div
+                                        className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
+                                        title={creatorLabel}
+                                      >
+                                        {creatorInitials}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                    {noteDepartment ? (
+                                      <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
+                                        {abbreviateDepartmentName(noteDepartment.name)}
+                                      </Badge>
+                                    ) : null}
+                                  </td>
+                                  <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                    {project ? (
+                                      <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
+                                        {project.title || project.name || "Project"}
+                                      </Badge>
+                                    ) : null}
+                                  </td>
+                                  <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                    <div className="flex justify-center">
+                                      {linkedTask ? (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
+                                          Task Created
+                                        </Badge>
+                                      ) : !isReadOnly && note.status !== "CLOSED" ? (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                          onClick={() => {
+                                            setGaNoteTaskOpenId(note.id)
+                                            setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
+                                            setGaNoteTaskAssigneeId("__unassigned__")
+                                            setGaNoteTaskPriority(note.priority || "NORMAL")
+                                          }}
+                                        >
+                                          Create Task
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                  <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                    <div className="flex justify-center">
+                                      {note.status !== "CLOSED" ? (
+                                        !isReadOnly ? (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                            onClick={() => void closeGaNote(note.id)}
+                                          >
+                                            Close
+                                          </Button>
+                                        ) : (
+                                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 h-7 flex items-center">
+                                            Open
+                                          </Badge>
+                                        )
+                                      ) : (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 h-7 flex items-center">
+                                          Closed
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                        ) : (
+                          <tr>
+                            <td colSpan={8} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
+                              No GA/KA notes yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}

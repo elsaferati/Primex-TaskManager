@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, insert, select, cast, String as SQLString
@@ -19,8 +19,9 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_alignment_user import TaskAlignmentUser
+from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.user import User
-from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskUpdate
+from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
 from pydantic import BaseModel
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
@@ -824,6 +825,54 @@ async def update_task_user_comment(
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
     return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
+
+
+@router.post("/{task_id}/remove-from-day", response_model=None)
+async def remove_task_from_day(
+    task_id: uuid.UUID,
+    payload: TaskRemoveFromDayRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Remove a task instance for a specific user/day/slot without touching the master task."""
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    
+    if task.department_id is not None:
+        ensure_department_access(current_user, task.department_id)
+    
+    # Only managers and admins can remove tasks from days
+    if current_user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers and admins can remove tasks from days")
+    
+    slot = (payload.time_slot or "ALL").strip().upper()
+    if slot not in ("AM", "PM", "ALL"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid time slot")
+
+    existing = (
+        await db.execute(
+            select(TaskPlannerExclusion).where(
+                TaskPlannerExclusion.task_id == task.id,
+                TaskPlannerExclusion.user_id == payload.user_id,
+                TaskPlannerExclusion.day_date == payload.day_date,
+                TaskPlannerExclusion.time_slot == slot,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    exclusion = TaskPlannerExclusion(
+        task_id=task.id,
+        user_id=payload.user_id,
+        day_date=payload.day_date,
+        time_slot=slot,
+        created_by=current_user.id,
+    )
+    db.add(exclusion)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)

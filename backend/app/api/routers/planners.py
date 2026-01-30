@@ -13,10 +13,12 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
+from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.department import Department
@@ -806,6 +808,65 @@ async def weekly_table_planner(
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
+    exclusion_map: dict[tuple[uuid.UUID, uuid.UUID, date], set[str]] = {}
+    if task_ids and all_users:
+        user_ids = [u.id for u in all_users]
+        exclusion_rows = (
+            await db.execute(
+                select(
+                    TaskPlannerExclusion.task_id,
+                    TaskPlannerExclusion.user_id,
+                    TaskPlannerExclusion.day_date,
+                    TaskPlannerExclusion.time_slot,
+                )
+                .where(TaskPlannerExclusion.day_date >= working_days[0])
+                .where(TaskPlannerExclusion.day_date <= working_days[-1])
+                .where(TaskPlannerExclusion.user_id.in_(user_ids))
+                .where(TaskPlannerExclusion.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_id, day_date, time_slot in exclusion_rows:
+            slot_value = (time_slot or "ALL").strip().upper()
+            exclusion_map.setdefault((task_id, user_id, day_date), set()).add(slot_value)
+
+    def _is_excluded(task_id: uuid.UUID, user_id: uuid.UUID, day_date: date, slot: str) -> bool:
+        slots = exclusion_map.get((task_id, user_id, day_date))
+        if not slots:
+            return False
+        if "ALL" in slots:
+            return True
+        return slot in slots
+
+    project_exclusion_map: dict[tuple[uuid.UUID, uuid.UUID, date], set[str]] = {}
+    if project_map and all_users:
+        project_ids = list(project_map.keys())
+        user_ids = [u.id for u in all_users]
+        project_exclusions = (
+            await db.execute(
+                select(
+                    ProjectPlannerExclusion.project_id,
+                    ProjectPlannerExclusion.user_id,
+                    ProjectPlannerExclusion.day_date,
+                    ProjectPlannerExclusion.time_slot,
+                )
+                .where(ProjectPlannerExclusion.day_date >= working_days[0])
+                .where(ProjectPlannerExclusion.day_date <= working_days[-1])
+                .where(ProjectPlannerExclusion.user_id.in_(user_ids))
+                .where(ProjectPlannerExclusion.project_id.in_(project_ids))
+            )
+        ).all()
+        for project_id, user_id, day_date, time_slot in project_exclusions:
+            slot_value = (time_slot or "ALL").strip().upper()
+            project_exclusion_map.setdefault((project_id, user_id, day_date), set()).add(slot_value)
+
+    def _is_project_excluded(project_id: uuid.UUID, user_id: uuid.UUID, day_date: date, slot: str) -> bool:
+        slots = project_exclusion_map.get((project_id, user_id, day_date))
+        if not slots:
+            return False
+        if "ALL" in slots:
+            return True
+        return slot in slots
+
     # Prefetch active system task templates and resolve assignees for weekly planner display.
     system_templates = (
         await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
@@ -1045,6 +1106,7 @@ async def weekly_table_planner(
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
+                            finish_period=task.finish_period,
                             fast_task_type=get_fast_task_type(task),
                             is_bllok=task.is_bllok,
                             is_1h_report=task.is_1h_report,
@@ -1054,32 +1116,40 @@ async def weekly_table_planner(
                         )
                         if is_both:
                             # Add to both AM and PM
-                            am_fast_tasks.append(entry)
-                            pm_fast_tasks.append(entry)
+                            if not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                                am_fast_tasks.append(entry)
+                            if not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                                pm_fast_tasks.append(entry)
                         elif is_pm:
-                            pm_fast_tasks.append(entry)
+                            if not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                                pm_fast_tasks.append(entry)
                         else:
                             # Default to AM if not PM and not both
-                            am_fast_tasks.append(entry)
+                            if not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                                am_fast_tasks.append(entry)
                     # Project tasks (have project_id)
                     elif task.project_id is not None:
                         if is_both:
                             # Add to both AM and PM
-                            if task.project_id not in am_projects_map:
-                                am_projects_map[task.project_id] = []
-                            am_projects_map[task.project_id].append(task)
-                            if task.project_id not in pm_projects_map:
-                                pm_projects_map[task.project_id] = []
-                            pm_projects_map[task.project_id].append(task)
+                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                                if task.project_id not in am_projects_map:
+                                    am_projects_map[task.project_id] = []
+                                am_projects_map[task.project_id].append(task)
+                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                                if task.project_id not in pm_projects_map:
+                                    pm_projects_map[task.project_id] = []
+                                pm_projects_map[task.project_id].append(task)
                         elif is_pm:
-                            if task.project_id not in pm_projects_map:
-                                pm_projects_map[task.project_id] = []
-                            pm_projects_map[task.project_id].append(task)
+                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                                if task.project_id not in pm_projects_map:
+                                    pm_projects_map[task.project_id] = []
+                                pm_projects_map[task.project_id].append(task)
                         else:
                             # Default to AM if not PM and not both
-                            if task.project_id not in am_projects_map:
-                                am_projects_map[task.project_id] = []
-                            am_projects_map[task.project_id].append(task)
+                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                                if task.project_id not in am_projects_map:
+                                    am_projects_map[task.project_id] = []
+                                am_projects_map[task.project_id].append(task)
                 
                 # Add projects with due dates that don't have tasks yet
                 # These projects should show for members even without tasks
@@ -1091,7 +1161,8 @@ async def weekly_table_planner(
                     # and without tasks (but still visible) on other days until due date
                     if project_id not in am_projects_map and project_id not in pm_projects_map:
                         # Default to AM if no tasks exist
-                        am_projects_map[project_id] = []
+                        if not _is_project_excluded(project_id, dept_user.id, day_date, "AM"):
+                            am_projects_map[project_id] = []
                 
                 # Convert project maps to lists with task details
                 # Include all projects, even if not in project_map (they'll show as "Unknown Project")
@@ -1110,6 +1181,7 @@ async def weekly_table_planner(
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                     completed_at=t.completed_at,
                                     daily_products=t.daily_products,
+                                    finish_period=t.finish_period,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,
                                     is_r1=t.is_r1,
@@ -1136,6 +1208,7 @@ async def weekly_table_planner(
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                     completed_at=t.completed_at,
                                     daily_products=t.daily_products,
+                                    finish_period=t.finish_period,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,
                                     is_r1=t.is_r1,
