@@ -307,8 +307,8 @@ export function PcmMstDetail({ projectTitle, projectStatus, onBack }: PcmMstDeta
             <table className="w-full border-collapse text-sm">
               <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3 text-left">DESCRIPTION/GENERAL POINTS (ME CHECKBOX)</th>
-                  <th className="px-4 py-3 text-left w-48">STATUS/KOMENT</th>
+                  <th className="px-4 py-3 text-left">DESCRIPTION/GENERAL POINTS</th>
+                  <th className="px-4 py-3 text-left w-48">COMENT</th>
                 </tr>
               </thead>
               <tbody className="divide-y">

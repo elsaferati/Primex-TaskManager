@@ -5578,7 +5578,7 @@ export default function PcmProjectPage() {
                   <div className="grid gap-3">
                     {planningTopItems.map((item, idx) => {
                       const isEditing = editingPlanningItemId === item.id
-                      const itemNumber = item.position ?? planningIndexMap.get(item.id) ?? idx + 1
+                      const itemNumber = planningIndexMap.get(item.id) ?? idx + 1
                       return (
                         <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3">
                           <div className="col-span-1 text-right text-xs text-muted-foreground">
@@ -5592,7 +5592,7 @@ export default function PcmProjectPage() {
                                 className="h-8 w-14 text-right"
                               />
                             ) : (
-                              itemNumber ? `${itemNumber}.` : "-"
+                              `${itemNumber}.`
                             )}
                           </div>
                           <div className="col-span-1 flex justify-center">
@@ -5656,15 +5656,15 @@ export default function PcmProjectPage() {
                   <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
                     <div className="col-span-1" />
                     <div className="col-span-1" />
-                    <div className="col-span-6">Description/General Points (me checkbox)</div>
+                    <div className="col-span-6">Description/General Points</div>
                     <div className="col-span-2 text-center">Actions</div>
-                    <div className="col-span-2 text-right">Status/Koment</div>
+                    <div className="col-span-2 text-right">COMENT</div>
                   </div>
 
                   <div className="divide-y border rounded-lg">
-                    {planningOtherItems.map((item) => {
+                    {planningOtherItems.map((item, idx) => {
                       const comment = planningComments[item.id] || item.comment || ""
-                      const itemNumber = item.position ?? planningIndexMap.get(item.id)
+                      const itemNumber = planningIndexMap.get(item.id) ?? (idx + 3)
 
                       return (
                         <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
@@ -5679,7 +5679,7 @@ export default function PcmProjectPage() {
                                 className="h-8 w-14 text-right"
                               />
                             ) : (
-                              itemNumber ? `${itemNumber}.` : "-"
+                              `${itemNumber}.`
                             )}
                           </div>
                           <div className="col-span-1 flex justify-center">
