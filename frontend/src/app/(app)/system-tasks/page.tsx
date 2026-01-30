@@ -2420,7 +2420,7 @@ export function SystemTasksView({
                         </div>
                         <div className="space-y-2">
                           <Label className="text-sm text-muted-foreground">
-                            <span className="uppercase text-red-600">Question/Answer</span> (optional)
+                            <span className="uppercase">Question/Answer</span> (optional)
                           </Label>
                           <Textarea
                             value={internalNotes.QA || ""}
@@ -2816,7 +2816,7 @@ export function SystemTasksView({
                         </div>
                         <div className="space-y-2">
                           <Label className="text-sm text-muted-foreground ">
-                            <span className="uppercase text-red-600">Question/Answer</span> (optional)
+                            <span className="uppercase">Question/Answer</span> (optional)
                           </Label>
                           <Textarea
                             value={editInternalNotes.QA || ""}
