@@ -738,6 +738,37 @@ export default function WeeklyPlannerPage() {
     return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
   }, [getTaskStatusBadge, fastTaskBadgeStyles])
 
+  const fastTaskSortOrder = ["BLL", "1H", "GA", "P:", "R1", "N"] as const
+  const fastTaskSortRank = new Map<string, number>(
+    fastTaskSortOrder.map((label, index) => [label, index])
+  )
+
+  const getFastTaskSortLabel = React.useCallback((task: {
+    is_bllok?: boolean
+    is_1h_report?: boolean
+    is_r1?: boolean
+    is_personal?: boolean
+    ga_note_origin_id?: string | null
+    fast_task_type?: string | null
+  }) => {
+    const badge = getFastTaskBadge(task)
+    return badge?.label || "N"
+  }, [getFastTaskBadge])
+
+  const sortFastTasks = React.useCallback((tasks: WeeklyTableTaskEntry[]) => (
+    tasks
+      .map((task, index) => ({ task, index }))
+      .sort((a, b) => {
+        const aLabel = getFastTaskSortLabel(a.task)
+        const bLabel = getFastTaskSortLabel(b.task)
+        const aRank = fastTaskSortRank.get(aLabel) ?? fastTaskSortOrder.length
+        const bRank = fastTaskSortRank.get(bLabel) ?? fastTaskSortOrder.length
+        if (aRank !== bRank) return aRank - bRank
+        return a.index - b.index
+      })
+      .map((entry) => entry.task)
+  ), [getFastTaskSortLabel, fastTaskSortOrder.length, fastTaskSortRank])
+
   const handlePrint = React.useCallback(() => {
     if (!data) return
 
@@ -1173,7 +1204,7 @@ export default function WeeklyPlannerPage() {
       html += `<td class="print-subhead time-cell">AM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const fastTasks = userDay?.am_fast_tasks || []
+        const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
 
         html += `<td>`
         if (fastTasks.length > 0) {
@@ -1260,7 +1291,7 @@ export default function WeeklyPlannerPage() {
       html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const fastTasks = userDay?.pm_fast_tasks || []
+        const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
 
         html += `<td>`
         if (fastTasks.length > 0) {
@@ -1350,7 +1381,7 @@ export default function WeeklyPlannerPage() {
       renderPages()
       printWindow.print()
     }, 200)
-  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge])
+  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge, sortFastTasks])
 
   const parseFilenameFromDisposition = (headerValue: string | null) => {
     if (!headerValue) return null
@@ -1843,7 +1874,7 @@ export default function WeeklyPlannerPage() {
                             // Ensure arrays are defined
                             const projectsList = projects || []
                             const systemTasksList = systemTasks || []
-                            const fastTasksList = fastTasks || []
+                            const fastTasksList = sortFastTasks(fastTasks || [])
 
                             const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
 
