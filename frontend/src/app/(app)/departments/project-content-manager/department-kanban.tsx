@@ -117,6 +117,9 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-l-red-600",
 }
 
+// Grid layout for system tasks table - matches system-tasks page
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -2532,6 +2535,48 @@ export default function DepartmentKanban() {
       }))
   }, [visibleSystemTasks])
 
+  // Helper function for assignee summary
+  const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
+    if (!list || list.length === 0) return "-"
+    if (list.length <= 2) {
+      return list
+        .map((person) => person.full_name || person.username || ("email" in person ? person.email : ""))
+        .join(", ")
+    }
+    return `${list.length} people`
+  }
+
+  // Flattened and sorted list of all system tasks for table view
+  const sortedSystemTasks = React.useMemo(() => {
+    const frequencyOrder: Record<SystemTaskTemplate["frequency"], number> = {
+      DAILY: 0,
+      WEEKLY: 1,
+      MONTHLY: 2,
+      "3_MONTHS": 3,
+      "6_MONTHS": 4,
+      YEARLY: 5,
+    }
+    const priorityOrder: Record<TaskPriority, number> = {
+      HIGH: 0,
+      NORMAL: 1,
+    }
+    return [...visibleSystemTasks].sort((a, b) => {
+      const aInactive = !a.is_active
+      const bInactive = !b.is_active
+      if (aInactive !== bInactive) return aInactive ? 1 : -1
+      const aFrequency = frequencyOrder[a.frequency] ?? 999
+      const bFrequency = frequencyOrder[b.frequency] ?? 999
+      if (aFrequency !== bFrequency) return aFrequency - bFrequency
+      const aPriority = priorityOrder[normalizePriority(a.priority)]
+      const bPriority = priorityOrder[normalizePriority(b.priority)]
+      if (aPriority !== bPriority) return aPriority - bPriority
+      const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+      if (aCreated !== bCreated) return bCreated - aCreated
+      return a.title.localeCompare(b.title)
+    })
+  }, [visibleSystemTasks])
+
   const submitSystemTask = async () => {
     if (!systemTitle.trim() || !systemDepartmentId) return
     setCreatingSystem(true)
@@ -4405,128 +4450,130 @@ export default function DepartmentKanban() {
                 </Button>
               </div>
 
-              <div className="space-y-4">
-                {systemGroups.length ? (
-                  systemGroups.map((group) => (
-                    <Card
-                      key={group.label}
-                      className="overflow-hidden rounded-2xl border-stone-200/70 bg-white/80 shadow-sm dark:border-stone-800/70 dark:bg-stone-900/70"
-                    >
-                      <div className="flex items-center gap-3 border-b px-4 py-3">
-                        <Badge variant="outline" className="text-xs font-semibold">
-                          {group.label}
-                        </Badge>
-                        <Badge variant="secondary">{group.items.length}</Badge>
+              <div
+                className="relative w-full rounded-lg border bg-white shadow-sm"
+              >
+                <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain">
+                  <div className="min-w-[1000px] xl:min-w-0">
+                    <div className="sticky top-0 z-30">
+                      <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4">
+                        <div className={GRID_CLASS + " text-[11px] font-bold uppercase tracking-wider text-slate-500"}>
+                          <div>No.</div>
+                          <div>Task Title</div>
+                          <div>Department</div>
+                          <div>Owner</div>
+                          <div>Frequency</div>
+                          <div>Finish by</div>
+                          <div>Priority</div>
+                          <div className="text-right">Actions</div>
+                        </div>
                       </div>
-                      <div
-                        className={[
-                          "grid gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-semibold text-muted-foreground",
-                          showSystemActions ? "grid-cols-8" : "grid-cols-7",
-                        ].join(" ")}
-                      >
-                        <div className="col-span-2">TASK</div>
-                        <div>DEPARTMENT</div>
-                        <div>WHEN</div>
-                        <div>STATUS</div>
-                        <div>OWNER</div>
-                        <div>SET BY</div>
-                        {showSystemActions ? <div>ACTIONS</div> : null}
-                      </div>
-                      <div className="divide-y">
-                        {group.items.map((item) => {
-                          const owner = item.default_assignee_id ? users.find((u) => u.id === item.default_assignee_id) : null
-                          const priorityValue = normalizePriority(item.priority)
-                          const statusValue = item.status || "TODO"
-                          const isClosed = statusValue === "DONE"
-                          const isAssigned =
-                            Boolean(user?.id) &&
-                            (item.default_assignee_id === user?.id ||
-                              item.assignees?.some((assignee) => assignee.id === user?.id))
-                          return (
-                            <div
-                              key={item.id}
-                              className={[
-                                "grid gap-3 border-l-4 px-4 py-4 text-sm",
-                                PRIORITY_BORDER_STYLES[priorityValue],
-                                showSystemActions ? "grid-cols-8" : "grid-cols-7",
-                              ].join(" ")}
-                            >
-                              <div className="col-span-2">
-                                <div className="font-medium">{item.title}</div>
-                                {(() => {
-                                  const description = item.description?.trim() || ""
-                                  const isExpanded = Boolean(expandedSystemDescriptions[item.id])
-                                  const { text, truncated } = truncateDescription(description)
-                                  const displayText = description ? (isExpanded ? description : text) : "-"
-                                  return (
-                                    <div className="text-xs text-muted-foreground">
-                                      {displayText}
-                                      {description && truncated ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => toggleSystemDescription(item.id)}
-                                          className="ml-2 text-[11px] font-semibold text-blue-600 hover:underline"
-                                        >
-                                          {isExpanded ? "Show less" : "Read more"}
-                                        </button>
-                                      ) : null}
+                    </div>
+
+                    <div className="p-4 space-y-2 bg-slate-50">
+                      {sortedSystemTasks.length ? (
+                        (() => {
+                          let globalIndex = 0
+                          return sortedSystemTasks.map((template) => {
+                            const taskNumber = globalIndex + 1
+                            globalIndex++
+                            const priorityValue = normalizePriority(template.priority)
+                            const departmentLabel =
+                              template.scope === "GA"
+                                ? "GA"
+                                : template.scope === "ALL"
+                                  ? "ALL"
+                                  : department
+                                    ? formatDepartmentName(department.name)
+                                    : "-"
+                            const ownerLabel = assigneeSummary(template.assignees) || 
+                              (template.default_assignee_id ? users.find((u) => u.id === template.default_assignee_id)?.full_name || users.find((u) => u.id === template.default_assignee_id)?.username || "-" : "-")
+                            const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
+                            const statusValue = template.status || "TODO"
+                            const isClosed = statusValue === "DONE"
+                            const isAssigned =
+                              Boolean(user?.id) &&
+                              (template.default_assignee_id === user?.id ||
+                                template.assignees?.some((assignee) => assignee.id === user?.id))
+                            const isInactive = template.is_active === false
+
+                            return (
+                              <div
+                                key={template.id}
+                                className={[
+                                  GRID_CLASS,
+                                  "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50",
+                                  PRIORITY_BORDER_STYLES[priorityValue],
+                                  isInactive && "opacity-60 grayscale"
+                                ].join(" ")}
+                              >
+                                <div className="text-sm font-semibold text-slate-600">
+                                  {taskNumber}
+                                </div>
+                                <div className="min-w-0 pr-4">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                                      {template.title}
                                     </div>
-                                  )
-                                })()}
-                              </div>
-                              <div>{item.scope === "ALL" ? "ALL" : item.scope === "GA" ? "GA" : department.code}</div>
-                              <div className="whitespace-pre-line text-muted-foreground">
-                                {formatSchedule(item, showAllSystem ? getNextOccurrenceDate(item) : systemDate)}
-                              </div>
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant="secondary">
-                                    {item.is_active ? STATUS_LABELS.OPEN : STATUS_LABELS.INACTIVE}
-                                  </Badge>
-                                  <Badge variant="secondary" className="uppercase text-[10px]">
-                                    {statusValue}
-                                  </Badge>
+                                    <Badge variant="secondary" className="h-5 text-[10px] uppercase">
+                                      {statusValue}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                                  {departmentLabel}
+                                </div>
+                                <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                                  {ownerLabel === "-" ? <span className="text-slate-400">-</span> : ownerLabel}
+                                </div>
+                                <div>
+                                  <span className="text-sm text-slate-700 font-normal">
+                                    {frequencyLabel}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-slate-700 font-normal">
+                                  {template.finish_period || "-"}
+                                </div>
+                                <div>
                                   <Badge
                                     variant="outline"
-                                    className={`border px-2 py-0.5 text-[11px] ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                                    className={["px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue]].join(" ")}
                                   >
                                     {PRIORITY_LABELS[priorityValue]}
                                   </Badge>
                                 </div>
-                              </div>
-                              <div>{owner?.full_name || owner?.username || "-"}</div>
-                              <div>{user?.full_name || user?.username || "-"}</div>
-                              {showSystemActions ? (
-                                <div>
-                                  {isClosed ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                      <span className="text-[12px]">✓</span>
-                                      Done
-                                    </span>
-                                  ) : isAssigned ? (
-                                    <button
-                                      type="button"
-                                      disabled={systemStatusUpdatingId === item.id}
-                                      className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-                                      onClick={() => void updateSystemTaskStatus(item.id, "DONE")}
-                                    >
-                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-white text-[9px] leading-none text-emerald-600">
-                                        ✓
-                                      </span>
-                                      Mark Done
-                                    </button>
-                                  ) : null}
+                                <div className="text-right">
+                                  <div className="flex flex-col items-end gap-2">
+                                    {showSystemActions && isAssigned && !isClosed && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={systemStatusUpdatingId === template.id}
+                                        onClick={() => void updateSystemTaskStatus(template.id, "DONE")}
+                                        className="h-7 text-xs"
+                                      >
+                                        {systemStatusUpdatingId === template.id
+                                          ? "Updating..."
+                                          : "Mark done"}
+                                      </Button>
+                                    )}
+                                    {isClosed && (
+                                      <span className="text-xs text-emerald-700">Done</span>
+                                    )}
+                                  </div>
                                 </div>
-                              ) : null}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No system tasks yet.</div>
-                )}
+                              </div>
+                            )
+                          })
+                        })()
+                      ) : (
+                        <div className="py-12 text-center text-sm text-muted-foreground">
+                          No system tasks yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           ) : null}
