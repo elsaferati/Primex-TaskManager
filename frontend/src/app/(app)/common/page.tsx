@@ -1157,30 +1157,35 @@ export default function CommonViewPage() {
             }
             
             // Create one priority entry per date for this project
-            // Logic: Project members (people with tasks on multiple dates) ALWAYS appear on every date
-            //        Date-specific assignees (people with tasks on only one date) appear only on their specific date
+            // Logic: 
+            //   - Project members (people with tasks on MULTIPLE dates) ALWAYS appear on EVERY date
+            //   - Date-specific assignees (people with tasks on ONLY ONE date) appear ONLY on their specific date
+            // Example: If ES and EP have tasks on Mon, Tue, Wed → they're project members (appear every day)
+            //          If DV has a task only on Friday → DV is NOT a project member (appears only on Friday)
+            //          Result: Mon-Thu show [ES, EP], Friday shows [ES, EP, DV]
             for (const date of datesToUse) {
-              // Start with ALL project members (they appear on every date)
+              // ALWAYS start with ALL project members (they appear on every date, regardless of tasks on that date)
               const finalAssignees = new Set<string>(entry.projectMembers)
               
-              // Get assignees for this specific date (from tasks on that date)
+              // Get assignees who have tasks specifically on this date
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
               
-              // Add date-specific assignees (people who only have tasks on this date)
-              // These are people who are NOT project members (they only appear on one date)
+              // Add date-specific assignees (people who only have tasks on this one date)
+              // These are people who are NOT project members (they only appear on one date, not multiple)
               for (const name of dateAssignees) {
                 if (!entry.projectMembers.has(name)) {
-                  // This person only has tasks on this date (or fewer dates), so add them only to this date
+                  // This person only has tasks on this date (single-date assignee), so add them only to this date
                   finalAssignees.add(name)
                 }
                 // Note: If a project member has a task on this date, they're already in finalAssignees
-                // because we started with all projectMembers above
+                // because we started with all projectMembers above (line 1164)
               }
               
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: Array.from(finalAssignees), // Project members (multi-date) + date-specific assignees (single-date)
+                assignees: Array.from(finalAssignees), 
+                // Contains: Project members (appear every day) + Date-specific assignees (appear only on this date)
               })
             }
           }
@@ -2429,7 +2434,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0 0.1in 0.51in 0.1in;
+            margin: 0.1in 0.1in 0.51in 0.1in;
             size: landscape;
           }
           .no-print { display: none !important; }
@@ -2471,9 +2476,14 @@ export default function CommonViewPage() {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             margin-top: 0;
-            padding-top: 0.05in;
+            padding-top: 0;
+            page-break-after: avoid;
+          }
+          .week-table {
+            page-break-inside: avoid;
+            margin-top: 0;
           }
           .print-title {
             font-size: 16px;
@@ -2568,6 +2578,17 @@ export default function CommonViewPage() {
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;
+          }
+          .swimlane-cell.swimlane-accent.priority {
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .swimlane-cell.swimlane-accent.priority .swimlane-title {
+            flex: 1 !important;
+          }
+          .swimlane-cell.swimlane-accent.priority .swimlane-assignees {
+            flex-shrink: 0 !important;
           }
         }
         
@@ -2952,6 +2973,11 @@ export default function CommonViewPage() {
           background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
           position: relative;
         }
+        .swimlane-cell.swimlane-accent.priority {
+          flex-direction: row;
+          align-items: center;
+          gap: 12px;
+        }
         .swimlane-cell:nth-child(3n) {
           border-right: 0;
         }
@@ -2965,6 +2991,9 @@ export default function CommonViewPage() {
         .swimlane-title {
           font-weight: 700;
           font-size: 14px;
+        }
+        .swimlane-cell.swimlane-accent.priority .swimlane-title {
+          flex: 1;
         }
         .swimlane-subtitle {
           font-size: 12px;
@@ -2998,6 +3027,9 @@ export default function CommonViewPage() {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
+        }
+        .swimlane-cell.swimlane-accent.priority .swimlane-assignees {
+          flex-shrink: 0;
         }
         .swimlane-avatar {
           display: inline-flex;
@@ -3147,11 +3179,18 @@ export default function CommonViewPage() {
         @media print {
           .week-table-view {
             display: block !important;
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          .week-table-view .print-header {
+            page-break-after: avoid;
+            margin-bottom: 8px;
           }
           .week-table {
             page-break-inside: avoid;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            margin-top: 0;
           }
           .week-table thead {
             display: table-header-group;
