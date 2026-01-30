@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -960,15 +963,59 @@ async def delete_checklist_item(
     )
     await db.delete(item)
     # Keep numbering contiguous.
+    # Use retry mechanism to handle deadlocks from concurrent deletions
     if deleted_checklist_id is not None:
-        await db.execute(
-            update(ChecklistItem)
-            .where(
-                ChecklistItem.checklist_id == deleted_checklist_id,
-                path_filter,
-                ChecklistItem.position > deleted_position,
-            )
-            .values(position=ChecklistItem.position - 1)
-        )
-    await db.commit()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Lock rows in consistent order (by position) to prevent deadlocks
+                # First, select and lock the rows we need to update in order
+                items_to_update = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == deleted_checklist_id,
+                            path_filter,
+                            ChecklistItem.position > deleted_position,
+                        )
+                        .order_by(ChecklistItem.position)
+                        .with_for_update()
+                    )
+                ).scalars().all()
+                
+                # Update positions
+                if items_to_update:
+                    await db.execute(
+                        update(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == deleted_checklist_id,
+                            path_filter,
+                            ChecklistItem.position > deleted_position,
+                        )
+                        .values(position=ChecklistItem.position - 1)
+                    )
+                await db.commit()
+                break
+            except Exception as e:
+                # Check if it's a deadlock error
+                # SQLAlchemy wraps asyncpg exceptions, so we need to check both
+                is_deadlock = False
+                if hasattr(e, 'orig'):
+                    # Check the underlying asyncpg exception
+                    if isinstance(e.orig, asyncpg.exceptions.DeadlockDetectedError):
+                        is_deadlock = True
+                elif "deadlock" in str(e).lower():
+                    # Fallback: check error message
+                    is_deadlock = True
+                
+                if is_deadlock and attempt < max_retries - 1:
+                    await db.rollback()
+                    # Exponential backoff: wait longer on each retry
+                    await asyncio.sleep(0.1 * (2 ** attempt))
+                    continue
+                else:
+                    await db.rollback()
+                    raise
+    else:
+        await db.commit()
     return {"ok": True}
