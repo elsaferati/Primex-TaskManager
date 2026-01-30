@@ -557,7 +557,8 @@ async def update_task(
         task.department_id = payload.department_id
 
     if payload.assignees is not None:
-        ensure_manager_or_admin(user)
+        # Allow anyone who can edit the task to update assignees
+        # (can_edit already checked above: Admin, Manager, task creator, or assignees)
         rows = (
             await db.execute(
                 select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)

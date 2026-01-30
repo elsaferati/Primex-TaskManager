@@ -144,6 +144,9 @@ const INTERNAL_MEETING = {
       items: [
         "A ka mungesa, a ndryshon plani per sot?",
         "A ka shenime GA/KA ne grupe/Trello?",
+        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
+        "A ka e-mails te reja ne IT?",
+        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
       ],
     },
     M2: {
@@ -903,13 +906,8 @@ export default function DepartmentKanban() {
         setInternalMeetingChecklistId(selected.id)
         let items = selected.items || []
         
-        // Delete the items that were highlighted for removal
-        const itemsToDelete = [
-          "A ka e-mails te reja ne IT?",
-          "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-          "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
-          "dssdgsdg",
-        ]
+        // Delete only the test item "dssdgsdg" if it exists
+        const itemsToDelete = ["dssdgsdg"]
         const deletePromises: Promise<Response>[] = []
         for (const item of items) {
           const itemTitle = (item.title || "").trim()

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -649,9 +652,31 @@ async def create_checklist_item(
         if checklist is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
         # Global template-style checklists (group_key set, no project/task) are admin-only.
+        # Exception: Internal meeting checklists allow department members to create items
         if checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
+            if is_internal_meeting:
+                # Determine department from group_key
+                if checklist.group_key == "development_internal_meetings":
+                    dept_name = "Development"
+                elif checklist.group_key == "pcm_internal_meetings":
+                    dept_name = "Project Content Manager"
+                else:
+                    dept_name = None
+                
+                if dept_name:
+                    dept = (await db.execute(select(Department).where(Department.name == dept_name))).scalar_one_or_none()
+                    if dept:
+                        ensure_department_access(user, dept.id)
+                    else:
+                        if user.role != "ADMIN":
+                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                else:
+                    if user.role != "ADMIN":
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            else:
+                if user.role != "ADMIN":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
@@ -777,9 +802,36 @@ async def update_checklist_item(
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
         # Global template-style checklists (group_key set, no project/task) are admin-only to edit.
+        # Exception: Internal meeting checklists allow department members to update is_checked field
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
+            # For internal meetings, allow department members to update is_checked, but require admin for other fields
+            if is_internal_meeting:
+                # Determine department from group_key
+                if checklist.group_key == "development_internal_meetings":
+                    dept_name = "Development"
+                elif checklist.group_key == "pcm_internal_meetings":
+                    dept_name = "Project Content Manager"
+                else:
+                    dept_name = None
+                
+                if dept_name:
+                    dept = (await db.execute(select(Department).where(Department.name == dept_name))).scalar_one_or_none()
+                    if dept:
+                        ensure_department_access(user, dept.id)
+                        # If only updating is_checked, allow it. Otherwise require admin for other fields.
+                        if payload.is_checked is None and (payload.title is not None or payload.position is not None or payload.comment is not None or payload.item_type is not None):
+                            if user.role != "ADMIN":
+                                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only for editing internal meeting items")
+                    else:
+                        if user.role != "ADMIN":
+                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                else:
+                    if user.role != "ADMIN":
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            else:
+                if user.role != "ADMIN":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
@@ -911,15 +963,59 @@ async def delete_checklist_item(
     )
     await db.delete(item)
     # Keep numbering contiguous.
+    # Use retry mechanism to handle deadlocks from concurrent deletions
     if deleted_checklist_id is not None:
-        await db.execute(
-            update(ChecklistItem)
-            .where(
-                ChecklistItem.checklist_id == deleted_checklist_id,
-                path_filter,
-                ChecklistItem.position > deleted_position,
-            )
-            .values(position=ChecklistItem.position - 1)
-        )
-    await db.commit()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Lock rows in consistent order (by position) to prevent deadlocks
+                # First, select and lock the rows we need to update in order
+                items_to_update = (
+                    await db.execute(
+                        select(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == deleted_checklist_id,
+                            path_filter,
+                            ChecklistItem.position > deleted_position,
+                        )
+                        .order_by(ChecklistItem.position)
+                        .with_for_update()
+                    )
+                ).scalars().all()
+                
+                # Update positions
+                if items_to_update:
+                    await db.execute(
+                        update(ChecklistItem)
+                        .where(
+                            ChecklistItem.checklist_id == deleted_checklist_id,
+                            path_filter,
+                            ChecklistItem.position > deleted_position,
+                        )
+                        .values(position=ChecklistItem.position - 1)
+                    )
+                await db.commit()
+                break
+            except Exception as e:
+                # Check if it's a deadlock error
+                # SQLAlchemy wraps asyncpg exceptions, so we need to check both
+                is_deadlock = False
+                if hasattr(e, 'orig'):
+                    # Check the underlying asyncpg exception
+                    if isinstance(e.orig, asyncpg.exceptions.DeadlockDetectedError):
+                        is_deadlock = True
+                elif "deadlock" in str(e).lower():
+                    # Fallback: check error message
+                    is_deadlock = True
+                
+                if is_deadlock and attempt < max_retries - 1:
+                    await db.rollback()
+                    # Exponential backoff: wait longer on each retry
+                    await asyncio.sleep(0.1 * (2 ** attempt))
+                    continue
+                else:
+                    await db.rollback()
+                    raise
+    else:
+        await db.commit()
     return {"ok": True}
