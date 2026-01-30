@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.meeting import Meeting, MeetingParticipant
@@ -160,7 +160,8 @@ async def update_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    ensure_department_access(user, meeting.department_id)
+    # Only admins can edit external meetings
+    ensure_admin(user)
 
     # Get fields that were explicitly set in the request
     payload_dict = payload.model_dump(exclude_unset=True)
@@ -255,7 +256,8 @@ async def delete_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    ensure_department_access(user, meeting.department_id)
+    # Only admins can delete external meetings
+    ensure_admin(user)
     await db.delete(meeting)
     await db.commit()
     return {"ok": True}

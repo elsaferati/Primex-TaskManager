@@ -2768,7 +2768,7 @@ export default function DepartmentKanban() {
                     </Dialog>
                   )}
                 </div>
-                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                   {filteredProjects.map((project) => {
                     // Derived Data Calculation
                     const tasks = departmentTasks.filter(t => t.project_id === project.id);
@@ -2787,44 +2787,46 @@ export default function DepartmentKanban() {
                     const members = Array.from(memberIds).map(id => userMap.get(id as string)).filter(Boolean);
 
                     return (
-                      <div key={project.id} className="group flex flex-col gap-6 justify-between overflow-hidden rounded-3xl border-0 bg-white/60 p-6 shadow-sm ring-1 ring-slate-900/5 transition-all hover:-translate-y-1 hover:shadow-lg dark:bg-slate-900/60 dark:ring-white/10">
-                        <div className="space-y-4">
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-1">
-                              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{formatProjectTitleWithProducts(project)}</h3>
+                      <div key={project.id} className="group flex flex-col gap-4 justify-between overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1.5 flex-1 min-w-0">
+                              <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{formatProjectTitleWithProducts(project)}</h3>
                               {/* Single Phase Badge */}
-                              <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                              <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 text-xs">
                                 {PHASE_LABELS[phase]}
                               </Badge>
                             </div>
-                            <div className="text-right">
-                              <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Tasks</div>
-                              <div className="text-xl font-light text-slate-900 dark:text-white">{tasks.length}</div>
+                            <div className="text-right flex-shrink-0">
+                              <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Tasks</div>
+                              <div className="text-lg font-semibold text-slate-900 dark:text-white">{tasks.length}</div>
                             </div>
                           </div>
 
                           {/* Description */}
-                          <p className="text-sm leading-relaxed text-slate-500 line-clamp-3 dark:text-slate-400">
+                          <p className="text-xs leading-relaxed text-slate-600 line-clamp-2 dark:text-slate-400">
                             {project.description
                               ? project.description.split(".").slice(0, 3).join(".").trim() + (project.description.includes(".") ? "." : "")
                               : "No description provided."}
                           </p>
 
                           {/* Taskbar: Horizontal list of tasks */}
-                          <div className="space-y-2">
-                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Task Summary</div>
-                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                              {tasks.length > 0 ? tasks.slice(0, 5).map(t => (
-                                <div key={t.id} className="flex-shrink-0 max-w-[150px] truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                                  {t.title}
-                                </div>
-                              )) : <div className="text-xs text-slate-400 italic">No active tasks</div>}
-                              {tasks.length > 5 && <div className="flex-shrink-0 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">+{tasks.length - 5} more</div>}
+                          {tasks.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Task Summary</div>
+                              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                                {tasks.slice(0, 4).map(t => (
+                                  <div key={t.id} className="flex-shrink-0 max-w-[120px] truncate rounded-md bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                    {t.title}
+                                  </div>
+                                ))}
+                                {tasks.length > 4 && <div className="flex-shrink-0 rounded-md bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800">+{tasks.length - 4}</div>}
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
 
-                        <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
                           <div className="flex items-center gap-4">
                             {/* Members Stack */}
                             <div className="flex -space-x-2">
@@ -2848,8 +2850,8 @@ export default function DepartmentKanban() {
                             )}
                           </div>
 
-                          <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400">
-                            View <span aria-hidden="true">&rarr;</span>
+                          <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400">
+                            View →
                           </Link>
                         </div>
                       </div>
