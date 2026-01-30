@@ -2419,7 +2419,9 @@ export function SystemTasksView({
                           ))}
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Label className="text-sm text-muted-foreground">
+                            <span className="uppercase text-red-600">Question/Answer</span> (optional)
+                          </Label>
                           <Textarea
                             value={internalNotes.QA || ""}
                             onChange={(event) => setInternalNoteValue("QA", event.target.value, setInternalNotes)}
@@ -2650,7 +2652,7 @@ export function SystemTasksView({
                                 <div className="text-[12px] text-slate-500">Required.</div>
                               </div>
                               <div className="space-y-2">
-                                <Label>BZ me (managers)</Label>
+                                <Label>BZ with (managers)</Label>
                                 <div className="rounded-md border border-slate-200 bg-white p-2">
                                   <div className="flex flex-wrap gap-2">
                                     {editAlignmentManagerIds.map((id) => {
@@ -2813,7 +2815,9 @@ export function SystemTasksView({
                           ))}
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm text-muted-foreground">Question/Answer (optional)</Label>
+                          <Label className="text-sm text-muted-foreground ">
+                            <span className="uppercase text-red-600">Question/Answer</span> (optional)
+                          </Label>
                           <Textarea
                             value={editInternalNotes.QA || ""}
                             onChange={(event) => setInternalNoteValue("QA", event.target.value, setEditInternalNotes)}
