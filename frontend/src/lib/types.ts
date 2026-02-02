@@ -258,6 +258,19 @@ export interface ChecklistItem {
   assignees?: ChecklistItemAssignee[]
 }
 
+export interface ProjectPhaseChecklistItem {
+  id: string
+  project_id: string
+  phase_key: string
+  title: string
+  comment?: string | null
+  is_checked: boolean
+  sort_order?: number | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface GaNote {
   id: string
   content: string
