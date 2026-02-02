@@ -135,7 +135,12 @@ function hasProjectId(projectId?: Task["project_id"]) {
 }
 
 function isNoProjectTask(task: Task) {
-  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+  return (
+    !hasProjectId(task.project_id) &&
+    !hasProjectId(task.dependency_task_id) &&
+    task.system_template_origin_id == null &&
+    task.ga_note_origin_id == null
+  )
 }
 
 function isFastNormalTask(task: Task) {
