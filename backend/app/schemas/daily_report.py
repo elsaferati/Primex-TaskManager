@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 from app.schemas.task import TaskOut
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
 
 
 class DailyReportTaskItem(BaseModel):
@@ -37,4 +38,37 @@ class DailyReportResponse(BaseModel):
     tasks_overdue: list[DailyReportTaskItem]
     system_today: list[DailyReportSystemOccurrence]
     system_overdue: list[DailyReportSystemOccurrence]
+
+
+class DailyReportGaEntryOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    department_id: uuid.UUID
+    entry_date: date
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DailyReportGaEntryUpsert(BaseModel):
+    day: date
+    department_id: uuid.UUID
+    content: str
+    user_id: uuid.UUID | None = None
+
+
+class DailyReportGaNoteOut(BaseModel):
+    id: uuid.UUID
+    content: str
+    note_type: GaNoteType
+    status: GaNoteStatus
+    priority: GaNotePriority | None = None
+    created_at: datetime
+    project_id: uuid.UUID | None = None
+    project_name: str | None = None
+
+
+class DailyReportGaTableResponse(BaseModel):
+    entry: DailyReportGaEntryOut | None = None
+    notes: list[DailyReportGaNoteOut]
 
