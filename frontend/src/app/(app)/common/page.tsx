@@ -105,6 +105,7 @@ export default function CommonViewPage() {
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
   const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
+  const commonDepartmentId = user?.department_id || ""
   const printedAt = React.useMemo(() => new Date(), [])
   const printInitials = initials(user?.full_name || user?.username || "")
 
@@ -660,16 +661,13 @@ export default function CommonViewPage() {
         
         // For priority items (PRJK), we want everyone to see all projects,
         // so try to fetch all projects first, fallback if needed
-        let projectsEndpoint = "/projects?include_all_departments=true"
+        let projectsEndpoint = commonDepartmentId
+          ? `/projects?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/projects?include_all_departments=true"
         let projectsRes = await apiFetch(projectsEndpoint)
         
-        // If 403 (forbidden), fallback to user's department projects
-        if (!projectsRes?.ok && projectsRes?.status === 403) {
-          projectsEndpoint =
-            user?.role && user.role !== "STAFF"
-              ? "/projects?include_all_departments=true"
-              : "/projects"
-          projectsRes = await apiFetch(projectsEndpoint)
+        if (!projectsRes?.ok && projectsRes?.status === 403 && !commonDepartmentId) {
+          projectsRes = await apiFetch("/projects")
         }
         
         // Store full project info for MST/VS/VL date generation
@@ -702,6 +700,9 @@ export default function CommonViewPage() {
             let user = loadedUsers.find((u) => u.id === e.assigned_to_user_id)
             if (!user) {
               user = loadedUsers.find((u) => u.id === e.created_by_user_id)
+            }
+            if (commonDepartmentId && user?.department_id && user.department_id !== commonDepartmentId) {
+              continue
             }
             const personName = user?.full_name || user?.username || e.title || "Unknown"
             
@@ -857,16 +858,13 @@ export default function CommonViewPage() {
         // Load tasks for blocked, 1H, R1, external, and priority
         // For priority items (PRJK), we want everyone to see the same projects,
         // so try to fetch all tasks first, fallback to user's tasks if 403
-        let tasksEndpoint = "/tasks?include_done=true&include_all_departments=true"
+        let tasksEndpoint = commonDepartmentId
+          ? `/tasks?include_done=true&department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/tasks?include_done=true&include_all_departments=true"
         let tasksRes = await apiFetch(tasksEndpoint)
         
-        // If 403 (forbidden), fallback to user's department tasks
-        if (!tasksRes?.ok && tasksRes?.status === 403) {
-          tasksEndpoint =
-            user?.role && user.role !== "STAFF"
-              ? "/tasks?include_done=true&include_all_departments=true"
-              : "/tasks?include_done=true"
-          tasksRes = await apiFetch(tasksEndpoint)
+        if (!tasksRes?.ok && tasksRes?.status === 403 && !commonDepartmentId) {
+          tasksRes = await apiFetch("/tasks?include_done=true")
         }
         
         if (tasksRes?.ok) {
@@ -1167,7 +1165,9 @@ export default function CommonViewPage() {
         }
 
         // Show all external meetings for all users in common view
-        const meetingsEndpoint = "/meetings?include_all_departments=true"
+        const meetingsEndpoint = commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
 
         const meetingsRes = await apiFetch(meetingsEndpoint)
         if (meetingsRes?.ok) {
@@ -1675,7 +1675,11 @@ export default function CommonViewPage() {
       )
       cancelEditExternalMeeting()
       // Reload external meetings to update the list
-      const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+      const meetingsRes = await apiFetch(
+        commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+      )
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setExternalMeetings(meetings)
@@ -1692,6 +1696,7 @@ export default function CommonViewPage() {
     editingExternalMeetingPlatform,
     editingExternalMeetingStartsAt,
     editingExternalMeetingDepartmentId,
+    commonDepartmentId,
     apiFetch,
     cancelEditExternalMeeting,
   ])
@@ -1713,7 +1718,11 @@ export default function CommonViewPage() {
         }
         setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
         // Reload external meetings to update the list
-        const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+      const meetingsRes = await apiFetch(
+        commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+      )
         if (meetingsRes?.ok) {
           const meetings = (await meetingsRes.json()) as Meeting[]
           setExternalMeetings(meetings)
@@ -1725,7 +1734,7 @@ export default function CommonViewPage() {
         setDeletingExternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch]
+    [isAdmin, apiFetch, commonDepartmentId]
   )
 
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
@@ -2528,15 +2537,19 @@ export default function CommonViewPage() {
           .swimlane-row {
             margin-top: 6px;
           }
-          .swimlane-header,
-          .swimlane-cell {
-            padding-top: 18px;
-            padding-bottom: 18px;
-          }
-          .swimlane-cell {
-            background: #ffffff !important;
-            color: #111827 !important;
-          }
+            .swimlane-header,
+            .swimlane-cell {
+              padding-top: 18px;
+              padding-bottom: 18px;
+            }
+            .swimlane-cell {
+              background: #ffffff !important;
+              color: #111827 !important;
+              position: relative !important;
+              padding-right: 60px !important;
+              overflow: visible !important;
+              min-width: 0 !important;
+            }
           .swimlane-header,
           .swimlane-badge {
             -webkit-print-color-adjust: exact;
@@ -2568,23 +2581,46 @@ export default function CommonViewPage() {
           .swimlane-cell {
             border-color: #111827 !important;
           }
-          .swimlane-title-row {
-            display: flex !important;
-            align-items: flex-start !important;
-            justify-content: space-between !important;
-            gap: 8px !important;
-            width: 100% !important;
-          }
+            .swimlane-title-row {
+              display: flex !important;
+              align-items: flex-start !important;
+              justify-content: space-between !important;
+              gap: 8px !important;
+              width: 100% !important;
+              padding-right: 60px !important;
+            }
           .swimlane-title {
             flex: 1 1 auto !important;
             min-width: 0 !important;
           }
-          .swimlane-assignees {
-            margin-left: auto !important;
-            flex-shrink: 0 !important;
-            justify-content: flex-end !important;
+            .swimlane-assignees {
+              display: flex !important;
+              position: absolute !important;
+              top: 6px !important;
+              right: 6px !important;
+              gap: 6px !important;
+              flex-wrap: nowrap !important;
+              align-items: center !important;
+              justify-content: flex-end !important;
+              margin-left: 0 !important;
+              flex-shrink: 0 !important;
+              z-index: 2 !important;
+            }
+            .swimlane-avatar {
+              display: inline-flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-width: 24px !important;
+              height: 20px !important;
+              padding: 0 5px !important;
+              font-size: 9px !important;
+              line-height: 1 !important;
+              white-space: nowrap !important;
+              word-break: keep-all !important;
+              overflow-wrap: normal !important;
+              flex-shrink: 0 !important;
+            }
           }
-        }
         
         /* View Container */
         .view-container { 
@@ -2932,7 +2968,7 @@ export default function CommonViewPage() {
         .swimlane-delete {
           position: absolute;
           top: 8px;
-          right: 8px;
+          left: 8px;
           width: 22px;
           height: 22px;
           border-radius: 8px;
@@ -2955,7 +2991,7 @@ export default function CommonViewPage() {
           box-shadow: none;
         }
         .swimlane-cell {
-          padding: 12px 14px;
+          padding: 12px 54px 12px 14px;
           border-right: 1px solid var(--swim-border);
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
@@ -2983,6 +3019,7 @@ export default function CommonViewPage() {
           justify-content: space-between;
           gap: 8px;
           width: 100%;
+          padding-right: 54px;
         }
         .swimlane-title {
           flex: 1 1 auto;
@@ -2997,7 +3034,7 @@ export default function CommonViewPage() {
         .swimlane-delete {
           position: absolute;
           top: 6px;
-          right: 6px;
+          left: 6px;
           border: 1px solid #e2e8f0;
           background: #ffffff;
           color: #dc2626;
@@ -3020,18 +3057,23 @@ export default function CommonViewPage() {
         }
         .swimlane-assignees {
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           gap: 6px;
-          margin-left: auto;
-          flex-shrink: 0;
+          align-items: center;
           justify-content: flex-end;
+          margin-left: 0;
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          z-index: 2;
         }
         .swimlane-avatar {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 24px;
+          min-width: 24px;
           height: 24px;
+          padding: 0 6px;
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
@@ -3039,6 +3081,10 @@ export default function CommonViewPage() {
           font-size: 10px;
           letter-spacing: 0.02em;
           border: 1px solid #cbd5e1;
+          line-height: 1;
+          white-space: nowrap;
+          word-break: keep-all;
+          overflow-wrap: normal;
         }
         
         /* Week Table View - Shows when all days are selected */
