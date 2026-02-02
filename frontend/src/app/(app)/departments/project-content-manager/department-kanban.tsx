@@ -207,7 +207,12 @@ function hasProjectId(projectId?: Task["project_id"]) {
 }
 
 function isNoProjectTask(task: Task) {
-  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+  if (hasProjectId(task.project_id) || hasProjectId(task.dependency_task_id)) return false
+  if (task.system_template_origin_id != null) return false
+  if (task.ga_note_origin_id != null) return false
+  const normalizedTitle = normalizeTaskTitle(task.title || "")
+  if (VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)) return false
+  return true
 }
 
 function isFastNormalTask(task: Task) {
