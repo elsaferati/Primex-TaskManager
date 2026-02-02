@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import nulls_last
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.project import Project
@@ -160,6 +160,7 @@ async def delete_phase_checklist_item(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     _ensure_project_access(project, user)
+    ensure_manager_or_admin(user)
 
     await db.delete(item)
     await db.commit()
