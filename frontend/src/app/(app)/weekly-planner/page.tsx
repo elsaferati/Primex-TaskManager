@@ -800,7 +800,13 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { size: letter portrait; margin: 0.25in; }
+              @page {
+                size: letter portrait;
+                margin-top: 0.35in;
+                margin-bottom: 0.35in;
+                margin-left: 0.4in;
+                margin-right: 0.4in;
+              }
               body { margin: 0; padding: 0; }
               .print-page { page-break-after: avoid; page-break-inside: avoid; }
               .print-page:last-child { page-break-after: avoid; }
@@ -816,16 +822,17 @@ export default function WeeklyPlannerPage() {
             }
             body {
               font-family: Arial, sans-serif;
-              font-size: 6pt;
+              font-size: 5.5pt;
               margin: 0;
               padding: 0;
               width: 100%;
               margin-left: auto;
               margin-right: auto;
+              direction: ltr;
             }
             .print-page {
               position: relative;
-              height: calc(11in - 0.5in);
+              height: calc(11in - 0.7in);
               width: 100%;
               display: grid;
               grid-template-rows: auto auto 1fr auto;
@@ -871,7 +878,9 @@ export default function WeeklyPlannerPage() {
               width: 100%;
               min-height: 0;
               overflow: visible;
-              max-height: calc(11in - 0.5in - 70px);
+              max-height: calc(11in - 0.7in - 70px);
+              padding-left: 0.05in;
+              padding-right: 0.05in;
             }
             .print-dept-title {
               margin-top: 2px;
@@ -884,6 +893,7 @@ export default function WeeklyPlannerPage() {
               border-collapse: collapse;
               table-layout: fixed;
               margin-bottom: 0.01in;
+              direction: ltr;
             }
             thead {
               display: table-header-group;
@@ -897,50 +907,64 @@ export default function WeeklyPlannerPage() {
               page-break-inside: avoid;
             }
             .print-content {
-              max-height: calc(11in - 0.5in - 70px);
+              max-height: calc(11in - 0.7in - 70px);
               overflow: visible;
             }
             th {
               background-color: #e2e8f0;
               border: 0.5px solid #000;
-              padding: 2px;
-              text-align: center;
+              padding: 1px;
+              text-align: left;
               font-weight: bold;
-              font-size: 6pt;
+              font-size: 5.5pt;
               text-transform: uppercase;
               vertical-align: bottom;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             th.user-header {
               white-space: normal;
               word-break: break-word;
-              font-size: 6pt;
+              font-size: 5.5pt;
               line-height: 1.05;
             }
             td {
               border: 0.5px solid #000;
-              padding: 1px;
-              vertical-align: top;
-              font-size: 6pt;
+              padding: 0.5px;
+              vertical-align: bottom;
+              font-size: 5.5pt;
               line-height: 1.1;
+              text-align: left;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .day-cell {
               font-weight: bold;
               background-color: #f9f9f9;
-              text-align: center;
-              width: 52px;
+              text-align: left;
+              width: 48px;
+              vertical-align: bottom;
             }
             .ll-cell {
               font-weight: bold;
               background-color: #f9f9f9;
-              text-align: center;
-              width: 22px;
+              text-align: left;
+              width: 20px;
+              vertical-align: bottom;
+              font-size: 4.5pt;
+              line-height: 1;
+              letter-spacing: -0.2px;
+              white-space: nowrap;
+              padding-left: 0.5px;
+              padding-right: 0.5px;
             }
             .time-cell {
               width: 22px;
-              text-align: center;
+              text-align: left;
               padding-left: 1px;
               padding-right: 1px;
+              vertical-align: bottom;
             }
             .print-subhead {
               font-weight: bold;
@@ -960,6 +984,8 @@ export default function WeeklyPlannerPage() {
               font-weight: bold;
               margin-bottom: 0.5px;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .task-item {
               font-size: 5pt;
@@ -971,6 +997,8 @@ export default function WeeklyPlannerPage() {
               break-inside: avoid;
               page-break-inside: avoid;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
@@ -996,7 +1024,7 @@ export default function WeeklyPlannerPage() {
               font-size: 5pt;
             }
             .empty-cell {
-              text-align: center;
+              text-align: left;
               color: #999;
             }
             .pm-row {
@@ -1061,7 +1089,7 @@ export default function WeeklyPlannerPage() {
               left: -9999px;
               top: 0;
               visibility: hidden;
-              width: 8in;
+              width: 7.7in;
             }
           </style>
         </head>
@@ -1138,11 +1166,11 @@ export default function WeeklyPlannerPage() {
       return { page, content }
     }
 
-    const dayColWidth = 52
-    const llColWidth = 22
+    const dayColWidth = 48
+    const llColWidth = 20
     const timeColWidth = 22
-    const minUserColWidth = 56
-    const targetUserColWidth = 90
+    const minUserColWidth = 48
+    const targetUserColWidth = 72
 
     const getUserDisplayName = (lookup: UserLookup) => (
       lookup.full_name || lookup.username || ""
