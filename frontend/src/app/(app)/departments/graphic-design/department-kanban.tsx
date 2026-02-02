@@ -273,6 +273,21 @@ function formatDayLabel(date: Date) {
   return prefix ? `${prefix} - ${weekday}` : weekday
 }
 
+function isTaskActiveForDate(task: Task, targetDate: Date) {
+  const targetKey = dayKey(targetDate)
+  const start = toDate(task.start_date || task.created_at || task.due_date)
+  const due = toDate(task.due_date || task.start_date || task.created_at)
+  const startKey = start ? dayKey(start) : null
+  const dueKey = due ? dayKey(due) : startKey
+
+  const completedDate = task.completed_at ? toDate(task.completed_at) : null
+  if (completedDate && dayKey(completedDate) < targetKey) return false
+
+  if (startKey != null && targetKey < startKey) return false
+  if (dueKey != null && targetKey > dueKey) return false
+  return true
+}
+
 function getLastDayOfMonth(year: number, monthIndex: number) {
   return new Date(year, monthIndex + 1, 0).getDate()
 }
@@ -1026,9 +1041,7 @@ export default function DepartmentKanban() {
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
-      const date = toDate(task.due_date || task.start_date || task.created_at)
-      const matchesDate = date ? isSameDay(date, todayDate) : false
-      if (!matchesDate) return false
+      if (!isTaskActiveForDate(task, todayDate)) return false
       if (selectedUserId !== "__all__") {
         return task.assigned_to === selectedUserId
       }
@@ -1037,9 +1050,7 @@ export default function DepartmentKanban() {
   }, [projectTasks, todayDate, selectedUserId])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
-      const date = toDate(task.due_date || task.start_date || task.created_at)
-      const matchesDate = date ? isSameDay(date, todayDate) : false
-      if (!matchesDate) return false
+      if (!isTaskActiveForDate(task, todayDate)) return false
       if (selectedUserId !== "__all__") {
         return task.assigned_to === selectedUserId
       }
@@ -1068,27 +1079,21 @@ export default function DepartmentKanban() {
     [visibleMeetings, todayDate]
   )
   const dailyReportFastTasks = React.useMemo(() => {
-    const todayKey = dayKey(todayDate)
     return visibleNoProjectTasks.filter((task) => {
-      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      if (!isTaskActiveForDate(task, todayDate)) return false
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
-      if (!baseDate) return completedToday
-      const baseKey = dayKey(baseDate)
-      return baseKey <= todayKey || completedToday
+      return true
     })
   }, [todayDate, visibleNoProjectTasks])
   const dailyReportProjectTasks = React.useMemo(() => {
-    const todayKey = dayKey(todayDate)
     return projectTasks.filter((task) => {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      if (!isTaskActiveForDate(task, todayDate)) return false
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
-      if (!baseDate) return completedToday
-      const baseKey = dayKey(baseDate)
-      return baseKey <= todayKey || completedToday
+      return true
     })
   }, [projectTasks, todayDate])
   const systemTemplateById = React.useMemo(() => {
@@ -1237,7 +1242,7 @@ export default function DepartmentKanban() {
     }
 
     for (const task of dailyReportFastTasks) {
-      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      const baseDate = toDate(task.start_date || task.planned_for || task.due_date || task.created_at)
       fastRows.push({
         order: fastTypeOrder(task),
         index: fastIndex,
@@ -1259,7 +1264,7 @@ export default function DepartmentKanban() {
     }
 
     for (const task of dailyReportProjectTasks) {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const baseDate = toDate(task.start_date || task.due_date || task.created_at)
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
       const projectLabel = project?.title || project?.name || "-"
       projectRows.push({
@@ -1392,11 +1397,96 @@ export default function DepartmentKanban() {
         ...(report.tasks_overdue || []).map((item) => item.task),
       ]
 
+      const printedTaskIds = new Set<string>()
+
       for (const task of allTasks) {
-        const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date)
+        const startDate = toDate(task.start_date)
+        const createdDate = toDate(task.created_at)
+
+        // Use the start date (or the earliest available date) to decide whether a task
+        // is active for the daily report. This keeps it visible from start_date until due_date.
+        const baseDate = startDate || createdDate || dueDate
+        const dueKey = dueDate ? dayKey(dueDate) : null
+        const startKey = baseDate ? dayKey(baseDate) : null
+
+        // Skip tasks that haven't started yet.
         if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
           continue
         }
+
+        // If a due date exists, keep the task visible through the due date (inclusive).
+        if (dueKey != null && startKey != null && dayKey(todayDate) > dueKey && !task.completed_at) {
+          // It will already be listed under overdue from the API; avoid double‑adding here.
+          continue
+        }
+
+        printedTaskIds.add(task.id)
+
+        const isProject = Boolean(task.project_id)
+        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+        const projectLabel = project?.title || project?.name || "-"
+
+        if (isProject) {
+          projectRows.push({
+            typeLabel: "PRJK",
+            subtype: "-",
+            period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+            title: `${projectLabel} - ${task.title || "-"}`,
+            description: task.description || "-",
+            status: taskStatusLabel(task),
+            bz: "-",
+            kohaBz: "-",
+            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            comment: task.user_comment ?? null,
+            taskId: task.id,
+          })
+        } else {
+          fastRows.push({
+            order: fastTypeOrder(task),
+            index: fastIndex,
+            row: {
+              typeLabel: "FT",
+              subtype: fastReportSubtypeShort(task),
+              period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+              title: task.title || "-",
+              description: task.description || "-",
+              status: taskStatusLabel(task),
+              bz: "-",
+              kohaBz: "-",
+              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              comment: task.user_comment ?? null,
+              taskId: task.id,
+            },
+          })
+          fastIndex += 1
+        }
+      }
+
+      // Include in-progress tasks that fall between start_date and due_date (inclusive) but
+      // are missing from the API payload, so they appear every day of their active window.
+      const rangeTasks = visibleDepartmentTasks.filter((task) => {
+        const assigned =
+          task.assigned_to === userId ||
+          (task.assignees && task.assignees.some((a) => a.id === userId))
+        if (!assigned) return false
+
+        const startDate = toDate(task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
+        const todayKey = dayKey(todayDate)
+        const startKey = startDate ? dayKey(startDate) : null
+        const dueKey = dueDate ? dayKey(dueDate) : null
+
+        if (startKey != null && todayKey < startKey) return false
+        if (dueKey != null && todayKey > dueKey) return false
+        return true
+      })
+
+      for (const task of rangeTasks) {
+        if (printedTaskIds.has(task.id)) continue
+        const startDate = toDate(task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
+        const baseDate = startDate || dueDate || toDate(task.created_at)
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || "-"
@@ -4794,24 +4884,28 @@ export default function DepartmentKanban() {
               })()}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+            <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
               <colgroup>
-                <col className="w-[28px]" />
-                <col className="w-[32px]" />
-                <col className="w-[26px]" />
-                <col className="w-[32px]" />
+                <col className="w-[36px]" />
+                <col className="w-[44px]" />
+                <col className="w-[30px]" />
+                <col className="w-[36px]" />
+                <col className="w-[200px]" />
+                <col className="w-[60px]" />
+                <col className="w-[40px]" />
+                <col className="w-[52px]" />
+                <col className="w-[40px]" />
                 <col className="w-[140px]" />
-              <col className="w-[50px]" />
-              <col className="w-[28px]" />
-              <col className="w-[46px]" />
-              <col className="w-[32px]" />
-              <col className="w-[130px]" />
-            </colgroup>
+              </colgroup>
             <thead>
               <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
+                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                  Nr
+                </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                    NLL
+                  </th>
                   <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                     <span className="block">AM/</span>
                     <span className="block">PM</span>
@@ -4827,28 +4921,24 @@ export default function DepartmentKanban() {
             <tbody>
               {dailyUserReportRows.length ? (
                 dailyUserReportRows.map((row, index) => (
-                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                  <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                    <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
                     <td className="border border-slate-900 px-2 py-2 align-top">
-                      <input
-                        type="text"
-                        aria-label="Koment"
-                        className="h-4 w-full border-b border-slate-400 bg-transparent"
-                      />
+                      <div className="h-4 w-full border-b border-slate-400" />
                     </td>
                   </tr>
                 ))
               ) : (
                   <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
                       No data available.
                     </td>
                   </tr>
