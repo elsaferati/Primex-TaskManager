@@ -2537,15 +2537,19 @@ export default function CommonViewPage() {
           .swimlane-row {
             margin-top: 6px;
           }
-          .swimlane-header,
-          .swimlane-cell {
-            padding-top: 18px;
-            padding-bottom: 18px;
-          }
-          .swimlane-cell {
-            background: #ffffff !important;
-            color: #111827 !important;
-          }
+            .swimlane-header,
+            .swimlane-cell {
+              padding-top: 18px;
+              padding-bottom: 18px;
+            }
+            .swimlane-cell {
+              background: #ffffff !important;
+              color: #111827 !important;
+              position: relative !important;
+              padding-right: 60px !important;
+              overflow: visible !important;
+              min-width: 0 !important;
+            }
           .swimlane-header,
           .swimlane-badge {
             -webkit-print-color-adjust: exact;
@@ -2577,30 +2581,46 @@ export default function CommonViewPage() {
           .swimlane-cell {
             border-color: #111827 !important;
           }
-          .swimlane-title-row {
-            display: flex !important;
-            align-items: flex-start !important;
-            justify-content: space-between !important;
-            gap: 8px !important;
-            width: 100% !important;
-            padding-right: 54px !important;
-          }
+            .swimlane-title-row {
+              display: flex !important;
+              align-items: flex-start !important;
+              justify-content: space-between !important;
+              gap: 8px !important;
+              width: 100% !important;
+              padding-right: 60px !important;
+            }
           .swimlane-title {
             flex: 1 1 auto !important;
             min-width: 0 !important;
           }
-          .swimlane-assignees {
-            display: flex !important;
-            flex-wrap: nowrap !important;
-            align-items: center !important;
-            justify-content: flex-end !important;
-            margin-left: 0 !important;
-            position: absolute !important;
-            top: 10px !important;
-            right: 10px !important;
-            z-index: 2 !important;
+            .swimlane-assignees {
+              display: flex !important;
+              position: absolute !important;
+              top: 6px !important;
+              right: 6px !important;
+              gap: 6px !important;
+              flex-wrap: nowrap !important;
+              align-items: center !important;
+              justify-content: flex-end !important;
+              margin-left: 0 !important;
+              flex-shrink: 0 !important;
+              z-index: 2 !important;
+            }
+            .swimlane-avatar {
+              display: inline-flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-width: 24px !important;
+              height: 20px !important;
+              padding: 0 5px !important;
+              font-size: 9px !important;
+              line-height: 1 !important;
+              white-space: nowrap !important;
+              word-break: keep-all !important;
+              overflow-wrap: normal !important;
+              flex-shrink: 0 !important;
+            }
           }
-        }
         
         /* View Container */
         .view-container { 

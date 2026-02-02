@@ -957,10 +957,10 @@ export default function DepartmentKanban() {
     () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
     [departmentTasks, isMineView, user?.id]
   )
-  const visibleNoProjectTasks = React.useMemo(
-    () => (isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks),
-    [noProjectTasks, isMineView, user?.id]
-  )
+  const visibleNoProjectTasks = React.useMemo(() => {
+    const base = isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks
+    return base.filter(isNoProjectTask)
+  }, [noProjectTasks, isMineView, user?.id])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -2172,6 +2172,81 @@ export default function DepartmentKanban() {
     return { normal, personal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
 
+  const statusRows = [
+    {
+      id: "blocked",
+      title: "BLLOK",
+      count: noProjectBuckets.blocked.length,
+      items: noProjectBuckets.blocked,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-red-600 border border-red-200",
+      borderClass: "border-red-500",
+      itemBadge: "BLLOK",
+      itemBadgeClass: "bg-white text-red-600 border-red-200",
+    },
+    {
+      id: "one-hour",
+      title: "1H TASKS",
+      count: noProjectBuckets.oneHour.length,
+      items: noProjectBuckets.oneHour,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-indigo-600 border border-indigo-200",
+      borderClass: "border-indigo-500",
+      itemBadge: "1H",
+      itemBadgeClass: "bg-white text-indigo-600 border-indigo-200",
+    },
+    {
+      id: "r1",
+      title: "R1",
+      count: noProjectBuckets.r1.length,
+      items: noProjectBuckets.r1,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-emerald-600 border border-emerald-200",
+      borderClass: "border-emerald-500",
+      itemBadge: "R1",
+      itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
+    },
+    {
+      id: "ga",
+      title: "GA TASKS",
+      count: noProjectBuckets.ga.length,
+      items: noProjectBuckets.ga,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-sky-600 border border-slate-200",
+      borderClass: "border-sky-500",
+      itemBadge: "GA",
+      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
+    },
+    {
+      id: "personal",
+      title: "PERSONAL",
+      count: noProjectBuckets.personal.length,
+      items: noProjectBuckets.personal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-purple-600 border border-purple-200",
+      borderClass: "border-purple-500",
+      itemBadge: "Personal",
+      itemBadgeClass: "bg-white text-purple-600 border-purple-200",
+    },
+    {
+      id: "normal",
+      title: "NORMAL",
+      count: noProjectBuckets.normal.length,
+      items: noProjectBuckets.normal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-blue-600 border border-slate-200",
+      borderClass: "border-blue-500",
+      itemBadge: "Normal",
+      itemBadgeClass: "bg-white text-blue-600 border-slate-200",
+    },
+  ] as const
+
   const gaNoteTaskMap = React.useMemo(() => {
     const map = new Map<string, Task>()
     for (const task of departmentTasks) {
@@ -2421,19 +2496,37 @@ export default function DepartmentKanban() {
         const res = await apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, assigned_to: assigneeId }) })
         if (res.ok) {
           const created = (await res.json()) as Task
+          // Ensure boolean flags are set correctly based on type
           if (noProjectType === "personal") {
             created.is_personal = true
+          }
+          // Ensure the task has the correct properties for filtering
+          if (noProjectType === "normal") {
+            created.is_bllok = false
+            created.is_1h_report = false
+            created.is_r1 = false
+            created.is_personal = false
+            created.priority = created.priority || "NORMAL"
           }
           createdTasks.push(created)
         }
       }
       if (createdTasks.length) {
         // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
-        const nonProjectTasks = createdTasks.filter(isNoProjectTask)
+        // For normal tasks, ensure they pass isNoProjectTask by verifying properties
+        const nonProjectTasks = createdTasks.filter((t) => {
+          // Double-check that normal tasks are included
+          if (noProjectType === "normal" && !t.project_id && !t.system_template_origin_id && !t.ga_note_origin_id) {
+            return true
+          }
+          return isNoProjectTask(t)
+        })
         if (nonProjectTasks.length) {
           setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
         }
+        // Also add to departmentTasks for consistency
         setDepartmentTasks((prev) => [...createdTasks, ...prev])
+        toast.success(`Created ${createdTasks.length} task${createdTasks.length > 1 ? "s" : ""}`)
       }
       setNoProjectOpen(false)
       setNoProjectTitle("")
@@ -3137,7 +3230,7 @@ export default function DepartmentKanban() {
                   {[
                     { label: "PROJECT TASKS", value: todayProjectTasks.length },
                     { label: "GA NOTES", value: todayOpenNotes.length },
-                    { label: "FAST TASKS", value: todayNoProjectTasks.length },
+                    { label: "FAST TASKS", value: visibleNoProjectTasks.length },
                     { label: "SYSTEM TASKS", value: todaySystemTasks.length },
                 ].map((stat) => (
                   <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
@@ -3476,14 +3569,14 @@ export default function DepartmentKanban() {
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                       <div className="text-sm font-semibold">FAST TASKS</div>
                       <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                        {todayNoProjectTasks.length}
+                        {visibleNoProjectTasks.length}
                       </span>
                       <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                     </div>
-                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
-                      {todayNoProjectTasks.length ? (
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                      {visibleNoProjectTasks.length ? (
                         <div className="space-y-2">
-                          {todayNoProjectTasks.map((task) => {
+                          {visibleNoProjectTasks.map((task) => {
                             const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                             const typeLabel = noProjectTypeLabel(task)
                             return (
@@ -3506,7 +3599,7 @@ export default function DepartmentKanban() {
                           })}
                         </div>
                       ) : (
-                        <div className="text-sm text-slate-500">No tasks today.</div>
+                        <div className="text-sm text-slate-500">No tasks.</div>
                       )}
                     </div>
                   </div>
@@ -3720,54 +3813,67 @@ export default function DepartmentKanban() {
               </div>
             )}
 
-            {/* BUCKETS */}
-            {activeTab === "no-project" && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
-                  {!isReadOnly && (
+            {activeTab === "no-project" ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                    <div className="text-sm text-slate-600">
+                      Use these buckets to track non-project tasks and special cases.
+                    </div>
+                  </div>
+                  {!isReadOnly ? (
                     <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                       <DialogTrigger asChild>
-                        <Button className="rounded-xl bg-slate-900 text-white">Create Task</Button>
+                        <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                          + Add Task
+                        </Button>
                       </DialogTrigger>
-                      <DialogContent className="rounded-2xl sm:max-w-xl">
+                      <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                         <DialogHeader>
-                          <DialogTitle>New Task</DialogTitle>
+                          <DialogTitle className="text-slate-800">New Task</DialogTitle>
                         </DialogHeader>
-                        <div className="grid gap-4 py-4">
+                        <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label>Category</Label>
-                            <Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}>
-                              <SelectTrigger className="rounded-xl">
-                                <SelectValue />
+                            <Label className="text-slate-700">Type</Label>
+                            <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
+                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                                <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
-                                {NO_PROJECT_TYPES.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>
-                                    {t.label}
+                                {NO_PROJECT_TYPES.map((opt) => (
+                                  <SelectItem key={opt.id} value={opt.id}>
+                                    {opt.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
+                            <div className="text-xs text-slate-500">
+                              {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                            </div>
                           </div>
                           <div className="space-y-2">
-                            <Label>Title</Label>
-                            <Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                            <Label className="text-slate-700">Title</Label>
+                            <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                           </div>
                           <div className="space-y-2">
-                            <Label>Description</Label>
+                            <Label className="text-slate-700">Description</Label>
                             <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                           </div>
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2">
-                              <Label>Assignee</Label>
+                              <Label className="text-slate-700">Assign to</Label>
                               <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
                                 <DialogTrigger asChild>
-                                  <Button type="button" variant="outline" className="w-full justify-start rounded-xl">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                                  >
                                     {noProjectAssigneeLabel}
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="rounded-2xl sm:max-w-md">
+                                <DialogContent className="sm:max-w-md z-[110]">
                                   <DialogHeader>
                                     <DialogTitle>Select Assignees</DialogTitle>
                                   </DialogHeader>
@@ -3817,15 +3923,15 @@ export default function DepartmentKanban() {
                               </Dialog>
                             </div>
                             <div className="space-y-2">
-                              <Label>Finish by</Label>
+                              <Label className="text-slate-700">Finish by (optional)</Label>
                               <Select
                                 value={noProjectFinishPeriod}
                                 onValueChange={(value) =>
                                   setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                                 }
                               >
-                                <SelectTrigger className="rounded-xl">
-                                  <SelectValue />
+                                <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                                  <SelectValue placeholder="Select period" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
@@ -3838,67 +3944,67 @@ export default function DepartmentKanban() {
                               </Select>
                             </div>
                             <div className="space-y-2">
-                              <Label>Start date</Label>
+                              <Label className="text-slate-700">Start date</Label>
                               <Input
-                                className="rounded-xl w-full"
                                 type="date"
                                 required
                                 value={noProjectStartDate}
                                 onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                                className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label>Due date (optional)</Label>
+                              <Label className="text-slate-700">Due date (optional)</Label>
                               <Input
-                                className="rounded-xl w-full"
                                 type="date"
                                 value={noProjectDueDate}
                                 onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                                className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                               />
                             </div>
                           </div>
-                        </div>
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" onClick={() => setNoProjectOpen(false)}>
-                            Cancel
-                          </Button>
-                          <Button
-                            className="rounded-xl"
-                            disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
-                            onClick={() => void submitNoProjectTask()}
-                          >
-                            {creatingNoProject ? "Creating..." : "Create"}
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
+                              Cancel
+                            </Button>
+                            <Button
+                              disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
+                              onClick={() => void submitNoProjectTask()}
+                              className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                            >
+                              {creatingNoProject ? "Creating..." : "Create"}
+                            </Button>
+                          </div>
                         </div>
                       </DialogContent>
                     </Dialog>
-                  )}
+                  ) : null}
                 </div>
-              {!isReadOnly ? (
+                {!isReadOnly ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
-                  <DialogContent className="rounded-2xl sm:max-w-xl">
+                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                     <DialogHeader>
-                      <DialogTitle>Edit Task</DialogTitle>
+                      <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
+                    <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Title</Label>
-                        <Input className="rounded-xl" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} />
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                       </div>
                       <div className="space-y-2">
-                        <Label>Description</Label>
+                        <Label className="text-slate-700">Description</Label>
                         <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label>Finish by</Label>
+                          <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
                             value={editTaskFinishPeriod}
                             onValueChange={(value) =>
                               setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                             }
                           >
-                            <SelectTrigger className="rounded-xl">
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                               <SelectValue placeholder="Select period" />
                             </SelectTrigger>
                             <SelectContent>
@@ -3912,30 +4018,34 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Start date</Label>
+                          <Label className="text-slate-700">Start date</Label>
                           <Input
-                            className="rounded-xl w-full"
                             type="date"
                             required
                             value={editTaskStartDate}
                             onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Due date (optional)</Label>
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
-                            className="rounded-xl w-full"
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                       </div>
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" onClick={cancelEditTask}>
+                        <Button variant="outline" onClick={cancelEditTask} className="rounded-xl border-slate-200">
                           Cancel
                         </Button>
-                        <Button disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
+                        <Button
+                          disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask}
+                          onClick={() => void updateNoProjectTask()}
+                          className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                        >
                           {updatingTask ? "Updating..." : "Update"}
                         </Button>
                       </div>
@@ -3943,185 +4053,98 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
-                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.normal.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-white bg-white/80 p-3 pr-16 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-                          {canDeleteNoProject ? (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="absolute right-10 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${t.title}`}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  startEditTask(t)
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                disabled={deletingNoProjectTaskId === t.id}
-                                className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                title="Delete"
-                                aria-label={`Delete ${t.title}`}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  void deleteNoProjectTask(t.id)
-                                }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </>
-                          ) : null}
-                          <div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>
-                          {t.assigned_to ? (
-                            <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
-                          ) : null}
-                        </Link>
-                      ))}
+              <div className="space-y-4">
+                {statusRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+                >
+                  <div
+                    className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
+                  >
+                    <div className="text-sm font-semibold">{row.title}</div>
+                    <span
+                      className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
+                    >
+                      {row.count}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {row.items.length ? "Active items" : "No items"}
                     </div>
                   </div>
-                  <div className="rounded-3xl border border-purple-100 bg-purple-50/40 p-4 backdrop-blur-sm dark:border-purple-900/30 dark:bg-purple-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-purple-700 dark:text-purple-400">Personal</span>
-                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900 dark:text-purple-300">{noProjectBuckets.personal.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.personal.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-purple-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-purple-900 dark:bg-purple-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-purple-900 dark:text-purple-100">{t.title}</div>
-                          {t.assigned_to ? (
-                            <div className="mt-2 text-xs text-purple-500">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
-                          ) : null}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-rose-700 dark:text-rose-400">BLLOK</span>
-                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.blocked.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-rose-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span>
-                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.ga.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-sky-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span>
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-amber-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge>
-                          </div>
-                          <div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                    {row.items.length ? (
+                      <div className="flex flex-col gap-2">
+                        {row.items.map((t) => (
+                          <Link
+                            key={t.id}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium text-slate-800 text-xs">{t.title}</div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                  {row.itemBadge}
+                                </Badge>
+                                {t.assigned_to ? (
+                                  <div
+                                    className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                    title={assigneeLabel(userMap.get(t.assigned_to) || null)}
+                                  >
+                                    {initials(assigneeLabel(userMap.get(t.assigned_to) || null))}
+                                  </div>
+                                ) : null}
+                                {canDeleteNoProject ? (
+                                  <>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                      title="Edit"
+                                      aria-label={`Edit ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        startEditTask(t)
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      disabled={deletingNoProjectTaskId === t.id}
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                      title="Delete"
+                                      aria-label={`Delete ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        void deleteNoProjectTask(t.id)
+                                      }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                            {t.description ? (
+                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                            ) : null}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No tasks in this category.</div>
+                    )}
                   </div>
                 </div>
+              ))}
               </div>
-            )}
+            </div>
+          ) : null}
 
             {/* NOTES */}
             {activeTab === "ga-ka" && (

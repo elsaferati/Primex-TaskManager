@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,7 @@ export default function TaskDetailsPage() {
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
+  const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
   const [reminder, setReminder] = React.useState(false)
@@ -85,6 +87,7 @@ export default function TaskDetailsPage() {
     if (!task) return
     setDescription(task.description || "")
     setStatusValue(task.status || "")
+    setStartDate(toDateInput(task.start_date))
     setDueDate(toDateInput(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
     setReminder(Boolean(task.reminder_enabled))
@@ -105,6 +108,7 @@ export default function TaskDetailsPage() {
       }
       if (statusValue) payload.status = statusValue
       if (canAssign) {
+        payload.start_date = startDate || null
         payload.due_date = dueDate || null
         payload.assigned_to = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
       }
@@ -114,7 +118,24 @@ export default function TaskDetailsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        if (res.status === 403) {
+          toast.error("Forbidden: You don't have permission to edit this task")
+          return
+        }
+        let errorMessage = "Failed to update task"
+        try {
+          const errorData = await res.json()
+          if (errorData.detail) {
+            errorMessage = typeof errorData.detail === "string" ? errorData.detail : "Failed to update task"
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(errorMessage)
+        return
+      }
+      toast.success("Task updated")
       if (returnTo) {
         router.push(returnTo)
         return
@@ -204,6 +225,14 @@ export default function TaskDetailsPage() {
               {canAssign ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
+                    <Label>Start date</Label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(normalizeDueDateInput(e.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label>Due date</Label>
                     <Input
                       type="date"
@@ -211,24 +240,26 @@ export default function TaskDetailsPage() {
                       onChange={(e) => setDueDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Assign to</Label>
-                    <Select value={assignedTo} onValueChange={setAssignedTo}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                        {users
-                          .filter((u) => !u.department_id || u.department_id === task.department_id)
-                          .map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                </div>
+              ) : null}
+              {canAssign ? (
+                <div className="space-y-2">
+                  <Label>Assign to</Label>
+                  <Select value={assignedTo} onValueChange={setAssignedTo}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                      {users
+                        .filter((u) => !u.department_id || u.department_id === task.department_id)
+                        .map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.username}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               ) : null}
 
@@ -259,6 +290,10 @@ export default function TaskDetailsPage() {
                     <span className="font-medium text-slate-900">
                       {assignedUser?.full_name || assignedUser?.username || (task.assigned_to ? "Assigned" : "Unassigned")}
                     </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Start date</span>
+                    <span className="font-medium text-slate-900">{formatDate(task.start_date)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Due date</span>

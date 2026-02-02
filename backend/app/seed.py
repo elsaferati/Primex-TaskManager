@@ -53,6 +53,7 @@ PCM_PROJECTS = [
         "current_phase": ProjectPhaseStatus.PLANNING,
         "progress_percentage": 48,
         "project_type": ProjectType.MST.value,
+        "is_template": True,
     },
     {
         "title": "TT",
@@ -71,6 +72,7 @@ GD_PROJECTS = [
         "current_phase": ProjectPhaseStatus.PLANNING,
         "progress_percentage": 0,
         "project_type": ProjectType.MST.value,
+        "is_template": True,
     }
 ]
 
@@ -727,6 +729,9 @@ async def seed() -> None:
             existing_titles = {p.title for p in existing_pcm}
             for project in PCM_PROJECTS:
                 if project["title"] in existing_titles:
+                    existing_project = next((p for p in existing_pcm if p.title == project["title"]), None)
+                    if existing_project and project.get("is_template", False) and not existing_project.is_template:
+                        existing_project.is_template = True
                     continue
                 db.add(
                     Project(
@@ -737,6 +742,7 @@ async def seed() -> None:
                         status=project["status"],
                         current_phase=project["current_phase"],
                         progress_percentage=project["progress_percentage"],
+                        is_template=project.get("is_template", False),
                     )
                 )
             await db.commit()
@@ -903,6 +909,9 @@ async def seed() -> None:
             existing_titles = {p.title for p in existing_gd}
             for project in GD_PROJECTS:
                 if project["title"] in existing_titles:
+                    existing_project = next((p for p in existing_gd if p.title == project["title"]), None)
+                    if existing_project and project.get("is_template", False) and not existing_project.is_template:
+                        existing_project.is_template = True
                     continue
                 db.add(
                     Project(
@@ -913,6 +922,7 @@ async def seed() -> None:
                         status=project["status"],
                         current_phase=project["current_phase"],
                         progress_percentage=project["progress_percentage"],
+                        is_template=project.get("is_template", False),
                     )
                 )
             await db.commit()
