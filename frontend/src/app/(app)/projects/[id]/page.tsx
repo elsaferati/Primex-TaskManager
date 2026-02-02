@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Eye } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
@@ -386,6 +386,9 @@ export default function ProjectPage() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
+  const [viewDescriptionOpen, setViewDescriptionOpen] = React.useState(false)
+  const [viewingTaskTitle, setViewingTaskTitle] = React.useState("")
+  const [viewingTaskDescription, setViewingTaskDescription] = React.useState("")
   const [editStatus, setEditStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [editPriority, setEditPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [editAssignees, setEditAssignees] = React.useState<string[]>([])
@@ -967,6 +970,12 @@ export default function ProjectPage() {
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
+  }
+
+  const startViewDescription = (task: Task) => {
+    setViewingTaskTitle(task.title || "")
+    setViewingTaskDescription(task.description || "")
+    setViewDescriptionOpen(true)
   }
 
   const saveEditTask = async () => {
@@ -3245,6 +3254,36 @@ export default function ProjectPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            <Dialog open={viewDescriptionOpen} onOpenChange={setViewDescriptionOpen}>
+              <DialogContent className="sm:max-w-2xl z-[120]">
+                <DialogHeader>
+                  <DialogTitle className="text-slate-800">{viewingTaskTitle || "Task Description"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-700">Description</Label>
+                    {viewingTaskDescription && viewingTaskDescription.trim().length > 0 ? (
+                      <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] max-h-[400px] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">
+                        {viewingTaskDescription}
+                      </div>
+                    ) : (
+                      <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] text-sm text-slate-500 italic">
+                        No description provided.
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setViewDescriptionOpen(false)}
+                      className="rounded-xl"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
           <Card className="p-0">
             <div className="divide-y">
@@ -3330,6 +3369,17 @@ export default function ProjectPage() {
                         ) : null}
                       </div>
                       <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => startViewDescription(task)}
+                          disabled={!task.description || task.description.trim().length === 0}
+                          className="hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={!task.description || task.description.trim().length === 0 ? "No description available" : "View description"}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => startEditTask(task)}>
                           Edit
                         </Button>
