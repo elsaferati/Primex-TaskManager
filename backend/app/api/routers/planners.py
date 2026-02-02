@@ -241,7 +241,21 @@ async def weekly_planner(
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
     if user_id is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+        # Check both Task.assigned_to and TaskAssignee table for multiple assignees
+        task_ids_with_assignee = (
+            await db.execute(
+                select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id).distinct()
+            )
+        ).scalars().all()
+        if task_ids_with_assignee:
+            task_stmt = task_stmt.where(
+                or_(
+                    Task.assigned_to == user_id,
+                    Task.id.in_(task_ids_with_assignee)
+                )
+            )
+        else:
+            task_stmt = task_stmt.where(Task.assigned_to == user_id)
     
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     

@@ -342,6 +342,99 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   return false
 }
 
+function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
+  const today = new Date(fromDate)
+  today.setHours(0, 0, 0, 0)
+  
+  if (t.frequency === "DAILY") {
+    return today
+  }
+  
+  if (t.frequency === "WEEKLY") {
+    const days = t.days_of_week && t.days_of_week.length
+      ? t.days_of_week
+      : t.day_of_week != null
+        ? [t.day_of_week]
+        : [0] // Monday by default
+    
+    const currentDayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
+    const sortedDays = [...days].sort((a, b) => a - b)
+    
+    // Find next day in this week
+    for (const dayIdx of sortedDays) {
+      if (dayIdx >= currentDayIdx) {
+        const nextDate = new Date(today)
+        nextDate.setDate(today.getDate() + (dayIdx - currentDayIdx))
+        return nextDate
+      }
+    }
+    
+    // If no day found this week, use first day of next week
+    const nextDate = new Date(today)
+    const daysUntilNextWeek = 7 - currentDayIdx + sortedDays[0]
+    nextDate.setDate(today.getDate() + daysUntilNextWeek)
+    return nextDate
+  }
+  
+  if (t.frequency === "MONTHLY") {
+    const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+    if (current && current >= today) {
+      return current
+    }
+    const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+    return next || today
+  }
+  
+  if (t.frequency === "YEARLY") {
+    if (t.day_of_month === 0) {
+      const current = getYearEndDate(today.getFullYear())
+      if (current && current >= today) {
+        return current
+      }
+      return getYearEndDate(today.getFullYear() + 1)
+    }
+    if (t.month_of_year == null) {
+      const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+      if (current && current >= today) {
+        return current
+      }
+      const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+      if (next) return next
+      return getScheduledDateForMonth(t, today.getFullYear() + 1, 0) || today
+    }
+    const targetMonth = t.month_of_year - 1
+    const current = getScheduledDateForMonth(t, today.getFullYear(), targetMonth)
+    if (current && current >= today) {
+      return current
+    }
+    return getScheduledDateForMonth(t, today.getFullYear() + 1, targetMonth) || today
+  }
+  
+  if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
+    const interval = t.frequency === "3_MONTHS" ? 3 : 6
+    let checkMonth = today.getMonth()
+    let checkYear = today.getFullYear()
+    
+    // Check up to 2 years ahead
+    for (let i = 0; i < 24; i++) {
+      const monthValue = checkMonth + 1
+      if (monthValue % interval === 0) {
+        const candidate = getScheduledDateForMonth(t, checkYear, checkMonth)
+        if (candidate && candidate >= today) {
+          return candidate
+        }
+      }
+      checkMonth++
+      if (checkMonth >= 12) {
+        checkMonth = 0
+        checkYear++
+      }
+    }
+  }
+  
+  return today
+}
+
 function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
   const dateLabel = date.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" })
@@ -1078,7 +1171,18 @@ export default function DepartmentKanban() {
     [meetings, isMineView, user?.id]
   )
   const visibleSystemTemplates = React.useMemo(
-    () => (isMineView && user?.id ? systemTasks.filter((t) => t.default_assignee_id === user.id) : systemTasks),
+    () => {
+      if (!isMineView || !user?.id) return systemTasks
+      return systemTasks.filter((t) => {
+        // Check if user is the default assignee
+        if (t.default_assignee_id === user.id) return true
+        // Check if user is in the assignees array
+        if (t.assignees?.some((assignee) => assignee.id === user.id)) return true
+        // Check if user is in the alignment_user_ids array
+        if (t.alignment_user_ids?.includes(user.id)) return true
+        return false
+      })
+    },
     [systemTasks, isMineView, user?.id]
   )
 
@@ -1087,8 +1191,36 @@ export default function DepartmentKanban() {
     [visibleDepartmentTasks]
   )
   const todaySystemTasks = React.useMemo(
-    () => visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate)),
-    [visibleSystemTemplates, todayDate]
+    () => {
+      const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
+      
+      // If in "my view", also include overdue system tasks where next occurrence has passed
+      if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
+        const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
+        const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
+        
+        const overdueTasks = visibleSystemTemplates.filter((t) => {
+          const templateId = t.template_id || t.id
+          // Skip if already in today's tasks
+          if (todayTaskIds.has(templateId)) return false
+          // Only include if it's in overdue list
+          if (!overdueTaskIds.has(templateId)) return false
+          
+          // Check if next occurrence date has passed
+          const nextOccurrence = getNextOccurrenceDate(t, todayDate)
+          const nextOccurrenceKey = dayKey(nextOccurrence)
+          const todayKey = dayKey(todayDate)
+          
+          // Only show if next occurrence is in the past (overdue)
+          return nextOccurrenceKey < todayKey
+        })
+        
+        return [...todayTasks, ...overdueTasks]
+      }
+      
+      return todayTasks
+    },
+    [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
   )
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
