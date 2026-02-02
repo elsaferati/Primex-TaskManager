@@ -2968,7 +2968,7 @@ export default function CommonViewPage() {
         .swimlane-delete {
           position: absolute;
           top: 8px;
-          left: 8px;
+          right: 8px;
           width: 22px;
           height: 22px;
           border-radius: 8px;
@@ -2991,7 +2991,7 @@ export default function CommonViewPage() {
           box-shadow: none;
         }
         .swimlane-cell {
-          padding: 12px 54px 12px 14px;
+          padding: 12px 70px 12px 14px;
           border-right: 1px solid var(--swim-border);
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
@@ -3019,7 +3019,7 @@ export default function CommonViewPage() {
           justify-content: space-between;
           gap: 8px;
           width: 100%;
-          padding-right: 54px;
+          padding-right: 70px;
         }
         .swimlane-title {
           flex: 1 1 auto;
@@ -3034,7 +3034,7 @@ export default function CommonViewPage() {
         .swimlane-delete {
           position: absolute;
           top: 6px;
-          left: 6px;
+          right: 6px;
           border: 1px solid #e2e8f0;
           background: #ffffff;
           color: #dc2626;
@@ -3064,7 +3064,7 @@ export default function CommonViewPage() {
           margin-left: 0;
           position: absolute;
           top: 10px;
-          right: 10px;
+          right: 36px;
           z-index: 2;
         }
         .swimlane-avatar {
