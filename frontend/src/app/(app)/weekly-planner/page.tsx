@@ -24,6 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { WeeklyPlannerLegendTable } from "@/components/weekly-planner-legend-table"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -1988,6 +1989,25 @@ export default function WeeklyPlannerPage() {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Show Legend Table only for Development department */}
+            {(() => {
+              // Check if Development department is selected
+              const selectedDept = departments.find((d) => d.id === departmentId)
+              const isDevelopment = selectedDept?.name === "Development"
+              
+              // Also check if we're showing a single department in the data
+              const devDept = data.departments.find((d) => d.department_name === "Development")
+              
+              if (isDevelopment && devDept && data.week_start) {
+                return (
+                  <WeeklyPlannerLegendTable
+                    departmentId={departmentId}
+                    weekStart={data.week_start}
+                  />
+                )
+              }
+              return null
+            })()}
             {data.departments.map((dept) => (
               <Card key={dept.department_id}>
                 <CardHeader>
