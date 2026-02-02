@@ -5661,12 +5661,14 @@ export default function DepartmentKanban() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[20%]">Title</TableHead>
-                          <TableHead className="w-[12%]">Platform</TableHead>
-                          <TableHead className="w-[18%]">Date & Time</TableHead>
-                          <TableHead className="w-[15%]">Project</TableHead>
-                          <TableHead className="w-[20%]">Details</TableHead>
-                          {!isReadOnly ? <TableHead className="w-[15%] text-right">Actions</TableHead> : null}
+                          <TableHead className="w-[20%] uppercase">Title</TableHead>
+                          <TableHead className="w-[12%] uppercase">Platform</TableHead>
+                          <TableHead className="w-[18%] uppercase">Date & Time</TableHead>
+                          <TableHead className="w-[15%] uppercase">Project</TableHead>
+                          <TableHead className="w-[10%] uppercase">Link</TableHead>
+                          <TableHead className="w-[10%] uppercase">Repeat</TableHead>
+                          <TableHead className="w-[10%] uppercase">Users</TableHead>
+                          {!isReadOnly ? <TableHead className="w-[5%] text-right uppercase">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -5679,7 +5681,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id}>
                               {isEditing ? (
                                 <>
-                                  <TableCell colSpan={!isReadOnly ? 6 : 5}>
+                                  <TableCell colSpan={!isReadOnly ? 8 : 7}>
                                     <div className="space-y-3">
                                       <Input
                                         value={editMeetingTitle}
@@ -5845,50 +5847,67 @@ export default function DepartmentKanban() {
                                   <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
                                   <TableCell>{project ? project.title || project.name : "-"}</TableCell>
                                   <TableCell>
-                                    <div className="space-y-1 text-xs">
-                                      {meeting.meeting_url && (
-                                        <div>
-                                          <a
-                                            href={meeting.meeting_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:underline"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            🔗 Join meeting
-                                          </a>
-                                        </div>
-                                      )}
-                                      {meeting.recurrence_type && meeting.recurrence_type !== "none" && (
-                                        <div className="text-slate-600">
-                                          {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
-                                            ? `🔄 Weekly: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
-                                            : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
-                                            ? `🔄 Monthly: ${meeting.recurrence_days_of_month.join(", ")}`
-                                            : ""}
-                                        </div>
-                                      )}
-                                      {meeting.participant_ids && Array.isArray(meeting.participant_ids) && meeting.participant_ids.length > 0 && (
-                                        <div className="text-slate-600">
-                                          👥 {meeting.participant_ids.map(pid => {
+                                    {meeting.meeting_url ? (
+                                      <a
+                                        href={meeting.meeting_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:underline text-sm"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        🔗 Join
+                                      </a>
+                                    ) : (
+                                      <span className="text-slate-400 text-sm">-</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {meeting.recurrence_type && meeting.recurrence_type !== "none" ? (
+                                      <span className="text-slate-600 text-sm">
+                                        {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
+                                          ? `W: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
+                                          : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
+                                          ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
+                                          : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400 text-sm">-</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {meeting.participant_ids && Array.isArray(meeting.participant_ids) && meeting.participant_ids.length > 0 ? (
+                                      <div className="text-xs font-semibold text-slate-700">
+                                        {meeting.participant_ids
+                                          .map(pid => {
                                             const participant = users.find(u => u.id === pid)
-                                            return participant ? (participant.full_name || participant.username || "-") : null
-                                          }).filter(Boolean).join(", ") || `${meeting.participant_ids.length} participant${meeting.participant_ids.length > 1 ? 's' : ''}`}
-                                        </div>
-                                      )}
-                                    </div>
+                                            if (!participant) return null
+                                            const name = participant.full_name || participant.username || "-"
+                                            return { pid, name, initials: initials(name) }
+                                          })
+                                          .filter(Boolean)
+                                          .map((item, index, array) => (
+                                            <span key={item.pid} title={item.name}>
+                                              {item.initials}
+                                              {index < array.length - 1 && ", "}
+                                            </span>
+                                          ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-sm">-</span>
+                                    )}
                                   </TableCell>
                                   {!isReadOnly ? (
                                     <TableCell className="text-right">
-                                      <div className="flex items-center justify-end gap-2">
+                                      <div className="flex items-center justify-end gap-1">
                                         <Button
                                           variant="outline"
                                           size="icon"
                                           onClick={() => startEditMeeting(meeting)}
                                           aria-label="Edit meeting"
                                           title="Edit"
+                                          className="h-7 w-7"
                                         >
-                                          <Pencil className="h-4 w-4" />
+                                          <Pencil className="h-3.5 w-3.5" />
                                         </Button>
                                         <Button
                                           variant="outline"
@@ -5896,9 +5915,9 @@ export default function DepartmentKanban() {
                                           onClick={() => void deleteMeeting(meeting.id)}
                                           aria-label="Delete meeting"
                                           title="Delete"
-                                          className="text-red-600 border-red-200 hover:bg-red-50"
+                                          className="h-7 w-7 text-red-600 border-red-200 hover:bg-red-50"
                                         >
-                                          <Trash2 className="h-4 w-4" />
+                                          <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
                                       </div>
                                     </TableCell>
