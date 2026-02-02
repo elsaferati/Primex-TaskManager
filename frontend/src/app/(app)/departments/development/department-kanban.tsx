@@ -1229,8 +1229,53 @@ export default function DepartmentKanban() {
   )
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
     return projectTasks.filter((task) => {
-      const date = toDate(task.due_date || task.start_date || task.created_at)
+      // Show project tasks from start_date until due_date
+      const startDate = task.start_date ? toDate(task.start_date) : null
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      const createdDate = task.created_at ? toDate(task.created_at) : null
+      
+      // If we have both start and due dates, show if today is between them
+      if (startDate && dueDate) {
+        const startKey = dayKey(startDate)
+        const dueKey = dayKey(dueDate)
+        if (todayKey >= startKey && todayKey <= dueKey) {
+          // Task is in range, check user filter
+          if (selectedUserId !== "__all__") {
+            return task.assigned_to === selectedUserId
+          }
+          return true
+        }
+        return false
+      }
+      
+      // If only due date, show if due today or before
+      if (dueDate) {
+        const dueKey = dayKey(dueDate)
+        if (todayKey >= dueKey) {
+          if (selectedUserId !== "__all__") {
+            return task.assigned_to === selectedUserId
+          }
+          return true
+        }
+        return false
+      }
+      
+      // If only start date, show if started today or before
+      if (startDate) {
+        const startKey = dayKey(startDate)
+        if (todayKey >= startKey) {
+          if (selectedUserId !== "__all__") {
+            return task.assigned_to === selectedUserId
+          }
+          return true
+        }
+        return false
+      }
+      
+      // Fallback to created_at if no dates
+      const date = createdDate
       const matchesDate = date ? isSameDay(date, todayDate) : false
       if (!matchesDate) return false
       // Filter by user if selected
@@ -1289,13 +1334,42 @@ export default function DepartmentKanban() {
   const dailyReportProjectTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
     return projectTasks.filter((task) => {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      
+      // Show completed tasks if completed today
+      if (completedToday) return true
+      // Don't show tasks completed on other days
       if (completedDate && !completedToday) return false
-      if (!baseDate) return completedToday
-      const baseKey = dayKey(baseDate)
-      return baseKey <= todayKey || completedToday
+      
+      // Show project tasks from start_date until due_date
+      const startDate = task.start_date ? toDate(task.start_date) : null
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      const createdDate = task.created_at ? toDate(task.created_at) : null
+      
+      // If we have both start and due dates, show if today is between them
+      if (startDate && dueDate) {
+        const startKey = dayKey(startDate)
+        const dueKey = dayKey(dueDate)
+        return todayKey >= startKey && todayKey <= dueKey
+      }
+      
+      // If only due date, show if due today or before
+      if (dueDate) {
+        const dueKey = dayKey(dueDate)
+        return todayKey >= dueKey
+      }
+      
+      // If only start date, show if started today or before
+      if (startDate) {
+        const startKey = dayKey(startDate)
+        return todayKey >= startKey
+      }
+      
+      // Fallback to created_at if no dates
+      if (!createdDate) return false
+      const createdKey = dayKey(createdDate)
+      return createdKey <= todayKey
     })
   }, [projectTasks, todayDate])
   const systemTemplateById = React.useMemo(() => {
