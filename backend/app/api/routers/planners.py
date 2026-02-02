@@ -72,6 +72,21 @@ def _is_vs_vl_task(task: Task) -> bool:
     return normalized_title in VS_VL_TEMPLATE_TITLES
 
 
+def _is_fast_task(task: Task) -> bool:
+    """Fast/ad-hoc tasks must be standalone (no project link) and not system/GA."""
+    if task.project_id is not None:
+        return False
+    if task.dependency_task_id is not None:
+        return False
+    if task.system_template_origin_id is not None:
+        return False
+    if task.ga_note_origin_id is not None:
+        return False
+    if _is_vs_vl_task(task):
+        return False
+    return True
+
+
 def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
@@ -358,11 +373,11 @@ async def weekly_planner(
                 )
             )
 
-    # Fast tasks (tasks without project_id, excluding VS/VL tasks)
+    # Fast tasks (standalone ad-hoc tasks only)
     fast_tasks = [
         _task_to_out(t, assignee_map.get(t.id, []))
         for t in week_tasks
-        if t.project_id is None and not _is_vs_vl_task(t)
+        if _is_fast_task(t)
     ]
 
     # Organize tasks by day for the days view
@@ -1112,8 +1127,8 @@ async def weekly_table_planner(
                     # System tasks (have system_template_origin_id)
                     if task.system_template_origin_id is not None:
                         continue
-                    # Fast tasks (no project_id and no system_template_origin_id, excluding VS/VL tasks)
-                    elif task.project_id is None and not _is_vs_vl_task(task):
+                    # Fast tasks (standalone ad-hoc tasks only)
+                    elif _is_fast_task(task):
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,

@@ -943,14 +943,15 @@ export default function WeeklyPlannerPage() {
               font-weight: bold;
               background-color: #f9f9f9;
               text-align: left;
-              width: 48px;
+              width: 70px;
               vertical-align: bottom;
+              white-space: nowrap;
             }
             .ll-cell {
               font-weight: bold;
               background-color: #f9f9f9;
               text-align: left;
-              width: 20px;
+              width: 32px;
               vertical-align: bottom;
               font-size: 4.5pt;
               line-height: 1;
@@ -1166,8 +1167,8 @@ export default function WeeklyPlannerPage() {
       return { page, content }
     }
 
-    const dayColWidth = 48
-    const llColWidth = 20
+    const dayColWidth = 70
+    const llColWidth = 32
     const timeColWidth = 22
     const minUserColWidth = 48
     const targetUserColWidth = 72
@@ -1255,16 +1256,16 @@ export default function WeeklyPlannerPage() {
       const colgroup = doc.createElement("colgroup")
       colgroup.innerHTML = `
         <col style="width: ${dayColWidth}px;" />
-        <col style="width: ${llColWidth}px;" />
         <col style="width: ${timeColWidth}px;" />
+        <col style="width: ${llColWidth}px;" />
         ${allUsers.map(() => `<col style="width: ${userColWidth}px;" />`).join("")}
       `
       const thead = doc.createElement("thead")
       thead.innerHTML = `
         <tr>
           <th class="day-cell" rowspan="2">Day</th>
-          <th style="width: ${llColWidth}px;">LL</th>
           <th class="time-cell" style="width: ${timeColWidth}px;">Time</th>
+          <th style="width: ${llColWidth}px;">LL</th>
           ${allUsers.map(user => `<th class="user-header">${user.user_name}</th>`).join("")}
         </tr>
       `
@@ -1321,8 +1322,8 @@ export default function WeeklyPlannerPage() {
               <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
             </div>
           </td>
+          <td class="print-subhead time-cell" rowspan="2">AM</td>
           <td class="ll-cell print-subhead">PRJK</td>
-          <td class="print-subhead time-cell">AM</td>
       `
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
@@ -1377,7 +1378,6 @@ export default function WeeklyPlannerPage() {
 
       html += `<tr>`
       html += `<td class="ll-cell print-subhead">FT</td>`
-      html += `<td class="print-subhead time-cell">AM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
@@ -1409,8 +1409,8 @@ export default function WeeklyPlannerPage() {
       html += `</tr>`
 
       html += `<tr style="border-top: 2px solid #000;">`
+      html += `<td class="print-subhead time-cell" rowspan="2">PM</td>`
       html += `<td class="ll-cell print-subhead">PRJK</td>`
-      html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.pm_projects || []
@@ -1464,7 +1464,6 @@ export default function WeeklyPlannerPage() {
 
       html += `<tr>`
       html += `<td class="ll-cell print-subhead">FT</td>`
-      html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
@@ -2010,8 +2009,8 @@ export default function WeeklyPlannerPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-24 min-w-24 sticky left-0 bg-background z-10 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
+                          <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
+                          <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
                           {(() => {
                             // Get all unique users from all days
                             const userMap = new Map<string, WeeklyTableUserDay>()
@@ -2294,11 +2293,11 @@ export default function WeeklyPlannerPage() {
                                     <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
                                   </div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  PRJK
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2320,11 +2319,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* AM FT Row */}
                               <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  FT
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2345,11 +2344,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* PM PRJK Row */}
                               <TableRow className="border-t-2 border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  PRJK
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2371,11 +2370,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* PM FT Row */}
                               <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  FT
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
