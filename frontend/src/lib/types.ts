@@ -203,6 +203,32 @@ export interface DailyReportResponse {
   system_overdue: DailyReportSystemOccurrence[]
 }
 
+export interface DailyReportGaEntry {
+  id: string
+  user_id: string
+  department_id: string
+  entry_date: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DailyReportGaNote {
+  id: string
+  content: string
+  note_type?: "GA" | "KA"
+  status?: "OPEN" | "CLOSED"
+  priority?: "NORMAL" | "HIGH" | null
+  created_at: string
+  project_id?: string | null
+  project_name?: string | null
+}
+
+export interface DailyReportGaTableResponse {
+  entry?: DailyReportGaEntry | null
+  notes: DailyReportGaNote[]
+}
+
 export type ChecklistItemType = "TITLE" | "COMMENT" | "CHECKBOX"
 
 export interface ChecklistItemAssignee {
@@ -230,6 +256,19 @@ export interface ChecklistItem {
   is_checked?: boolean | null
   // Assignees
   assignees?: ChecklistItemAssignee[]
+}
+
+export interface ProjectPhaseChecklistItem {
+  id: string
+  project_id: string
+  phase_key: string
+  title: string
+  comment?: string | null
+  is_checked: boolean
+  sort_order?: number | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface GaNote {

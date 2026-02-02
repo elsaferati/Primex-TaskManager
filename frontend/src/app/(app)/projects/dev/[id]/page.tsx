@@ -19,7 +19,17 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, User } from "@/lib/types"
+import type {
+  ChecklistItem,
+  GaNote,
+  Meeting,
+  Project,
+  ProjectPhaseChecklistItem,
+  ProjectPrompt,
+  Task,
+  TaskFinishPeriod,
+  User,
+} from "@/lib/types"
 
 const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"] as const
 const PHASE_LABELS: Record<string, string> = {
@@ -43,6 +53,7 @@ function getInitials(name: string | null | undefined): string {
 const TABS = [
   { id: "description", label: "Description" },
   { id: "tasks", label: "Tasks" },
+  { id: "development-checklist", label: "Checklist" },
   { id: "checklists", label: "Checklists" },
   { id: "members", label: "Members" },
   { id: "ga", label: "GA/KA Notes" },
@@ -203,6 +214,18 @@ export default function DevelopmentProjectPage() {
   const [prompts, setPrompts] = React.useState<ProjectPrompt[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [activeTab, setActiveTab] = React.useState<TabId>("description")
+  const [developmentChecklistItems, setDevelopmentChecklistItems] = React.useState<ProjectPhaseChecklistItem[]>([])
+  const [developmentChecklistLoading, setDevelopmentChecklistLoading] = React.useState(false)
+  const [developmentChecklistError, setDevelopmentChecklistError] = React.useState<string | null>(null)
+  const [developmentChecklistCreateOpen, setDevelopmentChecklistCreateOpen] = React.useState(false)
+  const [developmentChecklistTitle, setDevelopmentChecklistTitle] = React.useState("")
+  const [developmentChecklistComment, setDevelopmentChecklistComment] = React.useState("")
+  const [developmentChecklistCreating, setDevelopmentChecklistCreating] = React.useState(false)
+  const [developmentChecklistEditingId, setDevelopmentChecklistEditingId] = React.useState<string | null>(null)
+  const [developmentChecklistEditingTitle, setDevelopmentChecklistEditingTitle] = React.useState("")
+  const [developmentChecklistEditingComment, setDevelopmentChecklistEditingComment] = React.useState("")
+  const [developmentChecklistSavingId, setDevelopmentChecklistSavingId] = React.useState<string | null>(null)
+  const [developmentChecklistDeletingId, setDevelopmentChecklistDeletingId] = React.useState<string | null>(null)
   const [newChecklistContent, setNewChecklistContent] = React.useState("")
   const [addingChecklist, setAddingChecklist] = React.useState(false)
   const [createOpen, setCreateOpen] = React.useState(false)
@@ -280,6 +303,173 @@ export default function DevelopmentProjectPage() {
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
 
+  const loadDevelopmentChecklist = React.useCallback(
+    async (targetProjectId?: string) => {
+      if (!targetProjectId) return
+      setDevelopmentChecklistLoading(true)
+      setDevelopmentChecklistError(null)
+      try {
+        const res = await apiFetch(`/projects/${targetProjectId}/phases/development/checklist`)
+        if (!res.ok) {
+          let detail = "Failed to load checklist"
+          try {
+            const data = (await res.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          setDevelopmentChecklistError(typeof detail === "string" ? detail : "Failed to load checklist")
+          return
+        }
+        const items = (await res.json()) as ProjectPhaseChecklistItem[]
+        setDevelopmentChecklistItems(items)
+      } catch (error) {
+        console.error("Failed to load development checklist", error)
+        setDevelopmentChecklistError("Failed to load checklist")
+      } finally {
+        setDevelopmentChecklistLoading(false)
+      }
+    },
+    [apiFetch]
+  )
+
+  const submitDevelopmentChecklistItem = async () => {
+    if (!project) return
+    const title = developmentChecklistTitle.trim()
+    if (!title) {
+      toast.error("Title is required")
+      return
+    }
+    setDevelopmentChecklistCreating(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}/phases/development/checklist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          comment: developmentChecklistComment.trim() || null,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to add checklist item")
+        return
+      }
+      const created = (await res.json()) as ProjectPhaseChecklistItem
+      setDevelopmentChecklistItems((prev) => [...prev, created])
+      setDevelopmentChecklistTitle("")
+      setDevelopmentChecklistComment("")
+      setDevelopmentChecklistCreateOpen(false)
+      toast.success("Checklist item added")
+    } finally {
+      setDevelopmentChecklistCreating(false)
+    }
+  }
+
+  const startEditDevelopmentChecklistItem = (item: ProjectPhaseChecklistItem) => {
+    setDevelopmentChecklistEditingId(item.id)
+    setDevelopmentChecklistEditingTitle(item.title || "")
+    setDevelopmentChecklistEditingComment(item.comment || "")
+  }
+
+  const cancelEditDevelopmentChecklistItem = () => {
+    setDevelopmentChecklistEditingId(null)
+    setDevelopmentChecklistEditingTitle("")
+    setDevelopmentChecklistEditingComment("")
+  }
+
+  const saveDevelopmentChecklistItem = async () => {
+    if (!developmentChecklistEditingId) return
+    const title = developmentChecklistEditingTitle.trim()
+    if (!title) {
+      toast.error("Title is required")
+      return
+    }
+    setDevelopmentChecklistSavingId(developmentChecklistEditingId)
+    try {
+      const res = await apiFetch(`/phase-checklist-items/${developmentChecklistEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          comment: developmentChecklistEditingComment.trim() || null,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to update checklist item")
+        return
+      }
+      const updated = (await res.json()) as ProjectPhaseChecklistItem
+      setDevelopmentChecklistItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      cancelEditDevelopmentChecklistItem()
+      toast.success("Checklist item updated")
+    } finally {
+      setDevelopmentChecklistSavingId(null)
+    }
+  }
+
+  const toggleDevelopmentChecklistItem = async (item: ProjectPhaseChecklistItem, next: boolean) => {
+    const previous = item.is_checked
+    setDevelopmentChecklistItems((prev) =>
+      prev.map((entry) => (entry.id === item.id ? { ...entry, is_checked: next } : entry))
+    )
+    try {
+      const res = await apiFetch(`/phase-checklist-items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_checked: next }),
+      })
+      if (!res.ok) throw new Error("Failed to update checklist item")
+      const updated = (await res.json()) as ProjectPhaseChecklistItem
+      setDevelopmentChecklistItems((prev) =>
+        prev.map((entry) => (entry.id === updated.id ? updated : entry))
+      )
+    } catch (error) {
+      console.error("Failed to update checklist item", error)
+      setDevelopmentChecklistItems((prev) =>
+        prev.map((entry) => (entry.id === item.id ? { ...entry, is_checked: previous } : entry))
+      )
+      toast.error("Failed to update checklist item")
+    }
+  }
+
+  const deleteDevelopmentChecklistItem = async (itemId: string) => {
+    const confirmed = window.confirm("Delete this checklist item?")
+    if (!confirmed) return
+    setDevelopmentChecklistDeletingId(itemId)
+    try {
+      const res = await apiFetch(`/phase-checklist-items/${itemId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to delete checklist item")
+        return
+      }
+      setDevelopmentChecklistItems((prev) => prev.filter((item) => item.id !== itemId))
+      toast.success("Checklist item deleted")
+    } finally {
+      setDevelopmentChecklistDeletingId(null)
+    }
+  }
+
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
     if (editProjectDueDateOpen && project) {
@@ -339,6 +529,7 @@ export default function DevelopmentProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
+      await loadDevelopmentChecklist(p.id)
     }
     void load()
   }, [apiFetch, projectId])
@@ -1045,20 +1236,20 @@ export default function DevelopmentProjectPage() {
       ]
     }
     if (phaseValue === "PLANIFIKIMI") {
-      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
+      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts" && tab.id !== "development-checklist")
     }
     if (phaseValue === "ZHVILLIMI" || phaseValue === "DEVELOPMENT") {
       return [
-        ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts"),
+        ...TABS.filter((tab) => tab.id === "tasks" || tab.id === "prompts" || tab.id === "development-checklist"),
         ...TABS.filter((tab) => tab.id === "ga"),
       ]
     }
     if (phaseValue === "TESTIMI") {
-      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts")
+      return TABS.filter((tab) => tab.id !== "checklists" && tab.id !== "members" && tab.id !== "prompts" && tab.id !== "development-checklist")
     }
     if (phaseValue === "DOKUMENTIMI") {
       return TABS.filter((tab) =>
-        tab.id !== "description" && tab.id !== "tasks" && tab.id !== "members" && tab.id !== "prompts"
+        tab.id !== "description" && tab.id !== "tasks" && tab.id !== "members" && tab.id !== "prompts" && tab.id !== "development-checklist"
       )
     }
     return TABS
@@ -2002,6 +2193,155 @@ export default function DevelopmentProjectPage() {
                 </div>
               </Card>
             </div>
+          ) : null}
+
+          {activeTab === "development-checklist" ? (
+            <Card className="bg-white/90 backdrop-blur-sm border-sky-100 shadow-sm rounded-2xl overflow-hidden">
+              <div className="p-6 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xl font-semibold text-slate-800">Development checklist</div>
+                    <div className="text-sm text-slate-500">Track custom development items for this project.</div>
+                  </div>
+                  <Dialog open={developmentChecklistCreateOpen} onOpenChange={setDevelopmentChecklistCreateOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl px-5">
+                        + Add Item
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-lg bg-white border-sky-100 rounded-2xl">
+                      <DialogHeader>
+                        <DialogTitle className="text-slate-800">Add checklist item</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">
+                            Title <span className="text-red-500">*</span>
+                          </Label>
+                          <Input
+                            value={developmentChecklistTitle}
+                            onChange={(e) => setDevelopmentChecklistTitle(e.target.value)}
+                            placeholder="Enter title..."
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Comment / Notes</Label>
+                          <Textarea
+                            value={developmentChecklistComment}
+                            onChange={(e) => setDevelopmentChecklistComment(e.target.value)}
+                            placeholder="Add notes (optional)..."
+                            rows={4}
+                            className="border-sky-200 focus:border-sky-400 rounded-xl"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => setDevelopmentChecklistCreateOpen(false)}
+                            className="rounded-xl border-sky-200"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            disabled={developmentChecklistCreating}
+                            onClick={() => void submitDevelopmentChecklistItem()}
+                            className="bg-sky-500 hover:bg-sky-600 text-white border-0 shadow-md shadow-sky-200/50 rounded-xl"
+                          >
+                            {developmentChecklistCreating ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                {developmentChecklistLoading ? (
+                  <div className="text-sm text-slate-500">Loading checklist...</div>
+                ) : developmentChecklistError ? (
+                  <div className="text-sm text-red-600">{developmentChecklistError}</div>
+                ) : developmentChecklistItems.length ? (
+                  <div className="space-y-3">
+                    {developmentChecklistItems.map((item) => {
+                      const isEditing = developmentChecklistEditingId === item.id
+                      return (
+                        <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3 hover:bg-sky-50/30 transition-colors">
+                          <Checkbox
+                            checked={item.is_checked}
+                            onCheckedChange={(checked) => toggleDevelopmentChecklistItem(item, Boolean(checked))}
+                            className="mt-1"
+                          />
+                          <div className="flex-1 min-w-[200px]">
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <Input
+                                  value={developmentChecklistEditingTitle}
+                                  onChange={(e) => setDevelopmentChecklistEditingTitle(e.target.value)}
+                                  className="border-sky-200 focus:border-sky-400 rounded-xl"
+                                />
+                                <Textarea
+                                  value={developmentChecklistEditingComment}
+                                  onChange={(e) => setDevelopmentChecklistEditingComment(e.target.value)}
+                                  rows={3}
+                                  className="border-sky-200 focus:border-sky-400 rounded-xl"
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <div className="font-semibold text-slate-800">{item.title}</div>
+                                <div className="text-sm text-slate-500">
+                                  {item.comment?.trim() ? item.comment : "No notes"}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isEditing ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void saveDevelopmentChecklistItem()}
+                                  disabled={developmentChecklistSavingId === item.id}
+                                  className="rounded-xl border-sky-200"
+                                >
+                                  {developmentChecklistSavingId === item.id ? "Saving..." : "Save"}
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={cancelEditDevelopmentChecklistItem}>
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEditDevelopmentChecklistItem(item)}
+                                  className="rounded-xl border-sky-200"
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void deleteDevelopmentChecklistItem(item.id)}
+                                  disabled={developmentChecklistDeletingId === item.id}
+                                  className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                                >
+                                  {developmentChecklistDeletingId === item.id ? "Deleting..." : "Delete"}
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">No checklist items yet. Add one.</div>
+                )}
+              </div>
+            </Card>
           ) : null}
 
           {activeTab === "checklists" ? (

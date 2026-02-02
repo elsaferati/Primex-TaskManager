@@ -12,6 +12,7 @@ from app.api.routers.planners import router as planners_router
 from app.api.routers.reports import router as reports_router
 from app.api.routers.project_members import router as project_members_router
 from app.api.routers.project_prompts import router as project_prompts_router
+from app.api.routers.project_phase_checklists import router as project_phase_checklists_router
 from app.api.routers.projects import router as projects_router
 from app.api.routers.system_tasks import router as system_tasks_router
 from app.api.routers.system_task_occurrences import router as system_task_occurrences_router
@@ -37,6 +38,7 @@ api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 api_router.include_router(project_members_router, prefix="/project-members", tags=["project-members"])
 api_router.include_router(project_prompts_router, prefix="/project-prompts", tags=["project-prompts"])
+api_router.include_router(project_phase_checklists_router, tags=["project-phase-checklists"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(system_tasks_router, prefix="/system-tasks", tags=["system-tasks"])
 api_router.include_router(system_task_occurrences_router, prefix="/system-tasks", tags=["system-tasks"])

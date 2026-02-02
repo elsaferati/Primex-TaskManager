@@ -4,6 +4,7 @@ from app.models.board import Board
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
+from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
@@ -13,6 +14,7 @@ from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
+from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
 from app.models.vs_workflow_item import VsWorkflowItem
@@ -40,6 +42,7 @@ __all__ = [
     "ChecklistItem",
     "ChecklistItemAssignee",
     "CommonEntry",
+    "DailyReportGaEntry",
     "Department",
     "FeedbackLog",
     "GaNote",
@@ -49,6 +52,7 @@ __all__ = [
     "Notification",
     "Project",
     "ProjectPlannerExclusion",
+    "ProjectPhaseChecklistItem",
     "ProjectMember",
     "ProjectPrompt",
     "VsWorkflowItem",

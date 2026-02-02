@@ -21,7 +21,21 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { DailyReportResponse, Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type {
+  DailyReportGaEntry,
+  DailyReportGaNote,
+  DailyReportGaTableResponse,
+  DailyReportResponse,
+  Department,
+  GaNote,
+  Meeting,
+  Project,
+  SystemTaskTemplate,
+  Task, TaskAssignee,
+  TaskFinishPeriod,
+  TaskPriority,
+  UserLookup,
+} from "@/lib/types"
 
 // --- CONSTANTS ---
 
@@ -681,6 +695,11 @@ export default function DepartmentKanban() {
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
+  const [gaTableInput, setGaTableInput] = React.useState("")
+  const [gaTableNotes, setGaTableNotes] = React.useState<DailyReportGaNote[]>([])
+  const [loadingGaTable, setLoadingGaTable] = React.useState(false)
+  const [savingGaTable, setSavingGaTable] = React.useState(false)
   const [allUsersDailyReports, setAllUsersDailyReports] = React.useState<Map<string, DailyReportResponse>>(new Map())
   const [loadingAllUsersDailyReports, setLoadingAllUsersDailyReports] = React.useState(false)
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
@@ -2234,6 +2253,7 @@ export default function DepartmentKanban() {
     [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
+  const gaTableDirty = gaTableInput !== (gaTableEntry?.content ?? "")
 
   // Daily Report (overdue) for All Today (department view) and My View (current user).
   React.useEffect(() => {
@@ -2274,6 +2294,87 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (activeTab !== "all" || viewMode !== "mine") {
+        setGaTableEntry(null)
+        setGaTableInput("")
+        setGaTableNotes([])
+        setLoadingGaTable(false)
+        return
+      }
+      if (!department?.id || !user?.id) {
+        setGaTableEntry(null)
+        setGaTableInput("")
+        setGaTableNotes([])
+        setLoadingGaTable(false)
+        return
+      }
+      setLoadingGaTable(true)
+      try {
+        const qs = new URLSearchParams({
+          day: todayIso,
+          department_id: department.id,
+          user_id: user.id,
+        })
+        const res = await apiFetch(`/reports/daily-ga-table?${qs.toString()}`)
+        if (!res.ok) {
+          if (!cancelled) {
+            setGaTableEntry(null)
+            setGaTableInput("")
+            setGaTableNotes([])
+          }
+          return
+        }
+        const payload = (await res.json()) as DailyReportGaTableResponse
+        if (cancelled) return
+        setGaTableEntry(payload.entry ?? null)
+        setGaTableInput(payload.entry?.content ?? "")
+        setGaTableNotes(payload.notes || [])
+      } catch {
+        if (!cancelled) {
+          setGaTableEntry(null)
+          setGaTableInput("")
+          setGaTableNotes([])
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingGaTable(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
+
+  const saveGaTableEntry = React.useCallback(
+    async (nextValue: string) => {
+      if (!department?.id || !user?.id) return
+      setSavingGaTable(true)
+      try {
+        const res = await apiFetch("/reports/daily-ga-entry", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            day: todayIso,
+            department_id: department.id,
+            content: nextValue,
+          }),
+        })
+        if (!res.ok) return
+        const payload = (await res.json()) as DailyReportGaEntry
+        setGaTableEntry(payload)
+        setGaTableInput(payload.content ?? "")
+      } finally {
+        setSavingGaTable(false)
+      }
+    },
+    [apiFetch, department?.id, todayIso, user?.id]
+  )
 
   // Fetch daily reports for all users when showing All Today print view
   React.useEffect(() => {
@@ -3757,12 +3858,72 @@ export default function DepartmentKanban() {
                                 No data available.
                               </td>
                             </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-4">
+                  <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                    <colgroup>
+                      <col className="w-[180px]" />
+                      <col />
+                    </colgroup>
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-200 px-2 py-2 text-xs font-semibold uppercase align-top">
+                          GA/KUR/SI/KUJT/PRBL
+                        </td>
+                        <td className="border border-slate-200 px-2 py-2">
+                          <div className="flex items-start gap-2">
+                            <Textarea
+                              value={gaTableInput}
+                              onChange={(e) => setGaTableInput(e.target.value)}
+                              onBlur={(e) => {
+                                const nextValue = e.target.value
+                                if (nextValue === (gaTableEntry?.content ?? "")) return
+                                void saveGaTableEntry(nextValue)
+                              }}
+                              placeholder="Add GA/KUR/SI/KUJT/PRBL..."
+                              className="min-h-[60px] text-xs"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-[11px] text-slate-900 shadow-sm hover:bg-slate-50"
+                              disabled={savingGaTable || !gaTableDirty}
+                              onClick={() => void saveGaTableEntry(gaTableInput)}
+                            >
+                              {savingGaTable ? "Saving..." : "Save"}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="border border-slate-200 px-2 py-2 text-xs font-semibold uppercase align-top">
+                          GA Notes:
+                        </td>
+                        <td className="border border-slate-200 px-2 py-2 text-xs">
+                          {loadingGaTable ? (
+                            <div className="text-slate-500">Loading...</div>
+                          ) : gaTableNotes.length ? (
+                            <ul className="list-disc pl-4 space-y-1">
+                              {gaTableNotes.map((note) => (
+                                <li key={note.id}>
+                                  {note.project_name ? `${note.project_name}: ` : ""}
+                                  {note.content}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="italic text-slate-500">No GA notes.</div>
                           )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card>
-                ) : null}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            ) : null}
 
                 {viewMode === "department" ? (
                 <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
@@ -5210,67 +5371,106 @@ export default function DepartmentKanban() {
               })()}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
-            <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
-              <colgroup>
-                <col className="w-[36px]" />
-                <col className="w-[44px]" />
-                <col className="w-[30px]" />
-                <col className="w-[36px]" />
-                <col className="w-[200px]" />
-                <col className="w-[60px]" />
-                <col className="w-[40px]" />
-                <col className="w-[52px]" />
-                <col className="w-[40px]" />
-                <col className="w-[140px]" />
-              </colgroup>
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
-                  Nr
-                </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                    NLL
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                    <span className="block">AM/</span>
-                    <span className="block">PM</span>
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dailyUserReportRows.length ? (
-                dailyUserReportRows.map((row, index) => (
-                  <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                    <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">
-                      <div className="h-4 w-full border-b border-slate-400" />
-                    </td>
+            <>
+              <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+                <colgroup>
+                  <col className="w-[28px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[26px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[140px]" />
+                  <col className="w-[50px]" />
+                  <col className="w-[28px]" />
+                  <col className="w-[46px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[130px]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                    <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                      <span className="block">AM/</span>
+                      <span className="block">PM</span>
+                    </th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
                   </tr>
-                ))
-              ) : (
-                  <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
-                      No data available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {dailyUserReportRows.length ? (
+                    dailyUserReportRows.map((row, index) => (
+                      <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                        <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">
+                          <input
+                            type="text"
+                            aria-label="Koment"
+                            className="h-4 w-full border-b border-slate-400 bg-transparent"
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                        No data available.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+                  <colgroup>
+                    <col className="w-[180px]" />
+                    <col />
+                  </colgroup>
+                  <tbody>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top">
+                        GA/KUR/SI/KUJT/PRBL
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        {gaTableInput || "-"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top">
+                        GA Notes:
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 text-xs">
+                        {gaTableNotes.length ? (
+                          <ul className="list-disc pl-4 space-y-1">
+                            {gaTableNotes.map((note) => (
+                              <li key={note.id}>
+                                {note.project_name ? `${note.project_name}: ` : ""}
+                                {note.content}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="italic text-slate-600">No GA notes.</div>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>

@@ -4,13 +4,16 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import UserRole
+from app.models.enums import GaNoteStatus, UserRole
+from app.models.ga_note import GaNote
+from app.models.project import Project
+from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
@@ -20,6 +23,10 @@ from app.schemas.daily_report import (
     DailyReportResponse,
     DailyReportSystemOccurrence,
     DailyReportTaskItem,
+    DailyReportGaEntryOut,
+    DailyReportGaEntryUpsert,
+    DailyReportGaNoteOut,
+    DailyReportGaTableResponse,
 )
 from app.schemas.task import TaskAssigneeOut, TaskOut
 from app.services.system_task_occurrences import (
@@ -253,5 +260,193 @@ async def daily_report(
         tasks_overdue=tasks_overdue,
         system_today=system_today,
         system_overdue=system_overdue,
+    )
+
+
+@router.get("/daily-ga-table", response_model=DailyReportGaTableResponse)
+async def daily_ga_table(
+    day: date,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> DailyReportGaTableResponse:
+    if user.role == UserRole.STAFF:
+        department_id = user.department_id
+        user_id = user.id
+
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+    elif user.role != UserRole.ADMIN:
+        department_id = user.department_id
+
+    if user_id is None:
+        user_id = user.id
+
+    entry = None
+    if department_id is not None:
+        entry = (
+            await db.execute(
+                select(DailyReportGaEntry).where(
+                    DailyReportGaEntry.user_id == user_id,
+                    DailyReportGaEntry.department_id == department_id,
+                    DailyReportGaEntry.entry_date == day,
+                )
+            )
+        ).scalar_one_or_none()
+
+    task_stmt = (
+        select(Task)
+        .where(Task.completed_at.is_(None))
+        .where(Task.is_active.is_(True))
+        .where(Task.system_template_origin_id.is_(None))
+        .where(Task.due_date.is_not(None))
+    )
+    if department_id is not None:
+        task_stmt = task_stmt.where(Task.department_id == department_id)
+    if user_id is not None:
+        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+
+    tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
+    project_ids: set[uuid.UUID] = set()
+    for task in tasks:
+        planned_start, planned_end = _planned_range_for_task(task)
+        if planned_start is None or planned_end is None:
+            continue
+        if planned_start <= day <= planned_end and task.project_id is not None:
+            project_ids.add(task.project_id)
+
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    closed_cutoff = datetime.utcnow() - timedelta(days=5)
+    base_filters = [
+        GaNote.created_at >= cutoff,
+        or_(
+            GaNote.status != GaNoteStatus.CLOSED,
+            GaNote.completed_at.is_(None),
+            GaNote.completed_at >= closed_cutoff,
+        ),
+    ]
+
+    user_notes = (
+        await db.execute(
+            select(GaNote)
+            .where(GaNote.created_by == user_id)
+            .where(*base_filters)
+            .order_by(GaNote.created_at.desc())
+        )
+    ).scalars().all()
+
+    project_notes: list[GaNote] = []
+    if project_ids:
+        project_notes = (
+            await db.execute(
+                select(GaNote)
+                .where(GaNote.project_id.in_(project_ids))
+                .where(*base_filters)
+                .order_by(GaNote.created_at.desc())
+            )
+        ).scalars().all()
+
+    notes_by_id: dict[uuid.UUID, GaNote] = {}
+    for note in user_notes + project_notes:
+        notes_by_id[note.id] = note
+
+    note_project_ids = {note.project_id for note in notes_by_id.values() if note.project_id}
+    project_map: dict[uuid.UUID, Project] = {}
+    if note_project_ids:
+        projects = (
+            await db.execute(select(Project).where(Project.id.in_(note_project_ids)))
+        ).scalars().all()
+        project_map = {proj.id: proj for proj in projects}
+
+    def _project_name(pid: uuid.UUID | None) -> str | None:
+        if not pid:
+            return None
+        proj = project_map.get(pid)
+        if not proj:
+            return None
+        return proj.title or proj.name
+
+    notes_sorted = sorted(notes_by_id.values(), key=lambda n: n.created_at, reverse=True)
+    notes_out = [
+        DailyReportGaNoteOut(
+            id=n.id,
+            content=n.content,
+            note_type=n.note_type,
+            status=n.status,
+            priority=n.priority,
+            created_at=n.created_at,
+            project_id=n.project_id,
+            project_name=_project_name(n.project_id),
+        )
+        for n in notes_sorted
+    ]
+
+    return DailyReportGaTableResponse(
+        entry=DailyReportGaEntryOut(
+            id=entry.id,
+            user_id=entry.user_id,
+            department_id=entry.department_id,
+            entry_date=entry.entry_date,
+            content=entry.content,
+            created_at=entry.created_at,
+            updated_at=entry.updated_at,
+        )
+        if entry
+        else None,
+        notes=notes_out,
+    )
+
+
+@router.put("/daily-ga-entry", response_model=DailyReportGaEntryOut)
+async def upsert_daily_ga_entry(
+    payload: DailyReportGaEntryUpsert,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> DailyReportGaEntryOut:
+    department_id = payload.department_id
+    user_id = payload.user_id or user.id
+
+    if user.role == UserRole.STAFF:
+        user_id = user.id
+        department_id = user.department_id
+
+    if department_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id required")
+
+    ensure_department_access(user, department_id)
+
+    entry = (
+        await db.execute(
+            select(DailyReportGaEntry).where(
+                DailyReportGaEntry.user_id == user_id,
+                DailyReportGaEntry.department_id == department_id,
+                DailyReportGaEntry.entry_date == payload.day,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if entry is None:
+        entry = DailyReportGaEntry(
+            user_id=user_id,
+            department_id=department_id,
+            entry_date=payload.day,
+            content=payload.content,
+        )
+        db.add(entry)
+    else:
+        entry.content = payload.content
+
+    await db.commit()
+    await db.refresh(entry)
+
+    return DailyReportGaEntryOut(
+        id=entry.id,
+        user_id=entry.user_id,
+        department_id=entry.department_id,
+        entry_date=entry.entry_date,
+        content=entry.content,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
     )
 

@@ -11,12 +11,13 @@ from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.department import Department
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
+from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project import Project
 from app.models.user import User
 from app.models.enums import ChecklistItemType
@@ -25,6 +26,9 @@ from app.schemas.checklist_item import (
     ChecklistItemCreate,
     ChecklistItemUpdate,
     ChecklistItemAssigneeOut,
+)
+from app.schemas.project_phase_checklist_item import (
+    ProjectPhaseChecklistItemOut,
 )
 
 
@@ -780,13 +784,54 @@ async def create_checklist_item(
     return _item_to_out(item)
 
 
-@router.patch("/{item_id}", response_model=ChecklistItemOut)
+@router.patch("/{item_id}", response_model=ChecklistItemOut | ProjectPhaseChecklistItemOut)
 async def update_checklist_item(
     item_id: uuid.UUID,
     payload: ChecklistItemUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> ChecklistItemOut:
+    phase_item = (
+        await db.execute(
+            select(ProjectPhaseChecklistItem).where(ProjectPhaseChecklistItem.id == item_id)
+        )
+    ).scalar_one_or_none()
+    if phase_item is not None:
+        project = (
+            await db.execute(select(Project).where(Project.id == phase_item.project_id))
+        ).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if project.department_id is not None:
+            ensure_department_access(user, project.department_id)
+
+        if payload.title is not None:
+            title = payload.title.strip()
+            if not title:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
+            phase_item.title = title
+        if payload.comment is not None:
+            phase_item.comment = payload.comment.strip() if payload.comment else None
+        if payload.is_checked is not None:
+            phase_item.is_checked = payload.is_checked
+        if payload.sort_order is not None:
+            phase_item.sort_order = payload.sort_order
+
+        await db.commit()
+        await db.refresh(phase_item)
+        return ProjectPhaseChecklistItemOut(
+            id=phase_item.id,
+            project_id=phase_item.project_id,
+            phase_key=phase_item.phase_key,
+            title=phase_item.title,
+            comment=phase_item.comment,
+            is_checked=phase_item.is_checked,
+            sort_order=phase_item.sort_order,
+            created_by=phase_item.created_by,
+            created_at=phase_item.created_at,
+            updated_at=phase_item.updated_at,
+        )
+
     item = (
         await db.execute(
             select(ChecklistItem)
@@ -935,18 +980,36 @@ async def delete_checklist_item(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> dict:
+    phase_item = (
+        await db.execute(
+            select(ProjectPhaseChecklistItem).where(ProjectPhaseChecklistItem.id == item_id)
+        )
+    ).scalar_one_or_none()
+    if phase_item is not None:
+        project = (
+            await db.execute(select(Project).where(Project.id == phase_item.project_id))
+        ).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if project.department_id is not None:
+            ensure_department_access(user, project.department_id)
+        ensure_manager_or_admin(user)
+        await db.delete(phase_item)
+        await db.commit()
+        return {"ok": True}
+
     item = (await db.execute(select(ChecklistItem).where(ChecklistItem.id == item_id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+    ensure_manager_or_admin(user)
 
     if item.checklist_id is not None:
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
-        # Global template-style checklists (group_key set, no project/task) are admin-only to delete.
+        # Global template-style checklists (group_key set, no project/task) are admin/manager-only to delete.
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            ensure_manager_or_admin(user)
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
