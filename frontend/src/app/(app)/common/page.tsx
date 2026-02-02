@@ -1193,18 +1193,13 @@ export default function CommonViewPage() {
           allData.priority = expandedPriority
         }
 
-        const meetingsEndpoint =
-          user?.role && user.role !== "STAFF"
-            ? "/meetings?include_all_departments=true"
-            : user?.department_id
-              ? `/meetings?department_id=${user.department_id}`
-              : null
+        // Show all external meetings for all users in common view
+        const meetingsEndpoint = "/meetings?include_all_departments=true"
 
-        if (meetingsEndpoint) {
-          const meetingsRes = await apiFetch(meetingsEndpoint)
-          if (meetingsRes?.ok) {
-            const meetings = (await meetingsRes.json()) as Meeting[]
-            if (mounted) setExternalMeetings(meetings)
+        const meetingsRes = await apiFetch(meetingsEndpoint)
+        if (meetingsRes?.ok) {
+          const meetings = (await meetingsRes.json()) as Meeting[]
+          if (mounted) setExternalMeetings(meetings)
             for (const meeting of meetings) {
               const startsAt = meeting.starts_at ? new Date(meeting.starts_at) : null
               const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null
@@ -1227,7 +1222,6 @@ export default function CommonViewPage() {
               })
             }
           }
-        }
 
         // Single state update with all data
         if (mounted) {
@@ -1646,8 +1640,16 @@ export default function CommonViewPage() {
     externalMeetingChecklist,
   ])
 
+  const canEditExternalMeeting = React.useCallback((meeting: Meeting) => {
+    if (!user) return false
+    // Allow admin, manager, or the person that created it
+    if (isAdmin || isManager) return true
+    if (meeting.created_by && meeting.created_by === user.id) return true
+    return false
+  }, [user, isAdmin, isManager])
+
   const startEditExternalMeeting = React.useCallback((meeting: Meeting) => {
-    if (!isAdmin) return
+    if (!canEditExternalMeeting(meeting)) return
     setEditingExternalMeetingId(meeting.id)
     setEditingExternalMeetingTitle(meeting.title || "")
     setEditingExternalMeetingPlatform(meeting.platform || "")
@@ -1661,7 +1663,7 @@ export default function CommonViewPage() {
       setEditingExternalMeetingStartsAt("")
     }
     setEditingExternalMeetingDepartmentId(meeting.department_id || "")
-  }, [isAdmin])
+  }, [canEditExternalMeeting])
 
   const cancelEditExternalMeeting = React.useCallback(() => {
     setEditingExternalMeetingId(null)
@@ -1691,7 +1693,7 @@ export default function CommonViewPage() {
       })
       if (!res?.ok) {
         console.error("Failed to update meeting", res?.status)
-        alert("Failed to update meeting. Only admins can edit meetings.")
+        alert("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
         return
       }
       const updated = (await res.json()) as Meeting
@@ -4639,7 +4641,7 @@ export default function CommonViewPage() {
                                   <span>Owner: {ownerName}</span>
                                 </div>
                               </div>
-                              {isAdmin ? (
+                              {canEditExternalMeeting(meeting) ? (
                                 <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
                                   <button
                                     className="btn-surface"
@@ -4650,16 +4652,18 @@ export default function CommonViewPage() {
                                   >
                                     Edit
                                   </button>
-                                  <button
-                                    className="btn-surface"
-                                    type="button"
-                                    onClick={() => void deleteExternalMeeting(meeting.id)}
-                                    disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
-                                    title="Delete meeting"
-                                    style={{ color: "#dc2626", borderColor: "#fecaca" }}
-                                  >
-                                    {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
-                                  </button>
+                                  {isAdmin ? (
+                                    <button
+                                      className="btn-surface"
+                                      type="button"
+                                      onClick={() => void deleteExternalMeeting(meeting.id)}
+                                      disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                      title="Delete meeting"
+                                      style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                    >
+                                      {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                    </button>
+                                  ) : null}
                                 </div>
                               ) : null}
                             </div>

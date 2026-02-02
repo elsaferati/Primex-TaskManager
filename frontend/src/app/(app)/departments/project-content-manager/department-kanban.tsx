@@ -1232,7 +1232,18 @@ export default function DepartmentKanban() {
     [meetings, isMineView, user?.id]
   )
   const visibleSystemTemplates = React.useMemo(
-    () => (isMineView && user?.id ? systemTasks.filter((t) => t.default_assignee_id === user.id) : systemTasks),
+    () => {
+      if (!isMineView || !user?.id) return systemTasks
+      return systemTasks.filter((t) => {
+        // Check if user is the default assignee
+        if (t.default_assignee_id === user.id) return true
+        // Check if user is in the assignees array
+        if (t.assignees?.some((assignee) => assignee.id === user.id)) return true
+        // Check if user is in the alignment_user_ids array
+        if (t.alignment_user_ids?.includes(user.id)) return true
+        return false
+      })
+    },
     [systemTasks, isMineView, user?.id]
   )
 
@@ -1241,8 +1252,36 @@ export default function DepartmentKanban() {
     [visibleDepartmentTasks]
   )
   const todaySystemTasks = React.useMemo(
-    () => visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate)),
-    [visibleSystemTemplates, todayDate]
+    () => {
+      const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
+      
+      // If in "my view", also include overdue system tasks where next occurrence has passed
+      if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
+        const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
+        const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
+        
+        const overdueTasks = visibleSystemTemplates.filter((t) => {
+          const templateId = t.template_id || t.id
+          // Skip if already in today's tasks
+          if (todayTaskIds.has(templateId)) return false
+          // Only include if it's in overdue list
+          if (!overdueTaskIds.has(templateId)) return false
+          
+          // Check if next occurrence date has passed
+          const nextOccurrence = getNextOccurrenceDate(t, todayDate)
+          const nextOccurrenceKey = dayKey(nextOccurrence)
+          const todayKey = dayKey(todayDate)
+          
+          // Only show if next occurrence is in the past (overdue)
+          return nextOccurrenceKey < todayKey
+        })
+        
+        return [...todayTasks, ...overdueTasks]
+      }
+      
+      return todayTasks
+    },
+    [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
   )
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {

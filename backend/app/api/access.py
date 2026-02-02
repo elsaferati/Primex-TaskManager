@@ -51,3 +51,18 @@ def ensure_task_editor(user: User, task: "Task") -> None:
 def ensure_admin(user: User) -> None:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+
+def ensure_meeting_editor(user: User, meeting: "Meeting") -> None:
+    """
+    Allow editing a meeting when:
+      - user is ADMIN or MANAGER
+      - or user created the meeting (meeting.created_by)
+    """
+    from app.models.meeting import Meeting  # local import to avoid circular
+
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        return
+    if meeting.created_by and meeting.created_by == user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")

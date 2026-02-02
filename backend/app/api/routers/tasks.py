@@ -186,7 +186,21 @@ async def list_tasks(
     if status:
         stmt = stmt.where(cast(Task.status, SQLString) == status.value)
     if assigned_to:
-        stmt = stmt.where(Task.assigned_to == assigned_to)
+        # Check both Task.assigned_to and TaskAssignee table for multiple assignees
+        task_ids_with_assignee = (
+            await db.execute(
+                select(TaskAssignee.task_id).where(TaskAssignee.user_id == assigned_to).distinct()
+            )
+        ).scalars().all()
+        if task_ids_with_assignee:
+            stmt = stmt.where(
+                or_(
+                    Task.assigned_to == assigned_to,
+                    Task.id.in_(task_ids_with_assignee)
+                )
+            )
+        else:
+            stmt = stmt.where(Task.assigned_to == assigned_to)
     if created_by:
         stmt = stmt.where(Task.created_by == created_by)
     if due_from:
