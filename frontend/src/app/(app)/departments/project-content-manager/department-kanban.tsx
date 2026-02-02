@@ -2435,12 +2435,23 @@ export default function DepartmentKanban() {
   }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
 
   const handlePrint = React.useCallback(() => {
+    // In "My View" mode, automatically show daily report for printing
+    if (viewMode === "mine" && !showDailyUserReport) {
+      setShowDailyUserReport(true)
+      setPrintRange("today")
+      // Use setTimeout to ensure state updates before printing
+      setTimeout(() => {
+        window.print()
+      }, 0)
+      return
+    }
+    
     if (showAllTodayPrint && loadingAllUsersDailyReports) {
       setPendingPrint(true)
       return
     }
     window.print()
-  }, [loadingAllUsersDailyReports, showAllTodayPrint])
+  }, [loadingAllUsersDailyReports, showAllTodayPrint, viewMode, showDailyUserReport])
 
   React.useEffect(() => {
     if (!pendingPrint) return
