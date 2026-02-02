@@ -352,6 +352,7 @@ export default function ProjectPage() {
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
+  const [newStartDate, setNewStartDate] = React.useState("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [newFinishPeriod, setNewFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -365,6 +366,7 @@ export default function ProjectPage() {
   const [editPriority, setEditPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [editAssignees, setEditAssignees] = React.useState<string[]>([])
   const [editPhase, setEditPhase] = React.useState<string>("")
+  const [editStartDate, setEditStartDate] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -675,6 +677,7 @@ export default function ProjectPage() {
         status: newStatus,
         priority: newPriority,
         phase: newTaskPhase || activePhase,
+        start_date: newStartDate ? new Date(newStartDate).toISOString() : null,
         due_date: newDueDate || null,
         finish_period: newFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : newFinishPeriod,
       }
@@ -703,6 +706,7 @@ export default function ProjectPage() {
       setNewPriority("NORMAL")
       setNewAssignees([])
       setNewTaskPhase("")
+      setNewStartDate("")
       setNewDueDate("")
       setNewFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -904,6 +908,7 @@ export default function ProjectPage() {
       : (task.assigned_to || task.assigned_to_user_id ? [task.assigned_to || task.assigned_to_user_id!] : [])
     setEditAssignees(assigneeIds)
     setEditPhase(task.phase || activePhase)
+    setEditStartDate(toDateInput(task.start_date))
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
@@ -932,6 +937,7 @@ export default function ProjectPage() {
         priority: editPriority,
         assignees: editAssignees,
         phase: editPhase || activePhase,
+        start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
         due_date: editDueDate || null,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
       }
@@ -2824,6 +2830,14 @@ export default function ProjectPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
+                      <Label>Start date</Label>
+                      <Input
+                        type="date"
+                        value={newStartDate}
+                        onChange={(e) => setNewStartDate(normalizeDueDateInput(e.target.value))}
+                      />
+                    </div>
+                    <div className="space-y-2">
                       <Label>Due date <span className="text-red-500">*</span></Label>
                       <Input
                         type="date"
@@ -2983,6 +2997,14 @@ export default function ProjectPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Start date</Label>
+                      <Input
+                        type="date"
+                        value={editStartDate}
+                        onChange={(e) => setEditStartDate(normalizeDueDateInput(e.target.value))}
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>Due date <span className="text-red-500">*</span></Label>
