@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.department import Department
@@ -993,6 +993,7 @@ async def delete_checklist_item(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         if project.department_id is not None:
             ensure_department_access(user, project.department_id)
+        ensure_manager_or_admin(user)
         await db.delete(phase_item)
         await db.commit()
         return {"ok": True}
@@ -1000,15 +1001,15 @@ async def delete_checklist_item(
     item = (await db.execute(select(ChecklistItem).where(ChecklistItem.id == item_id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+    ensure_manager_or_admin(user)
 
     if item.checklist_id is not None:
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
-        # Global template-style checklists (group_key set, no project/task) are admin-only to delete.
+        # Global template-style checklists (group_key set, no project/task) are admin/manager-only to delete.
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            if user.role != "ADMIN":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+            ensure_manager_or_admin(user)
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))

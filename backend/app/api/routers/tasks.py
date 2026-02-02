@@ -172,10 +172,8 @@ async def list_tasks(
                 stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
             # If manager has no department, they can see tasks without a department
         else:
-            # STAFF can only see their department's tasks
-            if user.department_id is None:
-                return []
-            stmt = stmt.where(Task.department_id == user.department_id)
+            # STAFF can see all tasks (same as admin)
+            pass  # No filtering - staff can see all tasks
 
     if department_id:
         if project_id is None:
