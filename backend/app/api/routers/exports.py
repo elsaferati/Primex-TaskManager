@@ -1606,13 +1606,19 @@ async def export_common_xlsx(
     end_dt = datetime.combine(week_dates[-1], time.max, tzinfo=timezone.utc)
 
     entries_stmt = select(CommonEntry)
-    if user.role == UserRole.STAFF:
-        entries_stmt = entries_stmt.where(
-            or_(
-                CommonEntry.created_by_user_id == user.id,
-                CommonEntry.assigned_to_user_id == user.id,
+    if user.department_id is not None:
+        dept_user_ids = (
+            await db.execute(select(User.id).where(User.department_id == user.department_id))
+        ).scalars().all()
+        if dept_user_ids:
+            entries_stmt = entries_stmt.where(
+                or_(
+                    CommonEntry.created_by_user_id.in_(dept_user_ids),
+                    CommonEntry.assigned_to_user_id.in_(dept_user_ids),
+                )
             )
-        )
+        else:
+            entries_stmt = entries_stmt.where(CommonEntry.created_by_user_id.is_(None))
     entries_stmt = entries_stmt.where(
         or_(
             CommonEntry.entry_date.between(week_dates[0], week_dates[-1]),
@@ -1626,9 +1632,9 @@ async def export_common_xlsx(
     entries = (await db.execute(entries_stmt.order_by(CommonEntry.created_at.desc()))).scalars().all()
 
     tasks: list[Task] = []
-    if user.role != UserRole.STAFF or user.department_id is not None:
+    if user.department_id is not None or user.role != UserRole.STAFF:
         tasks_stmt = select(Task)
-        if user.role == UserRole.STAFF:
+        if user.department_id is not None:
             tasks_stmt = tasks_stmt.where(Task.department_id == user.department_id)
         tasks_stmt = tasks_stmt.where(
             or_(
@@ -1640,9 +1646,9 @@ async def export_common_xlsx(
         tasks = (await db.execute(tasks_stmt.order_by(Task.created_at.desc()))).scalars().all()
 
     meetings: list[Meeting] = []
-    if user.role != UserRole.STAFF or user.department_id is not None:
+    if user.department_id is not None or user.role != UserRole.STAFF:
         meetings_stmt = select(Meeting)
-        if user.role == UserRole.STAFF:
+        if user.department_id is not None:
             meetings_stmt = meetings_stmt.where(Meeting.department_id == user.department_id)
         meetings_stmt = meetings_stmt.where(
             or_(
