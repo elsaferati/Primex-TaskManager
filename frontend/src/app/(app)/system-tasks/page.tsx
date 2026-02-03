@@ -456,6 +456,12 @@ export function SystemTasksView({
   const isManagerOrAdmin = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canCreate = showSystemActions
 
+  // Resolve Gane user id once for GA scoping checks
+  const ganeUserId = React.useMemo(() => {
+    const gane = users.find((u) => u.username?.toLowerCase() === "gane.arifaj")
+    return gane?.id ?? null
+  }, [users])
+
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
@@ -676,6 +682,38 @@ export function SystemTasksView({
     [departmentNamesForOwnerIds]
   )
 
+  const templateDepartmentLabel = React.useCallback(
+    (template: SystemTaskTemplate) => {
+      const scope = resolveTemplateScope(template)
+      const department = template.department_id ? departmentMap.get(template.department_id) : null
+
+      const assigneeDeptCodes = template.assignees
+        ? Array.from(
+            new Set(
+              template.assignees
+                .map((a) => {
+                  const userDeptId = a.department_id || userMap.get(a.id || "")?.department_id
+                  return userDeptId ? departmentMap.get(userDeptId)?.code : null
+                })
+                .filter(Boolean) as string[]
+            )
+          )
+        : []
+
+      if (scope === "GA") {
+        return assigneeDeptCodes.length ? assigneeDeptCodes.join(" / ") : "GA"
+      }
+      if (scope === "ALL") {
+        if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+        return "ALL"
+      }
+      if (department) return formatDepartmentName(department.name)
+      if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+      return "-"
+    },
+    [departmentMap, userMap]
+  )
+
   const formatDepartmentNames = React.useCallback((names: string[]) => {
     if (!names.length) return "All departments"
     const formatted = names.map((name) => formatDepartmentName(name))
@@ -773,8 +811,21 @@ export function SystemTasksView({
 
   const scopeTemplates = React.useMemo(() => {
     if (!scopeFilter) return templates
+
+    // When GA view is requested, show any template where Gane is an assignee (default or list),
+    // regardless of department/scope.
+    if (scopeFilter === "GA") {
+      const isAssignedToGane = (template: SystemTaskTemplate) =>
+        (ganeUserId &&
+          (template.default_assignee_id === ganeUserId ||
+            template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
+        template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
+
+      return templates.filter((template) => isAssignedToGane(template))
+    }
+
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
-  }, [scopeFilter, templates])
+  }, [scopeFilter, templates, ganeUserId])
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
@@ -1534,16 +1585,7 @@ export function SystemTasksView({
 
     const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
       const priorityValue = normalizePriority(template.priority)
-      const department = template.department_id ? departmentMap.get(template.department_id) : null
-      const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-      const departmentLabel =
-        scope === "GA"
-          ? "GA"
-          : scope === "ALL"
-            ? "ALL"
-            : department
-              ? formatDepartmentName(department.name)
-              : "-"
+                        const departmentLabel = templateDepartmentLabel(template)
       const ownerLabel = assigneeInitials(template.assignees)
       const frequencyLabelResolved =
         FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency
@@ -3151,16 +3193,7 @@ export function SystemTasksView({
                           const taskNumber = globalIndex + 1
                           globalIndex++
                         const priorityValue = normalizePriority(template.priority)
-                        const department = template.department_id ? departmentMap.get(template.department_id) : null
-                        const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-                        const departmentLabel =
-                          scope === "GA"
-                            ? "GA"
-                            : scope === "ALL"
-                              ? "ALL"
-                              : department
-                                ? formatDepartmentName(department.name)
-                                : "-"
+                        const departmentLabel = templateDepartmentLabel(template)
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =
