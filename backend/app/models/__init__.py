@@ -4,15 +4,18 @@ from app.models.board import Board
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
+from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.holiday import Holiday
+from app.models.internal_note import InternalNote
 from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
+from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
 from app.models.vs_workflow_item import VsWorkflowItem
@@ -31,6 +34,7 @@ from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 
 __all__ = [
     "AttendanceLog",
@@ -40,15 +44,18 @@ __all__ = [
     "ChecklistItem",
     "ChecklistItemAssignee",
     "CommonEntry",
+    "DailyReportGaEntry",
     "Department",
     "FeedbackLog",
     "GaNote",
     "Holiday",
+    "InternalNote",
     "Meeting",
     "MicrosoftToken",
     "Notification",
     "Project",
     "ProjectPlannerExclusion",
+    "ProjectPhaseChecklistItem",
     "ProjectMember",
     "ProjectPrompt",
     "VsWorkflowItem",
@@ -67,5 +74,5 @@ __all__ = [
     "TaskTemplateRun",
     "User",
     "WeeklyPlan",
+    "WeeklyPlannerLegendEntry",
 ]
-

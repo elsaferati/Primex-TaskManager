@@ -20,7 +20,23 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { DailyReportResponse, Department, GaNote, Meeting, Project, SystemTaskTemplate, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import { formatDepartmentName } from "@/lib/department-name"
+import type {
+  DailyReportGaEntry,
+  DailyReportGaNote,
+  DailyReportGaTableResponse,
+  DailyReportResponse,
+  Department,
+  GaNote,
+  InternalNote,
+  Meeting,
+  Project,
+  SystemTaskTemplate,
+  Task, TaskAssignee,
+  TaskFinishPeriod,
+  TaskPriority,
+  UserLookup,
+} from "@/lib/types"
 
 // --- CONSTANTS ---
 
@@ -30,6 +46,7 @@ const TABS = [
   { id: "system", label: "System Tasks", tone: "blue" },
   { id: "no-project", label: "Fast Tasks", tone: "red" },
   { id: "ga-ka", label: "GA/KA Notes", tone: "neutral" },
+  { id: "internal-notes", label: "Internal Notes", tone: "neutral" },
   { id: "meetings", label: "Meetings", tone: "neutral" },
 ] as const
 
@@ -134,13 +151,16 @@ function hasProjectId(projectId?: Task["project_id"]) {
 }
 
 function isNoProjectTask(task: Task) {
-  return !hasProjectId(task.project_id) && task.system_template_origin_id == null
+  return (
+    !hasProjectId(task.project_id) &&
+    !hasProjectId(task.dependency_task_id) &&
+    task.system_template_origin_id == null
+  )
 }
 
 function isFastNormalTask(task: Task) {
   return (
     isNoProjectTask(task) &&
-    !task.ga_note_origin_id &&
     !task.is_bllok &&
     !task.is_1h_report &&
     !task.is_r1 &&
@@ -267,6 +287,26 @@ function formatDayLabel(date: Date) {
   return prefix ? `${prefix} - ${weekday}` : weekday
 }
 
+function isTaskActiveForDate(task: Task, targetDate: Date) {
+  const targetKey = dayKey(targetDate)
+  const start = toDate(task.start_date || task.created_at || task.due_date)
+  const due = toDate(task.due_date || task.start_date || task.created_at)
+  const startKey = start ? dayKey(start) : null
+  const dueKey = due ? dayKey(due) : startKey
+
+  const completedDate = task.completed_at ? toDate(task.completed_at) : null
+  // If task is completed, only show it on the day it was completed
+  if (completedDate) {
+    const completedKey = dayKey(completedDate)
+    // Only show if completed on the target date
+    return completedKey === targetKey
+  }
+
+  if (startKey != null && targetKey < startKey) return false
+  if (dueKey != null && targetKey > dueKey) return false
+  return true
+}
+
 function getLastDayOfMonth(year: number, monthIndex: number) {
   return new Date(year, monthIndex + 1, 0).getDate()
 }
@@ -350,6 +390,99 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   return false
 }
 
+function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
+  const today = new Date(fromDate)
+  today.setHours(0, 0, 0, 0)
+  
+  if (t.frequency === "DAILY") {
+    return today
+  }
+  
+  if (t.frequency === "WEEKLY") {
+    const days = t.days_of_week && t.days_of_week.length
+      ? t.days_of_week
+      : t.day_of_week != null
+        ? [t.day_of_week]
+        : [0] // Monday by default
+    
+    const currentDayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
+    const sortedDays = [...days].sort((a, b) => a - b)
+    
+    // Find next day in this week
+    for (const dayIdx of sortedDays) {
+      if (dayIdx >= currentDayIdx) {
+        const nextDate = new Date(today)
+        nextDate.setDate(today.getDate() + (dayIdx - currentDayIdx))
+        return nextDate
+      }
+    }
+    
+    // If no day found this week, use first day of next week
+    const nextDate = new Date(today)
+    const daysUntilNextWeek = 7 - currentDayIdx + sortedDays[0]
+    nextDate.setDate(today.getDate() + daysUntilNextWeek)
+    return nextDate
+  }
+  
+  if (t.frequency === "MONTHLY") {
+    const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+    if (current && current >= today) {
+      return current
+    }
+    const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+    return next || today
+  }
+  
+  if (t.frequency === "YEARLY") {
+    if (t.day_of_month === 0) {
+      const current = getYearEndDate(today.getFullYear())
+      if (current && current >= today) {
+        return current
+      }
+      return getYearEndDate(today.getFullYear() + 1)
+    }
+    if (t.month_of_year == null) {
+      const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
+      if (current && current >= today) {
+        return current
+      }
+      const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
+      if (next) return next
+      return getScheduledDateForMonth(t, today.getFullYear() + 1, 0) || today
+    }
+    const targetMonth = t.month_of_year - 1
+    const current = getScheduledDateForMonth(t, today.getFullYear(), targetMonth)
+    if (current && current >= today) {
+      return current
+    }
+    return getScheduledDateForMonth(t, today.getFullYear() + 1, targetMonth) || today
+  }
+  
+  if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
+    const interval = t.frequency === "3_MONTHS" ? 3 : 6
+    let checkMonth = today.getMonth()
+    let checkYear = today.getFullYear()
+    
+    // Check up to 2 years ahead
+    for (let i = 0; i < 24; i++) {
+      const monthValue = checkMonth + 1
+      if (monthValue % interval === 0) {
+        const candidate = getScheduledDateForMonth(t, checkYear, checkMonth)
+        if (candidate && candidate >= today) {
+          return candidate
+        }
+      }
+      checkMonth++
+      if (checkMonth >= 12) {
+        checkMonth = 0
+        checkYear++
+      }
+    }
+  }
+  
+  return today
+}
+
 function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
   const dateLabel = date.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" })
@@ -389,8 +522,8 @@ function formatPrintDay(date: Date) {
 
 function noProjectTypeLabel(task: Task) {
   if (task.is_bllok) return "BLLOK"
-  if (task.is_1h_report) return "1H"
   if (task.is_r1) return "R1"
+  if (task.is_1h_report) return "1H"
   if (task.is_personal) return "Personal"
   if (task.ga_note_origin_id) return "GA"
   return "Normal"
@@ -479,6 +612,42 @@ function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefin
   return "-"
 }
 
+type DailyReportTyoMode = "range" | "dueOnly"
+
+function getDailyReportTyo({
+  reportDate,
+  startDate,
+  dueDate,
+  mode,
+}: {
+  reportDate: Date
+  startDate?: Date | null
+  dueDate?: Date | null
+  mode: DailyReportTyoMode
+}) {
+  if (!dueDate) return "-"
+  const reportKey = dayKey(reportDate)
+  const dueKey = dayKey(dueDate)
+
+  if (mode === "range") {
+    if (startDate) {
+      const startKey = dayKey(startDate)
+      if (reportKey < startKey) return "-"
+      if (reportKey <= dueKey) return "T"
+    } else if (reportKey <= dueKey) {
+      return reportKey === dueKey ? "T" : "-"
+    }
+  } else {
+    if (reportKey < dueKey) return "-"
+    if (reportKey === dueKey) return "T"
+  }
+
+  const lateDays = Math.floor((reportKey - dueKey) / MS_PER_DAY)
+  if (lateDays === 1) return "Y"
+  if (lateDays >= 2) return String(lateDays)
+  return "-"
+}
+
 function fastReportSubtypeShort(task: Task) {
   const base = noProjectTypeLabel(task)
   if (base === "BLLOK") return "BLL"
@@ -547,6 +716,7 @@ export default function DepartmentKanban() {
 
   // --- STATES ---
   const [department, setDepartment] = React.useState<Department | null>(null)
+  const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [templateProjects, setTemplateProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
@@ -557,6 +727,7 @@ export default function DepartmentKanban() {
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
+  const [internalNotes, setInternalNotes] = React.useState<InternalNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
 
   const [loading, setLoading] = React.useState(true)
@@ -568,6 +739,11 @@ export default function DepartmentKanban() {
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
+  const [gaTableInput, setGaTableInput] = React.useState("")
+  const [gaTableNotes, setGaTableNotes] = React.useState<DailyReportGaNote[]>([])
+  const [loadingGaTable, setLoadingGaTable] = React.useState(false)
+  const [savingGaTable, setSavingGaTable] = React.useState(false)
   const [allUsersDailyReports, setAllUsersDailyReports] = React.useState<Map<string, DailyReportResponse>>(new Map())
   const [loadingAllUsersDailyReports, setLoadingAllUsersDailyReports] = React.useState(false)
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
@@ -643,6 +819,8 @@ export default function DepartmentKanban() {
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [editTaskAssignees, setEditTaskAssignees] = React.useState<string[]>([])
+  const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
 
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
@@ -663,6 +841,15 @@ export default function DepartmentKanban() {
   const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [internalNoteOpen, setInternalNoteOpen] = React.useState(false)
+  const [addingInternalNote, setAddingInternalNote] = React.useState(false)
+  const [internalNoteTitle, setInternalNoteTitle] = React.useState("")
+  const [internalNoteDescription, setInternalNoteDescription] = React.useState("")
+  const [internalNoteDepartmentId, setInternalNoteDepartmentId] = React.useState("")
+  const [internalNoteProjectId, setInternalNoteProjectId] = React.useState("")
+  const [internalNoteProjects, setInternalNoteProjects] = React.useState<Project[]>([])
+  const [loadingInternalNoteProjects, setLoadingInternalNoteProjects] = React.useState(false)
+  const [internalNoteToUserIds, setInternalNoteToUserIds] = React.useState<string[]>([])
 
   // --- DATA LOADING ---
   React.useEffect(() => {
@@ -672,15 +859,31 @@ export default function DepartmentKanban() {
         const depRes = await apiFetch("/departments")
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
+        setDepartments(deps)
         const dep = deps.find((d) => d.name === departmentName) || null
         setDepartment(dep)
         if (!dep) return
 
-        const [projRes, sysRes, tasksRes, gaRes, meetingsRes] = await Promise.all([
+        // Fetch users first so we can filter tasks by assignee departments
+        const usersRes = await apiFetch("/users/lookup")
+        let allUsers: UserLookup[] = []
+        if (usersRes.ok) {
+          allUsers = (await usersRes.json()) as UserLookup[]
+          setUsers(allUsers)
+        }
+        
+        // Create a set of user IDs that belong to this department
+        const departmentUserIds = new Set(
+          allUsers.filter((u) => u.department_id === dep.id).map((u) => u.id)
+        )
+
+        const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
-          apiFetch(`/tasks?department_id=${dep.id}&include_done=false`),
+          // Remove department_id filter to get all tasks, then filter client-side
+          apiFetch(`/tasks?include_done=true`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         let templateProjectIds = new Set<string>()
@@ -694,20 +897,31 @@ export default function DepartmentKanban() {
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
-          const nonSystemTasks = taskRows.filter(
-            (t) => !t.system_template_origin_id && (!t.project_id || !templateProjectIds.has(t.project_id))
-          )
+          // Filter tasks: include if task belongs to this department OR any assignee belongs to this department
+          const nonSystemTasks = taskRows.filter((t) => {
+            // Exclude system tasks and template projects
+            if (t.system_template_origin_id || (t.project_id && templateProjectIds.has(t.project_id))) {
+              return false
+            }
+            // Include if task belongs to this department
+            if (t.department_id === dep.id) return true
+            // Include if primary assignee belongs to this department
+            if (t.assigned_to && departmentUserIds.has(t.assigned_to)) return true
+            // Include if any assignee in the assignees array belongs to this department
+            // Check both string and direct ID matching
+            if (t.assignees?.some((a) => {
+              const assigneeId = a.id
+              if (!assigneeId) return false
+              return departmentUserIds.has(assigneeId)
+            })) return true
+            return false
+          })
           setDepartmentTasks(nonSystemTasks)
           setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
         if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
+        if (internalRes.ok) setInternalNotes((await internalRes.json()) as InternalNote[])
         if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
-
-        const usersRes = await apiFetch("/users/lookup")
-        if (usersRes.ok) {
-          const us = (await usersRes.json()) as UserLookup[]
-          setUsers(us)
-        }
 
         setSystemDepartmentId(dep.id)
       } finally {
@@ -716,6 +930,37 @@ export default function DepartmentKanban() {
     }
     void load()
   }, [apiFetch, departmentName, user?.role])
+
+  React.useEffect(() => {
+    if (!internalNoteDepartmentId && department?.id) {
+      setInternalNoteDepartmentId(department.id)
+    }
+  }, [department?.id, internalNoteDepartmentId])
+
+  React.useEffect(() => {
+    const loadProjects = async () => {
+      if (!internalNoteDepartmentId) {
+        setInternalNoteProjects([])
+        return
+      }
+      setLoadingInternalNoteProjects(true)
+      try {
+        const res = await apiFetch(`/projects?department_id=${internalNoteDepartmentId}`)
+        if (!res.ok) {
+          console.error("Failed to load department projects:", res.status)
+          setInternalNoteProjects([])
+          return
+        }
+        setInternalNoteProjects((await res.json()) as Project[])
+      } catch (error) {
+        console.error("Error loading department projects:", error)
+        setInternalNoteProjects([])
+      } finally {
+        setLoadingInternalNoteProjects(false)
+      }
+    }
+    void loadProjects()
+  }, [apiFetch, internalNoteDepartmentId])
 
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
@@ -828,6 +1073,15 @@ export default function DepartmentKanban() {
     }
     return `${noProjectAssignees.length} selected`
   }, [users, noProjectAssignees])
+  const editTaskAssigneeLabel = React.useMemo(() => {
+    if (editTaskAssignees.length === 0) return "Unassigned"
+    if (users.length && editTaskAssignees.length === users.length) return "All users"
+    if (editTaskAssignees.length === 1) {
+      const selected = users.find((u) => u.id === editTaskAssignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${editTaskAssignees.length} selected`
+  }, [users, editTaskAssignees])
   const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
   const mstTemplateOptions = React.useMemo(() => {
     return templateProjects.filter((p) => {
@@ -858,14 +1112,184 @@ export default function DepartmentKanban() {
     () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
     [departmentTasks, isMineView, user?.id]
   )
-  const visibleNoProjectTasks = React.useMemo(
-    () => (isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks),
-    [noProjectTasks, isMineView, user?.id]
-  )
+  const visibleNoProjectTasks = React.useMemo(() => {
+    const base = isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks
+    const filtered = base.filter(isNoProjectTask)
+    
+    // Deduplicate tasks by ID first, then by title+properties as fallback
+    // This handles cases where backend creates separate task records per assignee
+    const taskMapById = new Map<string, Task>()
+    const taskMapByKey = new Map<string, Task>()
+    
+    // Helper to create a unique key for grouping similar tasks
+    const getTaskKey = (task: Task): string => {
+      return [
+        task.title || "",
+        task.department_id || "",
+        task.is_bllok ? "bllok" : "",
+        task.is_r1 ? "r1" : "",
+        task.is_1h_report ? "1h" : "",
+        task.is_personal ? "personal" : "",
+        task.ga_note_origin_id || "",
+        task.start_date || "",
+        task.due_date || "",
+      ].join("|")
+    }
+    
+    for (const t of filtered) {
+      // First try to deduplicate by ID
+      const existingById = taskMapById.get(t.id)
+      if (existingById) {
+        // Merge assignees if task already exists with same ID
+        const assigneeMap = new Map<string, TaskAssignee>()
+        
+        // Add existing assignees
+        if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
+          const user = userMap.get(existingById.assigned_to)!
+          assigneeMap.set(existingById.assigned_to, {
+            id: existingById.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        existingById.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Add new task's assignees
+        if (t.assigned_to && userMap.has(t.assigned_to)) {
+          const user = userMap.get(t.assigned_to)!
+          assigneeMap.set(t.assigned_to, {
+            id: t.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        t.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Update existing task with merged assignees
+        existingById.assignees = Array.from(assigneeMap.values())
+        if (!existingById.assigned_to && t.assigned_to) {
+          existingById.assigned_to = t.assigned_to
+        }
+        continue
+      }
+      
+      // If not found by ID, check if we have a similar task by key (title+properties)
+      const taskKey = getTaskKey(t)
+      const existingByKey = taskMapByKey.get(taskKey)
+      if (existingByKey && existingByKey.id !== t.id) {
+        // Found a similar task with different ID - merge assignees into the existing task
+        const assigneeMap = new Map<string, TaskAssignee>()
+        
+        // Add existing assignees
+        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
+          const user = userMap.get(existingByKey.assigned_to)!
+          assigneeMap.set(existingByKey.assigned_to, {
+            id: existingByKey.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        existingByKey.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Add new task's assignees
+        if (t.assigned_to && userMap.has(t.assigned_to)) {
+          const user = userMap.get(t.assigned_to)!
+          assigneeMap.set(t.assigned_to, {
+            id: t.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        t.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Update existing task with merged assignees
+        existingByKey.assignees = Array.from(assigneeMap.values())
+        if (!existingByKey.assigned_to && t.assigned_to) {
+          existingByKey.assigned_to = t.assigned_to
+        }
+        // Also add this task's ID to taskMapById so we don't process it again
+        taskMapById.set(t.id, existingByKey)
+        continue
+      }
+      
+      // New unique task - add it to both maps
+      const taskCopy = { ...t }
+      taskMapById.set(t.id, taskCopy)
+      taskMapByKey.set(taskKey, taskCopy)
+    }
+    
+    // Use a Set to ensure we only get unique task objects
+    const uniqueTasks = new Set<Task>(taskMapById.values())
+    return Array.from(uniqueTasks)
+  }, [noProjectTasks, isMineView, user?.id, userMap])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
   )
+  const visibleInternalNotes = React.useMemo(() => {
+    const base = isMineView && user?.id ? internalNotes.filter((n) => n.to_user_id === user.id) : internalNotes
+    if (selectedUserId === "__all__") return base
+    return base.filter((n) => n.to_user_id === selectedUserId)
+  }, [internalNotes, isMineView, selectedUserId, user?.id])
+  const groupedInternalNotes = React.useMemo(() => {
+    const normalizeTime = (value?: string | null) => {
+      if (!value) return ""
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return value
+      return date.toISOString().slice(0, 16)
+    }
+    const groups = new Map<
+      string,
+      { note: InternalNote; toUserIds: string[]; notes: InternalNote[] }
+    >()
+    for (const note of internalNotes) {
+      const key = [
+        note.title?.trim() || "",
+        (note.description || "").trim(),
+        note.from_user_id,
+        note.department_id || note.to_department_id || "",
+        note.project_id || "",
+        normalizeTime(note.created_at),
+      ].join("|")
+      const existing = groups.get(key)
+      if (existing) {
+        if (!existing.toUserIds.includes(note.to_user_id)) {
+          existing.toUserIds.push(note.to_user_id)
+        }
+        existing.notes.push(note)
+      } else {
+        groups.set(key, { note, toUserIds: [note.to_user_id], notes: [note] })
+      }
+    }
+    let grouped = Array.from(groups.values())
+    if (isMineView && user?.id) {
+      grouped = grouped.filter((group) => group.toUserIds.includes(user.id))
+    }
+    if (selectedUserId !== "__all__") {
+      grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
+    }
+    return grouped.sort((a, b) => {
+      const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
+      const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
+      return bTime - aTime
+    })
+  }, [internalNotes, isMineView, selectedUserId, user?.id])
   const visibleMeetings = React.useMemo(
     () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
     [meetings, isMineView, user?.id]
@@ -874,7 +1298,16 @@ export default function DepartmentKanban() {
     () => {
       // Show ONLY tasks specific to this department (exclude global/ALL scope)
       const depTasks = department ? systemTasks.filter((t) => t.department_id === department.id) : []
-      return isMineView && user?.id ? depTasks.filter((t) => t.default_assignee_id === user.id) : depTasks
+      if (!isMineView || !user?.id) return depTasks
+      return depTasks.filter((t) => {
+        // Check if user is the default assignee
+        if (t.default_assignee_id === user.id) return true
+        // Check if user is in the assignees array
+        if (t.assignees?.some((assignee) => assignee.id === user.id)) return true
+        // Check if user is in the alignment_user_ids array
+        if (t.alignment_user_ids?.includes(user.id)) return true
+        return false
+      })
     },
     [systemTasks, isMineView, user?.id, department]
   )
@@ -884,15 +1317,41 @@ export default function DepartmentKanban() {
     [visibleDepartmentTasks]
   )
   const todaySystemTasks = React.useMemo(
-    () => visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate)),
-    [visibleSystemTemplates, todayDate]
+    () => {
+      const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
+      
+      // If in "my view", also include overdue system tasks where next occurrence has passed
+      if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
+        const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
+        const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
+        
+        const overdueTasks = visibleSystemTemplates.filter((t) => {
+          const templateId = t.template_id || t.id
+          // Skip if already in today's tasks
+          if (todayTaskIds.has(templateId)) return false
+          // Only include if it's in overdue list
+          if (!overdueTaskIds.has(templateId)) return false
+          
+          // Check if next occurrence date has passed
+          const nextOccurrence = getNextOccurrenceDate(t, todayDate)
+          const nextOccurrenceKey = dayKey(nextOccurrence)
+          const todayKey = dayKey(todayDate)
+          
+          // Only show if next occurrence is in the past (overdue)
+          return nextOccurrenceKey < todayKey
+        })
+        
+        return [...todayTasks, ...overdueTasks]
+      }
+      
+      return todayTasks
+    },
+    [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
   )
-  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
+  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
-      const date = toDate(task.due_date || task.start_date || task.created_at)
-      const matchesDate = date ? isSameDay(date, todayDate) : false
-      if (!matchesDate) return false
+      if (!isTaskActiveForDate(task, todayDate)) return false
       if (selectedUserId !== "__all__") {
         return task.assigned_to === selectedUserId
       }
@@ -901,9 +1360,7 @@ export default function DepartmentKanban() {
   }, [projectTasks, todayDate, selectedUserId])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
-      const date = toDate(task.due_date || task.start_date || task.created_at)
-      const matchesDate = date ? isSameDay(date, todayDate) : false
-      if (!matchesDate) return false
+      if (!isTaskActiveForDate(task, todayDate)) return false
       if (selectedUserId !== "__all__") {
         return task.assigned_to === selectedUserId
       }
@@ -934,25 +1391,35 @@ export default function DepartmentKanban() {
   const dailyReportFastTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
     return visibleNoProjectTasks.filter((task) => {
-      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
-      if (!baseDate) return completedToday
-      const baseKey = dayKey(baseDate)
-      return baseKey <= todayKey || completedToday
+      if (completedToday) return true
+
+      const startDate = task.start_date ? toDate(task.start_date) : null
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      if (startDate && dueDate) {
+        return todayKey >= dayKey(startDate)
+      }
+
+      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      if (!baseDate) return false
+      return dayKey(baseDate) <= todayKey
     })
   }, [todayDate, visibleNoProjectTasks])
   const dailyReportProjectTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
     return projectTasks.filter((task) => {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
-      if (!baseDate) return completedToday
-      const baseKey = dayKey(baseDate)
-      return baseKey <= todayKey || completedToday
+      if (completedToday) return true
+
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      if (dueDate) {
+        return todayKey >= dayKey(dueDate)
+      }
+      return false
     })
   }, [projectTasks, todayDate])
   const systemTemplateById = React.useMemo(() => {
@@ -1101,7 +1568,8 @@ export default function DepartmentKanban() {
     }
 
     for (const task of dailyReportFastTasks) {
-      const baseDate = toDate(task.due_date || task.start_date || task.planned_for || task.created_at)
+      const startDate = task.start_date ? toDate(task.start_date) : null
+      const dueDate = task.due_date ? toDate(task.due_date) : null
       fastRows.push({
         order: fastTypeOrder(task),
         index: fastIndex,
@@ -1114,7 +1582,12 @@ export default function DepartmentKanban() {
           status: taskStatusLabel(task),
           bz: "-",
           kohaBz: "-",
-          tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          tyo: getDailyReportTyo({
+            reportDate: todayDate,
+            startDate,
+            dueDate,
+            mode: startDate && dueDate ? "range" : "dueOnly",
+          }),
           comment: task.user_comment ?? null,
           taskId: task.id,
         },
@@ -1123,7 +1596,7 @@ export default function DepartmentKanban() {
     }
 
     for (const task of dailyReportProjectTasks) {
-      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const dueDate = task.due_date ? toDate(task.due_date) : null
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
       const projectLabel = project?.title || project?.name || "-"
       projectRows.push({
@@ -1135,7 +1608,11 @@ export default function DepartmentKanban() {
         status: taskStatusLabel(task),
         bz: "-",
         kohaBz: "-",
-        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        tyo: getDailyReportTyo({
+          reportDate: todayDate,
+          dueDate,
+          mode: "dueOnly",
+        }),
         comment: task.user_comment ?? null,
         taskId: task.id,
       })
@@ -1256,11 +1733,96 @@ export default function DepartmentKanban() {
         ...(report.tasks_overdue || []).map((item) => item.task),
       ]
 
+      const printedTaskIds = new Set<string>()
+
       for (const task of allTasks) {
-        const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date)
+        const startDate = toDate(task.start_date)
+        const createdDate = toDate(task.created_at)
+
+        // Use the start date (or the earliest available date) to decide whether a task
+        // is active for the daily report. This keeps it visible from start_date until due_date.
+        const baseDate = startDate || createdDate || dueDate
+        const dueKey = dueDate ? dayKey(dueDate) : null
+        const startKey = baseDate ? dayKey(baseDate) : null
+
+        // Skip tasks that haven't started yet.
         if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
           continue
         }
+
+        // If a due date exists, keep the task visible through the due date (inclusive).
+        if (dueKey != null && startKey != null && dayKey(todayDate) > dueKey && !task.completed_at) {
+          // It will already be listed under overdue from the API; avoid double‑adding here.
+          continue
+        }
+
+        printedTaskIds.add(task.id)
+
+        const isProject = Boolean(task.project_id)
+        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+        const projectLabel = project?.title || project?.name || "-"
+
+        if (isProject) {
+          projectRows.push({
+            typeLabel: "PRJK",
+            subtype: "-",
+            period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+            title: `${projectLabel} - ${task.title || "-"}`,
+            description: task.description || "-",
+            status: taskStatusLabel(task),
+            bz: "-",
+            kohaBz: "-",
+            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            comment: task.user_comment ?? null,
+            taskId: task.id,
+          })
+        } else {
+          fastRows.push({
+            order: fastTypeOrder(task),
+            index: fastIndex,
+            row: {
+              typeLabel: "FT",
+              subtype: fastReportSubtypeShort(task),
+              period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+              title: task.title || "-",
+              description: task.description || "-",
+              status: taskStatusLabel(task),
+              bz: "-",
+              kohaBz: "-",
+              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              comment: task.user_comment ?? null,
+              taskId: task.id,
+            },
+          })
+          fastIndex += 1
+        }
+      }
+
+      // Include in-progress tasks that fall between start_date and due_date (inclusive) but
+      // are missing from the API payload, so they appear every day of their active window.
+      const rangeTasks = visibleDepartmentTasks.filter((task) => {
+        const assigned =
+          task.assigned_to === userId ||
+          (task.assignees && task.assignees.some((a) => a.id === userId))
+        if (!assigned) return false
+
+        const startDate = toDate(task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
+        const todayKey = dayKey(todayDate)
+        const startKey = startDate ? dayKey(startDate) : null
+        const dueKey = dueDate ? dayKey(dueDate) : null
+
+        if (startKey != null && todayKey < startKey) return false
+        if (dueKey != null && todayKey > dueKey) return false
+        return true
+      })
+
+      for (const task of rangeTasks) {
+        if (printedTaskIds.has(task.id)) continue
+        const startDate = toDate(task.start_date || task.created_at)
+        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
+        const baseDate = startDate || dueDate || toDate(task.created_at)
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || "-"
@@ -1863,11 +2425,13 @@ export default function DepartmentKanban() {
       system: visibleSystemTemplates.length,
       "no-project": visibleNoProjectTasks.length,
       "ga-ka": visibleGaNotes.filter((n) => n.status !== "CLOSED").length,
+      "internal-notes": visibleInternalNotes.length,
       meetings: visibleMeetings.length,
     }),
-    [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
+    [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleInternalNotes.length, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
+  const gaTableDirty = gaTableInput !== (gaTableEntry?.content ?? "")
 
   // Daily Report (overdue) for All Today (department view) and My View (current user).
   React.useEffect(() => {
@@ -1908,6 +2472,87 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (activeTab !== "all" || viewMode !== "mine") {
+        setGaTableEntry(null)
+        setGaTableInput("")
+        setGaTableNotes([])
+        setLoadingGaTable(false)
+        return
+      }
+      if (!department?.id || !user?.id) {
+        setGaTableEntry(null)
+        setGaTableInput("")
+        setGaTableNotes([])
+        setLoadingGaTable(false)
+        return
+      }
+      setLoadingGaTable(true)
+      try {
+        const qs = new URLSearchParams({
+          day: todayIso,
+          department_id: department.id,
+          user_id: user.id,
+        })
+        const res = await apiFetch(`/reports/daily-ga-table?${qs.toString()}`)
+        if (!res.ok) {
+          if (!cancelled) {
+            setGaTableEntry(null)
+            setGaTableInput("")
+            setGaTableNotes([])
+          }
+          return
+        }
+        const payload = (await res.json()) as DailyReportGaTableResponse
+        if (cancelled) return
+        setGaTableEntry(payload.entry ?? null)
+        setGaTableInput(payload.entry?.content ?? "")
+        setGaTableNotes(payload.notes || [])
+      } catch {
+        if (!cancelled) {
+          setGaTableEntry(null)
+          setGaTableInput("")
+          setGaTableNotes([])
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingGaTable(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
+
+  const saveGaTableEntry = React.useCallback(
+    async (nextValue: string) => {
+      if (!department?.id || !user?.id) return
+      setSavingGaTable(true)
+      try {
+        const res = await apiFetch("/reports/daily-ga-entry", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            day: todayIso,
+            department_id: department.id,
+            content: nextValue,
+          }),
+        })
+        if (!res.ok) return
+        const payload = (await res.json()) as DailyReportGaEntry
+        setGaTableEntry(payload)
+        setGaTableInput(payload.content ?? "")
+      } finally {
+        setSavingGaTable(false)
+      }
+    },
+    [apiFetch, department?.id, todayIso, user?.id]
+  )
 
   // Fetch daily reports for all users when showing All Today print view
   React.useEffect(() => {
@@ -1959,12 +2604,23 @@ export default function DepartmentKanban() {
   }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
 
   const handlePrint = React.useCallback(() => {
+    // In "My View" mode, automatically show daily report for printing
+    if (viewMode === "mine" && !showDailyUserReport) {
+      setShowDailyUserReport(true)
+      setPrintRange("today")
+      // Use setTimeout to ensure state updates before printing
+      setTimeout(() => {
+        window.print()
+      }, 0)
+      return
+    }
+    
     if (showAllTodayPrint && loadingAllUsersDailyReports) {
       setPendingPrint(true)
       return
     }
     window.print()
-  }, [loadingAllUsersDailyReports, showAllTodayPrint])
+  }, [loadingAllUsersDailyReports, showAllTodayPrint, viewMode, showDailyUserReport])
 
   React.useEffect(() => {
     if (!pendingPrint) return
@@ -2007,13 +2663,139 @@ export default function DepartmentKanban() {
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
+    // Deduplicate tasks by ID first, then by title+properties as fallback
+    // This handles cases where backend creates separate task records per assignee
+    const taskMapById = new Map<string, Task>()
+    const taskMapByKey = new Map<string, Task>()
+    
+    // Helper to create a unique key for grouping similar tasks
+    const getTaskKey = (task: Task): string => {
+      return [
+        task.title || "",
+        task.department_id || "",
+        task.is_bllok ? "bllok" : "",
+        task.is_r1 ? "r1" : "",
+        task.is_1h_report ? "1h" : "",
+        task.is_personal ? "personal" : "",
+        task.ga_note_origin_id || "",
+        task.start_date || "",
+        task.due_date || "",
+      ].join("|")
+    }
+    
     for (const t of visibleNoProjectTasks) {
+      // First try to deduplicate by ID
+      const existingById = taskMapById.get(t.id)
+      if (existingById) {
+        // Merge assignees if task already exists with same ID
+        const assigneeMap = new Map<string, TaskAssignee>()
+        
+        // Add existing assignees
+        if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
+          const user = userMap.get(existingById.assigned_to)!
+          assigneeMap.set(existingById.assigned_to, {
+            id: existingById.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        existingById.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Add new task's assignees
+        if (t.assigned_to && userMap.has(t.assigned_to)) {
+          const user = userMap.get(t.assigned_to)!
+          assigneeMap.set(t.assigned_to, {
+            id: t.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        t.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Update existing task with merged assignees
+        existingById.assignees = Array.from(assigneeMap.values())
+        if (!existingById.assigned_to && t.assigned_to) {
+          existingById.assigned_to = t.assigned_to
+        }
+        continue
+      }
+      
+      // If not found by ID, check if we have a similar task by key (title+properties)
+      const taskKey = getTaskKey(t)
+      const existingByKey = taskMapByKey.get(taskKey)
+      if (existingByKey && existingByKey.id !== t.id) {
+        // Found a similar task with different ID - merge assignees into the existing task
+        // existingByKey should be the same reference as in taskMapById
+        const assigneeMap = new Map<string, TaskAssignee>()
+        
+        // Add existing assignees
+        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
+          const user = userMap.get(existingByKey.assigned_to)!
+          assigneeMap.set(existingByKey.assigned_to, {
+            id: existingByKey.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        existingByKey.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Add new task's assignees
+        if (t.assigned_to && userMap.has(t.assigned_to)) {
+          const user = userMap.get(t.assigned_to)!
+          assigneeMap.set(t.assigned_to, {
+            id: t.assigned_to,
+            full_name: user.full_name || null,
+            username: user.username || null,
+            email: user.email || null,
+            department_id: user.department_id || null,
+          })
+        }
+        t.assignees?.forEach(a => {
+          if (a.id) assigneeMap.set(a.id, a)
+        })
+        
+        // Update existing task with merged assignees (this updates the same object in both maps)
+        existingByKey.assignees = Array.from(assigneeMap.values())
+        if (!existingByKey.assigned_to && t.assigned_to) {
+          existingByKey.assigned_to = t.assigned_to
+        }
+        // Also add this task's ID to taskMapById so we don't process it again
+        taskMapById.set(t.id, existingByKey)
+        // Don't add this task to taskMapByKey, we've merged it into existingByKey
+        continue
+      }
+      
+      // New unique task - add it to both maps (same object reference)
+      const taskCopy = { ...t }
+      taskMapById.set(t.id, taskCopy)
+      taskMapByKey.set(taskKey, taskCopy)
+    }
+    
+    // Use tasks from ID map (they're the source of truth)
+    // Use a Set to ensure we only get unique task objects (in case multiple IDs point to same object)
+    const uniqueTasks = new Set<Task>(taskMapById.values())
+    const deduplicatedTasks = Array.from(uniqueTasks)
+    
+    // Now categorize the deduplicated tasks
+    for (const t of deduplicatedTasks) {
       if (t.is_bllok) {
         blocked.push(t)
-      } else if (t.is_1h_report) {
-        oneHour.push(t)
       } else if (t.is_r1) {
         r1.push(t)
+      } else if (t.is_1h_report) {
+        oneHour.push(t)
       } else if (t.is_personal) {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
@@ -2024,6 +2806,81 @@ export default function DepartmentKanban() {
     }
     return { normal, personal, ga, blocked, oneHour, r1 }
   }, [visibleNoProjectTasks])
+
+  const statusRows = [
+    {
+      id: "blocked",
+      title: "BLLOK",
+      count: noProjectBuckets.blocked.length,
+      items: noProjectBuckets.blocked,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-red-600 border border-red-200",
+      borderClass: "border-red-500",
+      itemBadge: "BLLOK",
+      itemBadgeClass: "bg-white text-red-600 border-red-200",
+    },
+    {
+      id: "one-hour",
+      title: "1H TASKS",
+      count: noProjectBuckets.oneHour.length,
+      items: noProjectBuckets.oneHour,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-indigo-600 border border-indigo-200",
+      borderClass: "border-indigo-500",
+      itemBadge: "1H",
+      itemBadgeClass: "bg-white text-indigo-600 border-indigo-200",
+    },
+    {
+      id: "r1",
+      title: "R1",
+      count: noProjectBuckets.r1.length,
+      items: noProjectBuckets.r1,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-emerald-600 border border-emerald-200",
+      borderClass: "border-emerald-500",
+      itemBadge: "R1",
+      itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
+    },
+    {
+      id: "ga",
+      title: "GA TASKS",
+      count: noProjectBuckets.ga.length,
+      items: noProjectBuckets.ga,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-sky-600 border border-slate-200",
+      borderClass: "border-sky-500",
+      itemBadge: "GA",
+      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
+    },
+    {
+      id: "personal",
+      title: "PERSONAL",
+      count: noProjectBuckets.personal.length,
+      items: noProjectBuckets.personal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-purple-600 border border-purple-200",
+      borderClass: "border-purple-500",
+      itemBadge: "Personal",
+      itemBadgeClass: "bg-white text-purple-600 border-purple-200",
+    },
+    {
+      id: "normal",
+      title: "NORMAL",
+      count: noProjectBuckets.normal.length,
+      items: noProjectBuckets.normal,
+      headerBg: "bg-white",
+      headerText: "text-slate-700",
+      badgeClass: "bg-white text-blue-600 border border-slate-200",
+      borderClass: "border-blue-500",
+      itemBadge: "Normal",
+      itemBadgeClass: "bg-white text-blue-600 border-slate-200",
+    },
+  ] as const
 
   const gaNoteTaskMap = React.useMemo(() => {
     const map = new Map<string, Task>()
@@ -2248,11 +3105,15 @@ export default function DepartmentKanban() {
           gaNoteId = createdNote.id
           setGaNotes((prev) => [createdNote, ...prev])
         }
+        // If GA note creation failed or was skipped, still tag the task as GA so it shows in GA bucket.
+        if (!gaNoteId) {
+          gaNoteId = "__ga__"
+        }
       }
       const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
-        const payload = {
-          title: noProjectTitle.trim(),
+      const payload = {
+        title: noProjectTitle.trim(),
           description: noProjectDescription.trim() || null,
           project_id: null,
           department_id: department.id,
@@ -2267,26 +3128,49 @@ export default function DepartmentKanban() {
           start_date: startDate,
           due_date: dueDate,
         }
-      const assigneeIds = noProjectAssignees.length ? noProjectAssignees : [null]
-
-      const createdTasks: Task[] = []
-      for (const assigneeId of assigneeIds) {
-        const res = await apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, assigned_to: assigneeId }) })
-        if (res.ok) {
-          const created = (await res.json()) as Task
-          if (noProjectType === "personal") {
-            created.is_personal = true
+      // Create one task with multiple assignees instead of multiple tasks
+      const assigneeIds = noProjectAssignees.length > 0 ? noProjectAssignees : null
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          assigned_to: assigneeIds && assigneeIds.length > 0 ? assigneeIds[0] : null,
+          assignees: assigneeIds,
+        }),
+      })
+      if (res.ok) {
+        const created = (await res.json()) as Task
+        // Ensure boolean flags are set correctly based on type
+        if (noProjectType === "personal") {
+          created.is_personal = true
+        }
+        // Ensure the task has the correct properties for filtering
+        if (noProjectType === "normal") {
+          created.is_bllok = false
+          created.is_1h_report = false
+          created.is_r1 = false
+          created.is_personal = false
+          created.priority = created.priority || "NORMAL"
+        }
+        // Add to noProjectTasks if it's a non-project task
+        if (isNoProjectTask(created) || (noProjectType === "normal" && !created.project_id && !created.system_template_origin_id && !created.ga_note_origin_id)) {
+          setNoProjectTasks((prev) => [created, ...prev])
+        }
+        // Also add to departmentTasks for consistency
+        setDepartmentTasks((prev) => [created, ...prev])
+        toast.success("Task created")
+      } else {
+        let errorMessage = "Failed to create task"
+        try {
+          const errorData = await res.json()
+          if (errorData.detail) {
+            errorMessage = typeof errorData.detail === "string" ? errorData.detail : "Failed to create task"
           }
-          createdTasks.push(created)
+        } catch {
+          // ignore
         }
-      }
-      if (createdTasks.length) {
-        // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
-        const nonProjectTasks = createdTasks.filter(isNoProjectTask)
-        if (nonProjectTasks.length) {
-          setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
-        }
-        setDepartmentTasks((prev) => [...createdTasks, ...prev])
+        toast.error(errorMessage)
       }
       setNoProjectOpen(false)
       setNoProjectTitle("")
@@ -2334,6 +3218,11 @@ export default function DepartmentKanban() {
     setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    // Get assignees from assignees array, fallback to assigned_to for backward compatibility
+    const assigneeIds = task.assignees && task.assignees.length > 0
+      ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
+      : (task.assigned_to ? [task.assigned_to] : [])
+    setEditTaskAssignees(assigneeIds)
   }
 
   const cancelEditTask = () => {
@@ -2343,6 +3232,7 @@ export default function DepartmentKanban() {
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+    setEditTaskAssignees([])
   }
 
   const updateNoProjectTask = async () => {
@@ -2351,6 +3241,8 @@ export default function DepartmentKanban() {
     try {
       const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
+      // Use first assignee for backward compatibility, or null if no assignees
+      const assignedToValue = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2360,6 +3252,7 @@ export default function DepartmentKanban() {
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+          assigned_to: assignedToValue,
         }),
       })
       if (!res.ok) {
@@ -2502,6 +3395,72 @@ export default function DepartmentKanban() {
     } finally {
       setAddingGaNote(false)
     }
+  }
+
+  const submitInternalNote = async () => {
+    const title = internalNoteTitle.trim()
+    const description = internalNoteDescription.trim()
+    if (!title || internalNoteToUserIds.length === 0) {
+      return
+    }
+    setAddingInternalNote(true)
+    try {
+      const res = await apiFetch("/internal-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description: description || null,
+          departmentId: internalNoteDepartmentId || null,
+          projectId: internalNoteProjectId || null,
+          toUserIds: internalNoteToUserIds,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add internal note"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as InternalNote[]
+      const departmentId = department?.id
+      const visibleCreated = departmentId
+        ? created.filter((note) => (note.department_id || note.to_department_id) === departmentId)
+        : created
+      setInternalNotes((prev) => [...visibleCreated, ...prev])
+      setInternalNoteTitle("")
+      setInternalNoteDescription("")
+      setInternalNoteProjectId("")
+      setInternalNoteToUserIds([])
+      setInternalNoteOpen(false)
+      toast.success("Internal note added")
+    } finally {
+      setAddingInternalNote(false)
+    }
+  }
+
+  const deleteInternalNote = async (noteIds: string[] | string) => {
+    const ids = Array.isArray(noteIds) ? noteIds : [noteIds]
+    if (!ids.length) return
+    if (!window.confirm("Are you sure you want to delete this internal note?")) return
+    let failed = false
+    for (const noteId of ids) {
+      const res = await apiFetch(`/internal-notes/${noteId}`, { method: "DELETE" })
+      if (!res.ok) {
+        failed = true
+      }
+    }
+    if (failed) {
+      toast.error("Failed to delete internal note")
+      return
+    }
+    setInternalNotes((prev) => prev.filter((note) => !ids.includes(note.id)))
+    toast.success("Internal note deleted")
   }
 
   const submitGaNoteTask = async () => {
@@ -2990,7 +3949,7 @@ export default function DepartmentKanban() {
                   {[
                     { label: "PROJECT TASKS", value: todayProjectTasks.length },
                     { label: "GA NOTES", value: todayOpenNotes.length },
-                    { label: "FAST TASKS", value: todayNoProjectTasks.length },
+                    { label: "FAST TASKS", value: visibleNoProjectTasks.length },
                     { label: "SYSTEM TASKS", value: todaySystemTasks.length },
                 ].map((stat) => (
                   <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
@@ -3157,12 +4116,72 @@ export default function DepartmentKanban() {
                                 No data available.
                               </td>
                             </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-4">
+                  <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                    <colgroup>
+                      <col className="w-[180px]" />
+                      <col />
+                    </colgroup>
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-200 px-2 py-2 text-xs font-semibold uppercase align-top">
+                          GA/KUR/SI/KUJT/PRBL
+                        </td>
+                        <td className="border border-slate-200 px-2 py-2">
+                          <div className="flex items-start gap-2">
+                            <Textarea
+                              value={gaTableInput}
+                              onChange={(e) => setGaTableInput(e.target.value)}
+                              onBlur={(e) => {
+                                const nextValue = e.target.value
+                                if (nextValue === (gaTableEntry?.content ?? "")) return
+                                void saveGaTableEntry(nextValue)
+                              }}
+                              placeholder="Add GA/KUR/SI/KUJT/PRBL..."
+                              className="min-h-[60px] text-xs"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-[11px] text-slate-900 shadow-sm hover:bg-slate-50"
+                              disabled={savingGaTable || !gaTableDirty}
+                              onClick={() => void saveGaTableEntry(gaTableInput)}
+                            >
+                              {savingGaTable ? "Saving..." : "Save"}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="border border-slate-200 px-2 py-2 text-xs font-semibold uppercase align-top">
+                          GA Notes:
+                        </td>
+                        <td className="border border-slate-200 px-2 py-2 text-xs">
+                          {loadingGaTable ? (
+                            <div className="text-slate-500">Loading...</div>
+                          ) : gaTableNotes.length ? (
+                            <ul className="list-disc pl-4 space-y-1">
+                              {gaTableNotes.map((note) => (
+                                <li key={note.id}>
+                                  {note.project_name ? `${note.project_name}: ` : ""}
+                                  {note.content}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="italic text-slate-500">No GA notes.</div>
                           )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card>
-                ) : null}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            ) : null}
 
                 {viewMode === "department" ? (
                 <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
@@ -3333,33 +4352,78 @@ export default function DepartmentKanban() {
                       </span>
                       <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                     </div>
-                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col">
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                       {todayNoProjectTasks.length ? (
                         <div className="space-y-2">
                           {todayNoProjectTasks.map((task) => {
-                            const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                             const typeLabel = noProjectTypeLabel(task)
+                            const isCompleted = task.completed_at != null || task.status === "DONE"
+                            // Collect all assignees: from assigned_to and assignees array
+                            const assigneeIds = new Set<string>()
+                            if (task.assigned_to) {
+                              assigneeIds.add(task.assigned_to)
+                            }
+                            if (task.assignees) {
+                              for (const assignee of task.assignees) {
+                                if (assignee.id) {
+                                  assigneeIds.add(assignee.id)
+                                }
+                              }
+                            }
                             return (
                               <Link
                                 key={task.id}
                                 href={`/tasks/${task.id}`}
-                                className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
+                                  isCompleted 
+                                    ? "border-green-500 bg-green-50/30 opacity-75" 
+                                    : "border-blue-500 bg-white"
+                                }`}
                               >
-                                <div className="flex items-center gap-2">
-                                  <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                    {typeLabel}
-                                  </Badge>
-                                  <div className="font-medium text-slate-800">{task.title}</div>
-                                </div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                  {assignee?.full_name || assignee?.username || "Unassigned"}
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    {task.ga_note_origin_id && (task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal) && (
+                                      <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                        GA
+                                      </Badge>
+                                    )}
+                                    <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                      {typeLabel}
+                                    </Badge>
+                                    <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                      {task.title}
+                                    </div>
+                                    {isCompleted && (
+                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
+                                        Done
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    {Array.from(assigneeIds).map((userId) => {
+                                      const userFromMap = userMap.get(userId)
+                                      const assigneeFromArray = task.assignees?.find(a => a.id === userId)
+                                      const label = userFromMap 
+                                        ? assigneeLabel(userFromMap)
+                                        : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+                                      return (
+                                        <div
+                                          key={userId}
+                                          className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                          title={label}
+                                        >
+                                          {initials(label)}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
                                 </div>
                               </Link>
                             )
                           })}
                         </div>
                       ) : (
-                        <div className="text-sm text-slate-500">No tasks today.</div>
+                        <div className="text-sm text-slate-500">No tasks.</div>
                       )}
                     </div>
                   </div>
@@ -3573,54 +4637,67 @@ export default function DepartmentKanban() {
               </div>
             )}
 
-            {/* BUCKETS */}
-            {activeTab === "no-project" && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div><h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Task Buckets</h2><p className="text-sm text-slate-500">Non-project specific workflows.</p></div>
-                  {!isReadOnly && (
+            {activeTab === "no-project" ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
+                    <div className="text-sm text-slate-600">
+                      Use these buckets to track non-project tasks and special cases.
+                    </div>
+                  </div>
+                  {!isReadOnly ? (
                     <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                       <DialogTrigger asChild>
-                        <Button className="rounded-xl bg-slate-900 text-white">Create Task</Button>
+                        <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
+                          + Add Task
+                        </Button>
                       </DialogTrigger>
-                      <DialogContent className="rounded-2xl sm:max-w-xl">
+                      <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                         <DialogHeader>
-                          <DialogTitle>New Task</DialogTitle>
+                          <DialogTitle className="text-slate-800">New Task</DialogTitle>
                         </DialogHeader>
-                        <div className="grid gap-4 py-4">
+                        <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label>Category</Label>
-                            <Select value={noProjectType} onValueChange={(v: any) => setNoProjectType(v)}>
-                              <SelectTrigger className="rounded-xl">
-                                <SelectValue />
+                            <Label className="text-slate-700">Type</Label>
+                            <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
+                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                                <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
-                                {NO_PROJECT_TYPES.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>
-                                    {t.label}
+                                {NO_PROJECT_TYPES.map((opt) => (
+                                  <SelectItem key={opt.id} value={opt.id}>
+                                    {opt.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
+                            <div className="text-xs text-slate-500">
+                              {NO_PROJECT_TYPES.find((opt) => opt.id === noProjectType)?.description}
+                            </div>
                           </div>
                           <div className="space-y-2">
-                            <Label>Title</Label>
-                            <Input className="rounded-xl" value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} />
+                            <Label className="text-slate-700">Title</Label>
+                            <Input value={noProjectTitle} onChange={(e) => setNoProjectTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                           </div>
                           <div className="space-y-2">
-                            <Label>Description</Label>
+                            <Label className="text-slate-700">Description</Label>
                             <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                           </div>
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2">
-                              <Label>Assignee</Label>
+                              <Label className="text-slate-700">Assign to</Label>
                               <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
                                 <DialogTrigger asChild>
-                                  <Button type="button" variant="outline" className="w-full justify-start rounded-xl">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                                  >
                                     {noProjectAssigneeLabel}
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="rounded-2xl sm:max-w-md">
+                                <DialogContent className="sm:max-w-md z-[110]">
                                   <DialogHeader>
                                     <DialogTitle>Select Assignees</DialogTitle>
                                   </DialogHeader>
@@ -3670,15 +4747,15 @@ export default function DepartmentKanban() {
                               </Dialog>
                             </div>
                             <div className="space-y-2">
-                              <Label>Finish by</Label>
+                              <Label className="text-slate-700">Finish by (optional)</Label>
                               <Select
                                 value={noProjectFinishPeriod}
                                 onValueChange={(value) =>
                                   setNoProjectFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                                 }
                               >
-                                <SelectTrigger className="rounded-xl">
-                                  <SelectValue />
+                                <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                                  <SelectValue placeholder="Select period" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
@@ -3691,67 +4768,67 @@ export default function DepartmentKanban() {
                               </Select>
                             </div>
                             <div className="space-y-2">
-                              <Label>Start date</Label>
+                              <Label className="text-slate-700">Start date</Label>
                               <Input
-                                className="rounded-xl w-full"
                                 type="date"
                                 required
                                 value={noProjectStartDate}
                                 onChange={(e) => setNoProjectStartDate(normalizeDueDateInput(e.target.value))}
+                                className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label>Due date (optional)</Label>
+                              <Label className="text-slate-700">Due date (optional)</Label>
                               <Input
-                                className="rounded-xl w-full"
                                 type="date"
                                 value={noProjectDueDate}
                                 onChange={(e) => setNoProjectDueDate(normalizeDueDateInput(e.target.value))}
+                                className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                               />
                             </div>
                           </div>
-                        </div>
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" onClick={() => setNoProjectOpen(false)}>
-                            Cancel
-                          </Button>
-                          <Button
-                            className="rounded-xl"
-                            disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
-                            onClick={() => void submitNoProjectTask()}
-                          >
-                            {creatingNoProject ? "Creating..." : "Create"}
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
+                              Cancel
+                            </Button>
+                            <Button
+                              disabled={!noProjectTitle.trim() || !noProjectStartDate || creatingNoProject}
+                              onClick={() => void submitNoProjectTask()}
+                              className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                            >
+                              {creatingNoProject ? "Creating..." : "Create"}
+                            </Button>
+                          </div>
                         </div>
                       </DialogContent>
                     </Dialog>
-                  )}
+                  ) : null}
                 </div>
-              {!isReadOnly ? (
+                {!isReadOnly ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
-                  <DialogContent className="rounded-2xl sm:max-w-xl">
+                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                     <DialogHeader>
-                      <DialogTitle>Edit Task</DialogTitle>
+                      <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
+                    <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Title</Label>
-                        <Input className="rounded-xl" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} />
+                        <Label className="text-slate-700">Title</Label>
+                        <Input value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
                       </div>
                       <div className="space-y-2">
-                        <Label>Description</Label>
+                        <Label className="text-slate-700">Description</Label>
                         <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label>Finish by</Label>
+                          <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
                             value={editTaskFinishPeriod}
                             onValueChange={(value) =>
                               setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                             }
                           >
-                            <SelectTrigger className="rounded-xl">
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                               <SelectValue placeholder="Select period" />
                             </SelectTrigger>
                             <SelectContent>
@@ -3765,30 +4842,95 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Start date</Label>
+                          <Label className="text-slate-700">Start date</Label>
                           <Input
-                            className="rounded-xl w-full"
                             type="date"
                             required
                             value={editTaskStartDate}
                             onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Due date (optional)</Label>
+                          <Label className="text-slate-700">Due date (optional)</Label>
                           <Input
-                            className="rounded-xl w-full"
                             type="date"
                             value={editTaskDueDate}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
+                            className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
                         </div>
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Assign to</Label>
+                        <Dialog open={selectEditTaskAssigneesOpen} onOpenChange={setSelectEditTaskAssigneesOpen}>
+                          <DialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                            >
+                              {editTaskAssigneeLabel}
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="sm:max-w-md z-[110]">
+                            <DialogHeader>
+                              <DialogTitle>Select Assignees</DialogTitle>
+                            </DialogHeader>
+                            <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                              {users.length ? (
+                                users.map((u) => {
+                                  const isSelected = editTaskAssignees.includes(u.id)
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          setEditTaskAssignees((prev) => prev.filter((id) => id !== u.id))
+                                        } else {
+                                          setEditTaskAssignees((prev) => [...prev, u.id])
+                                        }
+                                      }}
+                                    >
+                                      <Checkbox checked={isSelected} />
+                                      <Label className="cursor-pointer flex-1">
+                                        {u.full_name || u.username || "-"}
+                                      </Label>
+                                    </div>
+                                  )
+                                })
+                              ) : (
+                                <div className="text-sm text-slate-600">No users available.</div>
+                              )}
+                            </div>
+                            <div className="mt-4 flex justify-end gap-2">
+                              <Button variant="outline" onClick={() => setEditTaskAssignees([])}>
+                                Clear
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => setEditTaskAssignees(users.map((u) => u.id))}
+                                disabled={!users.length}
+                              >
+                                All users
+                              </Button>
+                              <Button onClick={() => setSelectEditTaskAssigneesOpen(false)}>
+                                Done
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" onClick={cancelEditTask}>
+                        <Button variant="outline" onClick={cancelEditTask} className="rounded-xl border-slate-200">
                           Cancel
                         </Button>
-                        <Button disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask} className="rounded-xl" onClick={() => void updateNoProjectTask()}>
+                        <Button
+                          disabled={!editTaskTitle.trim() || !editTaskStartDate || updatingTask}
+                          onClick={() => void updateNoProjectTask()}
+                          className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                        >
                           {updatingTask ? "Updating..." : "Update"}
                         </Button>
                       </div>
@@ -3796,185 +4938,147 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
-                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-3xl border border-slate-200 bg-white/50 p-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">General</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{noProjectBuckets.normal.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.normal.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-white bg-white/80 p-3 pr-16 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-                          {canDeleteNoProject ? (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="absolute right-10 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${t.title}`}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  startEditTask(t)
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                disabled={deletingNoProjectTaskId === t.id}
-                                className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                title="Delete"
-                                aria-label={`Delete ${t.title}`}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  void deleteNoProjectTask(t.id)
-                                }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </>
-                          ) : null}
-                          <div className="text-sm font-medium text-slate-900 dark:text-white">{t.title}</div>
-                          {t.assigned_to ? (
-                            <div className="mt-2 text-xs text-slate-400">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
-                          ) : null}
-                        </Link>
-                      ))}
+              <div className="space-y-4">
+                {statusRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+                >
+                  <div
+                    className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
+                  >
+                    <div className="text-sm font-semibold">{row.title}</div>
+                    <span
+                      className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
+                    >
+                      {row.count}
+                    </span>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {row.items.length ? "Active items" : "No items"}
                     </div>
                   </div>
-                  <div className="rounded-3xl border border-purple-100 bg-purple-50/40 p-4 backdrop-blur-sm dark:border-purple-900/30 dark:bg-purple-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-purple-700 dark:text-purple-400">Personal</span>
-                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900 dark:text-purple-300">{noProjectBuckets.personal.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.personal.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-purple-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-purple-900 dark:bg-purple-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-purple-900 dark:text-purple-100">{t.title}</div>
-                          {t.assigned_to ? (
-                            <div className="mt-2 text-xs text-purple-500">For: {assigneeLabel(userMap.get(t.assigned_to))}</div>
-                          ) : null}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-rose-100 bg-rose-50/40 p-4 backdrop-blur-sm dark:border-rose-900/30 dark:bg-rose-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-rose-700 dark:text-rose-400">BLLOK</span>
-                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900 dark:text-rose-300">{noProjectBuckets.blocked.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.blocked.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-rose-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-rose-900 dark:bg-rose-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-rose-900 dark:text-rose-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-4 backdrop-blur-sm dark:border-sky-900/30 dark:bg-sky-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-sky-700 dark:text-sky-400">GA Tasks</span>
-                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-900 dark:text-sky-300">{noProjectBuckets.ga.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {noProjectBuckets.ga.map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-sky-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-sky-900 dark:bg-sky-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="text-sm font-medium text-sky-900 dark:text-sky-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-amber-100 bg-amber-50/40 p-4 backdrop-blur-sm dark:border-amber-900/30 dark:bg-amber-900/10">
-                    <div className="mb-4 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">R1 / 1H</span>
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-600 dark:bg-amber-900 dark:text-amber-300">{noProjectBuckets.r1.length + noProjectBuckets.oneHour.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {[...noProjectBuckets.r1, ...noProjectBuckets.oneHour].map(t => (
-                        <Link key={t.id} href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`} className="relative block rounded-xl border border-amber-100 bg-white/80 p-3 pr-8 shadow-sm transition hover:shadow-md dark:border-amber-900 dark:bg-amber-950">
-                          {canDeleteNoProject ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              disabled={deletingNoProjectTaskId === t.id}
-                              className="absolute right-2 top-2 h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                              title="Delete"
-                              aria-label={`Delete ${t.title}`}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void deleteNoProjectTask(t.id)
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : null}
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="outline" className="h-4 text-[9px] px-1 border-amber-300 text-amber-700">{t.is_r1 ? "R1" : "1H"}</Badge>
-                          </div>
-                          <div className="text-sm font-medium text-amber-900 dark:text-amber-100">{t.title}</div>
-                        </Link>
-                      ))}
-                    </div>
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                    {row.items.length ? (
+                      <div className="flex flex-col gap-2">
+                        {row.items.map((t) => {
+                          const isCompleted = t.completed_at != null || t.status === "DONE"
+                          return (
+                          <Link
+                            key={t.id}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
+                              isCompleted 
+                                ? "border-green-500 bg-green-50/30 opacity-75" 
+                                : `${row.borderClass} bg-white`
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                    GA
+                                  </Badge>
+                                )}
+                                <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                  {t.title}
+                                </div>
+                                {isCompleted && (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">
+                                    Done
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                  {row.itemBadge}
+                                </Badge>
+                                {(() => {
+                                  // Collect all assignees: from assigned_to and assignees array
+                                  const assigneeIds = new Set<string>()
+                                  if (t.assigned_to) {
+                                    assigneeIds.add(t.assigned_to)
+                                  }
+                                  if (t.assignees) {
+                                    for (const assignee of t.assignees) {
+                                      if (assignee.id) {
+                                        assigneeIds.add(assignee.id)
+                                      }
+                                    }
+                                  }
+                                  
+                                  // Render all assignee initials
+                                  const assigneeChips = Array.from(assigneeIds).map((userId) => {
+                                    // Try to get user from userMap first, then from assignees array
+                                    const userFromMap = userMap.get(userId)
+                                    const assigneeFromArray = t.assignees?.find(a => a.id === userId)
+                                    // Get label from userMap or assignees array
+                                    const label = userFromMap 
+                                      ? assigneeLabel(userFromMap)
+                                      : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+                                    return (
+                                      <div
+                                        key={userId}
+                                        className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                        title={label}
+                                      >
+                                        {initials(label)}
+                                      </div>
+                                    )
+                                  })
+                                  
+                                  return assigneeChips.length > 0 ? assigneeChips : null
+                                })()}
+                                {canDeleteNoProject ? (
+                                  <>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                      title="Edit"
+                                      aria-label={`Edit ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        startEditTask(t)
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      disabled={deletingNoProjectTaskId === t.id}
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                      title="Delete"
+                                      aria-label={`Delete ${t.title}`}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        void deleteNoProjectTask(t.id)
+                                      }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                            {t.description ? (
+                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                            ) : null}
+                          </Link>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">No tasks in this category.</div>
+                    )}
                   </div>
                 </div>
+              ))}
               </div>
-            )}
+            </div>
+          ) : null}
 
             {/* NOTES */}
             {activeTab === "ga-ka" && (
@@ -4382,6 +5486,240 @@ export default function DepartmentKanban() {
               </div>
             )}
 
+            {activeTab === "internal-notes" && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Internal Notes</h2>
+                    <p className="text-sm text-slate-500">Peer-to-peer notes between colleagues.</p>
+                  </div>
+                  <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
+                    </DialogTrigger>
+                    <DialogContent className="rounded-2xl sm:max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>Create Internal Note</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Title</Label>
+                          <Input
+                            className="rounded-xl"
+                            value={internalNoteTitle}
+                            onChange={(e) => setInternalNoteTitle(e.target.value)}
+                            placeholder="Enter title"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Description</Label>
+                          <Textarea
+                            className="rounded-xl"
+                            value={internalNoteDescription}
+                            onChange={(e) => setInternalNoteDescription(e.target.value)}
+                            placeholder="Enter description"
+                            rows={4}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Department</Label>
+                          <Select
+                            value={internalNoteDepartmentId}
+                            onValueChange={(value) => {
+                              setInternalNoteDepartmentId(value)
+                              setInternalNoteProjectId("")
+                            }}
+                          >
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue placeholder="Select department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {departments.map((dep) => (
+                                <SelectItem key={dep.id} value={dep.id}>
+                                  {dep.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Project</Label>
+                          <Select
+                            value={internalNoteProjectId}
+                            onValueChange={setInternalNoteProjectId}
+                            disabled={!internalNoteDepartmentId || loadingInternalNoteProjects}
+                          >
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue
+                                placeholder={
+                                  !internalNoteDepartmentId
+                                    ? "Select a department first"
+                                    : loadingInternalNoteProjects
+                                      ? "Loading projects..."
+                                      : "Select project"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {internalNoteProjects.map((project) => (
+                                <SelectItem key={project.id} value={project.id}>
+                                  {project.title || project.name || "Untitled project"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>User (To)</Label>
+                          <div className="rounded-md border border-slate-200 p-2 max-h-56 overflow-y-auto space-y-2">
+                            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                              <Checkbox
+                                checked={users.length > 0 && users.every((u) => internalNoteToUserIds.includes(u.id))}
+                                onCheckedChange={(value) => {
+                                  const next = Boolean(value)
+                                  setInternalNoteToUserIds(next ? users.map((u) => u.id) : [])
+                                }}
+                              />
+                              <span>Select all users</span>
+                            </label>
+                            {users.map((member) => {
+                              const label = member.full_name || member.username || "-"
+                              const checked = internalNoteToUserIds.includes(member.id)
+                              return (
+                                <label key={member.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(value) => {
+                                      const next = Boolean(value)
+                                      setInternalNoteToUserIds((prev) =>
+                                        next ? [...prev, member.id] : prev.filter((id) => id !== member.id)
+                                      )
+                                    }}
+                                  />
+                                  <span>{label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={() => setInternalNoteOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          className="rounded-xl"
+                          onClick={() => void submitInternalNote()}
+                          disabled={
+                            !internalNoteTitle.trim() ||
+                            internalNoteToUserIds.length === 0 ||
+                            addingInternalNote
+                          }
+                        >
+                          {addingInternalNote ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                <div className="rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
+                  <div className="w-full min-w-[900px]">
+                    <table className="w-full caption-bottom text-sm min-w-[900px]">
+                      <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: "sticky", top: 0, zIndex: 50 }}>
+                        <tr className="bg-white" style={{ borderBottom: "1px solid rgb(51 65 85)" }}>
+                          <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)", whiteSpace: "normal" }}>Nr</th>
+                          <th className="w-[300px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>NOTE</th>
+                          <th className="w-[360px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DESCRIPTION</th>
+                          <th className="w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DEPARTMENT</th>
+                          <th className="w-[200px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>PROJECT</th>
+                          <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DATE, TIME</th>
+                          <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>FROM</th>
+                          <th className="w-[160px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>TO</th>
+                          <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupedInternalNotes.length ? (
+                          groupedInternalNotes.map((group, idx) => {
+                            const note = group.note
+                            const fromUser = users.find((u) => u.id === note.from_user_id) || null
+                            const fromLabel = fromUser?.full_name || fromUser?.username || "Unknown user"
+                            const toInitials = group.toUserIds
+                              .map((id) => {
+                                const toUser = userMap.get(id)
+                                const toLabel = toUser?.full_name || toUser?.username || "Unknown user"
+                                return initials(toLabel)
+                              })
+                              .join(", ")
+                            const departmentLabel =
+                              departments.find((d) => d.id === (note.department_id || note.to_department_id))?.name || "-"
+                            const projectLabel =
+                              projects.find((p) => p.id === note.project_id)?.title ||
+                              projects.find((p) => p.id === note.project_id)?.name ||
+                              "-"
+                            const canDeleteNote =
+                              user?.role === "ADMIN" ||
+                              user?.role === "MANAGER" ||
+                              (user?.id ? group.toUserIds.includes(user.id) : false)
+
+                              return (
+                                <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
+                                  <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
+                                  <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-sm font-semibold">{note.title}</span>
+                                    </div>
+                                  </td>
+                              <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                                <span className="text-sm">{note.description || "-"}</span>
+                              </td>
+                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{departmentLabel}</td>
+                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{projectLabel}</td>
+                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{formatDate(note.created_at)}</td>
+                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
+                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
+                                  <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
+                                    {canDeleteNote ? (
+                                      <div className="flex justify-center">
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                          title="Delete"
+                                          aria-label={`Delete ${note.title}`}
+                                          onClick={() => {
+                                            const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
+                                            const noteIds = isAdminOrManager
+                                              ? group.notes.map((n) => n.id)
+                                              : user?.id
+                                                ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id)
+                                                : []
+                                            void deleteInternalNote(noteIds)
+                                          }}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                </tr>
+                              )
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={9} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
+                              No internal notes yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* MEETINGS */}
             {activeTab === "meetings" && (
               <div className="space-y-8">
@@ -4624,67 +5962,106 @@ export default function DepartmentKanban() {
               })()}
             </>
           ) : printRange === "today" && showDailyUserReport ? (
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
-              <colgroup>
-                <col className="w-[28px]" />
-                <col className="w-[32px]" />
-                <col className="w-[26px]" />
-                <col className="w-[32px]" />
-                <col className="w-[140px]" />
-              <col className="w-[50px]" />
-              <col className="w-[28px]" />
-              <col className="w-[46px]" />
-              <col className="w-[32px]" />
-              <col className="w-[130px]" />
-            </colgroup>
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                    <span className="block">AM/</span>
-                    <span className="block">PM</span>
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dailyUserReportRows.length ? (
-                dailyUserReportRows.map((row, index) => (
-                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">
-                      <input
-                        type="text"
-                        aria-label="Koment"
-                        className="h-4 w-full border-b border-slate-400 bg-transparent"
-                      />
-                    </td>
+            <>
+              <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+                <colgroup>
+                  <col className="w-[28px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[26px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[140px]" />
+                  <col className="w-[50px]" />
+                  <col className="w-[28px]" />
+                  <col className="w-[46px]" />
+                  <col className="w-[32px]" />
+                  <col className="w-[130px]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                    <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                      <span className="block">AM/</span>
+                      <span className="block">PM</span>
+                    </th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
                   </tr>
-                ))
-              ) : (
-                  <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
-                      No data available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {dailyUserReportRows.length ? (
+                    dailyUserReportRows.map((row, index) => (
+                      <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                        <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">
+                          <input
+                            type="text"
+                            aria-label="Koment"
+                            className="h-4 w-full border-b border-slate-400 bg-transparent"
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                        No data available.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+                  <colgroup>
+                    <col className="w-[180px]" />
+                    <col />
+                  </colgroup>
+                  <tbody>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top">
+                        GA/KUR/SI/KUJT/PRBL
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        {gaTableInput || "-"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top">
+                        GA Notes:
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 text-xs">
+                        {gaTableNotes.length ? (
+                          <ul className="list-disc pl-4 space-y-1">
+                            {gaTableNotes.map((note) => (
+                              <li key={note.id}>
+                                {note.project_name ? `${note.project_name}: ` : ""}
+                                {note.content}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="italic text-slate-600">No GA notes.</div>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
               <thead>

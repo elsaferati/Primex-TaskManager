@@ -24,6 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { WeeklyPlannerLegendTable } from "@/components/weekly-planner-legend-table"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -91,6 +92,11 @@ type WeeklyTableResponse = {
   week_end: string
   departments: WeeklyTableDepartment[]
   saved_plan_id: string | null
+}
+
+type WeeklyPrintUser = {
+  user_id: string
+  user_name: string
 }
 
 const ALL_DEPARTMENTS_VALUE = "__all__"
@@ -795,7 +801,13 @@ export default function WeeklyPlannerPage() {
           <title>Weekly Planner - ${weekRange}</title>
           <style>
             @media print {
-              @page { size: letter landscape; margin: 0.15in; }
+              @page {
+                size: letter portrait;
+                margin-top: 0.35in;
+                margin-bottom: 0.35in;
+                margin-left: 0.4in;
+                margin-right: 0.4in;
+              }
               body { margin: 0; padding: 0; }
               .print-page { page-break-after: avoid; page-break-inside: avoid; }
               .print-page:last-child { page-break-after: avoid; }
@@ -811,16 +823,18 @@ export default function WeeklyPlannerPage() {
             }
             body {
               font-family: Arial, sans-serif;
-              font-size: 5pt;
+              font-size: 5.5pt;
               margin: 0;
               padding: 0;
-              width: calc(11in - 0.3in);
+              width: 100%;
               margin-left: auto;
               margin-right: auto;
+              direction: ltr;
             }
             .print-page {
               position: relative;
-              height: calc(8.5in - 0.3in);
+              height: calc(11in - 0.7in);
+              width: 100%;
               display: grid;
               grid-template-rows: auto auto 1fr auto;
             }
@@ -836,7 +850,7 @@ export default function WeeklyPlannerPage() {
             }
             .print-title {
               margin: 0;
-              font-size: 7pt;
+              font-size: 8pt;
               font-weight: 700;
               text-transform: uppercase;
               text-align: center;
@@ -845,13 +859,13 @@ export default function WeeklyPlannerPage() {
             }
             .print-datetime {
               text-align: right;
-              font-size: 5pt;
+              font-size: 6pt;
               color: #334155;
             }
             .print-meta {
               text-align: center;
               margin-bottom: 2px;
-              font-size: 5pt;
+              font-size: 6pt;
               color: #334155;
             }
             .print-meta.compact {
@@ -864,16 +878,15 @@ export default function WeeklyPlannerPage() {
             .print-content {
               width: 100%;
               min-height: 0;
-              overflow: hidden;
-              max-height: calc(8.5in - 0.3in - 60px);
-              transform: scale(0.85);
-              transform-origin: top left;
-              width: 117.65%;
+              overflow: visible;
+              max-height: calc(11in - 0.7in - 70px);
+              padding-left: 0.05in;
+              padding-right: 0.05in;
             }
             .print-dept-title {
               margin-top: 2px;
               margin-bottom: 1px;
-              font-size: 6pt;
+              font-size: 7pt;
               font-weight: 700;
             }
             table {
@@ -881,6 +894,7 @@ export default function WeeklyPlannerPage() {
               border-collapse: collapse;
               table-layout: fixed;
               margin-bottom: 0.01in;
+              direction: ltr;
             }
             thead {
               display: table-header-group;
@@ -894,49 +908,70 @@ export default function WeeklyPlannerPage() {
               page-break-inside: avoid;
             }
             .print-content {
-              max-height: calc(8.5in - 0.3in - 60px);
-              overflow: hidden;
+              max-height: calc(11in - 0.7in - 70px);
+              overflow: visible;
             }
             th {
               background-color: #e2e8f0;
               border: 0.5px solid #000;
-              padding: 2px;
-              text-align: center;
+              padding: 1px;
+              text-align: left;
               font-weight: bold;
-              font-size: 5pt;
+              font-size: 5.5pt;
               text-transform: uppercase;
               vertical-align: bottom;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
+            }
+            th.user-header {
+              white-space: normal;
+              word-break: break-word;
+              font-size: 5.5pt;
+              line-height: 1.05;
             }
             td {
               border: 0.5px solid #000;
-              padding: 1px;
-              vertical-align: top;
-              font-size: 5pt;
+              padding: 0.5px;
+              vertical-align: bottom;
+              font-size: 5.5pt;
               line-height: 1.1;
+              text-align: left;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .day-cell {
               font-weight: bold;
               background-color: #f9f9f9;
-              text-align: center;
+              text-align: left;
               width: 70px;
+              vertical-align: bottom;
+              white-space: nowrap;
             }
             .ll-cell {
               font-weight: bold;
               background-color: #f9f9f9;
-              text-align: center;
+              text-align: left;
               width: 32px;
+              vertical-align: bottom;
+              font-size: 4.5pt;
+              line-height: 1;
+              letter-spacing: -0.2px;
+              white-space: nowrap;
+              padding-left: 0.5px;
+              padding-right: 0.5px;
             }
             .time-cell {
-              width: 32px;
-              text-align: center;
+              width: 22px;
+              text-align: left;
               padding-left: 1px;
               padding-right: 1px;
+              vertical-align: bottom;
             }
             .print-subhead {
               font-weight: bold;
               text-transform: uppercase;
-              font-size: 5pt;
+              font-size: 6pt;
             }
             .project-card {
               margin: 1px 0;
@@ -951,9 +986,11 @@ export default function WeeklyPlannerPage() {
               font-weight: bold;
               margin-bottom: 0.5px;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .task-item {
-              font-size: 4pt;
+              font-size: 5pt;
               margin: 0.5px 0;
               padding: 0.5px 1px;
               border: 0.5px solid #000;
@@ -962,6 +999,8 @@ export default function WeeklyPlannerPage() {
               break-inside: avoid;
               page-break-inside: avoid;
               line-height: 1.1;
+              overflow-wrap: anywhere;
+              word-break: break-word;
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
@@ -970,7 +1009,7 @@ export default function WeeklyPlannerPage() {
               display: inline-block;
               padding: 0.5px 2px;
               border-radius: 2px;
-              font-size: 4pt;
+              font-size: 5pt;
               font-weight: bold;
               margin-left: 1px;
               line-height: 1.1;
@@ -984,14 +1023,51 @@ export default function WeeklyPlannerPage() {
             .products {
               color: #2563eb;
               font-weight: bold;
-              font-size: 4pt;
+              font-size: 5pt;
             }
             .empty-cell {
-              text-align: center;
+              text-align: left;
               color: #999;
             }
             .pm-row {
               border-top: 1px solid #000 !important;
+            }
+            .table-narrow th,
+            .table-narrow td {
+              font-size: 5pt;
+            }
+            .table-narrow .task-item,
+            .table-narrow .badge,
+            .table-narrow .products {
+              font-size: 4pt;
+            }
+            .table-compact th,
+            .table-compact td {
+              font-size: 5pt;
+              padding: 0.5px;
+            }
+            .table-compact .task-item,
+            .table-compact .badge,
+            .table-compact .products {
+              font-size: 4pt;
+            }
+            .table-compact th.user-header {
+              font-size: 5pt;
+              line-height: 1;
+            }
+            .table-ultra-compact th,
+            .table-ultra-compact td {
+              font-size: 4.5pt;
+              padding: 0.25px;
+            }
+            .table-ultra-compact .task-item,
+            .table-ultra-compact .badge,
+            .table-ultra-compact .products {
+              font-size: 3.5pt;
+            }
+            .table-ultra-compact th.user-header {
+              font-size: 4.5pt;
+              line-height: 1;
             }
             .print-footer {
               margin-top: auto;
@@ -1000,7 +1076,7 @@ export default function WeeklyPlannerPage() {
               padding-left: 0.1in;
               padding-right: 0.04in;
               padding-bottom: 0.05in;
-              font-size: 5pt;
+              font-size: 6pt;
               color: #334155;
               background: #fff;
             }
@@ -1015,7 +1091,7 @@ export default function WeeklyPlannerPage() {
               left: -9999px;
               top: 0;
               visibility: hidden;
-              width: calc(11in - 0.5in);
+              width: 7.7in;
             }
           </style>
         </head>
@@ -1092,27 +1168,129 @@ export default function WeeklyPlannerPage() {
       return { page, content }
     }
 
-    const createTable = (allUsers: WeeklyTableUserDay[]) => {
+    const dayColWidth = 70
+    const llColWidth = 32
+    const timeColWidth = 22
+    const minUserColWidth = 48
+    const targetUserColWidth = 72
+
+    const getUserDisplayName = (lookup: UserLookup) => (
+      lookup.full_name || lookup.username || ""
+    )
+
+    const getDepartmentUsersForPrint = (dept: WeeklyTableDepartment) => {
+      const deptUsers = users
+        .filter((lookup) => lookup.department_id === dept.department_id)
+        .map((lookup) => ({
+          user_id: lookup.id,
+          user_name: getUserDisplayName(lookup).trim(),
+        }))
+        .filter((user) => user.user_name.length > 0)
+        .sort((a, b) => a.user_name.localeCompare(b.user_name))
+
+      const dataUsersMap = new Map<string, WeeklyTableUserDay>()
+      dept.days.forEach((day) => {
+        day.users.forEach((userDay) => {
+          if (!dataUsersMap.has(userDay.user_id)) {
+            dataUsersMap.set(userDay.user_id, userDay)
+          }
+        })
+      })
+
+      const extraUsers = Array.from(dataUsersMap.values())
+        .filter((userDay) => !deptUsers.some((user) => user.user_id === userDay.user_id))
+        .map((userDay) => ({
+          user_id: userDay.user_id,
+          user_name: userDay.user_name,
+        }))
+        .filter((user) => user.user_name.trim().length > 0)
+        .sort((a, b) => a.user_name.localeCompare(b.user_name))
+
+      return [...deptUsers, ...extraUsers]
+    }
+
+    const getPrintableWidth = () => {
+      if (measure.clientWidth) return measure.clientWidth
+      return Math.max(0, Math.floor(printWindow.innerWidth * 0.9))
+    }
+
+    const getUserColumnWidth = (userCount: number) => {
+      const measureWidth = getPrintableWidth() ? Math.floor(getPrintableWidth() * 0.98) : 0
+      const fixedWidth = dayColWidth + llColWidth + timeColWidth
+      const availableWidth = Math.max(0, measureWidth - fixedWidth)
+      if (userCount <= 0) return minUserColWidth
+      return Math.max(minUserColWidth, Math.floor(availableWidth / userCount))
+    }
+
+    const getMaxUsersPerPage = (totalUsers: number) => {
+      if (totalUsers <= 0) return 1
+      const printableWidth = getPrintableWidth()
+      const fixedWidth = dayColWidth + llColWidth + timeColWidth
+      const availableWidth = Math.max(0, printableWidth - fixedWidth)
+      if (availableWidth <= 0) return 1
+      const maxByTarget = Math.max(1, Math.floor(availableWidth / targetUserColWidth))
+      return Math.min(totalUsers, maxByTarget)
+    }
+
+    const chunkUsers = (allUsers: WeeklyPrintUser[], chunkSize: number) => {
+      if (chunkSize <= 0) return [allUsers]
+      const chunks: WeeklyPrintUser[][] = []
+      for (let i = 0; i < allUsers.length; i += chunkSize) {
+        chunks.push(allUsers.slice(i, i + chunkSize))
+      }
+      return chunks
+    }
+
+    const createTable = (allUsers: WeeklyPrintUser[]) => {
+      const userCount = allUsers.length
+      const userColWidth = getUserColumnWidth(userCount)
       const table = doc.createElement("table")
+      if (userColWidth <= 55) {
+        table.classList.add("table-narrow")
+      }
+      if (userCount >= 8) {
+        table.classList.add("table-compact")
+      }
+      if (userCount >= 12) {
+        table.classList.add("table-ultra-compact")
+      }
       const colgroup = doc.createElement("colgroup")
       colgroup.innerHTML = `
-        <col style="width: 70px;" />
-        <col style="width: 32px;" />
-        <col style="width: 32px;" />
-        ${allUsers.map(() => `<col style="width: 200px;" />`).join("")}
+        <col style="width: ${dayColWidth}px;" />
+        <col style="width: ${timeColWidth}px;" />
+        <col style="width: ${llColWidth}px;" />
+        ${allUsers.map(() => `<col style="width: ${userColWidth}px;" />`).join("")}
       `
       const thead = doc.createElement("thead")
       thead.innerHTML = `
         <tr>
           <th class="day-cell" rowspan="2">Day</th>
-          <th style="width: 32px;">LL</th>
-          <th class="time-cell">Time</th>
-          ${allUsers.map(user => `<th>${user.user_name}</th>`).join("")}
+          <th class="time-cell" style="width: ${timeColWidth}px;">Time</th>
+          <th style="width: ${llColWidth}px;">LL</th>
+          ${allUsers.map(user => `<th class="user-header">${user.user_name}</th>`).join("")}
         </tr>
       `
       table.appendChild(colgroup)
       table.appendChild(thead)
       return table
+    }
+
+    const fitContentToWidth = (content: HTMLElement) => {
+      const tables = Array.from(content.querySelectorAll("table")) as HTMLTableElement[]
+      const maxTableWidth = tables.reduce((max, table) => Math.max(max, table.scrollWidth), 0)
+      const availableWidth = Math.max(0, content.clientWidth - 2)
+      if (maxTableWidth > 0 && availableWidth > 0) {
+        const scale = Math.min(1, (availableWidth / maxTableWidth) * 0.98)
+        if (scale < 1) {
+          content.style.transform = `scale(${scale})`
+          content.style.transformOrigin = "top left"
+          content.style.width = `${Math.round((1 / scale) * 1000) / 10}%`
+          return
+        }
+      }
+      content.style.transform = ""
+      content.style.transformOrigin = ""
+      content.style.width = "100%"
     }
 
     const isContentOverflowing = (content: HTMLElement | null) => {
@@ -1132,7 +1310,7 @@ export default function WeeklyPlannerPage() {
       return ""
     }
 
-    const renderDayGroupHtml = (day: WeeklyTableDay, dayIndex: number, allUsers: WeeklyTableUserDay[]) => {
+    const renderDayGroupHtml = (day: WeeklyTableDay, dayIndex: number, allUsers: WeeklyPrintUser[]) => {
       const dayName = DAY_NAMES[dayIndex]
       const dayDate = formatDate(day.date)
       const dayIso = day.date
@@ -1145,8 +1323,8 @@ export default function WeeklyPlannerPage() {
               <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
             </div>
           </td>
+          <td class="print-subhead time-cell" rowspan="2">AM</td>
           <td class="ll-cell print-subhead">PRJK</td>
-          <td class="print-subhead time-cell">AM</td>
       `
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
@@ -1201,7 +1379,6 @@ export default function WeeklyPlannerPage() {
 
       html += `<tr>`
       html += `<td class="ll-cell print-subhead">FT</td>`
-      html += `<td class="print-subhead time-cell">AM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
@@ -1233,8 +1410,8 @@ export default function WeeklyPlannerPage() {
       html += `</tr>`
 
       html += `<tr style="border-top: 2px solid #000;">`
+      html += `<td class="print-subhead time-cell" rowspan="2">PM</td>`
       html += `<td class="ll-cell print-subhead">PRJK</td>`
-      html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.pm_projects || []
@@ -1288,7 +1465,6 @@ export default function WeeklyPlannerPage() {
 
       html += `<tr>`
       html += `<td class="ll-cell print-subhead">FT</td>`
-      html += `<td class="print-subhead time-cell">PM</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
@@ -1327,42 +1503,40 @@ export default function WeeklyPlannerPage() {
     root.appendChild(measure)
 
     const pages: HTMLDivElement[] = []
-    let currentPage: HTMLDivElement | null = null
-    let currentContent: HTMLDivElement | null = null
-
-    const startNewPage = () => {
-      const isFirstPage = pages.length === 0
-      const { page, content } = createPage({ showTitle: isFirstPage, showMeta: isFirstPage })
-      measure.appendChild(page)
-      currentPage = page
-      currentContent = content
-      pages.push(page)
-    }
-
-    startNewPage()
 
     data.departments.forEach((dept) => {
-      const userMap = new Map<string, WeeklyTableUserDay>()
-      dept.days.forEach((day) => {
-        day.users.forEach((userDay) => {
-          if (!userMap.has(userDay.user_id)) {
-            userMap.set(userDay.user_id, userDay)
-          }
+      const allUsers = getDepartmentUsersForPrint(dept)
+      const maxUsersPerPage = getMaxUsersPerPage(allUsers.length)
+      const userChunks = chunkUsers(allUsers, maxUsersPerPage)
+
+      userChunks.forEach((chunk, chunkIndex) => {
+        const isFirstPage = pages.length === 0
+        const { page, content } = createPage({ showTitle: isFirstPage, showMeta: isFirstPage })
+        measure.appendChild(page)
+        pages.push(page)
+
+        const deptTitle = doc.createElement("div")
+        deptTitle.className = "print-dept-title"
+        let chunkLabel = ""
+        if (allUsers.length > 0 && userChunks.length > 1) {
+          const chunkStart = chunkIndex * maxUsersPerPage + 1
+          const chunkEnd = Math.min(allUsers.length, chunkStart + chunk.length - 1)
+          chunkLabel = ` (${chunkStart}-${chunkEnd} of ${allUsers.length})`
+        }
+        deptTitle.textContent = `${formatDepartmentName(dept.department_name)}${chunkLabel}`
+        content.appendChild(deptTitle)
+
+        const table = createTable(chunk)
+        content.appendChild(table)
+
+        dept.days.forEach((day, dayIndex) => {
+          const tbody = doc.createElement("tbody")
+          tbody.className = "day-group"
+          tbody.innerHTML = renderDayGroupHtml(day, dayIndex, chunk)
+          table.appendChild(tbody)
         })
-      })
-      const allUsers = Array.from(userMap.values())
 
-      let table = createTable(allUsers)
-      if (currentContent) {
-        currentContent.appendChild(table)
-      }
-
-      // Force everything onto first page - no page breaks
-      dept.days.forEach((day, dayIndex) => {
-        const tbody = doc.createElement("tbody")
-        tbody.className = "day-group"
-        tbody.innerHTML = renderDayGroupHtml(day, dayIndex, allUsers)
-        table.appendChild(tbody)
+        fitContentToWidth(content)
       })
     })
 
@@ -1379,9 +1553,17 @@ export default function WeeklyPlannerPage() {
 
     setTimeout(() => {
       renderPages()
-      printWindow.print()
+      requestAnimationFrame(() => {
+        pages.forEach((page) => {
+          const content = page.querySelector(".print-content") as HTMLElement | null
+          if (content) {
+            fitContentToWidth(content)
+          }
+        })
+        printWindow.print()
+      })
     }, 200)
-  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge, sortFastTasks])
+  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge, sortFastTasks, users])
 
   const parseFilenameFromDisposition = (headerValue: string | null) => {
     if (!headerValue) return null
@@ -1807,6 +1989,26 @@ export default function WeeklyPlannerPage() {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Show Legend Table only for Development department */}
+            {(() => {
+              // Check if Development department is selected
+              const selectedDept = departments.find((d) => d.id === departmentId)
+              const isDevelopment = selectedDept?.name === "Development"
+              
+              // Also check if we're showing a single department in the data
+              const devDept = data.departments.find((d) => d.department_name === "Development")
+              
+              if (isDevelopment && devDept && data.week_start) {
+                return (
+                  <WeeklyPlannerLegendTable
+                    departmentId={departmentId}
+                    weekStart={data.week_start}
+                    departmentName={selectedDept?.name}
+                  />
+                )
+              }
+              return null
+            })()}
             {data.departments.map((dept) => (
               <Card key={dept.department_id}>
                 <CardHeader>
@@ -1828,8 +2030,8 @@ export default function WeeklyPlannerPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-24 min-w-24 sticky left-0 bg-background z-10 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
+                          <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
+                          <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
                           {(() => {
                             // Get all unique users from all days
                             const userMap = new Map<string, WeeklyTableUserDay>()
@@ -2112,11 +2314,11 @@ export default function WeeklyPlannerPage() {
                                     <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
                                   </div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  PRJK
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2138,11 +2340,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* AM FT Row */}
                               <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  FT
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2163,11 +2365,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* PM PRJK Row */}
                               <TableRow className="border-t-2 border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  PRJK
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
@@ -2189,11 +2391,11 @@ export default function WeeklyPlannerPage() {
 
                               {/* PM FT Row */}
                               <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center">
+                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
+                                </TableCell>
+                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                  FT
                                 </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)

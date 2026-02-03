@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_admin, ensure_department_access, ensure_meeting_editor
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.meeting import Meeting, MeetingParticipant
@@ -29,11 +29,13 @@ async def list_meetings(
     stmt = select(Meeting)
     if department_id is None and project_id is None:
         if include_all_departments:
-            ensure_manager_or_admin(user)
+            # Allow all users to see all meetings in common view
+            pass
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id or project_id required")
     elif include_all_departments:
-        ensure_manager_or_admin(user)
+        # Allow all users to see all meetings in common view
+        pass
     if project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
@@ -160,8 +162,8 @@ async def update_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    # Only admins can edit external meetings
-    ensure_admin(user)
+    # Allow admin, manager, or the person that created it to edit
+    ensure_meeting_editor(user, meeting)
 
     # Get fields that were explicitly set in the request
     payload_dict = payload.model_dump(exclude_unset=True)

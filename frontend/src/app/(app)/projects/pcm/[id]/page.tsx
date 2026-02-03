@@ -90,7 +90,8 @@ const FINALIZATION_CHECKLIST = [
 async function initializeMstChecklistItems(
   projectId: string,
   existingItems: ChecklistItem[],
-  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>,
+  allowDelete: boolean
 ) {
   // Create a map of existing items by path + title for quick lookup
   // Also detect and remove duplicates
@@ -116,11 +117,13 @@ async function initializeMstChecklistItems(
     }
   })
   
-  // Delete duplicates
-  for (const dupId of duplicates) {
-    await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
-      // Ignore errors - item might already be deleted
-    })
+  // Delete duplicates (admin/manager only)
+  if (allowDelete) {
+    for (const dupId of duplicates) {
+      await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
+        // Ignore errors - item might already be deleted
+      })
+    }
   }
 
   // Find user IDs for "DV, LM" initials (we'll need to parse this)
@@ -224,7 +227,8 @@ async function initializeMstChecklistItems(
 async function initializeVsVlPlanningItems(
   projectId: string,
   existingItems: ChecklistItem[],
-  apiFetch: (url: string, options?: RequestInit) => Promise<Response>
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>,
+  allowDelete: boolean
 ) {
   // Get all existing VS/VL planning items (including duplicates)
   const vsVlItems = existingItems.filter(
@@ -245,11 +249,13 @@ async function initializeVsVlPlanningItems(
     }
   }
   
-  // Delete duplicates
-  for (const dupId of duplicates) {
-    await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
-      // Ignore errors - item might already be deleted
-    })
+  // Delete duplicates (admin/manager only)
+  if (allowDelete) {
+    for (const dupId of duplicates) {
+      await apiFetch(`/checklist-items/${dupId}`, { method: "DELETE" }).catch(() => {
+        // Ignore errors - item might already be deleted
+      })
+    }
   }
   
   // Create missing items

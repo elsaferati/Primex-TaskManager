@@ -83,6 +83,7 @@ class ChecklistItemCreate(BaseModel):
 class ChecklistItemUpdate(BaseModel):
     item_type: ChecklistItemType | None = None
     position: int | None = None
+    sort_order: int | None = None
 
     # Common fields
     path: str | None = None

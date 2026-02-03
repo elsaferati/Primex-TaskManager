@@ -172,10 +172,8 @@ async def list_tasks(
                 stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
             # If manager has no department, they can see tasks without a department
         else:
-            # STAFF can only see their department's tasks
-            if user.department_id is None:
-                return []
-            stmt = stmt.where(Task.department_id == user.department_id)
+            # STAFF can see all tasks (same as admin)
+            pass  # No filtering - staff can see all tasks
 
     if department_id:
         if project_id is None:
@@ -186,7 +184,21 @@ async def list_tasks(
     if status:
         stmt = stmt.where(cast(Task.status, SQLString) == status.value)
     if assigned_to:
-        stmt = stmt.where(Task.assigned_to == assigned_to)
+        # Check both Task.assigned_to and TaskAssignee table for multiple assignees
+        task_ids_with_assignee = (
+            await db.execute(
+                select(TaskAssignee.task_id).where(TaskAssignee.user_id == assigned_to).distinct()
+            )
+        ).scalars().all()
+        if task_ids_with_assignee:
+            stmt = stmt.where(
+                or_(
+                    Task.assigned_to == assigned_to,
+                    Task.id.in_(task_ids_with_assignee)
+                )
+            )
+        else:
+            stmt = stmt.where(Task.assigned_to == assigned_to)
     if created_by:
         stmt = stmt.where(Task.created_by == created_by)
     if due_from:
@@ -244,8 +256,8 @@ async def get_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    # For viewing, only check department access - editing is restricted separately
     ensure_department_access(user, task.department_id)
-    ensure_task_editor(user, task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
@@ -298,8 +310,9 @@ async def create_task(
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
-        if ga_note.department_id is not None and ga_note.department_id != department_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
+        # Allow cross-department task creation from GA notes - removed department mismatch check
+        # if ga_note.department_id is not None and ga_note.department_id != department_id:
+        #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
 
@@ -518,7 +531,9 @@ async def update_task(
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
-    allow_cross_department = task.project_id is not None
+    # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
+    # This matches the logic in create_task endpoint
+    allow_cross_department = task.project_id is not None or task.ga_note_origin_id is not None or task.project_id is None
 
     if payload.title is not None:
         task.title = payload.title

@@ -21,12 +21,15 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.system_task_schedule import matches_template_date
 from app.schemas.planner import (
     MonthlyPlannerResponse,
     MonthlyPlannerSummary,
     WeeklyPlannerDay,
+    WeeklyPlannerLegendEntryOut,
+    WeeklyPlannerLegendEntryUpdate,
     WeeklyPlannerProject,
     WeeklyPlannerResponse,
     WeeklyTableDay,
@@ -70,6 +73,21 @@ def _is_vs_vl_task(task: Task) -> bool:
     """Check if a task is a VS/VL template task by comparing normalized titles."""
     normalized_title = _normalize_title(task.title)
     return normalized_title in VS_VL_TEMPLATE_TITLES
+
+
+def _is_fast_task(task: Task) -> bool:
+    """Fast/ad-hoc tasks must be standalone (no project link) and not system/GA."""
+    if task.project_id is not None:
+        return False
+    if task.dependency_task_id is not None:
+        return False
+    if task.system_template_origin_id is not None:
+        return False
+    if task.ga_note_origin_id is not None:
+        return False
+    if _is_vs_vl_task(task):
+        return False
+    return True
 
 
 def _week_start(d: date) -> date:
@@ -241,7 +259,21 @@ async def weekly_planner(
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
     if user_id is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+        # Check both Task.assigned_to and TaskAssignee table for multiple assignees
+        task_ids_with_assignee = (
+            await db.execute(
+                select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id).distinct()
+            )
+        ).scalars().all()
+        if task_ids_with_assignee:
+            task_stmt = task_stmt.where(
+                or_(
+                    Task.assigned_to == user_id,
+                    Task.id.in_(task_ids_with_assignee)
+                )
+            )
+        else:
+            task_stmt = task_stmt.where(Task.assigned_to == user_id)
     
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
@@ -344,11 +376,11 @@ async def weekly_planner(
                 )
             )
 
-    # Fast tasks (tasks without project_id, excluding VS/VL tasks)
+    # Fast tasks (standalone ad-hoc tasks only)
     fast_tasks = [
         _task_to_out(t, assignee_map.get(t.id, []))
         for t in week_tasks
-        if t.project_id is None and not _is_vs_vl_task(t)
+        if _is_fast_task(t)
     ]
 
     # Organize tasks by day for the days view
@@ -1098,8 +1130,8 @@ async def weekly_table_planner(
                     # System tasks (have system_template_origin_id)
                     if task.system_template_origin_id is not None:
                         continue
-                    # Fast tasks (no project_id and no system_template_origin_id, excluding VS/VL tasks)
-                    elif task.project_id is None and not _is_vs_vl_task(task):
+                    # Fast tasks (standalone ad-hoc tasks only)
+                    elif _is_fast_task(task):
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
@@ -1255,4 +1287,134 @@ async def weekly_table_planner(
         departments=departments_data,
         saved_plan_id=saved_plan_id,
     )
+
+
+# Development department legend questions configuration
+# Color mapping:
+# - PINK = TO DO / New task
+# - GREEN = KRYER / Done
+# - RED = NUK ESHTE PUNUAR / Not worked
+# - YELLOW = PROCES / In process
+# - LIGHT GREY = PV
+DEVELOPMENT_LEGEND_QUESTIONS = [
+    {
+        "key": "to_do",
+        "label": "TO DO",
+        "question_text": "A KEMI PROJEKTE TE TJERA TE P(A)PLANIFIKUARA?",
+        "color": "#FF0000",  # Red
+    },
+    {
+        "key": "kryer",
+        "label": "KRYER",
+        "question_text": "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+        "color": "#C4FDC4",  # Green
+    },
+    {
+        "key": "nuk_eshte_punuar",
+        "label": "NUK ESHTE PUNUAR",
+        "question_text": "BLOK?",
+        "color": "#FFC4ED",  # Pink
+    },
+    {
+        "key": "proces",
+        "label": "PROCES",
+        "question_text": "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+        "color": "#FFD700",  # Yellow
+    },
+    {
+        "key": "pv",
+        "label": "PV",
+        "question_text": "",
+        "color": "#D3D3D3",  # Light Grey
+    },
+]
+
+
+@router.get("/weekly-planner/legend", response_model=list[WeeklyPlannerLegendEntryOut])
+async def get_weekly_planner_legend(
+    department_id: uuid.UUID,
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[WeeklyPlannerLegendEntryOut]:
+    """Get legend entries for a specific department and week. Auto-creates default entries for Development."""
+    # Check department access
+    ensure_department_access(user, department_id)
+    
+    # Get department to check if it's Development
+    dept = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+    if not dept:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+    
+    # Only support Development department for now
+    if dept.name != "Development":
+        return []
+    
+    # Get existing entries
+    stmt = select(WeeklyPlannerLegendEntry).where(
+        WeeklyPlannerLegendEntry.department_id == department_id,
+        WeeklyPlannerLegendEntry.week_start_date == week_start,
+    )
+    existing_entries = (await db.execute(stmt.order_by(WeeklyPlannerLegendEntry.key))).scalars().all()
+    
+    # If entries exist, return them
+    if existing_entries:
+        return [WeeklyPlannerLegendEntryOut.model_validate(entry) for entry in existing_entries]
+    
+    # Auto-create default entries for Development
+    new_entries = []
+    for question in DEVELOPMENT_LEGEND_QUESTIONS:
+        entry = WeeklyPlannerLegendEntry(
+            department_id=department_id,
+            week_start_date=week_start,
+            key=question["key"],
+            label=question["label"],
+            question_text=question["question_text"],
+            answer_text=None,
+            created_by=user.id,
+        )
+        db.add(entry)
+        new_entries.append(entry)
+    
+    await db.commit()
+    
+    # Refresh entries to get IDs and timestamps
+    for entry in new_entries:
+        await db.refresh(entry)
+    
+    return [WeeklyPlannerLegendEntryOut.model_validate(entry) for entry in new_entries]
+
+
+@router.patch("/weekly-planner/legend/{entry_id}", response_model=WeeklyPlannerLegendEntryOut)
+async def update_weekly_planner_legend_entry(
+    entry_id: uuid.UUID,
+    payload: WeeklyPlannerLegendEntryUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklyPlannerLegendEntryOut:
+    """Update the answer_text for a legend entry."""
+    entry = (await db.execute(
+        select(WeeklyPlannerLegendEntry).where(WeeklyPlannerLegendEntry.id == entry_id)
+    )).scalar_one_or_none()
+    
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legend entry not found")
+    
+    # Check department access
+    ensure_department_access(user, entry.department_id)
+    
+    # Update answer_text - handle both None and empty string as null
+    # This allows clearing the field by sending empty string or null
+    if payload.answer_text is not None:
+        # Trim whitespace and set to None if empty
+        answer_text = payload.answer_text.strip() if payload.answer_text else None
+        entry.answer_text = answer_text if answer_text else None
+    else:
+        # Explicitly set to None if payload.answer_text is None
+        entry.answer_text = None
+    
+    await db.commit()
+    await db.refresh(entry)
+    
+    return WeeklyPlannerLegendEntryOut.model_validate(entry)
 

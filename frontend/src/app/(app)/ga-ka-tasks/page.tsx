@@ -306,6 +306,11 @@ function fastReportSubtypeShort(task: Task) {
   return base
 }
 
+function getDisplayPriority(task: Task): TaskPriority {
+  if (task.is_bllok) return "BLLOK"
+  return (task.priority || "NORMAL") as TaskPriority
+}
+
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
@@ -382,6 +387,7 @@ export default function GaKaTasksPage() {
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [originalIsBllok, setOriginalIsBllok] = React.useState(false)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
 
@@ -514,16 +520,19 @@ export default function GaKaTasksPage() {
 
       const startDateValue = startDate ? new Date(startDate).toISOString() : null
       const dueDateValue = dueDate ? new Date(dueDate).toISOString() : null
+      const isBllok = taskPriority === "BLLOK"
+      const actualPriority: "NORMAL" | "HIGH" = isBllok ? "NORMAL" : (taskPriority === "HIGH" ? "HIGH" : "NORMAL")
       const payload: Record<string, unknown> = {
         title: title.trim(),
         description: description.trim() || null,
         status: "TODO",
-        priority: taskPriority,
+        priority: actualPriority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         start_date: startDateValue,
         due_date: dueDateValue,
         ga_note_origin_id: createdNote.id,
         assigned_to: ganeUserId,
+        ...(isBllok && { is_bllok: true }),
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -569,24 +578,26 @@ export default function GaKaTasksPage() {
 
   const gaTasks = React.useMemo(() => {
     return tasks.filter((task) => {
-      if (!ganeUserId) return false
       const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
       if (!task.ga_note_origin_id || isSystem) return false
-      const isAssigned =
-        task.assigned_to === ganeUserId ||
-        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      // Show tasks assigned to current user or to gane.arifaj
+      const currentUserId = user?.id
+      if (!currentUserId && !ganeUserId) return false
+      const isAssigned = 
+        (currentUserId && (task.assigned_to === currentUserId || task.assignees?.some((assignee) => assignee.id === currentUserId))) ||
+        (ganeUserId && (task.assigned_to === ganeUserId || task.assignees?.some((assignee) => assignee.id === ganeUserId)))
       if (!isAssigned) return false
       const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
       return createdAt >= cutoff
     })
-  }, [ganeUserId, tasks])
+  }, [ganeUserId, tasks, user?.id])
 
   const filteredTasks = React.useMemo(() => {
     let filtered = gaTasks
     if (priorityFilter !== "all") {
       filtered = filtered.filter(
-        (task) => (task.priority || "NORMAL").toUpperCase() === priorityFilter
+        (task) => getDisplayPriority(task).toUpperCase() === priorityFilter
       )
     }
     if (dateFilter) {
@@ -788,7 +799,8 @@ export default function GaKaTasksPage() {
     const taskDueDate = task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : ""
     setEditDueDate(taskDueDate)
     setEditDueDateDisplay(taskDueDate ? toDDMMYYYY(taskDueDate) : "")
-    setEditPriority((task.priority || "NORMAL") as TaskPriority)
+    setEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
+    setOriginalIsBllok(task.is_bllok || false)
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
   }
@@ -799,13 +811,19 @@ export default function GaKaTasksPage() {
     try {
       const startDateValue = editStartDate ? new Date(editStartDate).toISOString() : null
       const dueDateValue = editDueDate ? new Date(editDueDate).toISOString() : null
-      const payload = {
+      const isBllok = editPriority === "BLLOK"
+      const actualPriority: "NORMAL" | "HIGH" = isBllok ? "NORMAL" : (editPriority === "HIGH" ? "HIGH" : "NORMAL")
+      const payload: Record<string, unknown> = {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
-        priority: editPriority,
+        priority: actualPriority,
         start_date: startDateValue,
         due_date: dueDateValue,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
+      }
+      // Only include is_bllok if it changed from the original value
+      if (isBllok !== originalIsBllok) {
+        payload.is_bllok = isBllok
       }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -1569,9 +1587,9 @@ export default function GaKaTasksPage() {
                               )}
                             </td>
                             <td className="py-3 px-4">
-                              {task.priority ? (
+                              {getDisplayPriority(task) ? (
                                 <Badge variant="outline" className="border-slate-200 text-slate-700">
-                                  {task.priority}
+                                  {getDisplayPriority(task)}
                                 </Badge>
                               ) : (
                                 <span className="text-sm text-muted-foreground">-</span>

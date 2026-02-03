@@ -313,6 +313,20 @@ function matchesTemplateDate(template: SystemTaskTemplate, date: Date) {
 function parseInternalNotes(value?: string | null): Record<string, string> {
   const result: Record<string, string> = {}
   if (!value) return result
+  
+  // Create a mapping from label to key for all internal note fields
+  const labelToKeyMap: Record<string, string> = {}
+  for (const field of INTERNAL_NOTE_FIELDS) {
+    // Map exact label (uppercase)
+    labelToKeyMap[field.label.toUpperCase()] = field.key
+    // Map normalized version (lowercase, no spaces)
+    const normalizedLabel = field.label.toLowerCase().replace(/\s+/g, "")
+    labelToKeyMap[normalizedLabel] = field.key
+    // Also map the key itself (for backward compatibility)
+    labelToKeyMap[field.key.toUpperCase()] = field.key
+    labelToKeyMap[field.key.toLowerCase()] = field.key
+  }
+  
   const lines = value
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -324,6 +338,8 @@ function parseInternalNotes(value?: string | null): Record<string, string> {
     const rest = line.slice(idx + 1).trim()
     if (!key) continue
     const normalizedKey = key.toLowerCase().replace(/\s+/g, "")
+    
+    // Handle QA fields
     if (normalizedKey === "qa" || normalizedKey === "question/answer" || normalizedKey === "questionanswer") {
       result.QA = rest
       continue
@@ -333,7 +349,11 @@ function parseInternalNotes(value?: string | null): Record<string, string> {
       result.QA = existing
       continue
     }
-    result[key] = rest
+    
+    // Map the label back to the key (e.g., "CHECKLISTA" -> "CHECK")
+    // Try uppercase first, then normalized, then use original key
+    const mappedKey = labelToKeyMap[key.toUpperCase()] || labelToKeyMap[normalizedKey] || key
+    result[mappedKey] = rest
   }
   return result
 }
@@ -377,6 +397,7 @@ export function SystemTasksView({
   const [editOpen, setEditOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [editSaving, setEditSaving] = React.useState(false)
+  const [deletingTemplateId, setDeletingTemplateId] = React.useState<string | null>(null)
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
@@ -1100,6 +1121,7 @@ export function SystemTasksView({
       const updated = (await res.json()) as SystemTaskTemplate
       // Match by template_id first, then fall back to id (task id)
       const matchId = updated.template_id ?? updated.id
+      // Update templates list with the server response
       setTemplates((prev) =>
         prev.map((item) => {
           const itemTemplateId = item.template_id ?? item.id
@@ -1109,9 +1131,50 @@ export function SystemTasksView({
       setEditOpen(false)
       setEditTemplate(null)
       setEditAssigneeError(null)
+      // Reload to refresh the list, but the updated template should already be in the list
       await load()
     } finally {
       setEditSaving(false)
+    }
+  }
+
+  const deleteTemplate = async (template: SystemTaskTemplate) => {
+    const templateId = template.template_id ?? template.id
+    const templateTitle = template.title || "this system task"
+    
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the system task "${templateTitle}"?\n\nThis action cannot be undone and will also delete all associated tasks.`
+    )
+    
+    if (!confirmed) return
+
+    setDeletingTemplateId(templateId)
+    try {
+      const res = await apiFetch(`/system-tasks/${templateId}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        let detail = "Failed to delete system task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      // Remove from templates list
+      setTemplates((prev) => prev.filter((item) => {
+        const itemTemplateId = item.template_id ?? item.id
+        return itemTemplateId !== templateId
+      }))
+      toast.success("System task deleted")
+      await load()
+    } catch {
+      toast.error("Failed to delete system task")
+    } finally {
+      setDeletingTemplateId(null)
     }
   }
 
@@ -1344,7 +1407,7 @@ export function SystemTasksView({
       const parts: string[] = []
       const reg = notes.REGJ ? `REGJ: ${notes.REGJ}` : ""
       const path = notes.PATH ? `PATH: ${notes.PATH}` : ""
-      const check = notes.CHECKLISTA || notes.CHECK ? `CHECKLISTA: ${notes.CHECKLISTA || notes.CHECK}` : ""
+      const check = (notes.CHECK || notes.CHECKLISTA) ? `CHECKLISTA: ${notes.CHECK || notes.CHECKLISTA}` : ""
       const training = notes.TRAINING ? `TRAINING: ${notes.TRAINING}` : ""
       if (reg) parts.push(reg)
       if (path) parts.push(path)
@@ -1383,7 +1446,7 @@ export function SystemTasksView({
       const reg = normalize(notes.REGJ)
       const path = normalize(notes.PATH)
       const training = normalize(notes.TRAINING)
-      const checklistaValue = normalize(notes.CHECKLISTA || notes.CHECK)
+      const checklistaValue = normalize(notes.CHECK || notes.CHECKLISTA)
       const bzGroup = normalize(buildBzGroup(template))
       const hasAny = reg || path || training || checklistaValue || bzGroup
       if (!hasAny) return ""
@@ -2795,9 +2858,13 @@ export function SystemTasksView({
                               <Label className="text-sm">{field.label}</Label>
                               <Input
                                 value={editInternalNotes[field.key] || ""}
-                                onChange={(event) =>
-                                  setInternalNoteValue(field.key, event.target.value, setEditInternalNotes)
-                                }
+                                onChange={(event) => {
+                                  const newValue = event.target.value
+                                  setEditInternalNotes((prev) => ({
+                                    ...prev,
+                                    [field.key]: newValue,
+                                  }))
+                                }}
                                 placeholder={field.placeholder}
                                 className="placeholder:text-muted-foreground/60"
                               />
@@ -3213,6 +3280,17 @@ export function SystemTasksView({
                                       onClick={() => startEdit(template)}
                                     >
                                       Edit
+                                    </Button>
+                                  )}
+                                  {user?.role === "ADMIN" && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={deletingTemplateId === (template.template_id ?? template.id)}
+                                      className="h-7 w-full border border-transparent text-xs text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                      onClick={() => void deleteTemplate(template)}
+                                    >
+                                      {deletingTemplateId === (template.template_id ?? template.id) ? "Deleting..." : "Delete"}
                                     </Button>
                                   )}
                                 </div>

@@ -2,11 +2,13 @@
 
 import * as React from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -77,16 +79,25 @@ export default function TaskDetailsPage() {
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
+  const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
+  const [assignees, setAssignees] = React.useState<string[]>([])
+  const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
 
   React.useEffect(() => {
     if (!task) return
     setDescription(task.description || "")
     setStatusValue(task.status || "")
+    setStartDate(toDateInput(task.start_date))
     setDueDate(toDateInput(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
+    // Get assignees from assignees array, fallback to assigned_to for backward compatibility
+    const assigneeIds = task.assignees && task.assignees.length > 0
+      ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
+      : (task.assigned_to ? [task.assigned_to] : [])
+    setAssignees(assigneeIds)
     setReminder(Boolean(task.reminder_enabled))
   }, [task])
 
@@ -105,8 +116,14 @@ export default function TaskDetailsPage() {
       }
       if (statusValue) payload.status = statusValue
       if (canAssign) {
+        payload.start_date = startDate || null
         payload.due_date = dueDate || null
-        payload.assigned_to = assignedTo === UNASSIGNED_VALUE ? null : assignedTo
+        // Use first assignee for backward compatibility, or null if no assignees
+        payload.assigned_to = assignees.length > 0 ? assignees[0] : null
+        // Also send assignees array if backend supports it
+        if (assignees.length > 0) {
+          payload.assignees = assignees
+        }
       }
 
       const res = await apiFetch(`/tasks/${task.id}`, {
@@ -114,7 +131,24 @@ export default function TaskDetailsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        if (res.status === 403) {
+          toast.error("Forbidden: You don't have permission to edit this task")
+          return
+        }
+        let errorMessage = "Failed to update task"
+        try {
+          const errorData = await res.json()
+          if (errorData.detail) {
+            errorMessage = typeof errorData.detail === "string" ? errorData.detail : "Failed to update task"
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(errorMessage)
+        return
+      }
+      toast.success("Task updated")
       if (returnTo) {
         router.push(returnTo)
         return
@@ -125,9 +159,26 @@ export default function TaskDetailsPage() {
     }
   }
 
+  // Get all assignees for display - must be before conditional return
+  const assignedUser = task ? users.find((u) => u.id === task.assigned_to) || null : null
+  const allAssignees = task
+    ? (task.assignees && task.assignees.length > 0
+        ? task.assignees
+        : (task.assigned_to ? [{ id: task.assigned_to, full_name: assignedUser?.full_name, username: assignedUser?.username }] : []))
+    : []
+  
+  const assigneeLabel = React.useMemo(() => {
+    if (assignees.length === 0) return "Unassigned"
+    if (users.length && assignees.length === users.length) return "All users"
+    if (assignees.length === 1) {
+      const selected = users.find((u) => u.id === assignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${assignees.length} selected`
+  }, [users, assignees])
+
   if (!task) return <div className="text-sm text-muted-foreground">Loading...</div>
 
-  const assignedUser = users.find((u) => u.id === task.assigned_to) || null
   const statusText = statusLabel(task.status)
   const priorityText = task.priority ? TASK_PRIORITY_LABELS[task.priority] || task.priority : "-"
 
@@ -204,6 +255,14 @@ export default function TaskDetailsPage() {
               {canAssign ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
+                    <Label>Start date</Label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(normalizeDueDateInput(e.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label>Due date</Label>
                     <Input
                       type="date"
@@ -211,24 +270,76 @@ export default function TaskDetailsPage() {
                       onChange={(e) => setDueDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Assign to</Label>
-                    <Select value={assignedTo} onValueChange={setAssignedTo}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                </div>
+              ) : null}
+              {canAssign ? (
+                <div className="space-y-2">
+                  <Label>Assign to</Label>
+                  <Dialog open={selectAssigneesOpen} onOpenChange={setSelectAssigneesOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-start"
+                      >
+                        {assigneeLabel}
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Select Assignees</DialogTitle>
+                      </DialogHeader>
+                      <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
                         {users
                           .filter((u) => !u.department_id || u.department_id === task.department_id)
-                          .map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                          .length ? (
+                            users
+                              .filter((u) => !u.department_id || u.department_id === task.department_id)
+                              .map((u) => {
+                                const isSelected = assignees.includes(u.id)
+                                return (
+                                  <div
+                                    key={u.id}
+                                    className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setAssignees((prev) => prev.filter((id) => id !== u.id))
+                                      } else {
+                                        setAssignees((prev) => [...prev, u.id])
+                                      }
+                                    }}
+                                  >
+                                    <Checkbox checked={isSelected} />
+                                    <Label className="cursor-pointer flex-1">
+                                      {u.full_name || u.username || "-"}
+                                    </Label>
+                                  </div>
+                                )
+                              })
+                          ) : (
+                            <div className="text-sm text-slate-600">No users available.</div>
+                          )}
+                      </div>
+                      <div className="mt-4 flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setAssignees([])}>
+                          Clear
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const departmentUsers = users.filter((u) => !u.department_id || u.department_id === task.department_id)
+                            setAssignees(departmentUsers.map((u) => u.id))
+                          }}
+                          disabled={!users.filter((u) => !u.department_id || u.department_id === task.department_id).length}
+                        >
+                          All users
+                        </Button>
+                        <Button onClick={() => setSelectAssigneesOpen(false)}>
+                          Done
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               ) : null}
 
@@ -255,10 +366,16 @@ export default function TaskDetailsPage() {
               <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
                 <div className="grid gap-3 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Assignee</span>
+                    <span className="text-muted-foreground">Assignee{allAssignees.length > 1 ? "s" : ""}</span>
                     <span className="font-medium text-slate-900">
-                      {assignedUser?.full_name || assignedUser?.username || (task.assigned_to ? "Assigned" : "Unassigned")}
+                      {allAssignees.length > 0
+                        ? allAssignees.map((a) => a.full_name || a.username || "-").join(", ")
+                        : "Unassigned"}
                     </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Start date</span>
+                    <span className="font-medium text-slate-900">{formatDate(task.start_date)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Due date</span>

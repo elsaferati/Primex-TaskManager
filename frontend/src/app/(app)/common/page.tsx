@@ -105,6 +105,7 @@ export default function CommonViewPage() {
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
   const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
+  const commonDepartmentId = user?.department_id || ""
   const printedAt = React.useMemo(() => new Date(), [])
   const printInitials = initials(user?.full_name || user?.username || "")
 
@@ -660,16 +661,13 @@ export default function CommonViewPage() {
         
         // For priority items (PRJK), we want everyone to see all projects,
         // so try to fetch all projects first, fallback if needed
-        let projectsEndpoint = "/projects?include_all_departments=true"
+        let projectsEndpoint = commonDepartmentId
+          ? `/projects?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/projects?include_all_departments=true"
         let projectsRes = await apiFetch(projectsEndpoint)
         
-        // If 403 (forbidden), fallback to user's department projects
-        if (!projectsRes?.ok && projectsRes?.status === 403) {
-          projectsEndpoint =
-            user?.role && user.role !== "STAFF"
-              ? "/projects?include_all_departments=true"
-              : "/projects"
-          projectsRes = await apiFetch(projectsEndpoint)
+        if (!projectsRes?.ok && projectsRes?.status === 403 && !commonDepartmentId) {
+          projectsRes = await apiFetch("/projects")
         }
         
         // Store full project info for MST/VS/VL date generation
@@ -702,6 +700,9 @@ export default function CommonViewPage() {
             let user = loadedUsers.find((u) => u.id === e.assigned_to_user_id)
             if (!user) {
               user = loadedUsers.find((u) => u.id === e.created_by_user_id)
+            }
+            if (commonDepartmentId && user?.department_id && user.department_id !== commonDepartmentId) {
+              continue
             }
             const personName = user?.full_name || user?.username || e.title || "Unknown"
             
@@ -857,16 +858,13 @@ export default function CommonViewPage() {
         // Load tasks for blocked, 1H, R1, external, and priority
         // For priority items (PRJK), we want everyone to see the same projects,
         // so try to fetch all tasks first, fallback to user's tasks if 403
-        let tasksEndpoint = "/tasks?include_done=true&include_all_departments=true"
+        let tasksEndpoint = commonDepartmentId
+          ? `/tasks?include_done=true&department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/tasks?include_done=true&include_all_departments=true"
         let tasksRes = await apiFetch(tasksEndpoint)
         
-        // If 403 (forbidden), fallback to user's department tasks
-        if (!tasksRes?.ok && tasksRes?.status === 403) {
-          tasksEndpoint =
-            user?.role && user.role !== "STAFF"
-              ? "/tasks?include_done=true&include_all_departments=true"
-              : "/tasks?include_done=true"
-          tasksRes = await apiFetch(tasksEndpoint)
+        if (!tasksRes?.ok && tasksRes?.status === 403 && !commonDepartmentId) {
+          tasksRes = await apiFetch("/tasks?include_done=true")
         }
         
         if (tasksRes?.ok) {
@@ -907,13 +905,11 @@ export default function CommonViewPage() {
           
           const today = toISODate(new Date())
           // Group priority items by project_id, tracking assignees per date
-          // This ensures all users see the same projects
+          // Participants must be resolved per day only.
           const priorityMap = new Map<string, { 
             project: string; 
-            projectMembers: Set<string>; // Assignees who have tasks on MULTIPLE dates (appear every day)
             assigneesByDate: Map<string, Set<string>>; // Track assignees per date
             dates: Set<string>;
-            assigneeDates: Map<string, Set<string>>; // Track unique dates each assignee appears on
           }>()
 
           // Second pass: process active tasks for date-specific data and other categories
@@ -937,8 +933,16 @@ export default function CommonViewPage() {
               ? [ownerName]
               : []
             
+            const phaseValue = (t.phase || "").toUpperCase()
+            const isCheckPhase = phaseValue === "CHECK" || phaseValue === "CONTROL"
+
             // Helper function to generate dates from start_date to due_date
-            const getTaskDates = (task: Task): string[] => {
+            // Check/Control phase tasks should be treated as single-day assignments.
+            const getTaskDates = (task: Task, singleDayOnly: boolean): string[] => {
+              const taskDateSource = task.planned_for || task.due_date || task.start_date || task.created_at
+              if (singleDayOnly) {
+                return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
+              }
               const startDate = task.start_date ? new Date(task.start_date) : null
               const dueDate = task.due_date ? new Date(task.due_date) : null
               
@@ -970,11 +974,10 @@ export default function CommonViewPage() {
               }
               
               // Fallback to single date
-              const taskDateSource = task.planned_for || task.due_date || task.start_date || task.created_at
               return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
             }
             
-            const taskDates = getTaskDates(t)
+            const taskDates = getTaskDates(t, isCheckPhase)
 
             // Create entries for each date in the range
             for (const taskDate of taskDates) {
@@ -1038,10 +1041,8 @@ export default function CommonViewPage() {
               if (!priorityMap.has(projectKey)) {
                 priorityMap.set(projectKey, {
                   project: projectName,
-                  projectMembers: new Set<string>(),
                   assigneesByDate: new Map<string, Set<string>>(),
                   dates: new Set<string>(),
-                  assigneeDates: new Map<string, Set<string>>(),
                 })
               }
               
@@ -1057,14 +1058,9 @@ export default function CommonViewPage() {
                 }
                 const dateAssignees = entry.assigneesByDate.get(taskDate)!
                 
-                // Add assignees to this date and track unique dates they appear on
+                // Add assignees to this date only
                 for (const name of assigneeNames) {
                   dateAssignees.add(name)
-                  // Track unique dates for this assignee
-                  if (!entry.assigneeDates.has(name)) {
-                    entry.assigneeDates.set(name, new Set<string>())
-                  }
-                  entry.assigneeDates.get(name)!.add(taskDate)
                 }
               }
             }
@@ -1082,10 +1078,8 @@ export default function CommonViewPage() {
               
               priorityMap.set(projectId, {
                 project: projectName,
-                projectMembers: new Set<string>(), // Empty if no tasks
                 assigneesByDate: new Map<string, Set<string>>(),
                 dates: new Set<string>(),
-                assigneeDates: new Map<string, Set<string>>(),
               })
             }
           }
@@ -1146,41 +1140,23 @@ export default function CommonViewPage() {
                 continue
               }
             }
-            
-            // Determine project members: only assignees who appear on MULTIPLE unique dates
-            // Assignees who only appear on ONE date are NOT project members (they're date-specific)
-            for (const [name, dates] of entry.assigneeDates.entries()) {
-              if (dates.size > 1) {
-                // This assignee has tasks on multiple dates, so they're a project member
-                entry.projectMembers.add(name)
-              }
+
+            // Always include actual task dates to ensure assignees show on their real days.
+            if (entry.dates.size > 0) {
+              const merged = new Set(datesToUse)
+              for (const d of entry.dates) merged.add(d)
+              datesToUse = Array.from(merged).sort()
             }
-            
             // Create one priority entry per date for this project
-            // Logic: Project members (people with tasks on multiple dates) ALWAYS appear on every date
-            //        Date-specific assignees (people with tasks on only one date) appear only on their specific date
+            // Participants are derived strictly from tasks on that specific date.
             for (const date of datesToUse) {
-              // Start with ALL project members (they appear on every date)
-              const finalAssignees = new Set<string>(entry.projectMembers)
-              
-              // Get assignees for this specific date (from tasks on that date)
+              // Get assignees who have tasks specifically on this date
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
-              
-              // Add date-specific assignees (people who only have tasks on this date)
-              // These are people who are NOT project members (they only appear on one date)
-              for (const name of dateAssignees) {
-                if (!entry.projectMembers.has(name)) {
-                  // This person only has tasks on this date (or fewer dates), so add them only to this date
-                  finalAssignees.add(name)
-                }
-                // Note: If a project member has a task on this date, they're already in finalAssignees
-                // because we started with all projectMembers above
-              }
-              
+
               expandedPriority.push({
                 project: entry.project,
                 date: date,
-                assignees: Array.from(finalAssignees), // Project members (multi-date) + date-specific assignees (single-date)
+                assignees: Array.from(dateAssignees),
               })
             }
           }
@@ -1188,18 +1164,15 @@ export default function CommonViewPage() {
           allData.priority = expandedPriority
         }
 
-        const meetingsEndpoint =
-          user?.role && user.role !== "STAFF"
-            ? "/meetings?include_all_departments=true"
-            : user?.department_id
-              ? `/meetings?department_id=${user.department_id}`
-              : null
+        // Show all external meetings for all users in common view
+        const meetingsEndpoint = commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
 
-        if (meetingsEndpoint) {
-          const meetingsRes = await apiFetch(meetingsEndpoint)
-          if (meetingsRes?.ok) {
-            const meetings = (await meetingsRes.json()) as Meeting[]
-            if (mounted) setExternalMeetings(meetings)
+        const meetingsRes = await apiFetch(meetingsEndpoint)
+        if (meetingsRes?.ok) {
+          const meetings = (await meetingsRes.json()) as Meeting[]
+          if (mounted) setExternalMeetings(meetings)
             for (const meeting of meetings) {
               const startsAt = meeting.starts_at ? new Date(meeting.starts_at) : null
               const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null
@@ -1222,7 +1195,6 @@ export default function CommonViewPage() {
               })
             }
           }
-        }
 
         // Single state update with all data
         if (mounted) {
@@ -1641,8 +1613,16 @@ export default function CommonViewPage() {
     externalMeetingChecklist,
   ])
 
+  const canEditExternalMeeting = React.useCallback((meeting: Meeting) => {
+    if (!user) return false
+    // Allow admin, manager, or the person that created it
+    if (isAdmin || isManager) return true
+    if (meeting.created_by && meeting.created_by === user.id) return true
+    return false
+  }, [user, isAdmin, isManager])
+
   const startEditExternalMeeting = React.useCallback((meeting: Meeting) => {
-    if (!isAdmin) return
+    if (!canEditExternalMeeting(meeting)) return
     setEditingExternalMeetingId(meeting.id)
     setEditingExternalMeetingTitle(meeting.title || "")
     setEditingExternalMeetingPlatform(meeting.platform || "")
@@ -1656,7 +1636,7 @@ export default function CommonViewPage() {
       setEditingExternalMeetingStartsAt("")
     }
     setEditingExternalMeetingDepartmentId(meeting.department_id || "")
-  }, [isAdmin])
+  }, [canEditExternalMeeting])
 
   const cancelEditExternalMeeting = React.useCallback(() => {
     setEditingExternalMeetingId(null)
@@ -1686,7 +1666,7 @@ export default function CommonViewPage() {
       })
       if (!res?.ok) {
         console.error("Failed to update meeting", res?.status)
-        alert("Failed to update meeting. Only admins can edit meetings.")
+        alert("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
         return
       }
       const updated = (await res.json()) as Meeting
@@ -1695,7 +1675,11 @@ export default function CommonViewPage() {
       )
       cancelEditExternalMeeting()
       // Reload external meetings to update the list
-      const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+      const meetingsRes = await apiFetch(
+        commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+      )
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setExternalMeetings(meetings)
@@ -1712,6 +1696,7 @@ export default function CommonViewPage() {
     editingExternalMeetingPlatform,
     editingExternalMeetingStartsAt,
     editingExternalMeetingDepartmentId,
+    commonDepartmentId,
     apiFetch,
     cancelEditExternalMeeting,
   ])
@@ -1733,7 +1718,11 @@ export default function CommonViewPage() {
         }
         setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
         // Reload external meetings to update the list
-        const meetingsRes = await apiFetch("/meetings?include_all_departments=true")
+      const meetingsRes = await apiFetch(
+        commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+      )
         if (meetingsRes?.ok) {
           const meetings = (await meetingsRes.json()) as Meeting[]
           setExternalMeetings(meetings)
@@ -1745,7 +1734,7 @@ export default function CommonViewPage() {
         setDeletingExternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch]
+    [isAdmin, apiFetch, commonDepartmentId]
   )
 
   const buildSwimlaneCells = (items: SwimlaneCell[]) => {
@@ -2429,7 +2418,7 @@ export default function CommonViewPage() {
         }
         @media print {
           @page {
-            margin: 0 0.1in 0.51in 0.1in;
+            margin: 0.45in 0.35in 0.51in 0.35in;
             size: landscape;
           }
           .no-print { display: none !important; }
@@ -2439,10 +2428,15 @@ export default function CommonViewPage() {
           aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
             display: none !important;
           }
+          *, *::before, *::after { 
+            box-sizing: border-box;
+          }
           body, html { 
             background: white;
             margin: 0;
             padding: 0;
+            width: 100%;
+            overflow: visible;
           }
           main { 
             padding: 0 !important;
@@ -2452,12 +2446,16 @@ export default function CommonViewPage() {
             padding: 0 !important;
             margin: 0 !important;
             background: white;
+            overflow: visible !important;
           }
           .print-page {
             position: relative;
             padding-top: 0;
             padding-bottom: 0.35in;
             margin: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow: visible;
             page-break-before: auto;
           }
           .week-table-view { 
@@ -2465,15 +2463,25 @@ export default function CommonViewPage() {
             padding-top: 0;
             padding-bottom: 0.35in; 
             margin: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow: visible;
             page-break-before: auto;
           }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             margin-top: 0;
-            padding-top: 0.05in;
+            padding-top: 0;
+            position: static !important;
+            transform: none !important;
+            page-break-after: avoid;
+          }
+          .week-table {
+            page-break-inside: avoid;
+            margin-top: 0;
           }
           .print-title {
             font-size: 16px;
@@ -2529,15 +2537,19 @@ export default function CommonViewPage() {
           .swimlane-row {
             margin-top: 6px;
           }
-          .swimlane-header,
-          .swimlane-cell {
-            padding-top: 18px;
-            padding-bottom: 18px;
-          }
-          .swimlane-cell {
-            background: #ffffff !important;
-            color: #111827 !important;
-          }
+            .swimlane-header,
+            .swimlane-cell {
+              padding-top: 18px;
+              padding-bottom: 18px;
+            }
+            .swimlane-cell {
+              background: #ffffff !important;
+              color: #111827 !important;
+              position: relative !important;
+              padding-right: 60px !important;
+              overflow: visible !important;
+              min-width: 0 !important;
+            }
           .swimlane-header,
           .swimlane-badge {
             -webkit-print-color-adjust: exact;
@@ -2569,7 +2581,46 @@ export default function CommonViewPage() {
           .swimlane-cell {
             border-color: #111827 !important;
           }
-        }
+            .swimlane-title-row {
+              display: flex !important;
+              align-items: flex-start !important;
+              justify-content: space-between !important;
+              gap: 8px !important;
+              width: 100% !important;
+              padding-right: 60px !important;
+            }
+          .swimlane-title {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+          }
+            .swimlane-assignees {
+              display: flex !important;
+              position: absolute !important;
+              top: 6px !important;
+              right: 6px !important;
+              gap: 6px !important;
+              flex-wrap: nowrap !important;
+              align-items: center !important;
+              justify-content: flex-end !important;
+              margin-left: 0 !important;
+              flex-shrink: 0 !important;
+              z-index: 2 !important;
+            }
+            .swimlane-avatar {
+              display: inline-flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-width: 24px !important;
+              height: 20px !important;
+              padding: 0 5px !important;
+              font-size: 9px !important;
+              line-height: 1 !important;
+              white-space: nowrap !important;
+              word-break: keep-all !important;
+              overflow-wrap: normal !important;
+              flex-shrink: 0 !important;
+            }
+          }
         
         /* View Container */
         .view-container { 
@@ -2940,7 +2991,7 @@ export default function CommonViewPage() {
           box-shadow: none;
         }
         .swimlane-cell {
-          padding: 12px 14px;
+          padding: 12px 70px 12px 14px;
           border-right: 1px solid var(--swim-border);
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
@@ -2962,7 +3013,17 @@ export default function CommonViewPage() {
           color: var(--swim-muted);
           font-style: italic;
         }
+        .swimlane-title-row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
+          width: 100%;
+          padding-right: 70px;
+        }
         .swimlane-title {
+          flex: 1 1 auto;
+          min-width: 0;
           font-weight: 700;
           font-size: 14px;
         }
@@ -2996,15 +3057,23 @@ export default function CommonViewPage() {
         }
         .swimlane-assignees {
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           gap: 6px;
+          align-items: center;
+          justify-content: flex-end;
+          margin-left: 0;
+          position: absolute;
+          top: 10px;
+          right: 36px;
+          z-index: 2;
         }
         .swimlane-avatar {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 24px;
+          min-width: 24px;
           height: 24px;
+          padding: 0 6px;
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
@@ -3012,6 +3081,10 @@ export default function CommonViewPage() {
           font-size: 10px;
           letter-spacing: 0.02em;
           border: 1px solid #cbd5e1;
+          line-height: 1;
+          white-space: nowrap;
+          word-break: keep-all;
+          overflow-wrap: normal;
         }
         
         /* Week Table View - Shows when all days are selected */
@@ -3147,11 +3220,21 @@ export default function CommonViewPage() {
         @media print {
           .week-table-view {
             display: block !important;
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          .week-table-view .print-header {
+            page-break-after: avoid;
+            margin-bottom: 8px;
           }
           .week-table {
             page-break-inside: avoid;
+            table-layout: fixed;
+            width: 100%;
+            font-size: 9px;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            margin-top: 0;
           }
           .week-table thead {
             display: table-header-group;
@@ -3159,6 +3242,26 @@ export default function CommonViewPage() {
           .week-table th,
           .week-table td {
             border: 1px solid #111827 !important;
+            position: static !important;
+            top: auto !important;
+            z-index: auto !important;
+            padding: 4px 5px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }
+          .week-table thead tr:nth-child(2) th {
+            top: auto !important;
+          }
+          .week-table-number {
+            width: 36px !important;
+          }
+          .week-table-label {
+            width: 100px !important;
+          }
+          .week-table-cell,
+          .week-table-entry span {
+            white-space: normal;
           }
           .week-table-entry {
             border: 1px solid #111827 !important;
@@ -3166,6 +3269,11 @@ export default function CommonViewPage() {
             print-color-adjust: exact;
             page-break-inside: avoid;
             margin-bottom: 3px;
+            font-size: 9px;
+            padding: 2px 4px;
+          }
+          .week-table-entries {
+            gap: 2px;
           }
         }
           align-items: center;
@@ -4600,7 +4708,7 @@ export default function CommonViewPage() {
                                   <span>Owner: {ownerName}</span>
                                 </div>
                               </div>
-                              {isAdmin ? (
+                              {canEditExternalMeeting(meeting) ? (
                                 <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
                                   <button
                                     className="btn-surface"
@@ -4611,16 +4719,18 @@ export default function CommonViewPage() {
                                   >
                                     Edit
                                   </button>
-                                  <button
-                                    className="btn-surface"
-                                    type="button"
-                                    onClick={() => void deleteExternalMeeting(meeting.id)}
-                                    disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
-                                    title="Delete meeting"
-                                    style={{ color: "#dc2626", borderColor: "#fecaca" }}
-                                  >
-                                    {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
-                                  </button>
+                                  {isAdmin ? (
+                                    <button
+                                      className="btn-surface"
+                                      type="button"
+                                      onClick={() => void deleteExternalMeeting(meeting.id)}
+                                      disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                      title="Delete meeting"
+                                      style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                    >
+                                      {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                    </button>
+                                  ) : null}
                                 </div>
                               ) : null}
                             </div>
@@ -4909,19 +5019,21 @@ export default function CommonViewPage() {
                                     ×
                                   </button>
                                 ) : null}
-                                <div className="swimlane-title">
-                                  {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
-                                  {cell.title}
-                                </div>
-                                {!cell.placeholder && cell.assignees?.length ? (
-                                  <div className="swimlane-assignees">
-                                    {cell.assignees.map((name) => (
-                                      <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
-                                        {initials(name)}
-                                      </span>
-                                    ))}
+                                <div className="swimlane-title-row">
+                                  <div className="swimlane-title">
+                                    {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                    {cell.title}
                                   </div>
-                                ) : null}
+                                  {!cell.placeholder && cell.assignees?.length ? (
+                                    <div className="swimlane-assignees">
+                                      {cell.assignees.map((name) => (
+                                        <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
+                                          {initials(name)}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
                                 {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
                               </div>
                             ) : (
