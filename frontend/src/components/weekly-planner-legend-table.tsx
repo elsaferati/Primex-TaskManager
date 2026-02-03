@@ -42,11 +42,24 @@ const LEGEND_COLORS: Record<string, string> = {
 type WeeklyPlannerLegendTableProps = {
   departmentId: string
   weekStart: string
+  departmentName?: string
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error"
 
-export function WeeklyPlannerLegendTable({ departmentId, weekStart }: WeeklyPlannerLegendTableProps) {
+const DEVELOPMENT_QUESTION_ORDER = ["KRYER", "PROCES", "NUK ESHTE PUNUAR", "PV"] as const
+const DEVELOPMENT_QUESTIONS: Record<(typeof DEVELOPMENT_QUESTION_ORDER)[number], string> = {
+  KRYER: "A KEMI PROJEKTE TE TJERA TE P(A)PLANIFIKUARA?",
+  PROCES: "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+  "NUK ESHTE PUNUAR": "BLLOK?",
+  PV: "",
+}
+
+export function WeeklyPlannerLegendTable({
+  departmentId,
+  weekStart,
+  departmentName,
+}: WeeklyPlannerLegendTableProps) {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const [entries, setEntries] = React.useState<LegendEntry[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
@@ -269,6 +282,41 @@ export function WeeklyPlannerLegendTable({ departmentId, weekStart }: WeeklyPlan
     return null
   }
 
+  const normalizedDepartmentName = (departmentName || "").trim().toLowerCase()
+  const isDevelopmentDepartment =
+    normalizedDepartmentName === "development" || normalizedDepartmentName === "zhvillim"
+  const displayEntries = isDevelopmentDepartment
+    ? (() => {
+        const byLabel = new Map<string, LegendEntry>()
+        entries.forEach((entry) => {
+          if (!byLabel.has(entry.label)) {
+            byLabel.set(entry.label, entry)
+          }
+        })
+        return DEVELOPMENT_QUESTION_ORDER.map((label) => {
+          const match = byLabel.get(label)
+          if (!match) {
+            return {
+              id: `__placeholder__${label}`,
+              department_id: departmentId,
+              week_start_date: weekStart,
+              key: label,
+              label,
+              question_text: DEVELOPMENT_QUESTIONS[label],
+              answer_text: null,
+              created_by: null,
+              created_at: "",
+              updated_at: "",
+            }
+          }
+          return {
+            ...match,
+            question_text: DEVELOPMENT_QUESTIONS[label],
+          }
+        })
+      })()
+    : entries
+
   return (
     <Card>
       <CardHeader>
@@ -286,9 +334,10 @@ export function WeeklyPlannerLegendTable({ departmentId, weekStart }: WeeklyPlan
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map((entry) => {
+              {displayEntries.map((entry) => {
                 const color = LEGEND_COLORS[entry.label] || "#E5E7EB"
                 const saveState = saveStates.get(entry.id) || "idle"
+                const isPlaceholder = entry.id.startsWith("__placeholder__")
                 return (
                   <TableRow key={entry.id}>
                     <TableCell className="p-2">
@@ -299,31 +348,39 @@ export function WeeklyPlannerLegendTable({ departmentId, weekStart }: WeeklyPlan
                     </TableCell>
                     <TableCell className="font-semibold">{entry.label}</TableCell>
                     <TableCell>
-                      <span className="text-sm text-red-600 font-medium">{entry.question_text}</span>
+                      {entry.question_text ? (
+                        <span className="text-sm text-red-600 font-medium">{entry.question_text}</span>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <div className="relative">
-                        <Input
-                          value={entry.answer_text || ""}
-                          onChange={(e) => handleInputChange(entry.id, e.target.value)}
-                          onBlur={(e) => handleBlur(entry.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, entry.id, e.currentTarget.value)}
-                          placeholder="Enter answer..."
-                          className="w-full"
-                          disabled={saveState === "saving"}
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
-                          {saveState === "saving" && (
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                          )}
-                          {saveState === "saved" && (
-                            <Check className="h-4 w-4 text-green-600" />
-                          )}
-                          {saveState === "error" && (
-                            <AlertCircle className="h-4 w-4 text-red-600" title="Failed to save" />
-                          )}
+                      {isPlaceholder ? (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      ) : (
+                        <div className="relative">
+                          <Input
+                            value={entry.answer_text || ""}
+                            onChange={(e) => handleInputChange(entry.id, e.target.value)}
+                            onBlur={(e) => handleBlur(entry.id, e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, entry.id, e.currentTarget.value)}
+                            placeholder="Enter answer..."
+                            className="w-full"
+                            disabled={saveState === "saving"}
+                          />
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+                            {saveState === "saving" && (
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                            )}
+                            {saveState === "saved" && (
+                              <Check className="h-4 w-4 text-green-600" />
+                            )}
+                            {saveState === "error" && (
+                              <AlertCircle className="h-4 w-4 text-red-600" title="Failed to save" />
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 )

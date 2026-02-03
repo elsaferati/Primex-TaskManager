@@ -288,6 +288,19 @@ export interface GaNote {
   updated_at: string
 }
 
+export interface InternalNote {
+  id: string
+  title: string
+  description?: string | null
+  from_user_id: string
+  to_user_id: string
+  department_id?: string
+  project_id?: string | null
+  to_department_id: string
+  created_at: string
+  updated_at: string
+}
+
 export interface ProjectPrompt {
   id: string
   project_id: string
