@@ -116,3 +116,25 @@ class MonthlyPlannerResponse(BaseModel):
     summary: MonthlyPlannerSummary
 
 
+
+
+class WeeklyPlannerLegendEntryOut(BaseModel):
+    """Legend entry for weekly planner questions"""
+    id: uuid.UUID
+    department_id: uuid.UUID
+    week_start_date: date
+    key: str
+    label: str
+    question_text: str
+    answer_text: str | None = None
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WeeklyPlannerLegendEntryUpdate(BaseModel):
+    """Update payload for legend entry answer"""
+    answer_text: str | None = None
