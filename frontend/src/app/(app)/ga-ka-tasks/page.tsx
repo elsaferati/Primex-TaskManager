@@ -401,7 +401,11 @@ export default function GaKaTasksPage() {
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
+  const [allTasksReportCommentEdits, setAllTasksReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [savingAllTasksReportComments, setSavingAllTasksReportComments] = React.useState<Record<string, boolean>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [showAllTasksReport, setShowAllTasksReport] = React.useState(false)
+  const [exportingAllTasks, setExportingAllTasks] = React.useState(false)
   const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
   const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
@@ -490,34 +494,6 @@ export default function GaKaTasksPage() {
     }
     setCreating(true)
     try {
-      const noteRes = await apiFetch("/ga-notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          department_id: null,
-          content: description.trim() || title.trim(),
-          note_type: "GA",
-        }),
-      })
-      if (!noteRes.ok) {
-        let detail = "Failed to create GA note"
-        try {
-          const data = (await noteRes.json()) as { detail?: string | Array<{ msg?: string }> }
-          if (data?.detail) {
-            if (typeof data.detail === "string") {
-              detail = data.detail
-            } else if (Array.isArray(data.detail) && data.detail.length > 0) {
-              detail = data.detail.map((e) => e.msg || "Validation error").join(", ")
-            }
-          }
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      const createdNote = (await noteRes.json()) as { id: string }
-
       const startDateValue = startDate ? new Date(startDate).toISOString() : null
       const dueDateValue = dueDate ? new Date(dueDate).toISOString() : null
       const isBllok = taskPriority === "BLLOK"
@@ -530,7 +506,6 @@ export default function GaKaTasksPage() {
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         start_date: startDateValue,
         due_date: dueDateValue,
-        ga_note_origin_id: createdNote.id,
         assigned_to: ganeUserId,
         ...(isBllok && { is_bllok: true }),
       }
@@ -903,6 +878,45 @@ export default function GaKaTasksPage() {
     setSavingDailyReportComments((prev) => ({ ...prev, [commentKey]: isSaving }))
   }
 
+  const setAllTasksReportCommentSaving = (commentKey: string, isSaving: boolean) => {
+    setSavingAllTasksReportComments((prev) => ({ ...prev, [commentKey]: isSaving }))
+  }
+
+  const saveAllTasksReportTaskComment = async (
+    taskId: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setAllTasksReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: payloadComment }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+      updateTaskCommentState(taskId, payloadComment)
+      setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setAllTasksReportCommentSaving(commentKey, false)
+    }
+  }
+
   const isDragTargetInteractive = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false
     const tag = target.tagName
@@ -1061,6 +1075,122 @@ export default function GaKaTasksPage() {
     }
   }
 
+  // Convert all tasks to daily report row format
+  const allTasksReportRows = React.useMemo(() => {
+    const rows: Array<{
+      typeLabel: string
+      subtype: string
+      period: string
+      department: string
+      title: string
+      description: string
+      status: string
+      bz: string
+      kohaBz: string
+      tyo: string
+      comment?: string | null
+      userInitials?: string
+      taskId?: string
+      createdDate?: string
+    }> = []
+
+    if (!ganeUserId) return rows
+
+    const resolveDepartmentLabel = (
+      departmentId?: string | null,
+      scope?: string | null,
+      isGaNote?: boolean
+    ) => {
+      if (scope === "GA") return "GA"
+      if (scope === "ALL") return "ALL"
+      if (departmentId) {
+        const dept = departments.find((d) => d.id === departmentId)
+        return dept?.code || dept?.name || "-"
+      }
+      if (isGaNote) return "GA"
+      return "-"
+    }
+
+    // Process all tasks assigned to Gane
+    for (const task of tasks) {
+      const isAssigned =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      if (!isAssigned) continue
+      if (task.is_active === false) continue
+      if (task.system_template_origin_id) continue // Skip system tasks
+
+      const isProject = Boolean(task.project_id)
+      const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+      const createdDate = task.created_at ? new Date(task.created_at).toISOString().slice(0, 10) : undefined
+
+      rows.push({
+        typeLabel: isProject ? "PRJK" : "FT",
+        subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
+        title: task.title || "-",
+        description: task.description || "-",
+        status: taskStatusLabel(task),
+        bz: "-",
+        kohaBz: "-",
+        tyo: baseDate ? getTyoLabel(baseDate, task.completed_at, todayDate) : "-",
+        comment: taskCommentMap.get(task.id) ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        taskId: task.id,
+        createdDate,
+      })
+    }
+
+    // Sort by created date (newest first)
+    rows.sort((a, b) => {
+      if (!a.createdDate && !b.createdDate) return 0
+      if (!a.createdDate) return 1
+      if (!b.createdDate) return -1
+      return b.createdDate.localeCompare(a.createdDate)
+    })
+
+    return rows
+  }, [tasks, ganeUserId, ganeUser, departments, taskCommentMap, todayDate])
+
+  const exportAllTasks = async () => {
+    if (!user?.id) return
+    if (!ganeUserId) {
+      toast.error("Gane Arifaj user not found. Cannot export.")
+      return
+    }
+    setExportingAllTasks(true)
+    try {
+      // Use the daily report export endpoint but with all_users=true to get all tasks
+      // Since we want all tasks, we'll create a custom export
+      // For now, let's use the tasks.xlsx endpoint filtered by user
+      const qs = new URLSearchParams({
+        user_id: ganeUserId,
+      })
+      const res = await apiFetch(`/exports/tasks.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        toast.error("Failed to export all tasks")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const today = new Date()
+      const dateStr = `${today.getDate().toString().padStart(2, "0")}_${(today.getMonth() + 1).toString().padStart(2, "0")}_${today.getFullYear().toString().slice(-2)}`
+      link.download = `all_tasks_${dateStr}_${printInitials || "user"}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export all tasks", error)
+      toast.error("Failed to export all tasks")
+    } finally {
+      setExportingAllTasks(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="space-y-6 print:hidden">
@@ -1160,30 +1290,43 @@ export default function GaKaTasksPage() {
               <Button
                 variant="outline"
                 className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                onClick={() => setShowDailyUserReport((prev) => !prev)}
+                onClick={() => {
+                  setShowDailyUserReport(true)
+                  setShowAllTasksReport(false)
+                  setTimeout(() => window.print(), 100)
+                }}
               >
-                {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
+                <Printer className="mr-2 h-4 w-4" />
+                Print Daily
               </Button>
-              {showDailyUserReport ? (
-                <>
-                  <Button
-                    variant="outline"
-                    className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                    onClick={() => window.print()}
-                  >
-                    <Printer className="mr-2 h-4 w-4" />
-                    Print
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                    disabled={exportingDailyReport}
-                    onClick={() => void exportDailyReport()}
-                  >
-                    {exportingDailyReport ? "Exporting..." : "Export Excel"}
-                  </Button>
-                </>
-              ) : null}
+              <Button
+                variant="outline"
+                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                disabled={exportingDailyReport}
+                onClick={() => void exportDailyReport()}
+              >
+                {exportingDailyReport ? "Exporting..." : "Export Daily Excel"}
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                onClick={() => {
+                  setShowAllTasksReport(true)
+                  setShowDailyUserReport(false)
+                  setTimeout(() => window.print(), 100)
+                }}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Print All
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                disabled={exportingAllTasks}
+                onClick={() => void exportAllTasks()}
+              >
+                {exportingAllTasks ? "Exporting..." : "Export All Excel"}
+              </Button>
             </div>
           </CardHeader>
           {showDailyUserReport ? (
@@ -1354,6 +1497,156 @@ export default function GaKaTasksPage() {
             </CardContent>
           ) : null}
         </Card>
+
+        {showAllTasksReport ? (
+          <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">All Tasks Report</CardTitle>
+                <div className="text-xs text-slate-500 mt-1">All tasks assigned to Gane Arifaj.</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                  onClick={() => setShowAllTasksReport(false)}
+                >
+                  Hide All Tasks Report
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-500">
+                  Total tasks: {allTasksReportRows.length}
+                </div>
+              </div>
+              <div className="mt-3 max-h-[320px] overflow-x-auto overflow-y-auto">
+                <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                  <colgroup>
+                    <col className="w-[36px]" />
+                    <col className="w-[44px]" />
+                    <col className="w-[56px]" />
+                    <col className="w-[56px]" />
+                    <col className="w-[56px]" />
+                    <col className="w-[150px]" />
+                    <col className="w-[60px]" />
+                    <col className="w-[40px]" />
+                    <col className="w-[52px]" />
+                    <col className="w-[48px]" />
+                    <col className="w-[140px]" />
+                    <col className="w-[70px]" />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10 bg-slate-50">
+                    <tr className="bg-slate-50">
+                      <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                        Nr
+                      </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
+                      <th className="border border-slate-200 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                        NLL
+                      </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                        <span className="block">AM/</span>
+                        <span className="block">PM</span>
+                      </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">DEP</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                        KOHA BZ
+                      </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                        T/Y/O
+                      </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">User</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allTasksReportRows.length ? (
+                      allTasksReportRows.map((row, index) => {
+                        const commentKey = row.taskId ? `all-task:${row.taskId}` : ""
+                        const previousValue = row.comment ?? ""
+                        const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
+                        const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
+                        return (
+                          <tr key={`${row.taskId}-${index}`}>
+                            <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                              {index + 1}
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.subtype}
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.period}
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
+                              {row.tyo}
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  aria-label="Koment"
+                                  className="h-4 w-full border-b border-slate-300 bg-transparent"
+                                  value={commentValue}
+                                  onChange={(e) => {
+                                    if (!commentKey) return
+                                    const nextValue = e.target.value
+                                    setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
+                                  }}
+                                  onBlur={(e) => {
+                                    if (!commentKey) return
+                                    const nextValue = e.target.value
+                                    if (row.taskId) {
+                                      void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                    }
+                                  }}
+                                  disabled={!commentKey}
+                                />
+                                <button
+                                  type="button"
+                                  className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+                                  disabled={!commentKey || isSaving}
+                                  onClick={() => {
+                                    if (!commentKey) return
+                                    if (row.taskId) {
+                                      void saveAllTasksReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                    }
+                                  }}
+                                >
+                                  {isSaving ? "Saving" : "Save"}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              {row.userInitials || "-"}
+                            </td>
+                          </tr>
+                        )
+                      })
+                    ) : (
+                      <tr>
+                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
+                          No tasks available.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {viewFilter !== "system" ? (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
@@ -1872,21 +2165,126 @@ export default function GaKaTasksPage() {
           />
         </div>
       ) : null}
-      <div className="hidden print:block print:!p-0 print:!m-0">
-        <div className="print-page">
-          <div className="print-header">
-            <span />
-            <div className="print-title">Daily Report</div>
-            <div className="print-datetime">
-              {printedAt.toLocaleString("en-US", {
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+      {showAllTasksReport ? (
+        <div className="hidden print:block print:!p-0 print:!m-0">
+          <div className="print-page">
+            <div className="print-header">
+              <span />
+              <div className="print-title">All Tasks Report</div>
+              <div className="print-datetime">
+                {printedAt.toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </div>
+            <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+              <colgroup>
+                <col className="w-[36px]" />
+                <col className="w-[44px]" />
+                <col className="w-[30px]" />
+                <col className="w-[36px]" />
+                <col className="w-[48px]" />
+                <col className="w-[150px]" />
+                <col className="w-[60px]" />
+                <col className="w-[30px]" />
+                <col className="w-[52px]" />
+                <col className="w-[36px]" />
+                <col className="w-[140px]" />
+                <col className="w-[70px]" />
+              </colgroup>
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                    Nr
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
+                    NLL
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                    <span className="block">AM/</span>
+                    <span className="block">PM</span>
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">DEP</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
+                    T/Y/O
+                  </th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTasksReportRows.length ? (
+                  allTasksReportRows.map((row, index) => (
+                    <tr key={`${row.taskId}-${index}`}>
+                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                        {row.subtype}
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                        {row.period}
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                        {(row.status || "-").toString().toUpperCase()}
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                        {row.tyo}
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top">
+                        <div className="h-4 w-full border-b border-slate-400" />
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                        {row.userInitials || "-"}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
+                      No data available.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <div className="print-footer">
+              <span />
+              <span className="print-page-count">1/1</span>
+              <div className="print-initials">PUNOI: {printInitials || "—"}</div>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {showDailyUserReport ? (
+        <div className="hidden print:block print:!p-0 print:!m-0">
+          <div className="print-page">
+            <div className="print-header">
+              <span />
+              <div className="print-title">Daily Report</div>
+              <div className="print-datetime">
+                {printedAt.toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </div>
           <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
             <colgroup>
               <col className="w-[36px]" />
@@ -1973,6 +2371,7 @@ export default function GaKaTasksPage() {
           </div>
         </div>
       </div>
+      ) : null}
       <style jsx global>{`
         .daily-report-table th,
         .daily-report-table td {

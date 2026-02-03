@@ -39,6 +39,7 @@ class GaNoteCreate(BaseModel):
 
 
 class GaNoteUpdate(BaseModel):
+    content: str | None = None
     status: GaNoteStatus | None = None
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None

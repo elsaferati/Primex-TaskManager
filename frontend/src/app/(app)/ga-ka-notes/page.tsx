@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { Department, GaNote, Project, Task, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -134,6 +134,13 @@ export default function GaKaNotesPage() {
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
+  const [noteTaskInfo, setNoteTaskInfo] = React.useState<
+    Map<string, { assignees: TaskAssignee[]; description: string | null; taskId: string | null }>
+  >(new Map())
+  const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
+  const [editContent, setEditContent] = React.useState("")
+  const [editDescription, setEditDescription] = React.useState("")
+  const [savingEdit, setSavingEdit] = React.useState(false)
 
 
 
@@ -215,6 +222,55 @@ export default function GaKaNotesPage() {
     void fetchNotes()
   }, [fetchNotes])
 
+  // Load tasks linked to notes to show assignees/descriptions
+  React.useEffect(() => {
+    const loadNoteTasks = async () => {
+      if (!notes.length) {
+        setNoteTaskInfo(new Map())
+        return
+      }
+      // Wait for users to be loaded before processing
+      if (users.length === 0) {
+        return
+      }
+      const res = await apiFetch("/tasks?include_done=true&include_all_departments=true")
+      if (!res?.ok) return
+      const data = (await res.json()) as Task[]
+      const userMapById = new Map(users.map((u) => [u.id, u]))
+
+      const map = new Map<string, { assignees: TaskAssignee[]; description: string | null; taskId: string | null }>()
+      for (const t of data) {
+        if (!t.ga_note_origin_id) continue
+        let assignees: TaskAssignee[] = []
+        if (t.assignees && t.assignees.length > 0) {
+          // Use TaskAssignee directly from API - it has all the info we need for display
+          assignees = t.assignees
+        }
+        if (assignees.length === 0 && t.assigned_to) {
+          // Fallback to assigned_to if no assignees in TaskAssignee table
+          const fallback = userMapById.get(t.assigned_to)
+          if (fallback) {
+            // Convert UserLookup to TaskAssignee format for consistency
+            assignees = [{
+              id: fallback.id,
+              email: null,
+              username: fallback.username || null,
+              full_name: fallback.full_name || null,
+              department_id: fallback.department_id || null,
+            }]
+          }
+        }
+        map.set(t.ga_note_origin_id, {
+          assignees,
+          description: t.description ?? null,
+          taskId: t.id,
+        })
+      }
+      setNoteTaskInfo(map)
+    }
+    void loadNoteTasks()
+  }, [apiFetch, notes, users])
+
 
 
   const createNote = async () => {
@@ -273,12 +329,81 @@ export default function GaKaNotesPage() {
     }
   }
 
+  const openEditNote = (note: GaNote) => {
+    setEditNoteId(note.id)
+    setEditContent(note.content || "")
+    const taskInfo = noteTaskInfo.get(note.id)
+    setEditDescription(taskInfo?.description || "")
+  }
+
+  const saveEditNote = async () => {
+    if (!editNoteId) return
+    const trimmed = editContent.trim()
+    if (!trimmed) {
+      toast.error("Note text cannot be empty")
+      return
+    }
+    setSavingEdit(true)
+    try {
+      // Update the note
+      const res = await apiFetch(`/ga-notes/${editNoteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: trimmed }),
+      })
+      if (res?.ok) {
+        const updated = (await res.json()) as GaNote
+        setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
+        
+        // Update the task description if a task exists
+        const taskInfo = noteTaskInfo.get(editNoteId)
+        if (taskInfo?.taskId) {
+          const taskRes = await apiFetch(`/tasks/${taskInfo.taskId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: editDescription.trim() || null }),
+          })
+          if (taskRes?.ok) {
+            // Reload note task info to reflect the updated description
+            const notesRes = await apiFetch("/tasks?include_done=true&include_all_departments=true")
+            if (notesRes?.ok) {
+              const tasksData = (await notesRes.json()) as Task[]
+              const userMapById = new Map(users.map((u) => [u.id, u]))
+              const map = new Map<string, { assignees: UserLookup[]; description: string | null; taskId: string | null }>()
+              for (const t of tasksData) {
+                if (!t.ga_note_origin_id) continue
+                let assignees: UserLookup[] = t.assignees ?? []
+                if ((!assignees || assignees.length === 0) && t.assigned_to) {
+                  const fallback = userMapById.get(t.assigned_to)
+                  if (fallback) assignees = [fallback]
+                }
+                map.set(t.ga_note_origin_id, {
+                  assignees,
+                  description: t.description ?? null,
+                  taskId: t.id,
+                })
+              }
+              setNoteTaskInfo(map)
+            }
+          }
+        }
+        
+        toast.success("Note updated")
+        setEditNoteId(null)
+      } else {
+        toast.error("Failed to update note")
+      }
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   const openTaskDialog = (note: GaNote) => {
     const trimmed = note.content.trim()
     const defaultTitle = trimmed ? trimmed.split(/\r?\n/)[0].slice(0, 120) : "GA/KA note task"
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
-    setTaskDescription(note.content || "")
+    setTaskDescription("") // start empty so creator can add detailed description
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskDueDate("")
@@ -388,6 +513,35 @@ export default function GaKaNotesPage() {
           prev.map((n) => (n.id === note.id ? { ...n, is_converted_to_task: true } : n))
         )
       }
+      setNoteTaskInfo((prev) => {
+        const next = new Map(prev)
+        const userMapById = new Map(users.map((u) => [u.id, u]))
+        let assignees: TaskAssignee[] = []
+        if (createdTask.assignees && createdTask.assignees.length > 0) {
+          // Use TaskAssignee directly from the API response
+          assignees = createdTask.assignees
+        }
+        if (assignees.length === 0 && createdTask.assigned_to) {
+          // Fallback to assigned_to if no assignees in TaskAssignee table
+          const fallback = userMapById.get(createdTask.assigned_to)
+          if (fallback) {
+            // Convert UserLookup to TaskAssignee format for consistency
+            assignees = [{
+              id: fallback.id,
+              email: null,
+              username: fallback.username || null,
+              full_name: fallback.full_name || null,
+              department_id: fallback.department_id || null,
+            }]
+          }
+        }
+        next.set(note.id, {
+          assignees,
+          description: createdTask.description ?? null,
+          taskId: createdTask.id,
+        })
+        return next
+      })
       setTaskDialogNoteId(null)
       toast.success("Task created from note")
     } finally {
@@ -880,19 +1034,22 @@ export default function GaKaNotesPage() {
           ) : notes.length === 0 ? (
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
-            <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full md:w-fit">
-              <div className="w-full md:w-[1050px] min-w-[1050px]">
-                <table className="w-full caption-bottom text-sm min-w-[1050px]">
+            <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
+              <div className="w-full min-w-[1350px]">
+                <table className="w-full caption-bottom text-sm min-w-[1350px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
-                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>Nr</th>
-                      <th className="w-[calc(100vw-80px)] md:w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
+                      <th className="w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
-                      <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
-                      <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL SHENIM</th>
+                      <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
+                      <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
+                      <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
+                      <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -909,6 +1066,8 @@ export default function GaKaNotesPage() {
                           : "bg-slate-200 text-slate-700"
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
+                    const taskInfo = noteTaskInfo.get(note.id)
+                    const assignees = taskInfo?.assignees ?? []
 
                     // Only show department if:
                     // 1. Note has a project (always show projects)
@@ -921,7 +1080,7 @@ export default function GaKaNotesPage() {
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className="whitespace-pre-wrap break-words w-[calc(100vw-80px)] md:w-[450px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: 'bottom' }}>
+                        <td className="whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <span className="text-sm">{note.content}</span>
                             <div className="flex items-center gap-2">
@@ -934,6 +1093,9 @@ export default function GaKaNotesPage() {
 
                             </div>
                           </div>
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[320px] w-[320px] max-w-[320px]" style={{ verticalAlign: 'bottom' }}>
+                          {taskInfo?.description ? taskInfo.description : <span className="text-slate-400">-</span>}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
                         <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
@@ -960,7 +1122,36 @@ export default function GaKaNotesPage() {
                             </Badge>
                           ) : null}
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
+                          {!note.is_converted_to_task ? (
+                            <span className="text-xs text-slate-500">-</span>
+                          ) : assignees.length === 0 ? (
+                            <span className="text-xs text-slate-500">-</span>
+                          ) : (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {assignees.map((assignee, assigneeIdx) => {
+                                const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
+                                const assigneeInitials = getInitials(assigneeLabel)
+                                const assigneeBadgeClasses =
+                                  assigneeInitials === "GA"
+                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                    : assigneeInitials === "KA"
+                                      ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                      : "bg-slate-200 text-slate-700"
+                                return (
+                                  <div
+                                    key={assigneeIdx}
+                                    className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${assigneeBadgeClasses}`}
+                                    title={assigneeLabel}
+                                  >
+                                    {assigneeInitials}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {!note.is_converted_to_task ? (
                               <Button
@@ -978,7 +1169,7 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.status !== "CLOSED" ? (
                               <Button
@@ -994,6 +1185,18 @@ export default function GaKaNotesPage() {
                                 Closed
                               </Badge>
                             )}
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50"
+                              onClick={() => openEditNote(note)}
+                            >
+                              Edit
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -1228,6 +1431,46 @@ export default function GaKaNotesPage() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editNoteId)} onOpenChange={(open) => {
+        if (!open) {
+          setEditNoteId(null)
+          setEditDescription("")
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Note</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Note text</Label>
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="min-h-[140px]"
+              />
+            </div>
+            {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setEditNoteId(null)
+                setEditDescription("")
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={() => void saveEditNote()} disabled={savingEdit}>
+                {savingEdit ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -145,6 +145,8 @@ async def update_ga_note(
         if project and project.department_id is not None:
             ensure_department_access(user, project.department_id)
 
+    if payload.content is not None:
+        note.content = payload.content
     if payload.status is not None:
         note.status = payload.status
         if payload.status == GaNoteStatus.CLOSED:
