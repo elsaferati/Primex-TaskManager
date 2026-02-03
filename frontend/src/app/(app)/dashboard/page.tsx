@@ -132,6 +132,47 @@ export default function DashboardPage() {
                 </Link>
               )
             })}
+      <div className="grid gap-4 md:grid-cols-3 bg-red">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Open tasks</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{tasks.length}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Overdue</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{overdue.length}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Reminders</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{reminders.length}</CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 bg-green-100">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-2xl">Quick links</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm bg-red">
+            <Link className="block underline" href="/weekly-planner">
+              Weekly Planner
+            </Link>
+            <Link className="block underline" href="/monthly-planner">
+              Monthly Planner
+            </Link>
+            <Link className="block underline" href="/reports">
+              Reports & Exports
+            </Link>
+            {user?.role !== "STAFF" ? (
+              <Link className="block underline" href="/settings">
+                Settings
+              </Link>
+            ) : null}
           </CardContent>
         </Card>
 
