@@ -50,3 +50,14 @@ class CommonEntryReject(BaseModel):
     reason: str = Field(min_length=2, max_length=1000)
 
 
+class CommonLeaveBlockOut(BaseModel):
+    entry_id: uuid.UUID
+    user_id: uuid.UUID
+    start_date: date
+    end_date: date
+    full_day: bool
+    start_time: str | None = None
+    end_time: str | None = None
+    note: str | None = None
+
+

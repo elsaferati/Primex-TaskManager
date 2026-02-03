@@ -297,6 +297,9 @@ export interface InternalNote {
   department_id?: string
   project_id?: string | null
   to_department_id: string
+  is_done: boolean
+  done_at?: string | null
+  done_by_user_id?: string | null
   created_at: string
   updated_at: string
 }

@@ -1329,6 +1329,61 @@ DEVELOPMENT_LEGEND_QUESTIONS = [
     },
 ]
 
+GRAPHIC_DESIGN_LEGEND_QUESTIONS = [
+    {
+        "key": "kryer",
+        "label": "KRYER",
+        "question_text": "A KEMI PROJEKTE TE TJERA TE PAPLANIFIKUARA?",
+        "color": "#C4FDC4",  # Green
+    },
+    {
+        "key": "nuk_eshte_punuar",
+        "label": "NUK ESHTE PUNUAR",
+        "question_text": "A KA KLIENT QE NUK KEMI PROJEKTE TE HAPURA?",
+        "color": "#FFC4ED",  # Pink
+    },
+    {
+        "key": "proces",
+        "label": "PROCES",
+        "question_text": "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLANIFIKU KETE JAVE, APO BARTEN JAVEN TJETER?",
+        "color": "#FFD700",  # Yellow
+    },
+    {
+        "key": "pv",
+        "label": "PV",
+        "question_text": "NENGARKESE (NUK ESHTE I PLANIFIKUAR PERSONI PER KOMPLET JAVEN)?",
+        "color": "#D3D3D3",  # Light Grey
+    },
+    {
+        "key": "mbingarkese",
+        "label": "MBINGARKESE?",
+        "question_text": "MBINGARKESE?",
+        "color": "#D3D3D3",  # Light Grey
+    },
+    {
+        "key": "komplet",
+        "label": "KOMPLET (100% PROJEKTE)",
+        "question_text": "KOMPLET (100% PROJEKTE)",
+        "color": "#D3D3D3",  # Light Grey
+    },
+]
+
+def normalize_department_key(name: str | None) -> str:
+    return "".join((name or "").strip().lower().split())
+
+
+LEGEND_QUESTION_SETS = {
+    "development": DEVELOPMENT_LEGEND_QUESTIONS,
+    "zhvillim": DEVELOPMENT_LEGEND_QUESTIONS,
+    "graphicdesign": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "grafikdizajn": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "dizajngrafik": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "productcontent": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "produktcontent": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "projectcontentmanager": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+    "pcm": GRAPHIC_DESIGN_LEGEND_QUESTIONS,
+}
+
 
 @router.get("/weekly-planner/legend", response_model=list[WeeklyPlannerLegendEntryOut])
 async def get_weekly_planner_legend(
@@ -1337,7 +1392,7 @@ async def get_weekly_planner_legend(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[WeeklyPlannerLegendEntryOut]:
-    """Get legend entries for a specific department and week. Auto-creates default entries for Development."""
+    """Get legend entries for a specific department and week. Auto-creates default entries for supported departments."""
     # Check department access
     ensure_department_access(user, department_id)
     
@@ -1346,8 +1401,10 @@ async def get_weekly_planner_legend(
     if not dept:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
     
-    # Only support Development department for now
-    if dept.name != "Development":
+    legend_questions = LEGEND_QUESTION_SETS.get(normalize_department_key(dept.name))
+    if not legend_questions and getattr(dept, "code", None):
+        legend_questions = LEGEND_QUESTION_SETS.get(normalize_department_key(dept.code))
+    if not legend_questions:
         return []
     
     # Get existing entries
@@ -1357,13 +1414,12 @@ async def get_weekly_planner_legend(
     )
     existing_entries = (await db.execute(stmt.order_by(WeeklyPlannerLegendEntry.key))).scalars().all()
     
-    # If entries exist, return them
-    if existing_entries:
-        return [WeeklyPlannerLegendEntryOut.model_validate(entry) for entry in existing_entries]
-    
-    # Auto-create default entries for Development
+    existing_by_key = {entry.key: entry for entry in existing_entries}
     new_entries = []
-    for question in DEVELOPMENT_LEGEND_QUESTIONS:
+
+    for question in legend_questions:
+        if question["key"] in existing_by_key:
+            continue
         entry = WeeklyPlannerLegendEntry(
             department_id=department_id,
             week_start_date=week_start,
@@ -1375,14 +1431,17 @@ async def get_weekly_planner_legend(
         )
         db.add(entry)
         new_entries.append(entry)
-    
-    await db.commit()
-    
-    # Refresh entries to get IDs and timestamps
-    for entry in new_entries:
-        await db.refresh(entry)
-    
-    return [WeeklyPlannerLegendEntryOut.model_validate(entry) for entry in new_entries]
+
+    if new_entries:
+        await db.commit()
+        for entry in new_entries:
+            await db.refresh(entry)
+        existing_entries.extend(new_entries)
+
+    if not existing_entries:
+        return []
+
+    return [WeeklyPlannerLegendEntryOut.model_validate(entry) for entry in existing_entries]
 
 
 @router.patch("/weekly-planner/legend/{entry_id}", response_model=WeeklyPlannerLegendEntryOut)
