@@ -1136,7 +1136,7 @@ async def _daily_ga_table_for_user(
     day: date,
     department_id: uuid.UUID | None,
     user_id: uuid.UUID,
-) -> tuple[str, list[str]]:
+) -> str:
     entry_content = ""
     if department_id is not None:
         entry = (
@@ -1150,89 +1150,7 @@ async def _daily_ga_table_for_user(
         ).scalar_one_or_none()
         if entry:
             entry_content = entry.content or ""
-
-    task_stmt = (
-        select(Task)
-        .where(Task.completed_at.is_(None))
-        .where(Task.is_active.is_(True))
-        .where(Task.system_template_origin_id.is_(None))
-        .where(Task.due_date.is_not(None))
-        .where(Task.assigned_to == user_id)
-    )
-    if department_id is not None:
-        task_stmt = task_stmt.where(Task.department_id == department_id)
-
-    tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
-    project_ids: set[uuid.UUID] = set()
-    for task in tasks:
-        planned_start, planned_end = _planned_range_for_task(task)
-        if planned_start is None or planned_end is None:
-            continue
-        if planned_start <= day <= planned_end and task.project_id is not None:
-            project_ids.add(task.project_id)
-
-    cutoff = datetime.utcnow() - timedelta(days=7)
-    closed_cutoff = datetime.utcnow() - timedelta(days=5)
-    base_filters = [
-        GaNote.created_at >= cutoff,
-        or_(
-            GaNote.status != GaNoteStatus.CLOSED,
-            GaNote.completed_at.is_(None),
-            GaNote.completed_at >= closed_cutoff,
-        ),
-    ]
-
-    user_notes = (
-        await db.execute(
-            select(GaNote)
-            .where(GaNote.created_by == user_id)
-            .where(*base_filters)
-            .order_by(GaNote.created_at.desc())
-        )
-    ).scalars().all()
-
-    project_notes: list[GaNote] = []
-    if project_ids:
-        project_notes = (
-            await db.execute(
-                select(GaNote)
-                .where(GaNote.project_id.in_(project_ids))
-                .where(*base_filters)
-                .order_by(GaNote.created_at.desc())
-            )
-        ).scalars().all()
-
-    notes_by_id: dict[uuid.UUID, GaNote] = {}
-    for note in user_notes + project_notes:
-        notes_by_id[note.id] = note
-
-    note_project_ids = {note.project_id for note in notes_by_id.values() if note.project_id}
-    project_map: dict[uuid.UUID, Project] = {}
-    if note_project_ids:
-        projects = (
-            await db.execute(select(Project).where(Project.id.in_(note_project_ids)))
-        ).scalars().all()
-        project_map = {proj.id: proj for proj in projects}
-
-    def _project_name(pid: uuid.UUID | None) -> str | None:
-        if not pid:
-            return None
-        proj = project_map.get(pid)
-        if not proj:
-            return None
-        return proj.title or proj.name
-
-    notes_sorted = sorted(notes_by_id.values(), key=lambda n: n.created_at, reverse=True)
-    note_lines: list[str] = []
-    for note in notes_sorted:
-        content = note.content or ""
-        if not content:
-            continue
-        project_name = _project_name(note.project_id)
-        prefix = f"{project_name}: " if project_name else ""
-        note_lines.append(f"{prefix}{content}")
-
-    return entry_content, note_lines
+    return entry_content
 
 
 @router.get("/daily-report.xlsx")
@@ -1420,7 +1338,7 @@ async def export_daily_report_xlsx(
                     )
 
     if not all_users:
-        ga_entry, ga_notes = await _daily_ga_table_for_user(
+        ga_entry = await _daily_ga_table_for_user(
             db=db,
             day=day,
             department_id=department_id,
@@ -1457,43 +1375,13 @@ async def export_daily_report_xlsx(
             ga_lines = ga_value_text.count("\n") + 1
             ws.row_dimensions[ga_section_row].height = max(18, ga_lines * 15)
 
-        notes_row = ga_section_row + 1
-        if ga_label_end_col >= ga_label_start_col:
-            ws.merge_cells(
-                start_row=notes_row,
-                start_column=ga_label_start_col,
-                end_row=notes_row,
-                end_column=ga_label_end_col,
-            )
-        notes_label_cell = ws.cell(row=notes_row, column=ga_label_start_col, value="GA NOTES:")
-        notes_label_cell.font = Font(bold=True)
-        notes_label_cell.alignment = Alignment(horizontal="left", vertical="bottom", readingOrder=1)
-        if ga_value_col_end >= ga_value_col_start:
-            ws.merge_cells(
-                start_row=notes_row,
-                start_column=ga_value_col_start,
-                end_row=notes_row,
-                end_column=ga_value_col_end,
-            )
-        if ga_notes:
-            notes_text = "\n".join(f"- {line}" for line in ga_notes)
-        else:
-            notes_text = "No GA notes."
-        notes_cell = ws.cell(row=notes_row, column=ga_value_col_start, value=notes_text)
-        notes_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
-        if notes_text:
-            notes_lines = notes_text.count("\n") + 1
-            ws.row_dimensions[notes_row].height = max(18, notes_lines * 15)
-
-        # Outline border for GA section (2-row table).
+        # Outline border for GA section (single-row table).
         thin = Side(style="thin", color="000000")
         thick = Side(style="medium", color="000000")
         section_start = ga_section_row
-        section_end = notes_row
+        section_end = ga_section_row
         for r in range(section_start, section_end + 1):
             for c in range(1, last_col + 1):
-                is_top = r == section_start
-                is_bottom = r == section_end
                 is_left = c == 1
                 is_right = c == last_col
                 is_divider_left = c == ga_value_col_start
@@ -1501,10 +1389,12 @@ async def export_daily_report_xlsx(
 
                 left = thick if is_left else (thin if is_divider_left else None)
                 right = thick if is_right else (thin if is_divider_right else None)
-                top = thick if is_top else thin
-                bottom = thick if is_bottom else thin
-
-                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+                ws.cell(row=r, column=c).border = Border(
+                    left=left,
+                    right=right,
+                    top=thick,
+                    bottom=thick,
+                )
 
     ws.oddHeader.right.text = "&D &T"
     ws.oddFooter.center.text = "Page &P / &N"
