@@ -717,6 +717,7 @@ export default function GaKaTasksPage() {
     tasksToday.forEach(pushTaskRow)
     tasksOverdue.forEach(pushTaskRow)
 
+    // Include fast tasks (no project) across their start->due date window
     for (const task of tasks) {
       if (!ganeUserId) continue
       const isAssigned =
@@ -725,16 +726,25 @@ export default function GaKaTasksPage() {
       if (!isAssigned) continue
       if (task.is_active === false) continue
       if (task.system_template_origin_id) continue
+
+      const isProject = Boolean(task.project_id)
+      if (isProject) continue // show only fast tasks here
+
       if (!task.due_date) continue
       const due = toDate(task.due_date)
-      if (!due || !isSameDay(due, todayDate)) continue
+      const start = toDate(task.start_date || task.due_date)
+      if (!due || !start) continue
+
+      // Show on any day within start -> due (inclusive)
+      if (todayDate < start || todayDate > due) continue
+
       if (seenTaskIds.has(task.id)) continue
       seenTaskIds.add(task.id)
+
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
-      const isProject = Boolean(task.project_id)
       rows.push({
-        typeLabel: isProject ? "PRJK" : "FT",
-        subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        typeLabel: "FT",
+        subtype: fastReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
@@ -742,7 +752,8 @@ export default function GaKaTasksPage() {
         status: taskStatusLabel(task),
         bz: "-",
         kohaBz: "-",
-        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        // Show as "T" for every day within start->due window
+        tyo: "T",
         comment: taskCommentMap.get(task.id) ?? null,
         userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         taskId: task.id,
@@ -756,6 +767,13 @@ export default function GaKaTasksPage() {
       const key = `${occ.template_id}:${occ.occurrence_date}`
       if (seenSystemKeys.has(key)) return
       seenSystemKeys.add(key)
+
+      // Only include GA-scoped occurrences (scope GA or department GA)
+      const isGaScope =
+        occ.scope === "GA" ||
+        (adminDepartmentId && occ.department_id === adminDepartmentId)
+      if (!isGaScope) return
+
       const baseDate = toDate(occ.occurrence_date)
       const systemSubtype =
         occ.frequency === "DAILY"

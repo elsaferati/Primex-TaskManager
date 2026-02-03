@@ -736,26 +736,17 @@ export function SystemTasksView({
       return
     }
     
-    // Check if gane.arifaj is in the assignees
-    const ganeUser = users.find((u) => u.username?.toLowerCase() === "gane.arifaj")
-    const hasGane = ganeUser && nextOwnerIds.includes(ganeUser.id)
-    
-    if (hasGane && gaDepartmentId) {
-      // If gane.arifaj is assigned, automatically set department to GA
-      setDepartmentId(gaDepartmentId)
-    } else {
-      // Check if assignees are from different departments
-      const assigneeDepartments = new Set<string>()
-      for (const id of nextOwnerIds) {
-        const deptId = ownerDepartmentId(id)
-        if (deptId) {
-          assigneeDepartments.add(deptId)
-        }
-      }
-      // If assignees are from multiple departments, automatically switch to "ALL departments"
-      if (assigneeDepartments.size > 1 && !isGlobalScopeValue(departmentId)) {
-        setDepartmentId(ALL_DEPARTMENTS_VALUE)
-      }
+    // Allow assignees across departments; adjust department selection to ALL if mixed.
+    const assigneeDepartments = new Set<string>()
+    for (const id of nextOwnerIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) assigneeDepartments.add(deptId)
+    }
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(departmentId)) {
+      setDepartmentId(ALL_DEPARTMENTS_VALUE)
+    } else if (assigneeDepartments.size === 1 && !isGlobalScopeValue(departmentId)) {
+      const [singleDept] = Array.from(assigneeDepartments)
+      if (singleDept) setDepartmentId(singleDept)
     }
     
     setAssigneeIds(nextOwnerIds)
@@ -769,26 +760,17 @@ export function SystemTasksView({
       return
     }
     
-    // Check if gane.arifaj is in the assignees
-    const ganeUser = users.find((u) => u.username?.toLowerCase() === "gane.arifaj")
-    const hasGane = ganeUser && nextOwnerIds.includes(ganeUser.id)
-    
-    if (hasGane && gaDepartmentId) {
-      // If gane.arifaj is assigned, automatically set department to GA
-      setEditDepartmentId(gaDepartmentId)
-    } else {
-      // Check if assignees are from different departments
-      const assigneeDepartments = new Set<string>()
-      for (const id of nextOwnerIds) {
-        const deptId = ownerDepartmentId(id)
-        if (deptId) {
-          assigneeDepartments.add(deptId)
-        }
-      }
-      // If assignees are from multiple departments, automatically switch to "ALL departments"
-      if (assigneeDepartments.size > 1 && !isGlobalScopeValue(editDepartmentId)) {
-        setEditDepartmentId(ALL_DEPARTMENTS_VALUE)
-      }
+    // Allow assignees across departments; adjust department selection to ALL if mixed.
+    const assigneeDepartments = new Set<string>()
+    for (const id of nextOwnerIds) {
+      const deptId = ownerDepartmentId(id)
+      if (deptId) assigneeDepartments.add(deptId)
+    }
+    if (assigneeDepartments.size > 1 && !isGlobalScopeValue(editDepartmentId)) {
+      setEditDepartmentId(ALL_DEPARTMENTS_VALUE)
+    } else if (assigneeDepartments.size === 1 && !isGlobalScopeValue(editDepartmentId)) {
+      const [singleDept] = Array.from(assigneeDepartments)
+      if (singleDept) setEditDepartmentId(singleDept)
     }
     
     setEditAssigneeIds(nextOwnerIds)
