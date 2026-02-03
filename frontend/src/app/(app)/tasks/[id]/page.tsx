@@ -60,11 +60,24 @@ export default function TaskDetailsPage() {
   const { apiFetch, user } = useAuth()
 
   const [task, setTask] = React.useState<Task | null>(null)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const [users, setUsers] = React.useState<UserLookup[]>([])
 
   const load = React.useCallback(async () => {
     const taskRes = await apiFetch(`/tasks/${taskId}`)
-    if (!taskRes.ok) return
+    if (!taskRes.ok) {
+      let detail = `Failed to load task (${taskRes.status})`
+      try {
+        const data = (await taskRes.json()) as { detail?: string }
+        if (data?.detail) detail = data.detail
+      } catch {
+        // ignore parse errors
+      }
+      setLoadError(detail)
+      setTask(null)
+      return
+    }
+    setLoadError(null)
     const t = (await taskRes.json()) as Task
     setTask(t)
 
@@ -176,6 +189,20 @@ export default function TaskDetailsPage() {
     }
     return `${assignees.length} selected`
   }, [users, assignees])
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50 px-4 py-8">
+        <div className="max-w-2xl mx-auto rounded-lg border border-rose-200 bg-white p-6 shadow-sm">
+          <div className="text-base font-semibold text-rose-700 mb-2">Unable to load task</div>
+          <div className="text-sm text-rose-600">{loadError}</div>
+          <Button variant="outline" className="mt-4" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!task) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -411,4 +438,3 @@ export default function TaskDetailsPage() {
     </div>
   )
 }
-

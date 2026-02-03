@@ -24,7 +24,6 @@ import { formatDepartmentName } from "@/lib/department-name"
 import type {
   ChecklistItem,
   DailyReportGaEntry,
-  DailyReportGaNote,
   DailyReportGaTableResponse,
   DailyReportResponse,
   Department,
@@ -822,8 +821,6 @@ export default function DepartmentKanban() {
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
   const [gaTableInput, setGaTableInput] = React.useState("")
-  const [gaTableNotes, setGaTableNotes] = React.useState<DailyReportGaNote[]>([])
-  const [loadingGaTable, setLoadingGaTable] = React.useState(false)
   const [savingGaTable, setSavingGaTable] = React.useState(false)
   const [allUsersDailyReports, setAllUsersDailyReports] = React.useState<Map<string, DailyReportResponse>>(new Map())
   const [loadingAllUsersDailyReports, setLoadingAllUsersDailyReports] = React.useState(false)
@@ -2595,18 +2592,13 @@ export default function DepartmentKanban() {
       if (activeTab !== "all" || viewMode !== "mine") {
         setGaTableEntry(null)
         setGaTableInput("")
-        setGaTableNotes([])
-        setLoadingGaTable(false)
         return
       }
       if (!department?.id || !user?.id) {
         setGaTableEntry(null)
         setGaTableInput("")
-        setGaTableNotes([])
-        setLoadingGaTable(false)
         return
       }
-      setLoadingGaTable(true)
       try {
         const qs = new URLSearchParams({
           day: todayIso,
@@ -2618,7 +2610,6 @@ export default function DepartmentKanban() {
           if (!cancelled) {
             setGaTableEntry(null)
             setGaTableInput("")
-            setGaTableNotes([])
           }
           return
         }
@@ -2626,16 +2617,10 @@ export default function DepartmentKanban() {
         if (cancelled) return
         setGaTableEntry(payload.entry ?? null)
         setGaTableInput(payload.entry?.content ?? "")
-        setGaTableNotes(payload.notes || [])
       } catch {
         if (!cancelled) {
           setGaTableEntry(null)
           setGaTableInput("")
-          setGaTableNotes([])
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingGaTable(false)
         }
       }
     }
@@ -5021,27 +5006,6 @@ export default function DepartmentKanban() {
                               {savingGaTable ? "Saving..." : "Save"}
                             </Button>
                           </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="border border-slate-200 px-2 py-2 text-xs font-semibold uppercase align-top">
-                          GA Notes:
-                        </td>
-                        <td className="border border-slate-200 px-2 py-2 text-xs">
-                          {loadingGaTable ? (
-                            <div className="text-slate-500">Loading...</div>
-                          ) : gaTableNotes.length ? (
-                            <ul className="list-disc pl-4 space-y-1">
-                              {gaTableNotes.map((note) => (
-                                <li key={note.id}>
-                                  {note.project_name ? `${note.project_name}: ` : ""}
-                                  {note.content}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="italic text-slate-500">No GA notes.</div>
-                          )}
                         </td>
                       </tr>
                     </tbody>
@@ -7744,25 +7708,6 @@ export default function DepartmentKanban() {
                       </td>
                       <td className="border border-slate-900 px-2 py-2">
                         {gaTableInput || "-"}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top">
-                        GA Notes:
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 text-xs">
-                        {gaTableNotes.length ? (
-                          <ul className="list-disc pl-4 space-y-1">
-                            {gaTableNotes.map((note) => (
-                              <li key={note.id}>
-                                {note.project_name ? `${note.project_name}: ` : ""}
-                                {note.content}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div className="italic text-slate-600">No GA notes.</div>
-                        )}
                       </td>
                     </tr>
                   </tbody>
