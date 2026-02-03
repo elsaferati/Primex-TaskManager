@@ -43,6 +43,7 @@ DEPARTMENTS = [
     ("Graphic Design", "GD"),
     ("Human Resource", "HR"),
     ("Finance", "FIN"),
+    ("GA", "GA"),
 ]
 
 PCM_PROJECTS = [

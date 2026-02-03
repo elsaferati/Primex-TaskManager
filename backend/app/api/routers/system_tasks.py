@@ -426,8 +426,20 @@ async def create_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+        
+        # Check if any assignee is gane.arifaj - if so, set department to GA
+        gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
+        if gane_user:
+            # Find GA department
+            ga_department = (
+                await db.execute(select(Department).where(Department.code == "GA"))
+            ).scalar_one_or_none()
+            if ga_department:
+                # Set department to GA and scope to DEPARTMENT
+                department_id = ga_department.id
+                scope_value = SystemTaskScope.DEPARTMENT
         # If assignees are from different departments, automatically change scope to ALL
-        if assignee_users and scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
+        elif assignee_users and scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
             assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
             if len(assignee_departments) > 1 or (len(assignee_departments) == 1 and list(assignee_departments)[0] != department_id):
                 # Multiple departments or different department - change to ALL scope
@@ -592,6 +604,21 @@ async def update_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+        
+        # Check if any assignee is gane.arifaj - if so, set department to GA
+        gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
+        if gane_user:
+            # Find GA department
+            ga_department = (
+                await db.execute(select(Department).where(Department.code == "GA"))
+            ).scalar_one_or_none()
+            if ga_department:
+                # Set department to GA and scope to DEPARTMENT
+                target_department = ga_department.id
+                scope_value = SystemTaskScope.DEPARTMENT
+                # Update template fields - override any existing values
+                template.department_id = target_department
+                template.scope = _enum_value(scope_value)
         # Allow assigning users from any department - no department restriction
 
     if payload.title is not None:
@@ -605,6 +632,15 @@ async def update_system_task_template(
     if scope_value == SystemTaskScope.DEPARTMENT:
         if department_set:
             template.department_id = payload.department_id
+        # If gane.arifaj is assigned, ensure department is set to GA (already set above)
+        elif assignee_set and assignee_users:
+            gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
+            if gane_user and template.department_id is None:
+                ga_department = (
+                    await db.execute(select(Department).where(Department.code == "GA"))
+                ).scalar_one_or_none()
+                if ga_department:
+                    template.department_id = ga_department.id
     else:
         template.department_id = None
     if assignee_set and assignee_ids is not None:

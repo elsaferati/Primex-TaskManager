@@ -577,21 +577,27 @@ export default function GaKaTasksPage() {
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
   const gaTasks = React.useMemo(() => {
+    if (!ganeUserId) return []
     return tasks.filter((task) => {
       const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-      if (!task.ga_note_origin_id || isSystem) return false
-      // Show tasks assigned to current user or to gane.arifaj
-      const currentUserId = user?.id
-      if (!currentUserId && !ganeUserId) return false
-      const isAssigned = 
-        (currentUserId && (task.assigned_to === currentUserId || task.assignees?.some((assignee) => assignee.id === currentUserId))) ||
-        (ganeUserId && (task.assigned_to === ganeUserId || task.assignees?.some((assignee) => assignee.id === ganeUserId)))
-      if (!isAssigned) return false
+      if (isSystem) return false
+
+      // Only show fast tasks (no project) assigned to gane.arifaj
+      const isFastTask = !task.project_id
+      if (!isFastTask) return false
+
+      const isAssignedToGane =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+
+      if (!isAssignedToGane) return false
+
+      // Keep the same 7-day recency window
       const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
       return createdAt >= cutoff
     })
-  }, [ganeUserId, tasks, user?.id])
+  }, [ganeUserId, tasks])
 
   const filteredTasks = React.useMemo(() => {
     let filtered = gaTasks
@@ -711,6 +717,7 @@ export default function GaKaTasksPage() {
     tasksToday.forEach(pushTaskRow)
     tasksOverdue.forEach(pushTaskRow)
 
+    // Include fast tasks (no project) across their start->due date window
     for (const task of tasks) {
       if (!ganeUserId) continue
       const isAssigned =
@@ -719,16 +726,25 @@ export default function GaKaTasksPage() {
       if (!isAssigned) continue
       if (task.is_active === false) continue
       if (task.system_template_origin_id) continue
+
+      const isProject = Boolean(task.project_id)
+      if (isProject) continue // show only fast tasks here
+
       if (!task.due_date) continue
       const due = toDate(task.due_date)
-      if (!due || !isSameDay(due, todayDate)) continue
+      const start = toDate(task.start_date || task.due_date)
+      if (!due || !start) continue
+
+      // Show on any day within start -> due (inclusive)
+      if (todayDate < start || todayDate > due) continue
+
       if (seenTaskIds.has(task.id)) continue
       seenTaskIds.add(task.id)
+
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
-      const isProject = Boolean(task.project_id)
       rows.push({
-        typeLabel: isProject ? "PRJK" : "FT",
-        subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        typeLabel: "FT",
+        subtype: fastReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
@@ -736,7 +752,8 @@ export default function GaKaTasksPage() {
         status: taskStatusLabel(task),
         bz: "-",
         kohaBz: "-",
-        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        // Show as "T" for every day within start->due window
+        tyo: "T",
         comment: taskCommentMap.get(task.id) ?? null,
         userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
         taskId: task.id,
@@ -750,6 +767,13 @@ export default function GaKaTasksPage() {
       const key = `${occ.template_id}:${occ.occurrence_date}`
       if (seenSystemKeys.has(key)) return
       seenSystemKeys.add(key)
+
+      // Only include GA-scoped occurrences (scope GA or department GA)
+      const isGaScope =
+        occ.scope === "GA" ||
+        (adminDepartmentId && occ.department_id === adminDepartmentId)
+      if (!isGaScope) return
+
       const baseDate = toDate(occ.occurrence_date)
       const systemSubtype =
         occ.frequency === "DAILY"

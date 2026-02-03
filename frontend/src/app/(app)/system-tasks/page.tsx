@@ -545,18 +545,28 @@ export function SystemTasksView({
     void load()
   }, [load])
 
+  const canMarkDone = allowMarkAsDone && (
+    user?.role === "ADMIN" || user?.username?.toLowerCase() === "gane.arifaj"
+  )
+
   const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
     if (!template.id) return
+    if (!canMarkDone) return
     const taskId = template.id
-    const currentStatus = template.status || "TODO"
-    const newStatus = currentStatus === "DONE" ? "TODO" : "DONE"
+    const currentStatus = template.status || "OPEN"
+    const newStatus = currentStatus === "DONE" ? "OPEN" : "DONE"
+    const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
     
     setUpdatingTaskIds((prev) => new Set(prev).add(taskId))
     try {
-      const res = await apiFetch(`/tasks/${taskId}`, {
-        method: "PATCH",
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({
+          template_id: taskId,
+          occurrence_date: today,
+          status: newStatus,
+        }),
       })
       if (!res.ok) {
         let detail = "Failed to update task status"
@@ -573,7 +583,7 @@ export function SystemTasksView({
       setTemplates((prev) =>
         prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
       )
-      toast.success(`Task marked as ${newStatus}`)
+      toast.success(`Task marked as ${newStatus === "DONE" ? "done" : "open"}`)
     } catch (error) {
       toast.error("Failed to update task status")
     } finally {
@@ -583,7 +593,7 @@ export function SystemTasksView({
         return next
       })
     }
-  }, [apiFetch])
+  }, [apiFetch, canMarkDone])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -763,18 +773,20 @@ export function SystemTasksView({
       setAssigneeError(null)
       return
     }
-    // Check if assignees are from different departments
+    
+    // Allow assignees across departments; adjust department selection to ALL if mixed.
     const assigneeDepartments = new Set<string>()
     for (const id of nextOwnerIds) {
       const deptId = ownerDepartmentId(id)
-      if (deptId) {
-        assigneeDepartments.add(deptId)
-      }
+      if (deptId) assigneeDepartments.add(deptId)
     }
-    // If assignees are from multiple departments, automatically switch to "ALL departments"
     if (assigneeDepartments.size > 1 && !isGlobalScopeValue(departmentId)) {
       setDepartmentId(ALL_DEPARTMENTS_VALUE)
+    } else if (assigneeDepartments.size === 1 && !isGlobalScopeValue(departmentId)) {
+      const [singleDept] = Array.from(assigneeDepartments)
+      if (singleDept) setDepartmentId(singleDept)
     }
+    
     setAssigneeIds(nextOwnerIds)
     setAssigneeError(null)
   }
@@ -785,18 +797,20 @@ export function SystemTasksView({
       setEditAssigneeError(null)
       return
     }
-    // Check if assignees are from different departments
+    
+    // Allow assignees across departments; adjust department selection to ALL if mixed.
     const assigneeDepartments = new Set<string>()
     for (const id of nextOwnerIds) {
       const deptId = ownerDepartmentId(id)
-      if (deptId) {
-        assigneeDepartments.add(deptId)
-      }
+      if (deptId) assigneeDepartments.add(deptId)
     }
-    // If assignees are from multiple departments, automatically switch to "ALL departments"
     if (assigneeDepartments.size > 1 && !isGlobalScopeValue(editDepartmentId)) {
       setEditDepartmentId(ALL_DEPARTMENTS_VALUE)
+    } else if (assigneeDepartments.size === 1 && !isGlobalScopeValue(editDepartmentId)) {
+      const [singleDept] = Array.from(assigneeDepartments)
+      if (singleDept) setEditDepartmentId(singleDept)
     }
+    
     setEditAssigneeIds(nextOwnerIds)
     setEditAssigneeError(null)
   }
@@ -809,8 +823,42 @@ export function SystemTasksView({
     handleEditAssigneesChange(editAssigneeIds.filter((item) => item !== id))
   }
 
+  // Find gane user for filtering
+  const ganeUser = React.useMemo(() => {
+    return users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null
+  }, [users])
+  const ganeUserId = ganeUser?.id ?? null
+
+  // Find GA department by code
+  const gaDepartmentId = React.useMemo(() => {
+    const gaDept = departments.find((dept) => dept.code?.toUpperCase() === "GA")
+    return gaDept?.id ?? null
+  }, [departments])
+
   const scopeTemplates = React.useMemo(() => {
     if (!scopeFilter) return templates
+
+    // GA view should include tasks explicitly scoped to GA OR tasks that belong to the GA department code.
+    if (scopeFilter === "GA") {
+      return templates.filter((template) => {
+        const templateScope = resolveTemplateScope(template)
+        const isGaScoped = templateScope === "GA"
+        const isGaDepartment = gaDepartmentId ? template.department_id === gaDepartmentId : false
+
+        // Must belong to GA scope (explicit) or GA department.
+        if (!isGaScoped && !isGaDepartment) return false
+
+        // And must be assigned to gane.arifaj (default assignee or among assignees).
+        const isAssignedToGane =
+          (ganeUserId &&
+            (template.default_assignee_id === ganeUserId ||
+              template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
+          template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
+
+        return Boolean(isAssignedToGane)
+      })
+    }
+
 
     // When GA view is requested, show any template where Gane is an assignee (default or list),
     // regardless of department/scope.
@@ -825,7 +873,7 @@ export function SystemTasksView({
     }
 
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
-  }, [scopeFilter, templates, ganeUserId])
+  }, [scopeFilter, templates, ganeUserId, ganeUserId, gaDepartmentId])
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
@@ -2252,7 +2300,6 @@ export function SystemTasksView({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                            <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
                             {departments.map((dept) => (
                               <SelectItem key={dept.id} value={dept.id}>
                                 {formatDepartmentName(dept.name)} ({dept.code})
@@ -2638,7 +2685,6 @@ export function SystemTasksView({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={ALL_DEPARTMENTS_VALUE}>All departments</SelectItem>
-                            <SelectItem value={GA_DEPARTMENTS_VALUE}>GA</SelectItem>
                             {departments.map((dept) => (
                               <SelectItem key={dept.id} value={dept.id}>
                                 {formatDepartmentName(dept.name)} ({dept.code})
@@ -3290,7 +3336,7 @@ export function SystemTasksView({
 
                               <div className="text-right">
                                 <div className="flex flex-col items-end gap-2">
-                                  {allowMarkAsDone && (
+                                  {canMarkDone && (
                                     <Button
                                       variant="outline"
                                       size="sm"
