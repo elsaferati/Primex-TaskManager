@@ -2003,6 +2003,7 @@ export default function WeeklyPlannerPage() {
                   <WeeklyPlannerLegendTable
                     departmentId={departmentId}
                     weekStart={data.week_start}
+                    departmentName={selectedDept?.name}
                   />
                 )
               }

@@ -9,6 +9,7 @@ from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.holiday import Holiday
+from app.models.internal_note import InternalNote
 from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
@@ -48,6 +49,7 @@ __all__ = [
     "FeedbackLog",
     "GaNote",
     "Holiday",
+    "InternalNote",
     "Meeting",
     "MicrosoftToken",
     "Notification",
@@ -74,4 +76,3 @@ __all__ = [
     "WeeklyPlan",
     "WeeklyPlannerLegendEntry",
 ]
-
