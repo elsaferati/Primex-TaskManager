@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
 import { Loader2, Check, AlertCircle } from "lucide-react"
 
-type LegendEntry = {
+export type LegendEntry = {
   id: string
   department_id: string
   week_start_date: string
@@ -26,13 +26,15 @@ type LegendEntry = {
 // - PINK = NUK ESHTE PUNUAR (Not worked)
 // - YELLOW = PROCES (In process)
 // - LIGHT GREY = PV
-const LEGEND_COLORS: Record<string, string> = {
+export const LEGEND_COLORS: Record<string, string> = {
   // Current labels
   "TO DO": "#FF0000", // Red
   KRYER: "#C4FDC4", // Green
   "NUK ESHTE PUNUAR": "#FFC4ED", // Pink
   PROCES: "#FFD700", // Yellow
   PV: "#D3D3D3", // Light Grey
+  "MBINGARKESE?": "#D3D3D3", // Light Grey
+  "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light Grey
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
@@ -47,12 +49,116 @@ type WeeklyPlannerLegendTableProps = {
 
 type SaveState = "idle" | "saving" | "saved" | "error"
 
-const DEVELOPMENT_QUESTION_ORDER = ["KRYER", "PROCES", "NUK ESHTE PUNUAR", "PV"] as const
-const DEVELOPMENT_QUESTIONS: Record<(typeof DEVELOPMENT_QUESTION_ORDER)[number], string> = {
-  KRYER: "A KEMI PROJEKTE TE TJERA TE P(A)PLANIFIKUARA?",
-  PROCES: "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
-  "NUK ESHTE PUNUAR": "BLLOK?",
-  PV: "",
+const LEGEND_QUESTION_CONFIGS: Record<
+  string,
+  {
+    order: string[]
+    questions: Record<string, string>
+  }
+> = {
+  development: {
+    order: ["KRYER", "PROCES", "NUK ESHTE PUNUAR", "PV"],
+    questions: {
+      KRYER: "A KEMI PROJEKTE TE TJERA TE P(A)PLANIFIKUARA?",
+      PROCES: "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+      "NUK ESHTE PUNUAR": "BLLOK?",
+      PV: "",
+    },
+  },
+  graphicdesign: {
+    order: [
+      "KRYER",
+      "PROCES",
+      "NUK ESHTE PUNUAR",
+      "PV",
+      "MBINGARKESE?",
+      "KOMPLET (100% PROJEKTE)",
+    ],
+    questions: {
+      KRYER: "A KEMI PROJEKTE TE TJERA TE PAPLANIFIKUARA?",
+      PROCES: "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+      "NUK ESHTE PUNUAR": "A KA KLIENT QE NUK KEMI PROJEKTE TE HAPURA?",
+      PV: "NENGARKESE (NUK ESHTE I PLANIFIKUAR PERSONI PER KOMPLET JAVEN)?",
+      "MBINGARKESE?": "MBINGARKESE?",
+      "KOMPLET (100% PROJEKTE)": "KOMPLET (100% PROJEKTE)",
+    },
+  },
+  productcontent: {
+    order: [
+      "KRYER",
+      "PROCES",
+      "NUK ESHTE PUNUAR",
+      "PV",
+      "MBINGARKESE?",
+      "KOMPLET (100% PROJEKTE)",
+    ],
+    questions: {
+      KRYER: "A KEMI PROJEKTE TE TJERA TE PAPLANIFIKUARA?",
+      PROCES: "A PRITEN PROJEKTE TE TJERA GJATE JAVES QE DUHET ME I PLNF KETE JAVE, APO BARTEN JAVEN TJETER?",
+      "NUK ESHTE PUNUAR": "A KA KLIENT QE NUK KEMI PROJEKTE TE HAPURA?",
+      PV: "NENGARKESE (NUK ESHTE I PLANIFIKUAR PERSONI PER KOMPLET JAVEN)?",
+      "MBINGARKESE?": "MBINGARKESE?",
+      "KOMPLET (100% PROJEKTE)": "KOMPLET (100% PROJEKTE)",
+    },
+  },
+}
+
+const normalizeDepartmentKey = (name?: string) => {
+  const normalized = (name || "").trim().toLowerCase().replace(/\s+/g, "")
+  if (normalized === "zhvillim") return "development"
+  if (normalized === "grafikdizajn" || normalized === "dizajngrafik") return "graphicdesign"
+  if (normalized === "productcontent" || normalized === "produktcontent") return "productcontent"
+  if (normalized === "projectcontentmanager") return "productcontent"
+  return normalized
+}
+
+export const getLegendQuestions = (departmentName?: string) => {
+  const key = normalizeDepartmentKey(departmentName)
+  return LEGEND_QUESTION_CONFIGS[key] || null
+}
+
+export const buildLegendDisplayEntries = ({
+  entries,
+  departmentId,
+  weekStart,
+  departmentName,
+}: {
+  entries: LegendEntry[]
+  departmentId: string
+  weekStart: string
+  departmentName?: string
+}) => {
+  const legendConfig = getLegendQuestions(departmentName)
+  if (!legendConfig) return entries
+
+  const byLabel = new Map<string, LegendEntry>()
+  entries.forEach((entry) => {
+    if (!byLabel.has(entry.label)) {
+      byLabel.set(entry.label, entry)
+    }
+  })
+
+  return legendConfig.order.map((label) => {
+    const match = byLabel.get(label)
+    if (!match) {
+      return {
+        id: `__placeholder__${label}`,
+        department_id: departmentId,
+        week_start_date: weekStart,
+        key: label,
+        label,
+        question_text: legendConfig.questions[label],
+        answer_text: null,
+        created_by: null,
+        created_at: "",
+        updated_at: "",
+      }
+    }
+    return {
+      ...match,
+      question_text: legendConfig.questions[label] ?? match.question_text,
+    }
+  })
 }
 
 export function WeeklyPlannerLegendTable({
@@ -282,40 +388,12 @@ export function WeeklyPlannerLegendTable({
     return null
   }
 
-  const normalizedDepartmentName = (departmentName || "").trim().toLowerCase()
-  const isDevelopmentDepartment =
-    normalizedDepartmentName === "development" || normalizedDepartmentName === "zhvillim"
-  const displayEntries = isDevelopmentDepartment
-    ? (() => {
-        const byLabel = new Map<string, LegendEntry>()
-        entries.forEach((entry) => {
-          if (!byLabel.has(entry.label)) {
-            byLabel.set(entry.label, entry)
-          }
-        })
-        return DEVELOPMENT_QUESTION_ORDER.map((label) => {
-          const match = byLabel.get(label)
-          if (!match) {
-            return {
-              id: `__placeholder__${label}`,
-              department_id: departmentId,
-              week_start_date: weekStart,
-              key: label,
-              label,
-              question_text: DEVELOPMENT_QUESTIONS[label],
-              answer_text: null,
-              created_by: null,
-              created_at: "",
-              updated_at: "",
-            }
-          }
-          return {
-            ...match,
-            question_text: DEVELOPMENT_QUESTIONS[label],
-          }
-        })
-      })()
-    : entries
+  const displayEntries = buildLegendDisplayEntries({
+    entries,
+    departmentId,
+    weekStart,
+    departmentName,
+  })
 
   return (
     <Card>
@@ -346,17 +424,21 @@ export function WeeklyPlannerLegendTable({
                         style={{ backgroundColor: color }}
                       />
                     </TableCell>
-                    <TableCell className="font-semibold">{entry.label}</TableCell>
+                    <TableCell className="font-semibold">
+                      {entry.label === "MBINGARKESE?" || entry.label === "KOMPLET (100% PROJEKTE)"
+                        ? "-"
+                        : entry.label}
+                    </TableCell>
                     <TableCell>
                       {entry.question_text ? (
                         <span className="text-sm text-red-600 font-medium">{entry.question_text}</span>
                       ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
+                        <span className="text-sm text-muted-foreground">-</span>
                       )}
                     </TableCell>
                     <TableCell>
                       {isPlaceholder ? (
-                        <span className="text-sm text-muted-foreground">—</span>
+                        <span className="text-sm text-muted-foreground">-</span>
                       ) : (
                         <div className="relative">
                           <Input
@@ -392,3 +474,5 @@ export function WeeklyPlannerLegendTable({
     </Card>
   )
 }
+
+

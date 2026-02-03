@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.board import Board
 from app.models.common_entry import CommonEntry
-from app.models.enums import CommonApprovalStatus, NotificationType, TaskType, UserRole
+from app.models.enums import CommonApprovalStatus, CommonCategory, NotificationType, TaskType, UserRole
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.task import Task
@@ -21,6 +23,7 @@ from app.schemas.common_entry import (
     CommonEntryApprove,
     CommonEntryAssign,
     CommonEntryCreate,
+    CommonLeaveBlockOut,
     CommonEntryOut,
     CommonEntryReject,
 )
@@ -29,6 +32,62 @@ from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
+
+
+def _safe_iso_date(value: str | None, fallback: date) -> date:
+    if not value:
+        return fallback
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return fallback
+
+
+def _parse_annual_leave(entry: CommonEntry) -> tuple[date, date, bool, str | None, str | None, str | None]:
+    note = entry.description or ""
+    base_date = entry.entry_date or entry.created_at.date()
+    start_date = base_date
+    end_date = base_date
+    full_day = True
+    start_time: str | None = None
+    end_time: str | None = None
+
+    date_range_match = re.search(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", note, re.I)
+    if date_range_match:
+        start_date = _safe_iso_date(date_range_match.group(1), start_date)
+        end_date = _safe_iso_date(date_range_match.group(2), end_date)
+        note = re.sub(
+            r"Date range:\s*\d{4}-\d{2}-\d{2}\s+to\s+\d{4}-\d{2}-\d{2}",
+            "",
+            note,
+            flags=re.I,
+        ).strip()
+    else:
+        date_match = re.search(r"Date:\s*(\d{4}-\d{2}-\d{2})", note, re.I)
+        if date_match:
+            parsed = _safe_iso_date(date_match.group(1), start_date)
+            start_date = parsed
+            end_date = parsed
+            note = re.sub(r"Date:\s*\d{4}-\d{2}-\d{2}", "", note, flags=re.I).strip()
+        else:
+            date_matches = re.findall(r"\d{4}-\d{2}-\d{2}", note)
+            if date_matches:
+                start_date = _safe_iso_date(date_matches[0], start_date)
+                end_date = _safe_iso_date(date_matches[1] if len(date_matches) > 1 else date_matches[0], end_date)
+
+    if re.search(r"\(Full day\)", note, re.I):
+        full_day = True
+        note = re.sub(r"\(Full day\)", "", note, flags=re.I).strip()
+    else:
+        time_match = re.search(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)", note)
+        if time_match:
+            full_day = False
+            start_time = time_match.group(1)
+            end_time = time_match.group(2)
+            note = re.sub(r"\(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\)", "", note).strip()
+
+    cleaned_note = note.strip() if note.strip() else None
+    return start_date, end_date, full_day, start_time, end_time, cleaned_note
 
 
 def _to_out(e: CommonEntry) -> CommonEntryOut:
@@ -57,6 +116,72 @@ async def list_entries(db: AsyncSession = Depends(get_db), user=Depends(get_curr
     stmt = select(CommonEntry).order_by(CommonEntry.created_at.desc())
     entries = (await db.execute(stmt)).scalars().all()
     return [_to_out(e) for e in entries]
+
+
+@router.get("/blocks", response_model=list[CommonLeaveBlockOut])
+async def list_leave_blocks(
+    type: str = "PV_FEST",
+    start: date | None = None,
+    end: date | None = None,
+    department_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[CommonLeaveBlockOut]:
+    if type not in {"PV_FEST", "ANNUAL_LEAVE"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported block type")
+
+    if start is None or end is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start and end are required")
+
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+    elif user.role != UserRole.ADMIN:
+        department_id = user.department_id
+        if department_id is None:
+            return []
+
+    users_in_department: list[uuid.UUID] | None = None
+    if department_id is not None:
+        users_in_department = (
+            await db.execute(
+                select(User.id).where(User.department_id == department_id, User.is_active == True)
+            )
+        ).scalars().all()
+        if not users_in_department:
+            return []
+
+    entries_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)
+    if users_in_department is not None:
+        entries_stmt = entries_stmt.where(
+            (CommonEntry.assigned_to_user_id.in_(users_in_department))
+            | (
+                (CommonEntry.assigned_to_user_id.is_(None))
+                & (CommonEntry.created_by_user_id.in_(users_in_department))
+            )
+        )
+
+    entries = (await db.execute(entries_stmt.order_by(CommonEntry.created_at.desc()))).scalars().all()
+    blocks: list[CommonLeaveBlockOut] = []
+
+    for entry in entries:
+        entry_user_id = entry.assigned_to_user_id or entry.created_by_user_id
+        start_date, end_date, full_day, start_time, end_time, note = _parse_annual_leave(entry)
+        if end_date < start or start_date > end:
+            continue
+        blocks.append(
+            CommonLeaveBlockOut(
+                entry_id=entry.id,
+                user_id=entry_user_id,
+                start_date=start_date,
+                end_date=end_date,
+                full_day=full_day,
+                start_time=start_time,
+                end_time=end_time,
+                note=note,
+            )
+        )
+
+    return blocks
 
 
 @router.post("", response_model=CommonEntryOut)

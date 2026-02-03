@@ -24,7 +24,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { WeeklyPlannerLegendTable } from "@/components/weekly-planner-legend-table"
+import {
+  WeeklyPlannerLegendTable,
+  LEGEND_COLORS,
+  buildLegendDisplayEntries,
+  getLegendQuestions,
+  type LegendEntry,
+} from "@/components/weekly-planner-legend-table"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -94,6 +100,17 @@ type WeeklyTableResponse = {
   saved_plan_id: string | null
 }
 
+type WeeklyPlannerBlock = {
+  entry_id: string
+  user_id: string
+  start_date: string
+  end_date: string
+  full_day: boolean
+  start_time?: string | null
+  end_time?: string | null
+  note?: string | null
+}
+
 type WeeklyPrintUser = {
   user_id: string
   user_name: string
@@ -102,11 +119,34 @@ type WeeklyPrintUser = {
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
+const normalizeDepartmentKey = (name?: string) => {
+  const normalized = (name || "").trim().toLowerCase().replace(/\s+/g, "")
+  if (normalized === "zhvillim") return "development"
+  if (normalized === "grafikdizajn" || normalized === "dizajngrafik") return "graphicdesign"
+  if (normalized === "productcontent" || normalized === "produktcontent") return "productcontent"
+  if (normalized === "projectcontentmanager") return "productcontent"
+  return normalized
+}
+
 function mondayISO(today = new Date()) {
   const d = new Date(today)
   const day = (d.getDay() + 6) % 7
   d.setDate(d.getDate() - day)
   return d.toISOString().slice(0, 10)
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0")
+const toISODate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+const fromISODate = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number)
+  return new Date(y, m - 1, d)
+}
+
+const timeToMinutes = (value?: string | null) => {
+  if (!value) return null
+  const [h, m] = value.split(":").map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+  return h * 60 + m
 }
 
 export default function WeeklyPlannerPage() {
@@ -117,6 +157,7 @@ export default function WeeklyPlannerPage() {
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
   const [isThisWeek, setIsThisWeek] = React.useState(false)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
+  const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
 
   const [isExporting, setIsExporting] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(true)
@@ -387,15 +428,36 @@ export default function WeeklyPlannerPage() {
         console.error("Failed to load weekly planner:", res.status, res.statusText, errorText)
         setError(`Failed to load planner: ${res.status} ${res.statusText}`)
         setData(null)
+        setPvFestBlocks([])
         return
       }
       const payload = (await res.json()) as WeeklyTableResponse
       console.log("Weekly planner data:", payload)
       setData(payload)
+      try {
+        const blockParams = new URLSearchParams()
+        blockParams.set("type", "PV_FEST")
+        blockParams.set("start", payload.week_start)
+        blockParams.set("end", payload.week_end)
+        if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+          blockParams.set("department_id", departmentId)
+        }
+        const blocksRes = await apiFetch(`/common-entries/blocks?${blockParams.toString()}`)
+        if (blocksRes.ok) {
+          const blocks = (await blocksRes.json()) as WeeklyPlannerBlock[]
+          setPvFestBlocks(blocks)
+        } else {
+          setPvFestBlocks([])
+        }
+      } catch (err) {
+        console.error("Failed to load PV/FEST blocks:", err)
+        setPvFestBlocks([])
+      }
     } catch (error) {
       console.error("Error loading weekly planner:", error)
       setError(error instanceof Error ? error.message : "Unknown error occurred")
       setData(null)
+      setPvFestBlocks([])
     } finally {
       setIsLoading(false)
     }
@@ -454,6 +516,44 @@ export default function WeeklyPlannerPage() {
   const availableDepartments = React.useMemo(() => {
     return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [departments])
+
+  const pvFestByUserDate = React.useMemo(() => {
+    const map = new Map<string, Map<string, WeeklyPlannerBlock[]>>()
+    for (const block of pvFestBlocks) {
+      if (!block.user_id || !block.start_date || !block.end_date) continue
+      let current = fromISODate(block.start_date)
+      const end = fromISODate(block.end_date)
+      while (current <= end) {
+        const iso = toISODate(current)
+        const byDate = map.get(block.user_id) ?? new Map<string, WeeklyPlannerBlock[]>()
+        const list = byDate.get(iso) ?? []
+        list.push(block)
+        byDate.set(iso, list)
+        map.set(block.user_id, byDate)
+        current.setDate(current.getDate() + 1)
+      }
+    }
+    return map
+  }, [pvFestBlocks])
+
+  const getBlockForSlot = React.useCallback(
+    (userId: string, dayIso: string, slot: "am" | "pm") => {
+      const blocks = pvFestByUserDate.get(userId)?.get(dayIso) || []
+      if (!blocks.length) return null
+      const slotStart = slot === "am" ? 0 : 12 * 60
+      const slotEnd = slot === "am" ? 12 * 60 : 24 * 60
+      return (
+        blocks.find((block) => {
+          if (block.full_day) return true
+          const start = timeToMinutes(block.start_time) ?? 0
+          const end = timeToMinutes(block.end_time) ?? 24 * 60
+          if (end <= start) return true
+          return start < slotEnd && end > slotStart
+        }) || null
+      )
+    },
+    [pvFestByUserDate]
+  )
 
   const isProjectClosed = React.useCallback((project: Project) => {
     const statusValue = (project.status || "").toUpperCase()
@@ -775,7 +875,7 @@ export default function WeeklyPlannerPage() {
       .map((entry) => entry.task)
   ), [getFastTaskSortLabel, fastTaskSortOrder.length, fastTaskSortRank])
 
-  const handlePrint = React.useCallback(() => {
+  const handlePrint = React.useCallback(async () => {
     if (!data) return
 
     const printWindow = window.open("", "_blank")
@@ -793,6 +893,35 @@ export default function WeeklyPlannerPage() {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase())
       .join("") || "?"
+    const legendEntriesByDept = new Map<string, LegendEntry[]>()
+
+    await Promise.all(
+      data.departments.map(async (dept) => {
+        const legendConfig = getLegendQuestions(dept.department_name)
+        if (!legendConfig) return
+
+        let entries: LegendEntry[] = []
+        try {
+          const qs = new URLSearchParams()
+          qs.set("department_id", dept.department_id)
+          qs.set("week_start", data.week_start)
+          const res = await apiFetch(`/planners/weekly-planner/legend?${qs.toString()}`)
+          if (res.ok) {
+            entries = (await res.json()) as LegendEntry[]
+          }
+        } catch (error) {
+          console.error("Failed to load print legend entries:", error)
+        }
+
+        const displayEntries = buildLegendDisplayEntries({
+          entries,
+          departmentId: dept.department_id,
+          weekStart: data.week_start,
+          departmentName: dept.department_name,
+        })
+        legendEntriesByDept.set(dept.department_id, displayEntries)
+      })
+    )
 
     const printHtml = `
       <!DOCTYPE html>
@@ -888,6 +1017,43 @@ export default function WeeklyPlannerPage() {
               margin-bottom: 1px;
               font-size: 7pt;
               font-weight: 700;
+            }
+            .print-legend {
+              margin-top: 2px;
+              margin-bottom: 6px;
+              break-inside: avoid;
+              page-break-inside: avoid;
+            }
+            .print-legend-title {
+              font-size: 6.5pt;
+              font-weight: 700;
+              margin-bottom: 2px;
+              color: #0f172a;
+            }
+            .legend-table {
+              margin: 0;
+            }
+            .legend-table th,
+            .legend-table td {
+              font-size: 6pt;
+              padding: 1px;
+              vertical-align: middle;
+            }
+            .legend-color-box {
+              width: 18px;
+              height: 10px;
+              border: 0.5px solid #000;
+            }
+            .legend-question {
+              color: #991b1b;
+              font-weight: 600;
+            }
+            .legend-answer-line {
+              height: 9px;
+              border-bottom: 0.5px solid #000;
+            }
+            .print-legend-spacer {
+              height: 0.18in;
             }
             table {
               width: 100%;
@@ -1153,6 +1319,86 @@ export default function WeeklyPlannerPage() {
         <div class="print-initials">PUNOI: ${printInitials}</div>
       `
       return footer
+    }
+
+    const createLegendSection = (entries: LegendEntry[]) => {
+      const wrapper = doc.createElement("div")
+      wrapper.className = "print-legend"
+
+      const title = doc.createElement("div")
+      title.className = "print-legend-title"
+      title.textContent = "Legend / Questions"
+      wrapper.appendChild(title)
+
+      const table = doc.createElement("table")
+      table.className = "legend-table"
+
+      const colgroup = doc.createElement("colgroup")
+      colgroup.innerHTML = `
+        <col style="width: 28px;" />
+        <col style="width: 70px;" />
+        <col />
+        <col style="width: 120px;" />
+      `
+      table.appendChild(colgroup)
+
+      const thead = doc.createElement("thead")
+      thead.innerHTML = `
+        <tr>
+          <th>Color</th>
+          <th>Label</th>
+          <th>Question</th>
+          <th>Answer</th>
+        </tr>
+      `
+      table.appendChild(thead)
+
+      const tbody = doc.createElement("tbody")
+      entries.forEach((entry) => {
+        const row = doc.createElement("tr")
+
+        const colorCell = doc.createElement("td")
+        const colorBox = doc.createElement("div")
+        colorBox.className = "legend-color-box"
+        colorBox.style.backgroundColor = LEGEND_COLORS[entry.label] || "#E5E7EB"
+        colorCell.appendChild(colorBox)
+        row.appendChild(colorCell)
+
+        const labelCell = doc.createElement("td")
+        labelCell.textContent =
+          entry.label === "MBINGARKESE?" || entry.label === "KOMPLET (100% PROJEKTE)"
+            ? "-"
+            : entry.label
+        row.appendChild(labelCell)
+
+        const questionCell = doc.createElement("td")
+        if (entry.question_text) {
+          const question = doc.createElement("span")
+          question.className = "legend-question"
+          question.textContent = entry.question_text
+          questionCell.appendChild(question)
+        } else {
+          questionCell.textContent = "-"
+        }
+        row.appendChild(questionCell)
+
+        const answerCell = doc.createElement("td")
+        const answer = entry.answer_text?.trim() || ""
+        if (answer) {
+          answerCell.textContent = answer
+        } else {
+          const answerLine = doc.createElement("div")
+          answerLine.className = "legend-answer-line"
+          answerCell.appendChild(answerLine)
+        }
+        row.appendChild(answerCell)
+
+        tbody.appendChild(row)
+      })
+      table.appendChild(tbody)
+
+      wrapper.appendChild(table)
+      return wrapper
     }
 
     const createPage = (options?: { showTitle?: boolean; showMeta?: boolean }) => {
@@ -1515,6 +1761,14 @@ export default function WeeklyPlannerPage() {
         measure.appendChild(page)
         pages.push(page)
 
+        const legendEntries = legendEntriesByDept.get(dept.department_id)
+        if (legendEntries && legendEntries.length > 0 && chunkIndex === 0) {
+          content.appendChild(createLegendSection(legendEntries))
+          const legendSpacer = doc.createElement("div")
+          legendSpacer.className = "print-legend-spacer"
+          content.appendChild(legendSpacer)
+        }
+
         const deptTitle = doc.createElement("div")
         deptTitle.className = "print-dept-title"
         let chunkLabel = ""
@@ -1563,7 +1817,17 @@ export default function WeeklyPlannerPage() {
         printWindow.print()
       })
     }, 200)
-  }, [data, departmentId, departments, getFastTaskBadge, getStatusValueForDay, getTaskStatusBadge, sortFastTasks, users])
+  }, [
+    apiFetch,
+    data,
+    departmentId,
+    departments,
+    getFastTaskBadge,
+    getStatusValueForDay,
+    getTaskStatusBadge,
+    sortFastTasks,
+    users,
+  ])
 
   const parseFilenameFromDisposition = (headerValue: string | null) => {
     if (!headerValue) return null
@@ -1989,16 +2253,23 @@ export default function WeeklyPlannerPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Show Legend Table only for Development department */}
+            {/* Show Legend Table only for Development, Graphic Design, or Product Content */}
             {(() => {
-              // Check if Development department is selected
+              if (departmentId === ALL_DEPARTMENTS_VALUE) return null
+
               const selectedDept = departments.find((d) => d.id === departmentId)
-              const isDevelopment = selectedDept?.name === "Development"
-              
-              // Also check if we're showing a single department in the data
-              const devDept = data.departments.find((d) => d.department_name === "Development")
-              
-              if (isDevelopment && devDept && data.week_start) {
+              const selectedKey = normalizeDepartmentKey(selectedDept?.name)
+              const isLegendDepartment =
+                selectedKey === "development" ||
+                selectedKey === "graphicdesign" ||
+                selectedKey === "productcontent"
+              if (!isLegendDepartment) return null
+
+              const legendDept = data.departments.find(
+                (d) => normalizeDepartmentKey(d.department_name) === selectedKey
+              )
+
+              if (legendDept && data.week_start) {
                 return (
                   <WeeklyPlannerLegendTable
                     departmentId={departmentId}
@@ -2079,14 +2350,38 @@ export default function WeeklyPlannerPage() {
                             const fastTasksList = sortFastTasks(fastTasks || [])
 
                             const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
+                            const block = getBlockForSlot(userId, dayDate, timeSlot)
+                            const isBlocked = Boolean(block)
+                            const blockTitle = isBlocked
+                              ? `PV/FEST${block?.note ? `: ${block.note}` : ""}`
+                              : undefined
 
-                            if (!hasContent) {
+                            if (!hasContent && !isBlocked) {
                               return <div className="min-h-20 text-xs text-muted-foreground/50">—</div>
                             }
 
                             return (
-                              <div className="space-y-2 min-h-20">
-                                {/* Projects */}
+                              <div
+                                className={[
+                                  "min-h-20",
+                                  isBlocked ? "relative rounded-md border border-slate-300 bg-slate-100/70 text-slate-600 cursor-not-allowed" : "",
+                                ].join(" ")}
+                                title={blockTitle}
+                              >
+                                {isBlocked && (
+                                  <div className="absolute inset-0 bg-slate-200/50 pointer-events-none" />
+                                )}
+                                {isBlocked && (
+                                  <div className="absolute top-1 right-1 z-10 text-[10px] font-semibold uppercase tracking-wide text-slate-600 bg-slate-200/90 px-1.5 py-0.5 rounded">
+                                    PV/FEST
+                                  </div>
+                                )}
+                                <div className={isBlocked ? "relative z-0 opacity-70" : ""}>
+                                  {!hasContent ? (
+                                    <div className="min-h-20 text-xs text-muted-foreground/50">--</div>
+                                  ) : (
+                                    <div className="space-y-2 min-h-20">
+                                      {/* Projects */}
                                 {projectsList.map((project, projectIndex) => {
                                   // Debug: log if project should be late
                                   if (project.project_title.includes("LATE") || project.project_title.includes("PRJK")) {
@@ -2279,7 +2574,10 @@ export default function WeeklyPlannerPage() {
                                   </div>
                                 )}
                               </div>
-                            )
+                            )}
+                          </div>
+                        </div>
+                      )
                           }
 
                           const renderProjectsAndSystem = (

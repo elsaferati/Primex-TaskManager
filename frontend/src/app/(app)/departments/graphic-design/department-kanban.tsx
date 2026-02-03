@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
-import { Pencil, Printer, Trash2 } from "lucide-react"
+import { Check, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -847,6 +847,8 @@ export default function DepartmentKanban() {
   const [internalNoteProjects, setInternalNoteProjects] = React.useState<Project[]>([])
   const [loadingInternalNoteProjects, setLoadingInternalNoteProjects] = React.useState(false)
   const [internalNoteToUserIds, setInternalNoteToUserIds] = React.useState<string[]>([])
+  const [showDoneInternalNotes, setShowDoneInternalNotes] = React.useState(false)
+  const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
 
   // --- DATA LOADING ---
   React.useEffect(() => {
@@ -1241,9 +1243,10 @@ export default function DepartmentKanban() {
   )
   const visibleInternalNotes = React.useMemo(() => {
     const base = isMineView && user?.id ? internalNotes.filter((n) => n.to_user_id === user.id) : internalNotes
-    if (selectedUserId === "__all__") return base
-    return base.filter((n) => n.to_user_id === selectedUserId)
-  }, [internalNotes, isMineView, selectedUserId, user?.id])
+    const filteredByUser = selectedUserId === "__all__" ? base : base.filter((n) => n.to_user_id === selectedUserId)
+    if (showDoneInternalNotes) return filteredByUser
+    return filteredByUser.filter((n) => !n.is_done)
+  }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
   const groupedInternalNotes = React.useMemo(() => {
     const normalizeTime = (value?: string | null) => {
       if (!value) return ""
@@ -1281,12 +1284,15 @@ export default function DepartmentKanban() {
     if (selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
+    if (!showDoneInternalNotes) {
+      grouped = grouped.filter((group) => group.notes.some((n) => !n.is_done))
+    }
     return grouped.sort((a, b) => {
       const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
       const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
       return bTime - aTime
     })
-  }, [internalNotes, isMineView, selectedUserId, user?.id])
+  }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
   const visibleMeetings = React.useMemo(
     () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
     [meetings, isMineView, user?.id]
@@ -1375,6 +1381,18 @@ export default function DepartmentKanban() {
       return true
     })
   }, [openNotes, todayDate, selectedUserId])
+  const todayInternalNotes = React.useMemo(() => {
+    return visibleInternalNotes.filter((note) => {
+      const date = toDate(note.created_at)
+      return date ? isSameDay(date, todayDate) : false
+    })
+  }, [todayDate, visibleInternalNotes])
+  const todayGroupedInternalNotes = React.useMemo(() => {
+    return groupedInternalNotes.filter((group) => {
+      const date = toDate(group.note.created_at)
+      return date ? isSameDay(date, todayDate) : false
+    })
+  }, [groupedInternalNotes, todayDate])
   const todayMeetings = React.useMemo(
     () =>
       visibleMeetings.filter((m) => {
@@ -2248,7 +2266,7 @@ export default function DepartmentKanban() {
       userId: string
       period: "AM" | "PM"
       label: string
-      category: "PRJK" | "FT" | "SYS" | "EXM" | "GA"
+      category: "PRJK" | "FT" | "SYS" | "EXM" | "GA" | "IN"
       fastType?: string
     }> = []
     for (const task of todayProjectTasks) {
@@ -2295,6 +2313,16 @@ export default function DepartmentKanban() {
         category: "GA",
       })
     }
+    for (const note of todayInternalNotes) {
+      const period = periodFromDate(note.created_at)
+      const userId = note.to_user_id || "__unassigned__"
+      items.push({
+        userId,
+        period,
+        label: `IN: ${note.title || "Internal note"}`,
+        category: "IN",
+      })
+    }
     for (const meeting of todayMeetings) {
       const period = periodFromDate(meeting.starts_at)
       const userId = meeting.created_by || "__unassigned__"
@@ -2306,7 +2334,15 @@ export default function DepartmentKanban() {
       })
     }
     return items
-  }, [projects, todayMeetings, todayNoProjectTasks, todayOpenNotes, todayProjectTasks, todaySystemTasks])
+  }, [
+    projects,
+    todayInternalNotes,
+    todayMeetings,
+    todayNoProjectTasks,
+    todayOpenNotes,
+    todayProjectTasks,
+    todaySystemTasks,
+  ])
 
   const allTodayPrintHasUnassigned = React.useMemo(
     () => allTodayPrintItems.some((item) => item.userId === "__unassigned__"),
@@ -2343,7 +2379,7 @@ export default function DepartmentKanban() {
   }, [allTodayPrintBaseUsers, allTodayPrintHasUnassigned, allTodayPrintItems, userMap])
 
   const allTodayPrintByUser = React.useMemo(() => {
-    const categories = ["PRJK", "FT", "SYS", "EXM", "GA"] as const
+    const categories = ["PRJK", "FT", "SYS", "EXM", "GA", "IN"] as const
     const map = new Map<
       string,
       Record<string, Array<{ period: "AM" | "PM"; label: string; fastType?: string }>>
@@ -2626,6 +2662,7 @@ export default function DepartmentKanban() {
       { id: "SYS", label: "SYS" },
       { id: "EXM", label: "EXM" },
       { id: "GA", label: "GA" },
+      { id: "IN", label: "IN" },
     ],
     []
   )
@@ -3448,6 +3485,44 @@ export default function DepartmentKanban() {
     toast.success("Internal note deleted")
   }
 
+  const updateInternalNoteDone = async (noteIds: string[] | string, isDone: boolean) => {
+    const ids = Array.isArray(noteIds) ? noteIds : [noteIds]
+    if (!ids.length) return
+    const previous = internalNotes
+    setUpdatingInternalNoteIds((prev) => [...new Set([...prev, ...ids])])
+    const nowIso = new Date().toISOString()
+    setInternalNotes((prev) =>
+      prev.map((note) =>
+        ids.includes(note.id)
+          ? {
+            ...note,
+            is_done: isDone,
+            done_at: isDone ? nowIso : null,
+            done_by_user_id: isDone ? (user?.id || null) : null,
+          }
+          : note
+      )
+    )
+    let failed = false
+    for (const noteId of ids) {
+      const res = await apiFetch(`/internal-notes/${noteId}/done`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDone }),
+      })
+      if (!res.ok) {
+        failed = true
+      }
+    }
+    if (failed) {
+      setInternalNotes(previous)
+      toast.error("Failed to update internal note status")
+    } else {
+      toast.success(isDone ? "Internal note marked as done" : "Internal note reopened")
+    }
+    setUpdatingInternalNoteIds((prev) => prev.filter((id) => !ids.includes(id)))
+  }
+
   const submitGaNoteTask = async () => {
     if (!gaNoteTaskOpenId || !department) return
     const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
@@ -3930,10 +4005,11 @@ export default function DepartmentKanban() {
                     ) : null}
                   </div>
                 </div>
-                <div className="grid gap-4 md:grid-cols-4">
+                <div className="grid gap-4 md:grid-cols-5">
                   {[
                     { label: "PROJECT TASKS", value: todayProjectTasks.length },
                     { label: "GA NOTES", value: todayOpenNotes.length },
+                    { label: "INTERNAL NOTES", value: todayGroupedInternalNotes.length },
                     { label: "FAST TASKS", value: visibleNoProjectTasks.length },
                     { label: "SYSTEM TASKS", value: todaySystemTasks.length },
                 ].map((stat) => (
@@ -4304,6 +4380,55 @@ export default function DepartmentKanban() {
                         </div>
                       ) : (
                         <div className="text-sm text-muted-foreground">No open notes today.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row">
+                    <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-indigo-500 p-4 text-slate-700 md:w-48 md:shrink-0">
+                      <div className="text-sm font-semibold">INTERNAL NOTES</div>
+                      <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        {todayGroupedInternalNotes.length}
+                      </span>
+                      <div className="mt-2 text-xs text-slate-500">Team updates</div>
+                    </div>
+                    <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                      {todayGroupedInternalNotes.length ? (
+                        <div className="space-y-2">
+                          {todayGroupedInternalNotes.map((group) => {
+                            const note = group.note
+                            const fromUser = users.find((u) => u.id === note.from_user_id) || null
+                            const fromLabel = fromUser?.full_name || fromUser?.username || "Unknown user"
+                            const toInitials = group.toUserIds
+                              .map((id) => {
+                                const toUser = userMap.get(id)
+                                const toLabel = toUser?.full_name || toUser?.username || "Unknown user"
+                                return initials(toLabel)
+                              })
+                              .join(", ")
+                            return (
+                              <div
+                                key={note.id}
+                                className="rounded-lg border border-slate-200 border-l-4 border-indigo-500 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium text-slate-800">{note.title}</div>
+                                  {group.notes.every((n) => n.is_done) ? (
+                                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">
+                                      Done
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-600">{note.description || "-"}</div>
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  From {initials(fromLabel)} to {toInitials || "-"}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500">No internal notes today.</div>
                       )}
                     </div>
                   </div>
@@ -5457,7 +5582,16 @@ export default function DepartmentKanban() {
                     <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Internal Notes</h2>
                     <p className="text-sm text-slate-500">Peer-to-peer notes between colleagues.</p>
                   </div>
-                  <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
+                  <div className="flex items-center gap-3">
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={showDoneInternalNotes}
+                        onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
+                      />
+                      <span>Show Done</span>
+                    </label>
+                    <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
                     <DialogTrigger asChild>
                       <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
                     </DialogTrigger>
@@ -5584,7 +5718,8 @@ export default function DepartmentKanban() {
                         </Button>
                       </div>
                     </DialogContent>
-                  </Dialog>
+                    </Dialog>
+                  </div>
                 </div>
 
                 <div className="rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
@@ -5626,13 +5761,22 @@ export default function DepartmentKanban() {
                               user?.role === "ADMIN" ||
                               user?.role === "MANAGER" ||
                               (user?.id ? group.toUserIds.includes(user.id) : false)
+                            const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
+                            const noteIdsForAction = (() => {
+                              const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
+                              if (isAdminOrManager) return group.notes.map((n) => n.id)
+                              return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
+                            })()
 
                               return (
-                                <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
+                                <tr
+                                  key={note.id}
+                                  className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
+                                >
                                   <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
                                   <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
                                     <div className="flex flex-col gap-1">
-                                      <span className="text-sm font-semibold">{note.title}</span>
+                                      <span className={`text-sm font-semibold ${groupIsDone ? "line-through text-slate-500" : ""}`}>{note.title}</span>
                                     </div>
                                   </td>
                               <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
@@ -5644,28 +5788,50 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
                                   <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
-                                    {canDeleteNote ? (
-                                      <div className="flex justify-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      {!groupIsDone ? (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                          disabled={noteIdsForAction.length === 0 || noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                          onClick={() => void updateInternalNoteDone(noteIdsForAction, true)}
+                                        >
+                                          <Check className="h-3.5 w-3.5 mr-1" />
+                                          Mark as done
+                                        </Button>
+                                      ) : (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-xs text-emerald-700">Done</span>
+                                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                          {noteIdsForAction.length ? (
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="h-7 w-7 border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600"
+                                              title="Undo"
+                                              aria-label={`Undo done for ${note.title}`}
+                                              disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                              onClick={() => void updateInternalNoteDone(noteIdsForAction, false)}
+                                            >
+                                              <RotateCcw className="h-3.5 w-3.5" />
+                                            </Button>
+                                          ) : null}
+                                        </div>
+                                      )}
+                                      {canDeleteNote ? (
                                         <Button
                                           variant="outline"
                                           size="icon"
                                           className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
                                           title="Delete"
                                           aria-label={`Delete ${note.title}`}
-                                          onClick={() => {
-                                            const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
-                                            const noteIds = isAdminOrManager
-                                              ? group.notes.map((n) => n.id)
-                                              : user?.id
-                                                ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id)
-                                                : []
-                                            void deleteInternalNote(noteIds)
-                                          }}
+                                          onClick={() => void deleteInternalNote(noteIdsForAction)}
                                         >
                                           <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
-                                      </div>
-                                    ) : null}
+                                      ) : null}
+                                    </div>
                                   </td>
                                 </tr>
                               )
@@ -6117,6 +6283,17 @@ export default function DepartmentKanban() {
         }
         .print-nr-cell {
           font-weight: 700;
+        }
+        .switch {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #64748b;
+          cursor: pointer;
+        }
+        .switch input[type="checkbox"] {
+          cursor: pointer;
         }
         @media print {
           body {

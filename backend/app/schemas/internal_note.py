@@ -15,6 +15,9 @@ class InternalNoteOut(BaseModel):
     department_id: uuid.UUID
     project_id: uuid.UUID | None
     to_department_id: uuid.UUID
+    is_done: bool
+    done_at: datetime | None
+    done_by_user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -28,3 +31,9 @@ class InternalNoteCreate(BaseModel):
     project_id: uuid.UUID | None = Field(default=None, alias="projectId")
     to_user_id: uuid.UUID | None = Field(default=None, alias="toUserId")
     to_user_ids: list[uuid.UUID] | None = Field(default=None, alias="toUserIds")
+
+
+class InternalNoteDoneUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    is_done: bool = Field(alias="isDone")

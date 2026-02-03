@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -14,7 +15,7 @@ from app.models.internal_note import InternalNote
 from app.models.project import Project
 from app.models.user import User
 from app.models.enums import UserRole
-from app.schemas.internal_note import InternalNoteCreate, InternalNoteOut
+from app.schemas.internal_note import InternalNoteCreate, InternalNoteDoneUpdate, InternalNoteOut
 
 
 router = APIRouter()
@@ -46,6 +47,9 @@ async def list_internal_notes(
             department_id=n.department_id,
             project_id=n.project_id,
             to_department_id=n.to_department_id,
+            is_done=n.is_done,
+            done_at=n.done_at,
+            done_by_user_id=n.done_by_user_id,
             created_at=n.created_at,
             updated_at=n.updated_at,
         )
@@ -120,6 +124,9 @@ async def create_internal_note(
             department_id=note.department_id,
             project_id=note.project_id,
             to_department_id=note.to_department_id,
+            is_done=note.is_done,
+            done_at=note.done_at,
+            done_by_user_id=note.done_by_user_id,
             created_at=note.created_at,
             updated_at=note.updated_at,
         )
@@ -153,6 +160,52 @@ async def delete_internal_note(
         department_id=note.department_id,
         project_id=note.project_id,
         to_department_id=note.to_department_id,
+        is_done=note.is_done,
+        done_at=note.done_at,
+        done_by_user_id=note.done_by_user_id,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@router.patch("/{note_id}/done", response_model=InternalNoteOut)
+async def update_internal_note_done(
+    note_id: uuid.UUID,
+    payload: InternalNoteDoneUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> InternalNoteOut:
+    note = (await db.execute(select(InternalNote).where(InternalNote.id == note_id))).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal note not found")
+
+    is_admin_or_manager = user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    is_target_user = note.to_user_id == user.id
+    if not (is_admin_or_manager or is_target_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    note.is_done = payload.is_done
+    if payload.is_done:
+        note.done_at = datetime.utcnow()
+        note.done_by_user_id = user.id
+    else:
+        note.done_at = None
+        note.done_by_user_id = None
+
+    await db.commit()
+    await db.refresh(note)
+    return InternalNoteOut(
+        id=note.id,
+        title=note.title,
+        description=note.description,
+        from_user_id=note.from_user_id,
+        to_user_id=note.to_user_id,
+        department_id=note.department_id,
+        project_id=note.project_id,
+        to_department_id=note.to_department_id,
+        is_done=note.is_done,
+        done_at=note.done_at,
+        done_by_user_id=note.done_by_user_id,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
