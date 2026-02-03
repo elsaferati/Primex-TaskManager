@@ -310,8 +310,9 @@ async def create_task(
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
-        if ga_note.department_id is not None and ga_note.department_id != department_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
+        # Allow cross-department task creation from GA notes - removed department mismatch check
+        # if ga_note.department_id is not None and ga_note.department_id != department_id:
+        #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
 

@@ -950,7 +950,12 @@ export default function DepartmentKanban() {
             // Include if primary assignee belongs to this department
             if (t.assigned_to && departmentUserIds.has(t.assigned_to)) return true
             // Include if any assignee in the assignees array belongs to this department
-            if (t.assignees?.some((a) => a.id && departmentUserIds.has(a.id))) return true
+            // Check both string and direct ID matching
+            if (t.assignees?.some((a) => {
+              const assigneeId = a.id
+              if (!assigneeId) return false
+              return departmentUserIds.has(assigneeId)
+            })) return true
             return false
           })
           setDepartmentTasks(nonSystemTasks)
@@ -5036,6 +5041,11 @@ export default function DepartmentKanban() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
+                                {task.ga_note_origin_id && (task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal) && (
+                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                    GA
+                                  </Badge>
+                                )}
                                 <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                                   {typeLabel}
                                 </Badge>
@@ -5823,6 +5833,11 @@ export default function DepartmentKanban() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
+                                {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                    GA
+                                  </Badge>
+                                )}
                                 <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                   {t.title}
                                 </div>

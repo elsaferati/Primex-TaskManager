@@ -1031,7 +1031,12 @@ export default function DepartmentKanban() {
             // Include if primary assignee belongs to this department
             if (t.assigned_to && departmentUserIds.has(t.assigned_to)) return true
             // Include if any assignee in the assignees array belongs to this department
-            if (t.assignees?.some((a) => a.id && departmentUserIds.has(a.id))) return true
+            // Check both string and direct ID matching
+            if (t.assignees?.some((a) => {
+              const assigneeId = a.id
+              if (!assigneeId) return false
+              return departmentUserIds.has(assigneeId)
+            })) return true
             return false
           })
           setDepartmentTasks(nonSystemTasks)
@@ -4723,38 +4728,43 @@ export default function DepartmentKanban() {
                     {todayNoProjectTasks.length ? (
                       <div className="space-y-2">
                         {todayNoProjectTasks.map((task) => {
-                          const typeLabel = noProjectTypeLabel(task)
-                          const isCompleted = task.completed_at != null || task.status === "DONE"
-                          // Collect all assignees: from assigned_to and assignees array
-                          const assigneeIds = new Set<string>()
-                          if (task.assigned_to) {
-                            assigneeIds.add(task.assigned_to)
-                          }
-                          if (task.assignees) {
-                            for (const assignee of task.assignees) {
-                              if (assignee.id) {
-                                assigneeIds.add(assignee.id)
-                              }
+                        const typeLabel = noProjectTypeLabel(task)
+                        const isCompleted = task.completed_at != null || task.status === "DONE"
+                        // Collect all assignees: from assigned_to and assignees array
+                        const assigneeIds = new Set<string>()
+                        if (task.assigned_to) {
+                          assigneeIds.add(task.assigned_to)
+                        }
+                        if (task.assignees) {
+                          for (const assignee of task.assignees) {
+                            if (assignee.id) {
+                              assigneeIds.add(assignee.id)
                             }
                           }
-                          return (
-                            <Link
-                              key={task.id}
-                              href={`/tasks/${task.id}`}
-                              className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
-                                isCompleted 
-                                  ? "border-green-500 bg-green-50/30 opacity-75" 
-                                  : "border-blue-500 bg-white"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                    {typeLabel}
+                        }
+                        return (
+                          <Link
+                            key={task.id}
+                            href={`/tasks/${task.id}`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
+                              isCompleted 
+                                ? "border-green-500 bg-green-50/30 opacity-75" 
+                                : "border-blue-500 bg-white"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                {task.ga_note_origin_id && (task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal) && (
+                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                    GA
                                   </Badge>
-                                  <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                    {task.title}
-                                  </div>
+                                )}
+                                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
+                                  {typeLabel}
+                                </Badge>
+                                <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                  {task.title}
+                                </div>
                                   {isCompleted && (
                                     <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
                                       Done
@@ -5497,6 +5507,11 @@ export default function DepartmentKanban() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
+                                {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                    GA
+                                  </Badge>
+                                )}
                                 <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                   {t.title}
                                 </div>

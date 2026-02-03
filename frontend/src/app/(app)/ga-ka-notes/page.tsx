@@ -41,6 +41,9 @@ const NOTE_TO_TASK_PRIORITY: Record<NotePriority, TaskPriority> = {
 }
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
+const TASK_TYPE_OPTIONS_NO_PROJECT = ["NORMAL", "R1", "1H", "PERSONAL", "BLLOK"] as const
+const TASK_TYPE_OPTIONS_WITH_PROJECT: TaskPriority[] = ["NORMAL", "HIGH"]
+type TaskTypeOption = typeof TASK_TYPE_OPTIONS_NO_PROJECT[number] | TaskPriority
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const TASK_PRIORITY_STYLES: Record<string, string> = {
@@ -122,7 +125,7 @@ export default function GaKaNotesPage() {
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
-  const [taskPriority, setTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [taskPriority, setTaskPriority] = React.useState<TaskTypeOption>("NORMAL")
   const [taskFinishPeriod, setTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
@@ -285,6 +288,14 @@ export default function GaKaNotesPage() {
     setTaskProjectId(note.project_id ?? "NONE")
   }
 
+  // Get available priority/type options based on whether a project is selected
+  const availablePriorityOptions = React.useMemo(() => {
+    if (taskProjectId !== "NONE") {
+      return TASK_TYPE_OPTIONS_WITH_PROJECT
+    }
+    return TASK_TYPE_OPTIONS_NO_PROJECT
+  }, [taskProjectId])
+
   const createTaskFromNote = async (note: GaNote) => {
     if (note.is_converted_to_task) return
     if (!taskTitle.trim()) {
@@ -306,6 +317,37 @@ export default function GaKaNotesPage() {
     try {
       const dueDateValue = taskDueDate ? new Date(taskDueDate).toISOString() : null
       const startDateValue = taskStartDate ? new Date(taskStartDate).toISOString() : null
+      
+      // Map task type/priority to actual priority and boolean flags
+      const isProjectTask = taskProjectId !== "NONE"
+      let actualPriority: TaskPriority = "NORMAL"
+      let isBllok = false
+      let is1hReport = false
+      let isR1 = false
+      let isPersonal = false
+
+      if (isProjectTask) {
+        // For project tasks: only HIGH or NORMAL
+        actualPriority = taskPriority === "HIGH" ? "HIGH" : "NORMAL"
+      } else {
+        // For non-project tasks: map to priority or boolean flags
+        if (taskPriority === "BLLOK") {
+          isBllok = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "1H") {
+          is1hReport = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "R1") {
+          isR1 = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "PERSONAL") {
+          isPersonal = true
+          actualPriority = "NORMAL"
+        } else {
+          actualPriority = taskPriority === "HIGH" ? "HIGH" : "NORMAL"
+        }
+      }
+
       const taskRes = await apiFetch("/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -313,7 +355,7 @@ export default function GaKaNotesPage() {
           title: taskTitle.trim(),
           description: taskDescription.trim() || null,
           status: "TODO",
-          priority: taskPriority,
+          priority: actualPriority,
           finish_period: taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod,
           due_date: dueDateValue,
           start_date: startDateValue,
@@ -322,6 +364,10 @@ export default function GaKaNotesPage() {
           ga_note_origin_id: note.id,
           department_id: primaryDepartmentId,
           project_id: taskProjectId !== "NONE" ? taskProjectId : null,
+          is_bllok: isBllok,
+          is_1h_report: is1hReport,
+          is_r1: isR1,
+          is_personal: isPersonal,
         }),
       })
       if (!taskRes.ok) {
@@ -431,6 +477,19 @@ export default function GaKaNotesPage() {
       effectiveTaskDepartmentIds.length === 1 ? effectiveTaskDepartmentIds[0] : undefined
     void loadProjects(dep)
   }, [effectiveTaskDepartmentIds, loadProjects, taskDialogNoteId])
+
+  // Reset priority when switching between project/non-project modes
+  React.useEffect(() => {
+    if (!taskDialogNoteId) return
+    const isProjectTask = taskProjectId !== "NONE"
+    const currentIsValid = isProjectTask 
+      ? TASK_TYPE_OPTIONS_WITH_PROJECT.includes(taskPriority as TaskPriority)
+      : TASK_TYPE_OPTIONS_NO_PROJECT.includes(taskPriority as any)
+    
+    if (!currentIsValid) {
+      setTaskPriority("NORMAL")
+    }
+  }, [taskProjectId, taskDialogNoteId, taskPriority])
   const visibleNotes = React.useMemo(() => {
     const now = Date.now()
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000
@@ -966,12 +1025,19 @@ export default function GaKaNotesPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Priority</Label>
-                  <Select value={taskPriority} onValueChange={(v) => setTaskPriority(v as TaskPriority)}>
+                  <Select 
+                    value={taskPriority} 
+                    onValueChange={(v) => {
+                      // Reset to NORMAL if switching between project/non-project modes and current value is invalid
+                      const isValid = availablePriorityOptions.includes(v as any)
+                      setTaskPriority(isValid ? (v as TaskTypeOption) : "NORMAL")
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PRIORITY_OPTIONS.map((value) => (
+                      {availablePriorityOptions.map((value) => (
                         <SelectItem key={value} value={value}>
                           {value}
                         </SelectItem>
@@ -1002,14 +1068,15 @@ export default function GaKaNotesPage() {
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
+                 <div className="space-y-2">
+                  <Label>Start date (optional)</Label>
+                  <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
+                </div>
                 <div className="space-y-2">
                   <Label>Due date (optional)</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
-                <div className="space-y-2">
-                  <Label>Start date (optional)</Label>
-                  <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
-                </div>
+               
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
