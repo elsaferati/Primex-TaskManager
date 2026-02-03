@@ -530,7 +530,9 @@ async def update_task(
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
-    allow_cross_department = task.project_id is not None
+    # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
+    # This matches the logic in create_task endpoint
+    allow_cross_department = task.project_id is not None or task.ga_note_origin_id is not None or task.project_id is None
 
     if payload.title is not None:
         task.title = payload.title

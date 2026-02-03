@@ -127,6 +127,7 @@ export default function GaKaNotesPage() {
     FINISH_PERIOD_NONE_VALUE
   )
   const [taskDueDate, setTaskDueDate] = React.useState("")
+  const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
@@ -278,6 +279,7 @@ export default function GaKaNotesPage() {
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskDueDate("")
+    setTaskStartDate("")
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
@@ -303,6 +305,7 @@ export default function GaKaNotesPage() {
     setCreatingTask(true)
     try {
       const dueDateValue = taskDueDate ? new Date(taskDueDate).toISOString() : null
+      const startDateValue = taskStartDate ? new Date(taskStartDate).toISOString() : null
       const taskRes = await apiFetch("/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -313,6 +316,7 @@ export default function GaKaNotesPage() {
           priority: taskPriority,
           finish_period: taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod,
           due_date: dueDateValue,
+          start_date: startDateValue,
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
           ga_note_origin_id: note.id,
@@ -1002,6 +1006,12 @@ export default function GaKaNotesPage() {
                   <Label>Due date (optional)</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
+                <div className="space-y-2">
+                  <Label>Start date (optional)</Label>
+                  <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Departments</Label>
                   <div className="rounded-md border bg-white p-2">

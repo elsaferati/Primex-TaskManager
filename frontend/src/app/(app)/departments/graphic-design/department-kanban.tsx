@@ -159,7 +159,6 @@ function isNoProjectTask(task: Task) {
 function isFastNormalTask(task: Task) {
   return (
     isNoProjectTask(task) &&
-    !task.ga_note_origin_id &&
     !task.is_bllok &&
     !task.is_1h_report &&
     !task.is_r1 &&
@@ -294,7 +293,12 @@ function isTaskActiveForDate(task: Task, targetDate: Date) {
   const dueKey = due ? dayKey(due) : startKey
 
   const completedDate = task.completed_at ? toDate(task.completed_at) : null
-  if (completedDate && dayKey(completedDate) < targetKey) return false
+  // If task is completed, only show it on the day it was completed
+  if (completedDate) {
+    const completedKey = dayKey(completedDate)
+    // Only show if completed on the target date
+    return completedKey === targetKey
+  }
 
   if (startKey != null && targetKey < startKey) return false
   if (dueKey != null && targetKey > dueKey) return false
@@ -775,6 +779,8 @@ export default function DepartmentKanban() {
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [editTaskAssignees, setEditTaskAssignees] = React.useState<string[]>([])
+  const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
 
   const [gaNoteOpen, setGaNoteOpen] = React.useState(false)
@@ -825,7 +831,7 @@ export default function DepartmentKanban() {
           apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           // Remove department_id filter to get all tasks, then filter client-side
-          apiFetch(`/tasks?include_done=false`),
+          apiFetch(`/tasks?include_done=true`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
@@ -979,6 +985,15 @@ export default function DepartmentKanban() {
     }
     return `${noProjectAssignees.length} selected`
   }, [users, noProjectAssignees])
+  const editTaskAssigneeLabel = React.useMemo(() => {
+    if (editTaskAssignees.length === 0) return "Unassigned"
+    if (users.length && editTaskAssignees.length === users.length) return "All users"
+    if (editTaskAssignees.length === 1) {
+      const selected = users.find((u) => u.id === editTaskAssignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${editTaskAssignees.length} selected`
+  }, [users, editTaskAssignees])
   const projectPhaseOptions = projectType === "MST" ? MST_PROJECT_PHASES : GENERAL_PROJECT_PHASES
   const mstTemplateOptions = React.useMemo(() => {
     return templateProjects.filter((p) => {
@@ -1197,7 +1212,7 @@ export default function DepartmentKanban() {
     },
     [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
   )
-  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED"), [visibleGaNotes])
+  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
       if (!isTaskActiveForDate(task, todayDate)) return false
@@ -2950,44 +2965,49 @@ export default function DepartmentKanban() {
           start_date: startDate,
           due_date: dueDate,
         }
-      const assigneeIds = noProjectAssignees.length ? noProjectAssignees : [null]
-
-      const createdTasks: Task[] = []
-      for (const assigneeId of assigneeIds) {
-        const res = await apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, assigned_to: assigneeId }) })
-        if (res.ok) {
-          const created = (await res.json()) as Task
-          // Ensure boolean flags are set correctly based on type
-          if (noProjectType === "personal") {
-            created.is_personal = true
-          }
-          // Ensure the task has the correct properties for filtering
-          if (noProjectType === "normal") {
-            created.is_bllok = false
-            created.is_1h_report = false
-            created.is_r1 = false
-            created.is_personal = false
-            created.priority = created.priority || "NORMAL"
-          }
-          createdTasks.push(created)
+      // Create one task with multiple assignees instead of multiple tasks
+      const assigneeIds = noProjectAssignees.length > 0 ? noProjectAssignees : null
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          assigned_to: assigneeIds && assigneeIds.length > 0 ? assigneeIds[0] : null,
+          assignees: assigneeIds,
+        }),
+      })
+      if (res.ok) {
+        const created = (await res.json()) as Task
+        // Ensure boolean flags are set correctly based on type
+        if (noProjectType === "personal") {
+          created.is_personal = true
         }
-      }
-      if (createdTasks.length) {
-        // Add all non-project tasks to noProjectTasks (they'll be categorized into buckets)
-        // For normal tasks, ensure they pass isNoProjectTask by verifying properties
-        const nonProjectTasks = createdTasks.filter((t) => {
-          // Double-check that normal tasks are included
-          if (noProjectType === "normal" && !t.project_id && !t.system_template_origin_id && !t.ga_note_origin_id) {
-            return true
-          }
-          return isNoProjectTask(t)
-        })
-        if (nonProjectTasks.length) {
-          setNoProjectTasks((prev) => [...nonProjectTasks, ...prev])
+        // Ensure the task has the correct properties for filtering
+        if (noProjectType === "normal") {
+          created.is_bllok = false
+          created.is_1h_report = false
+          created.is_r1 = false
+          created.is_personal = false
+          created.priority = created.priority || "NORMAL"
+        }
+        // Add to noProjectTasks if it's a non-project task
+        if (isNoProjectTask(created) || (noProjectType === "normal" && !created.project_id && !created.system_template_origin_id && !created.ga_note_origin_id)) {
+          setNoProjectTasks((prev) => [created, ...prev])
         }
         // Also add to departmentTasks for consistency
-        setDepartmentTasks((prev) => [...createdTasks, ...prev])
-        toast.success(`Created ${createdTasks.length} task${createdTasks.length > 1 ? "s" : ""}`)
+        setDepartmentTasks((prev) => [created, ...prev])
+        toast.success("Task created")
+      } else {
+        let errorMessage = "Failed to create task"
+        try {
+          const errorData = await res.json()
+          if (errorData.detail) {
+            errorMessage = typeof errorData.detail === "string" ? errorData.detail : "Failed to create task"
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(errorMessage)
       }
       setNoProjectOpen(false)
       setNoProjectTitle("")
@@ -3035,6 +3055,11 @@ export default function DepartmentKanban() {
     setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
     setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    // Get assignees from assignees array, fallback to assigned_to for backward compatibility
+    const assigneeIds = task.assignees && task.assignees.length > 0
+      ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
+      : (task.assigned_to ? [task.assigned_to] : [])
+    setEditTaskAssignees(assigneeIds)
   }
 
   const cancelEditTask = () => {
@@ -3044,6 +3069,7 @@ export default function DepartmentKanban() {
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+    setEditTaskAssignees([])
   }
 
   const updateNoProjectTask = async () => {
@@ -3052,6 +3078,8 @@ export default function DepartmentKanban() {
     try {
       const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
+      // Use first assignee for backward compatibility, or null if no assignees
+      const assignedToValue = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -3061,6 +3089,7 @@ export default function DepartmentKanban() {
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+          assigned_to: assignedToValue,
         }),
       })
       if (!res.ok) {
@@ -4090,15 +4119,16 @@ export default function DepartmentKanban() {
                     <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
                       <div className="text-sm font-semibold">FAST TASKS</div>
                       <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                        {visibleNoProjectTasks.length}
+                        {todayNoProjectTasks.length}
                       </span>
                       <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
                     </div>
                     <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                      {visibleNoProjectTasks.length ? (
+                      {todayNoProjectTasks.length ? (
                         <div className="space-y-2">
-                          {visibleNoProjectTasks.map((task) => {
+                          {todayNoProjectTasks.map((task) => {
                             const typeLabel = noProjectTypeLabel(task)
+                            const isCompleted = task.completed_at != null || task.status === "DONE"
                             // Collect all assignees: from assigned_to and assignees array
                             const assigneeIds = new Set<string>()
                             if (task.assigned_to) {
@@ -4115,14 +4145,25 @@ export default function DepartmentKanban() {
                               <Link
                                 key={task.id}
                                 href={`/tasks/${task.id}`}
-                                className="block rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
+                                className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
+                                  isCompleted 
+                                    ? "border-green-500 bg-green-50/30 opacity-75" 
+                                    : "border-blue-500 bg-white"
+                                }`}
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2">
                                     <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
                                       {typeLabel}
                                     </Badge>
-                                    <div className="font-medium text-slate-800">{task.title}</div>
+                                    <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                      {task.title}
+                                    </div>
+                                    {isCompleted && (
+                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
+                                        Done
+                                      </Badge>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-1">
                                     {Array.from(assigneeIds).map((userId) => {
@@ -4586,6 +4627,67 @@ export default function DepartmentKanban() {
                           />
                         </div>
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Assign to</Label>
+                        <Dialog open={selectEditTaskAssigneesOpen} onOpenChange={setSelectEditTaskAssigneesOpen}>
+                          <DialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                            >
+                              {editTaskAssigneeLabel}
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="sm:max-w-md z-[110]">
+                            <DialogHeader>
+                              <DialogTitle>Select Assignees</DialogTitle>
+                            </DialogHeader>
+                            <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                              {users.length ? (
+                                users.map((u) => {
+                                  const isSelected = editTaskAssignees.includes(u.id)
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          setEditTaskAssignees((prev) => prev.filter((id) => id !== u.id))
+                                        } else {
+                                          setEditTaskAssignees((prev) => [...prev, u.id])
+                                        }
+                                      }}
+                                    >
+                                      <Checkbox checked={isSelected} />
+                                      <Label className="cursor-pointer flex-1">
+                                        {u.full_name || u.username || "-"}
+                                      </Label>
+                                    </div>
+                                  )
+                                })
+                              ) : (
+                                <div className="text-sm text-slate-600">No users available.</div>
+                              )}
+                            </div>
+                            <div className="mt-4 flex justify-end gap-2">
+                              <Button variant="outline" onClick={() => setEditTaskAssignees([])}>
+                                Clear
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => setEditTaskAssignees(users.map((u) => u.id))}
+                                disabled={!users.length}
+                              >
+                                All users
+                              </Button>
+                              <Button onClick={() => setSelectEditTaskAssigneesOpen(false)}>
+                                Done
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" onClick={cancelEditTask} className="rounded-xl border-slate-200">
                           Cancel
@@ -4624,14 +4726,29 @@ export default function DepartmentKanban() {
                   <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
-                        {row.items.map((t) => (
+                        {row.items.map((t) => {
+                          const isCompleted = t.completed_at != null || t.status === "DONE"
+                          return (
                           <Link
                             key={t.id}
                             href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 ${row.borderClass} bg-white px-3 py-2 text-sm transition hover:bg-slate-50`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
+                              isCompleted 
+                                ? "border-green-500 bg-green-50/30 opacity-75" 
+                                : `${row.borderClass} bg-white`
+                            }`}
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <div className="font-medium text-slate-800 text-xs">{t.title}</div>
+                              <div className="flex items-center gap-2">
+                                <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                  {t.title}
+                                </div>
+                                {isCompleted && (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">
+                                    Done
+                                  </Badge>
+                                )}
+                              </div>
                               <div className="flex items-center gap-2">
                                 <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
                                   {row.itemBadge}
@@ -4711,7 +4828,8 @@ export default function DepartmentKanban() {
                               <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
                             ) : null}
                           </Link>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="text-sm text-slate-500">No tasks in this category.</div>
