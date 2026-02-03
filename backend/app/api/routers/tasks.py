@@ -167,10 +167,14 @@ async def list_tasks(
         elif user.role == UserRole.ADMIN:
             pass  # Admin can see all tasks
         elif user.role == UserRole.MANAGER:
-            # Manager can see their department's tasks OR tasks without a department (GA tasks)
-            if user.department_id is not None:
-                stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
-            # If manager has no department, they can see tasks without a department
+            # Managers in GA department can see all tasks across departments (needed for fast-task visibility)
+            if user.department and user.department.code and user.department.code.upper() == "GA":
+                pass  # no department filter
+            else:
+                # Other managers: their department's tasks OR tasks without a department
+                if user.department_id is not None:
+                    stmt = stmt.where((Task.department_id == user.department_id) | (Task.department_id.is_(None)))
+                # If manager has no department, they can see tasks without a department
         else:
             # STAFF can see all tasks (same as admin)
             pass  # No filtering - staff can see all tasks
@@ -257,7 +261,15 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     # For viewing, only check department access - editing is restricted separately
-    ensure_department_access(user, task.department_id)
+    # GA managers can view tasks across departments
+    ga_manager_cross = (
+        user.role == UserRole.MANAGER
+        and getattr(user, "department", None) is not None
+        and getattr(user.department, "code", "") is not None
+        and user.department.code.upper() == "GA"
+    )
+    if not ga_manager_cross:
+        ensure_department_access(user, task.department_id)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
@@ -287,9 +299,16 @@ async def create_task(
         if project.department_id is not None and project.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
 
-    # Allow cross-department creation when task originates from a GA/KA note.
+    # Allow GA managers (department code GA) to create tasks for any department (for fast tasks etc.)
     if department_id is not None and payload.ga_note_origin_id is None:
-        ensure_department_access(user, department_id)
+        ga_manager_cross = (
+            user.role == UserRole.MANAGER
+            and getattr(user, "department", None) is not None
+            and getattr(user.department, "code", "") is not None
+            and user.department.code.upper() == "GA"
+        )
+        if not ga_manager_cross:
+            ensure_department_access(user, department_id)
 
     dependency_task_id = payload.dependency_task_id
     if dependency_task_id is not None:

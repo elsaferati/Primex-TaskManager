@@ -577,21 +577,27 @@ export default function GaKaTasksPage() {
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
   const gaTasks = React.useMemo(() => {
+    if (!ganeUserId) return []
     return tasks.filter((task) => {
       const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-      if (!task.ga_note_origin_id || isSystem) return false
-      // Show tasks assigned to current user or to gane.arifaj
-      const currentUserId = user?.id
-      if (!currentUserId && !ganeUserId) return false
-      const isAssigned = 
-        (currentUserId && (task.assigned_to === currentUserId || task.assignees?.some((assignee) => assignee.id === currentUserId))) ||
-        (ganeUserId && (task.assigned_to === ganeUserId || task.assignees?.some((assignee) => assignee.id === ganeUserId)))
-      if (!isAssigned) return false
+      if (isSystem) return false
+
+      // Only show fast tasks (no project) assigned to gane.arifaj
+      const isFastTask = !task.project_id
+      if (!isFastTask) return false
+
+      const isAssignedToGane =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+
+      if (!isAssignedToGane) return false
+
+      // Keep the same 7-day recency window
       const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
       return createdAt >= cutoff
     })
-  }, [ganeUserId, tasks, user?.id])
+  }, [ganeUserId, tasks])
 
   const filteredTasks = React.useMemo(() => {
     let filtered = gaTasks
