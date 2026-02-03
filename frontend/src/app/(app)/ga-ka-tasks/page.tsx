@@ -578,18 +578,20 @@ export default function GaKaTasksPage() {
 
   const gaTasks = React.useMemo(() => {
     return tasks.filter((task) => {
-      if (!ganeUserId) return false
       const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
       if (!task.ga_note_origin_id || isSystem) return false
-      const isAssigned =
-        task.assigned_to === ganeUserId ||
-        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      // Show tasks assigned to current user or to gane.arifaj
+      const currentUserId = user?.id
+      if (!currentUserId && !ganeUserId) return false
+      const isAssigned = 
+        (currentUserId && (task.assigned_to === currentUserId || task.assignees?.some((assignee) => assignee.id === currentUserId))) ||
+        (ganeUserId && (task.assigned_to === ganeUserId || task.assignees?.some((assignee) => assignee.id === ganeUserId)))
       if (!isAssigned) return false
       const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
       return createdAt >= cutoff
     })
-  }, [ganeUserId, tasks])
+  }, [ganeUserId, tasks, user?.id])
 
   const filteredTasks = React.useMemo(() => {
     let filtered = gaTasks

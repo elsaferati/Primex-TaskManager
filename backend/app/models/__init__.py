@@ -9,6 +9,7 @@ from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.holiday import Holiday
+from app.models.internal_note import InternalNote
 from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
@@ -33,6 +34,7 @@ from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 
 __all__ = [
     "AttendanceLog",
@@ -47,6 +49,7 @@ __all__ = [
     "FeedbackLog",
     "GaNote",
     "Holiday",
+    "InternalNote",
     "Meeting",
     "MicrosoftToken",
     "Notification",
@@ -71,5 +74,5 @@ __all__ = [
     "TaskTemplateRun",
     "User",
     "WeeklyPlan",
+    "WeeklyPlannerLegendEntry",
 ]
-
