@@ -490,34 +490,6 @@ export default function GaKaTasksPage() {
     }
     setCreating(true)
     try {
-      const noteRes = await apiFetch("/ga-notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          department_id: null,
-          content: description.trim() || title.trim(),
-          note_type: "GA",
-        }),
-      })
-      if (!noteRes.ok) {
-        let detail = "Failed to create GA note"
-        try {
-          const data = (await noteRes.json()) as { detail?: string | Array<{ msg?: string }> }
-          if (data?.detail) {
-            if (typeof data.detail === "string") {
-              detail = data.detail
-            } else if (Array.isArray(data.detail) && data.detail.length > 0) {
-              detail = data.detail.map((e) => e.msg || "Validation error").join(", ")
-            }
-          }
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      const createdNote = (await noteRes.json()) as { id: string }
-
       const startDateValue = startDate ? new Date(startDate).toISOString() : null
       const dueDateValue = dueDate ? new Date(dueDate).toISOString() : null
       const isBllok = taskPriority === "BLLOK"
@@ -530,7 +502,6 @@ export default function GaKaTasksPage() {
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         start_date: startDateValue,
         due_date: dueDateValue,
-        ga_note_origin_id: createdNote.id,
         assigned_to: ganeUserId,
         ...(isBllok && { is_bllok: true }),
       }
