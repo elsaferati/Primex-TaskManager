@@ -457,10 +457,11 @@ export function SystemTasksView({
   const canCreate = showSystemActions
 
   // Resolve Gane user id once for GA scoping checks
-  const ganeUserId = React.useMemo(() => {
-    const gane = users.find((u) => u.username?.toLowerCase() === "gane.arifaj")
-    return gane?.id ?? null
-  }, [users])
+  const ganeUser = React.useMemo(
+    () => users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null,
+    [users]
+  )
+  const ganeUserId = React.useMemo(() => ganeUser?.id ?? null, [ganeUser])
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -823,12 +824,6 @@ export function SystemTasksView({
     handleEditAssigneesChange(editAssigneeIds.filter((item) => item !== id))
   }
 
-  // Find gane user for filtering
-  const ganeUser = React.useMemo(() => {
-    return users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null
-  }, [users])
-  const ganeUserId = ganeUser?.id ?? null
-
   // Find GA department by code
   const gaDepartmentId = React.useMemo(() => {
     const gaDept = departments.find((dept) => dept.code?.toUpperCase() === "GA")
@@ -838,30 +833,7 @@ export function SystemTasksView({
   const scopeTemplates = React.useMemo(() => {
     if (!scopeFilter) return templates
 
-    // GA view should include tasks explicitly scoped to GA OR tasks that belong to the GA department code.
-    if (scopeFilter === "GA") {
-      return templates.filter((template) => {
-        const templateScope = resolveTemplateScope(template)
-        const isGaScoped = templateScope === "GA"
-        const isGaDepartment = gaDepartmentId ? template.department_id === gaDepartmentId : false
-
-        // Must belong to GA scope (explicit) or GA department.
-        if (!isGaScoped && !isGaDepartment) return false
-
-        // And must be assigned to gane.arifaj (default assignee or among assignees).
-        const isAssignedToGane =
-          (ganeUserId &&
-            (template.default_assignee_id === ganeUserId ||
-              template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
-          template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
-
-        return Boolean(isAssignedToGane)
-      })
-    }
-
-
-    // When GA view is requested, show any template where Gane is an assignee (default or list),
-    // regardless of department/scope.
+    // GA view: show any template where Gane is an assignee (default or list), regardless of department/scope.
     if (scopeFilter === "GA") {
       const isAssignedToGane = (template: SystemTaskTemplate) =>
         (ganeUserId &&
@@ -873,7 +845,7 @@ export function SystemTasksView({
     }
 
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
-  }, [scopeFilter, templates, ganeUserId, ganeUserId, gaDepartmentId])
+  }, [scopeFilter, templates, ganeUserId])
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
