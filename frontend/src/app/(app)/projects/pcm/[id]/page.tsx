@@ -639,6 +639,22 @@ function parseTaskTotals(notes?: string | null) {
   }
 }
 
+function toNonNegativeInt(value: string | number | null | undefined): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
+  }
+  const n = parseInt((value ?? "").toString(), 10)
+  if (Number.isNaN(n) || n < 0) return 0
+  return n
+}
+
+function computeStatusFromCompleted(total: number, completed: number): Task["status"] {
+  if (total <= 0) return "TODO"
+  if (completed <= 0) return "TODO"
+  if (completed < total) return "IN_PROGRESS"
+  return "DONE"
+}
+
 function getOriginTaskId(notes?: string | null) {
   if (!notes) return null
   const match = notes.match(/origin_task_id[:=]\s*([a-f0-9-]+)/i)
@@ -2665,111 +2681,274 @@ export default function PcmProjectPage() {
     for (const t of tasks) {
       let total = ""
       let completed = ""
+      let hasProductCounts = false
       if (t.internal_notes) {
         const totalMatch = t.internal_notes.match(/total_products[:=]\s*(\d+)/i)
         const completedMatch = t.internal_notes.match(/completed_products[:=]\s*(\d+)/i)
         if (totalMatch) total = totalMatch[1]
         if (completedMatch) completed = completedMatch[1]
+        hasProductCounts = Boolean(totalMatch || completedMatch)
       }
+      if (t.daily_products !== null && t.daily_products !== undefined) {
+        hasProductCounts = true
+      }
+
+      const totalNum = t.daily_products ?? toNonNegativeInt(total)
+      const completedNum = toNonNegativeInt(completed)
       next[t.id] = {
         total,
         completed,
         assigned_to: t.assigned_to || null,
-        status: t.status,
+        status: hasProductCounts ? computeStatusFromCompleted(totalNum, completedNum) : t.status,
       }
     }
     setControlEdits(next)
   }, [tasks])
 
+  const controlTaskSyncInProgressRef = React.useRef(false)
+  const processedProductTaskIdsRef = React.useRef(new Set<string>())
+  const controlTaskSyncAbortControllerRef = React.useRef<AbortController | null>(null)
+
+  const controlTaskSyncPendingRef = React.useRef(false)
+  const controlTaskSyncProjectIdRef = React.useRef<string | null>(null)
+  const latestTasksRef = React.useRef<Task[]>(tasks)
+  latestTasksRef.current = tasks
+
+  React.useEffect(() => {
+    return () => {
+      controlTaskSyncAbortControllerRef.current?.abort()
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (mstPhase === "CONTROL") return
+    controlTaskSyncPendingRef.current = false
+    controlTaskSyncAbortControllerRef.current?.abort()
+    controlTaskSyncAbortControllerRef.current = null
+    controlTaskSyncInProgressRef.current = false
+  }, [mstPhase])
+
+  React.useEffect(() => {
+    if (!controlTaskSyncProjectIdRef.current) {
+      controlTaskSyncProjectIdRef.current = projectId
+      return
+    }
+    if (controlTaskSyncProjectIdRef.current === projectId) return
+
+    controlTaskSyncPendingRef.current = false
+    processedProductTaskIdsRef.current.clear()
+    controlTaskSyncAbortControllerRef.current?.abort()
+    controlTaskSyncAbortControllerRef.current = null
+    controlTaskSyncInProgressRef.current = false
+    controlTaskSyncProjectIdRef.current = projectId
+  }, [projectId])
+
   React.useEffect(() => {
     if (!project || mstPhase !== "CONTROL") return
-    const productTasks = tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
-    const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
-    const existingOrigins = new Set(controlTasks.map((task) => getOriginTaskId(task.internal_notes)).filter(Boolean))
-    const controlByTitleAndAssignee = new Map<string, Task>()
-    const controlWithoutOriginByTitle = new Map<string, Task[]>()
-    for (const t of controlTasks) {
-      const normalizedTitle = normalizeTaskTitle(t.title || "")
-      if (!normalizedTitle) continue
-      const key = `${normalizedTitle}|${t.assigned_to || ""}`
-      if (!controlByTitleAndAssignee.has(key)) controlByTitleAndAssignee.set(key, t)
-      if (!getOriginTaskId(t.internal_notes)) {
+
+    controlTaskSyncPendingRef.current = true
+    if (controlTaskSyncInProgressRef.current) return
+
+    const abortController = new AbortController()
+    controlTaskSyncAbortControllerRef.current?.abort()
+    controlTaskSyncAbortControllerRef.current = abortController
+
+    const syncOnce = async () => {
+      const snapshotTasks = latestTasksRef.current
+      const productTasks = snapshotTasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
+      const controlTasks = snapshotTasks.filter((task) => task.phase === "CONTROL")
+
+      const existingOrigins = new Set(controlTasks.map((task) => getOriginTaskId(task.internal_notes)).filter(Boolean))
+      const controlWithoutOriginByTitleAndAssignee = new Map<string, Task[]>()
+      const controlWithoutOriginByTitle = new Map<string, Task[]>()
+      for (const t of controlTasks) {
+        const originTaskId = getOriginTaskId(t.internal_notes)
+        if (originTaskId) continue
+        const normalizedTitle = normalizeTaskTitle(t.title || "")
+        if (!normalizedTitle) continue
+        const key = `${normalizedTitle}|${t.assigned_to || ""}`
+        const keyedItems = controlWithoutOriginByTitleAndAssignee.get(key) ?? []
+        keyedItems.push(t)
+        controlWithoutOriginByTitleAndAssignee.set(key, keyedItems)
+
         const items = controlWithoutOriginByTitle.get(normalizedTitle) ?? []
         items.push(t)
         controlWithoutOriginByTitle.set(normalizedTitle, items)
       }
-    }
-    const createMissing = async () => {
+
+      const productTitleKeyCounts = new Map<string, number>()
+      const productTitleCounts = new Map<string, number>()
+      for (const t of productTasks) {
+        const normalizedTitle = normalizeTaskTitle(t.title || "")
+        if (!normalizedTitle) continue
+        const key = `${normalizedTitle}|${t.assigned_to || ""}`
+        productTitleKeyCounts.set(key, (productTitleKeyCounts.get(key) ?? 0) + 1)
+        productTitleCounts.set(normalizedTitle, (productTitleCounts.get(normalizedTitle) ?? 0) + 1)
+      }
+
       for (const task of productTasks) {
-        if (existingOrigins.has(task.id)) continue
-        const normalizedTitle = normalizeTaskTitle(task.title || "")
-        const titleKey = `${normalizedTitle}|${task.assigned_to || ""}`
-        const existingControl =
-          normalizedTitle
-            ? controlByTitleAndAssignee.get(titleKey) ??
-              (controlWithoutOriginByTitle.get(normalizedTitle)?.length === 1
-                ? controlWithoutOriginByTitle.get(normalizedTitle)?.[0]
-                : undefined)
-            : undefined
+        if (abortController.signal.aborted) return
 
-        // If a control task already exists (typically created manually / legacy) but it's missing origin metadata,
-        // attach `origin_task_id` instead of creating a duplicate row.
-        if (existingControl && !getOriginTaskId(existingControl.internal_notes)) {
-          const existingTotals = parseTaskTotals(existingControl.internal_notes)
-          const productTotals = parseTaskTotals(task.internal_notes)
-          const koUserId = parseKoUserId(existingControl.internal_notes)
-          const totalValue = existingTotals.total || productTotals.total || task.daily_products || 0
-          const completedValue = existingTotals.completed || productTotals.completed || 0
+        if (existingOrigins.has(task.id)) {
+          processedProductTaskIdsRef.current.add(task.id)
+          continue
+        }
+        if (processedProductTaskIdsRef.current.has(task.id)) continue
 
-          const res = await apiFetch(`/tasks/${existingControl.id}`, {
-            method: "PATCH",
+        processedProductTaskIdsRef.current.add(task.id)
+
+        try {
+          const normalizedTitle = normalizeTaskTitle(task.title || "")
+          const titleKey = `${normalizedTitle}|${task.assigned_to || ""}`
+
+          const controlsWithoutOriginByKey = normalizedTitle ? (controlWithoutOriginByTitleAndAssignee.get(titleKey) ?? []) : []
+          const controlsWithoutOriginByTitle = normalizedTitle ? (controlWithoutOriginByTitle.get(normalizedTitle) ?? []) : []
+
+          const productCountWithTitleKey = normalizedTitle ? (productTitleKeyCounts.get(titleKey) ?? 0) : 0
+          const productCountWithTitle = normalizedTitle ? (productTitleCounts.get(normalizedTitle) ?? 0) : 0
+
+          const canExactMatch =
+            normalizedTitle && controlsWithoutOriginByKey.length === 1 && productCountWithTitleKey === 1
+
+          const ambiguousExactMatch =
+            normalizedTitle &&
+            controlsWithoutOriginByKey.length > 0 &&
+            !(controlsWithoutOriginByKey.length === 1 && productCountWithTitleKey === 1)
+
+          if (ambiguousExactMatch) {
+            console.warn(
+              "[Control sync] Ambiguous legacy control-task match (title+assignee); skipping auto-link/create to prevent duplicates.",
+              {
+                productTaskId: task.id,
+                normalizedTitle,
+                titleKey,
+                productTasksWithTitleKey: productCountWithTitleKey,
+                controlTasksWithoutOriginWithTitleKey: controlsWithoutOriginByKey.map((t) => t.id),
+              }
+            )
+            processedProductTaskIdsRef.current.delete(task.id)
+            continue
+          }
+
+          const canFallbackMatch =
+            normalizedTitle && controlsWithoutOriginByTitle.length === 1 && productCountWithTitle === 1
+
+          const ambiguousFallback =
+            normalizedTitle &&
+            controlsWithoutOriginByTitle.length > 0 &&
+            !(controlsWithoutOriginByTitle.length === 1 && productCountWithTitle === 1)
+
+          if (ambiguousFallback) {
+            console.warn(
+              "[Control sync] Ambiguous legacy control-task match (title-only); skipping auto-link/create to prevent duplicates.",
+              {
+                productTaskId: task.id,
+                normalizedTitle,
+                productTasksWithTitle: productCountWithTitle,
+                controlTasksWithoutOriginWithTitle: controlsWithoutOriginByTitle.map((t) => t.id),
+              }
+            )
+            processedProductTaskIdsRef.current.delete(task.id)
+            continue
+          }
+
+          const existingLegacyControl = canExactMatch
+            ? controlsWithoutOriginByKey[0]
+            : canFallbackMatch
+              ? controlsWithoutOriginByTitle[0]
+              : undefined
+
+          // If a control task already exists (typically created manually / legacy) but it's missing origin metadata,
+          // attach `origin_task_id` instead of creating a duplicate row.
+          if (existingLegacyControl) {
+            const existingTotals = parseTaskTotals(existingLegacyControl.internal_notes)
+            const productTotals = parseTaskTotals(task.internal_notes)
+            const koUserId = parseKoUserId(existingLegacyControl.internal_notes)
+            const totalValue = existingTotals.total || productTotals.total || task.daily_products || 0
+            const completedValue = existingTotals.completed || productTotals.completed || 0
+
+            const res = await apiFetch(`/tasks/${existingLegacyControl.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              signal: abortController.signal,
+              body: JSON.stringify({
+                internal_notes: serializeInternalNotes({
+                  originTaskId: task.id,
+                  total: totalValue,
+                  completed: completedValue,
+                  koUserId,
+                }),
+              }),
+            })
+            if (res?.ok) {
+              const updated = (await res.json()) as Task
+              setTasks((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+              existingOrigins.add(task.id)
+              continue
+            }
+
+            processedProductTaskIdsRef.current.delete(task.id)
+            continue
+          }
+
+          const totals = parseTaskTotals(task.internal_notes)
+          const res = await apiFetch("/tasks", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: abortController.signal,
             body: JSON.stringify({
+              title: task.title,
+              project_id: project.id,
+              department_id: project.department_id,
+              assigned_to: task.assigned_to || null,
+              status: "TODO",
+              priority: task.priority || "NORMAL",
+              phase: "CONTROL",
               internal_notes: serializeInternalNotes({
                 originTaskId: task.id,
-                total: totalValue,
-                completed: completedValue,
-                koUserId,
+                total: totals.total || 0,
+                completed: 0,
+                koUserId: null,
               }),
             }),
           })
           if (res?.ok) {
-            const updated = (await res.json()) as Task
-            setTasks((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+            const created = (await res.json()) as Task
+            setTasks((prev) => (prev.some((t) => t.id === created.id) ? prev : [...prev, created]))
             existingOrigins.add(task.id)
+            continue
           }
-          continue
-        }
 
-        const totals = parseTaskTotals(task.internal_notes)
-        const res = await apiFetch("/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: task.title,
-            project_id: project.id,
-            department_id: project.department_id,
-            assigned_to: task.assigned_to || null,
-            status: "TODO",
-            priority: task.priority || "NORMAL",
-            phase: "CONTROL",
-            internal_notes: serializeInternalNotes({
-              originTaskId: task.id,
-              total: totals.total || 0,
-              completed: 0,
-              koUserId: null,
-            }),
-          }),
-        })
-        if (res?.ok) {
-          const created = (await res.json()) as Task
-          setTasks((prev) => [...prev, created])
-          existingOrigins.add(task.id)
+          processedProductTaskIdsRef.current.delete(task.id)
+        } catch (err) {
+          const errName =
+            typeof err === "object" && err !== null && "name" in err
+              ? (err as { name?: unknown }).name
+              : undefined
+          if (typeof errName === "string" && errName === "AbortError") return
+          processedProductTaskIdsRef.current.delete(task.id)
+          console.warn("[Control sync] Failed to create/link control task.", { productTaskId: task.id, err })
         }
       }
     }
-    void createMissing()
-  }, [allUsers, apiFetch, mstPhase, project, tasks])
+
+    const run = async () => {
+      controlTaskSyncInProgressRef.current = true
+      try {
+        while (controlTaskSyncPendingRef.current && !abortController.signal.aborted) {
+          controlTaskSyncPendingRef.current = false
+          await syncOnce()
+        }
+      } finally {
+        if (controlTaskSyncAbortControllerRef.current === abortController) {
+          controlTaskSyncAbortControllerRef.current = null
+        }
+        controlTaskSyncInProgressRef.current = false
+      }
+    }
+
+    void run()
+  }, [apiFetch, mstPhase, project, tasks])
 
   const migratedControlTaskIdsRef = React.useRef(new Set<string>())
   React.useEffect(() => {
@@ -5529,10 +5708,10 @@ export default function PcmProjectPage() {
           editingTaskCompleted || controlEdits[task.id]?.completed || completedMatch?.[1] || "0"
 
         const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
-        const totalNum = parseInt(totalValue, 10) || 0
-        const completedNum = parseInt(completed, 10) || 0
-        const nextStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
-        
+        const totalNum = toNonNegativeInt(totalValue)
+        const completedNum = toNonNegativeInt(completed)
+        const nextStatus = computeStatusFromCompleted(totalNum, completedNum)
+
         // Preserve origin_task_id if it exists
         const originTaskId = getOriginTaskId(currentNotes)
         const internalNotes = serializeInternalNotes({
@@ -5551,9 +5730,8 @@ export default function PcmProjectPage() {
             due_date: editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null,
             finish_period:
               editingTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editingTaskFinishPeriod,
-            daily_products: totalNum || null,
+            daily_products: totalNum,
             internal_notes: internalNotes,
-            status: nextStatus,
           }),
         })
         if (!res.ok) {
@@ -6119,7 +6297,6 @@ export default function PcmProjectPage() {
                                 project_id: project.id,
                                 department_id: project.department_id,
                                 assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
-                                status: "TODO",
                                 priority: "NORMAL",
                                 phase: "PRODUCT",
                                 due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
@@ -6158,8 +6335,15 @@ export default function PcmProjectPage() {
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
-                      const totalVal = task.daily_products || parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const isEditing = editingTaskId === task.id
+                      const baseTotalVal =
+                        task.daily_products ?? (parseInt(controlEdits[task.id]?.total || "0", 10) || 0)
+                      const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
+                      const completedValue = isEditing
+                        ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
+                        : controlEdits[task.id]?.completed || "0"
+                      const completedNum = toNonNegativeInt(completedValue)
+                      const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                           <div className="col-span-3 pr-2">
@@ -6242,7 +6426,9 @@ export default function PcmProjectPage() {
                                 className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
                               />
                             ) : (
-                              <span className="text-slate-500">{task.daily_products || controlEdits[task.id]?.total || "-"}</span>
+                              <span className="text-slate-500">
+                                {task.daily_products ?? controlEdits[task.id]?.total ?? "-"}
+                              </span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -6253,13 +6439,11 @@ export default function PcmProjectPage() {
                                 value={editingTaskCompleted}
                                 onChange={(e) => {
                                   const rawValue = e.target.value
-                                  let completedNum = parseInt(rawValue, 10)
-                                  if (Number.isNaN(completedNum) || completedNum < 0) completedNum = 0
+                                  const completedNum = toNonNegativeInt(rawValue)
                                   const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
-                                  const totalNum = parseInt(totalValue, 10) || 0
-                                  if (totalNum > 0 && completedNum > totalNum) completedNum = totalNum
+                                  const totalNum = toNonNegativeInt(totalValue)
                                   const newCompleted = completedNum.toString()
-                                  const newStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
+                                  const newStatus = computeStatusFromCompleted(totalNum, completedNum)
                                   setEditingTaskCompleted(newCompleted)
                                   setControlEdits((prev) => ({
                                     ...prev,
@@ -6274,13 +6458,10 @@ export default function PcmProjectPage() {
                                   type="button"
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
-                                    const completedNum = Math.max(
-                                      0,
-                                      (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
-                                    )
+                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                    const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
                                     const newCompleted = completedNum.toString()
-                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
@@ -6290,18 +6471,32 @@ export default function PcmProjectPage() {
                                     const koUserId = parseKoUserId(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || "0",
+                                      total: totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
                                     })
-                                    await apiFetch(`/tasks/${task.id}`, {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
-                                        status: newStatus,
                                       }),
                                     })
+                                    if (!res?.ok) {
+                                      toast.error("Failed to update completed count")
+                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                      }))
+                                      return
+                                    }
+                                    try {
+                                      const updated = (await res.json()) as Task
+                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                    } catch {
+                                      // ignore JSON parse errors
+                                    }
                                   }}
                                 >
                                   -
@@ -6313,11 +6508,10 @@ export default function PcmProjectPage() {
                                   type="button"
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
-                                    let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
-                                    if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                    const completedNum = toNonNegativeInt(prevCompleted) + 1
                                     const newCompleted = completedNum.toString()
-                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
@@ -6327,18 +6521,32 @@ export default function PcmProjectPage() {
                                     const koUserId = parseKoUserId(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || "0",
+                                      total: totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
                                     })
-                                    await apiFetch(`/tasks/${task.id}`, {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
-                                        status: newStatus,
                                       }),
                                     })
+                                    if (!res?.ok) {
+                                      toast.error("Failed to update completed count")
+                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                      }))
+                                      return
+                                    }
+                                    try {
+                                      const updated = (await res.json()) as Task
+                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                    } catch {
+                                      // ignore JSON parse errors
+                                    }
                                   }}
                                 >
                                   +
@@ -6348,10 +6556,10 @@ export default function PcmProjectPage() {
                           </div>
                           <div className="col-span-1 px-2">
                             <Badge
-                              variant={task.status === "DONE" ? "default" : "outline"}
-                              className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                              variant={autoStatus === "DONE" ? "default" : "outline"}
+                              className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
                             >
-                              {statusLabel(controlEdits[task.id]?.status || task.status)}
+                              {statusLabel(autoStatus)}
                             </Badge>
                           </div>
                           <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1">
@@ -7049,7 +7257,6 @@ export default function PcmProjectPage() {
                                 project_id: project.id,
                                 department_id: project.department_id,
                                 assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                                status: "TODO",
                                 priority: "NORMAL",
                                 phase: "CONTROL",
                                 finish_period:
@@ -7088,9 +7295,15 @@ export default function PcmProjectPage() {
                   {/* Task rows */}
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
-                      const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const koUserId = parseKoUserId(task.internal_notes)
                       const isEditing = editingTaskId === task.id
+                      const baseTotalVal = toNonNegativeInt(controlEdits[task.id]?.total || "0")
+                      const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
+                      const completedValue = isEditing
+                        ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
+                        : controlEdits[task.id]?.completed || "0"
+                      const completedNum = toNonNegativeInt(completedValue)
+                      const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                           <div className="col-span-3 pr-2">
@@ -7172,13 +7385,11 @@ export default function PcmProjectPage() {
                                 value={editingTaskCompleted}
                                 onChange={(e) => {
                                   const rawValue = e.target.value
-                                  let completedNum = parseInt(rawValue, 10)
-                                  if (Number.isNaN(completedNum) || completedNum < 0) completedNum = 0
+                                  const completedNum = toNonNegativeInt(rawValue)
                                   const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
-                                  const totalNum = parseInt(totalValue, 10) || 0
-                                  if (totalNum > 0 && completedNum > totalNum) completedNum = totalNum
+                                  const totalNum = toNonNegativeInt(totalValue)
                                   const newCompleted = completedNum.toString()
-                                  const newStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
+                                  const newStatus = computeStatusFromCompleted(totalNum, completedNum)
                                   setEditingTaskCompleted(newCompleted)
                                   setControlEdits((prev) => ({
                                     ...prev,
@@ -7193,13 +7404,10 @@ export default function PcmProjectPage() {
                                   type="button"
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
-                                    const completedNum = Math.max(
-                                      0,
-                                      (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) - 1
-                                    )
+                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                    const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
                                     const newCompleted = completedNum.toString()
-                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
@@ -7209,18 +7417,32 @@ export default function PcmProjectPage() {
                                     const koUserId = parseKoUserId(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || "0",
+                                      total: controlEdits[task.id]?.total || totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
                                     })
-                                    await apiFetch(`/tasks/${task.id}`, {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
-                                        status: newStatus,
                                       }),
                                     })
+                                    if (!res?.ok) {
+                                      toast.error("Failed to update completed count")
+                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                      }))
+                                      return
+                                    }
+                                    try {
+                                      const updated = (await res.json()) as Task
+                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                    } catch {
+                                      // ignore JSON parse errors
+                                    }
                                   }}
                                 >
                                   -
@@ -7232,11 +7454,10 @@ export default function PcmProjectPage() {
                                   type="button"
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
-                                    let completedNum = (parseInt(controlEdits[task.id]?.completed || "0", 10) || 0) + 1
-                                    if (totalVal > 0 && completedNum > totalVal) completedNum = totalVal
+                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                    const completedNum = toNonNegativeInt(prevCompleted) + 1
                                     const newCompleted = completedNum.toString()
-                                    const shouldMarkDone = totalVal > 0 && completedNum >= totalVal
-                                    const newStatus = shouldMarkDone ? "DONE" : "TODO"
+                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
@@ -7246,18 +7467,32 @@ export default function PcmProjectPage() {
                                     const koUserId = parseKoUserId(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || "0",
+                                      total: controlEdits[task.id]?.total || totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
                                     })
-                                    await apiFetch(`/tasks/${task.id}`, {
+                                    const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
-                                        status: newStatus,
                                       }),
                                     })
+                                    if (!res?.ok) {
+                                      toast.error("Failed to update completed count")
+                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                      }))
+                                      return
+                                    }
+                                    try {
+                                      const updated = (await res.json()) as Task
+                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                    } catch {
+                                      // ignore JSON parse errors
+                                    }
                                   }}
                                 >
                                   +
@@ -7302,10 +7537,10 @@ export default function PcmProjectPage() {
                           </div>
                           <div className="col-span-1 px-2">
                             <Badge
-                              variant={task.status === "DONE" ? "default" : "outline"}
-                              className={task.status === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                              variant={autoStatus === "DONE" ? "default" : "outline"}
+                              className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
                             >
-                              {statusLabel(controlEdits[task.id]?.status || task.status)}
+                              {statusLabel(autoStatus)}
                             </Badge>
                           </div>
                           <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1 px-2">
