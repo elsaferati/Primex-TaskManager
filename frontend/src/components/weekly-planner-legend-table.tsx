@@ -41,6 +41,14 @@ export const LEGEND_COLORS: Record<string, string> = {
   "NË PROCES": "#FFC4ED", // Pink
 }
 
+const LEGEND_LABEL_DISPLAY: Record<string, string> = {
+  "NUK ESHTE PUNUAR": "DETYRE E RE",
+  "MBINGARKESE?": "-",
+  "KOMPLET (100% PROJEKTE)": "-",
+}
+
+export const getLegendLabelDisplay = (label: string) => LEGEND_LABEL_DISPLAY[label] ?? label
+
 type WeeklyPlannerLegendTableProps = {
   departmentId: string
   weekStart: string
@@ -424,11 +432,7 @@ export function WeeklyPlannerLegendTable({
                         style={{ backgroundColor: color }}
                       />
                     </TableCell>
-                    <TableCell className="font-semibold">
-                      {entry.label === "MBINGARKESE?" || entry.label === "KOMPLET (100% PROJEKTE)"
-                        ? "-"
-                        : entry.label}
-                    </TableCell>
+                    <TableCell className="font-semibold">{getLegendLabelDisplay(entry.label)}</TableCell>
                     <TableCell>
                       {entry.question_text ? (
                         <span className="text-sm text-red-600 font-medium">{entry.question_text}</span>
