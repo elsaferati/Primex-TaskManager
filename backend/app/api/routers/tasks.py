@@ -25,6 +25,7 @@ from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFro
 from pydantic import BaseModel
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
+from app.services.task_daily_progress import upsert_task_daily_progress
 
 
 router = APIRouter()
@@ -473,6 +474,24 @@ async def create_task(
     db.add(task)
     await db.flush()
 
+    # Record per-day progress event for MST/TT Product Content tasks based on completed/total.
+    # This is per-day history; it does not retroactively change other days.
+    if project is not None and _is_mst_or_tt_project(project) and phase_value in (
+        ProjectPhaseStatus.PRODUCT,
+        ProjectPhaseStatus.CONTROL,
+    ):
+        total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+        if total is not None and total > 0 and completed > 0:
+            today = datetime.now(timezone.utc).date()
+            await upsert_task_daily_progress(
+                db,
+                task_id=task.id,
+                day_date=today,
+                old_completed=0,
+                new_completed=completed,
+                total=total,
+            )
+
     # Optional: store alignment users for this task (fast-task alignment).
     if payload.alignment_user_ids:
         seen: set[uuid.UUID] = set()
@@ -631,6 +650,9 @@ async def update_task(
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
     }
+
+    # Snapshot completion values before update for MST/TT daily progress logging.
+    old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -801,6 +823,24 @@ async def update_task(
                     task.completed_at = task.completed_at or datetime.now(timezone.utc)
                 else:
                     task.completed_at = None
+
+            # Per-day progress logging: only touches today's record (never overwrites other days).
+            if total is not None and total > 0:
+                made_progress = completed > old_completed
+                became_done_today = completed >= total and old_completed < total
+                is_already_done = completed >= total
+                values_changed = completed != old_completed or total != old_total
+                # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
+                if made_progress or became_done_today or is_already_done or values_changed:
+                    today = datetime.now(timezone.utc).date()
+                    await upsert_task_daily_progress(
+                        db,
+                        task_id=task.id,
+                        day_date=today,
+                        old_completed=old_completed,
+                        new_completed=completed,
+                        total=total,
+                    )
 
     if payload.status is not None and task.assigned_to is not None and task.status == payload.status:
         created_notifications.append(

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
+from app.models.enums import ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
@@ -19,6 +19,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_planner_exclusion import TaskPlannerExclusion
+from app.models.task_daily_progress import TaskDailyProgress
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
@@ -88,6 +89,12 @@ def _is_fast_task(task: Task) -> bool:
     if _is_vs_vl_task(task):
         return False
     return True
+
+
+def _is_mst_or_tt_project(project: Project) -> bool:
+    title = (project.title or "").upper().strip()
+    is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+    return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
 
 
 def _week_start(d: date) -> date:
@@ -253,9 +260,10 @@ async def weekly_planner(
     if department_id is not None:
         project_stmt = project_stmt.where(Project.department_id == department_id)
     projects = (await db.execute(project_stmt.order_by(Project.created_at))).scalars().all()
+    project_map = {p.id: p for p in projects}
 
-    # Get all active tasks (not completed)
-    task_stmt = select(Task).where(Task.completed_at.is_(None), Task.is_active == True)
+    # Get all active tasks (including completed ones so they can show through completion day)
+    task_stmt = select(Task).where(Task.is_active == True)
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
     if user_id is not None:
@@ -341,6 +349,16 @@ async def weekly_planner(
         if task.due_date is None:
             return None, None
         due = task.due_date.date()
+        
+        # MST/TT project tasks: show only on due_date (ignore start_date)
+        is_mst_tt_project = False
+        if task.project_id and task.project_id in project_map:
+            project = project_map[task.project_id]
+            if project:
+                is_mst_tt_project = _is_mst_or_tt_project(project)
+        if is_mst_tt_project and task.project_id is not None:
+            return due, due
+
         if task.start_date is not None:
             start = task.start_date.date()
             if start <= due:
@@ -738,21 +756,26 @@ async def weekly_table_planner(
             return None, None
         due = task.due_date.date()
         
-        # For Product Content department, tasks should only show on due_date, not from start_date to due_date
-        # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
+        # MST/TT project tasks: show only on due_date (ignore start_date)
         task_dept_id = task.department_id
         project_dept_id = None
+        is_mst_tt_project = False
         if task.project_id:
             # Try to get project from map
             if task.project_id in project_map:
                 project = project_map[task.project_id]
                 if project:
                     project_dept_id = project.department_id
+                    is_mst_tt_project = _is_mst_or_tt_project(project)
             # If project not in map, try to find it (shouldn't happen, but defensive)
             else:
                 # Project should already be in map, but if not, we'll check task's department
                 pass
-        
+        if is_mst_tt_project and task.project_id is not None:
+            return due, due
+
+        # For Product Content department, tasks should only show on due_date, not from start_date to due_date
+        # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
         is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
         if is_pc_task and task.project_id is not None:
             # Product Content project tasks: show only on due_date (ignore start_date)
@@ -819,6 +842,33 @@ async def weekly_table_planner(
         )).scalars().all()
         for p in missing_projects:
             project_map[p.id] = p
+
+    # Prefetch per-day progress statuses for MST/TT tasks so we can paint each day cell independently.
+    mst_tt_task_ids: set[uuid.UUID] = set()
+    for t in week_tasks:
+        if t.project_id is None:
+            continue
+        if t.phase not in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
+            continue
+        project = project_map.get(t.project_id)
+        if project is not None and _is_mst_or_tt_project(project):
+            mst_tt_task_ids.add(t.id)
+
+    daily_progress_map: dict[tuple[uuid.UUID, date], TaskStatus] = {}
+    if mst_tt_task_ids:
+        rows = (
+            await db.execute(
+                select(TaskDailyProgress.task_id, TaskDailyProgress.day_date, TaskDailyProgress.daily_status)
+                .where(TaskDailyProgress.task_id.in_(list(mst_tt_task_ids)))
+                .where(TaskDailyProgress.day_date >= working_days[0])
+                .where(TaskDailyProgress.day_date <= working_days[-1])
+            )
+        ).all()
+        for task_id_row, day_date_row, daily_status_row in rows:
+            try:
+                daily_progress_map[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
+            except Exception:
+                daily_progress_map[(task_id_row, day_date_row)] = TaskStatus.TODO
     
     # Get task assignees for all week tasks
     task_ids = [t.id for t in week_tasks]
@@ -1136,6 +1186,7 @@ async def weekly_table_planner(
                             task_id=task.id,
                             title=task.title,
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
+                            daily_status=None,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
                             finish_period=task.finish_period,
@@ -1211,6 +1262,11 @@ async def weekly_table_planner(
                                     task_id=t.id,
                                     task_title=t.title,
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                    daily_status=(
+                                        daily_progress_map.get((t.id, day_date), TaskStatus.TODO)
+                                        if t.id in mst_tt_task_ids
+                                        else None
+                                    ),
                                     completed_at=t.completed_at,
                                     daily_products=t.daily_products,
                                     finish_period=t.finish_period,
@@ -1238,6 +1294,11 @@ async def weekly_table_planner(
                                     task_id=t.id,
                                     task_title=t.title,
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                    daily_status=(
+                                        daily_progress_map.get((t.id, day_date), TaskStatus.TODO)
+                                        if t.id in mst_tt_task_ids
+                                        else None
+                                    ),
                                     completed_at=t.completed_at,
                                     daily_products=t.daily_products,
                                     finish_period=t.finish_period,

@@ -38,6 +38,7 @@ type WeeklyTableProjectTaskEntry = {
   task_id: string
   task_title: string
   status?: string | null
+  daily_status?: string | null
   completed_at?: string | null
   daily_products: number | null
   finish_period?: string | null
@@ -61,6 +62,7 @@ type WeeklyTableTaskEntry = {
   task_id: string | null
   title: string
   status?: string | null
+  daily_status?: string | null
   completed_at?: string | null
   daily_products: number | null
   finish_period?: string | null
@@ -763,7 +765,15 @@ export default function WeeklyPlannerPage() {
   }, [])
 
   const getStatusCardClassesForDay = React.useCallback(
-    (status?: string | null, completedAt?: string | null, dayDate?: string | null) => {
+    (
+      status?: string | null,
+      completedAt?: string | null,
+      dayDate?: string | null,
+      dailyStatus?: string | null
+    ) => {
+      if (dailyStatus) {
+        return getStatusCardClasses(dailyStatus)
+      }
       const normalized = (status || "TODO").toUpperCase()
       if (normalized !== "DONE") {
         return getStatusCardClasses(normalized)
@@ -782,7 +792,16 @@ export default function WeeklyPlannerPage() {
   )
 
   const getStatusValueForDay = React.useCallback(
-    (status?: string | null, completedAt?: string | null, dayDate?: string | null) => {
+    (
+      status?: string | null,
+      completedAt?: string | null,
+      dayDate?: string | null,
+      dailyStatus?: string | null
+    ) => {
+      if (dailyStatus) {
+        const normalizedDaily = dailyStatus.toUpperCase()
+        return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
+      }
       const normalized = (status || "TODO").toUpperCase()
       if (normalized !== "DONE") {
         return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
@@ -1586,7 +1605,7 @@ export default function WeeklyPlannerPage() {
             html += `</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
-                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
                 const statusClass =
                   statusValue === "DONE"
                     ? "task-status-done"
@@ -1631,7 +1650,7 @@ export default function WeeklyPlannerPage() {
         if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
-            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
             const statusClass =
               statusValue === "DONE"
                 ? "task-status-done"
@@ -1672,7 +1691,7 @@ export default function WeeklyPlannerPage() {
             html += `</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
-                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
                 const statusClass =
                   statusValue === "DONE"
                     ? "task-status-done"
@@ -1717,7 +1736,7 @@ export default function WeeklyPlannerPage() {
         if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
-            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso)
+            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
             const statusClass =
               statusValue === "DONE"
                 ? "task-status-done"
@@ -2429,7 +2448,7 @@ export default function WeeklyPlannerPage() {
                                                   key={task.task_id}
                                                 className={[
                                                   "text-[11px] flex justify-between items-center gap-1 rounded border px-1.5 py-0.5 group/task",
-                                                  getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                                  getStatusCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status),
                                                 ].join(" ")}
                                               >
                                                   <span className="truncate whitespace-nowrap font-semibold text-slate-900">{taskNumber}. {task.task_title}</span>
@@ -2488,7 +2507,7 @@ export default function WeeklyPlannerPage() {
                                             key={task.task_id || idx}
                                           className={[
                                             "p-1 rounded border text-[11px] flex justify-between items-center group/task",
-                                            getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                            getStatusCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status),
                                           ].join(" ")}
                                         >
                                             <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
@@ -2535,7 +2554,7 @@ export default function WeeklyPlannerPage() {
                                         key={task.task_id || idx}
                                           className={[
                                             "p-1 rounded border text-[11px] flex justify-between items-center group/task",
-                                            getStatusCardClassesForDay(task.status, task.completed_at, dayDate),
+                                            getStatusCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status),
                                           ].join(" ")}
                                         >
                                         <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
