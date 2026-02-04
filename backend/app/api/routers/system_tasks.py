@@ -394,12 +394,21 @@ async def list_system_tasks(
         department_ids_set = {task.department_id for task, _ in task_list if task.department_id is not None}
         department_ids = sorted(list(department_ids_set)) if department_ids_set else None
         
-        # Use the first task for the main response, but include all department_ids
+        # Collect all unique assignees from all tasks
+        all_assignees_map = {}
+        for task, _ in task_list:
+            task_assignees = assignee_map.get(task.id, [])
+            for assignee in task_assignees:
+                if assignee.id not in all_assignees_map:
+                    all_assignees_map[assignee.id] = assignee
+        all_assignees = list(all_assignees_map.values())
+        
+        # Use the first task for the main response, but include all department_ids and all assignees
         first_task, _ = task_list[0]
         task_out = _task_row_to_out(
             first_task,
             template,
-            assignee_map.get(first_task.id, []),
+            all_assignees,
             user_comment_map.get(first_task.id),
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
