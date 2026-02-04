@@ -174,8 +174,12 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 
 // Define the grid layout once so header and body always match.
 // Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
-// MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
-const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+// Responsive breakpoints:
+// - sm (640px+): Compact layout with essential columns
+// - md (768px+): Add more columns
+// - lg (1024px+): More columns visible
+// - xl (1280px+): Full columns
+const GRID_CLASS = "grid grid-cols-[28px_minmax(150px,1fr)_80px_80px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(180px,1fr)_100px_100px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(200px,1fr)_110px_110px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
 
 type Section = {
   id: string
@@ -3228,23 +3232,23 @@ export function SystemTasksView({
           )}
         >
           {/* SCROLL WRAPPER for responsive table */}
-          <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain print:max-h-none print:overflow-visible">
+          <div className="print:overflow-visible">
             {/* STICKY HEADER ROW */}
-            <div className="min-w-[1000px] xl:min-w-0 print:min-w-0">
-              <div className="sticky top-0 z-30 print:static">
-                <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
+            <div className="w-full print:min-w-0">
+              <div className="sticky top-[var(--system-tasks-sticky-offset)] z-30 print:static">
+                <div className="border-b bg-slate-50/95 backdrop-blur py-2 sm:py-2.5 md:py-3 px-2 sm:px-3 md:px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
                   <div
                     className={cn(
                       GRID_CLASS,
-                      "text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
+                      "text-[10px] sm:text-[10.5px] md:text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
                     )}
                   >
                     <div>No.</div>
                     <div>Task Title</div>
                     <div>Department</div>
                     <div>Owner</div>
-                    <div>Frequency</div>
-                    <div>Finish by</div>
+                    <div className="hidden sm:block">Frequency</div>
+                    <div className="hidden md:block">Finish by</div>
                     <div>Priority</div>
                     <div className="text-right">Actions</div>
                   </div>
@@ -3252,7 +3256,7 @@ export function SystemTasksView({
               </div>
 
               {/* TABLE BODY */}
-              <div className="p-4 space-y-2 bg-slate-50 print:bg-white print:p-0 print:space-y-0">
+              <div className="p-2 sm:p-3 md:p-4 space-y-2 bg-slate-50 print:bg-white print:p-0 print:space-y-0">
                 {(() => {
                   let globalIndex = 0
                   return sections.map((section) => (
@@ -3333,13 +3337,13 @@ export function SystemTasksView({
                                 isInactive && "opacity-60 grayscale"
                               )}
                             >
-                              <div className="text-sm font-semibold text-slate-600">
+                              <div className="text-xs sm:text-sm font-semibold text-slate-600">
                                 {taskNumber}
                               </div>
                               {/* Title Only (Description removed from list view) */}
-                              <div className="min-w-0 pr-4">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                              <div className="min-w-0 pr-2 sm:pr-4">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                     {template.title}
                                   </div>
                                   <Badge variant="secondary" className="h-5 text-[10px] uppercase">
@@ -3348,28 +3352,28 @@ export function SystemTasksView({
                                 </div>
                               </div>
 
-                              <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                              <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={departmentLabel}>
                                 {departmentLabel}
                               </div>
 
-                              <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                              <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
                                 {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
                               </div>
 
-                              <div>
-                                <span className="text-sm text-slate-700 font-normal">
+                              <div className="hidden sm:block">
+                                <span className="text-xs sm:text-sm text-slate-700 font-normal">
                                   {frequencyLabel}
                                 </span>
                               </div>
 
-                              <div className="text-sm text-slate-700 font-normal">
+                              <div className="hidden md:block text-xs sm:text-sm text-slate-700 font-normal">
                                 {template.finish_period || "-"}
                               </div>
 
                               <div>
                                 <Badge
                                   variant="outline"
-                                  className={cn("px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
+                                  className={cn("px-1.5 sm:px-2 py-0.5 text-[11px] sm:text-[12px] md:text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
                                 >
                                   {PRIORITY_LABELS[priorityValue]}
                                 </Badge>
