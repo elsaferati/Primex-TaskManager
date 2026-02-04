@@ -1268,13 +1268,55 @@ export default function GaKaTasksPage() {
     }
     setExportingAllTasks(true)
     try {
-      // Use the daily report export endpoint but with all_users=true to get all tasks
-      // Since we want all tasks, we'll create a custom export
-      // For now, let's use the tasks.xlsx endpoint filtered by user
-      const qs = new URLSearchParams({
-        user_id: ganeUserId,
+      const parseFilenameFromDisposition = (headerValue: string | null) => {
+        if (!headerValue) return null
+        const match = headerValue.match(/filename=\"?([^\";]+)\"?/i)
+        return match?.[1] || null
+      }
+
+      const rowsPayload = allTasksReportRows.map((row) => {
+        const commentKey = row.taskId
+          ? `all-task:${row.taskId}`
+          : row.systemTemplateId && row.systemOccurrenceDate
+            ? `all-system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+            : row.systemTemplateId
+              ? `all-system:${row.systemTemplateId}`
+              : ""
+        const previousValue = row.comment ?? ""
+        const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : previousValue
+        return {
+          typeLabel: row.typeLabel,
+          subtype: row.subtype,
+          period: row.period,
+          department: row.department,
+          title: row.title,
+          status: row.status,
+          bz: row.bz,
+          kohaBz: row.kohaBz,
+          tyo: row.tyo,
+          comment: commentValue || "",
+          userInitials: row.userInitials || "",
+        }
       })
-      const res = await apiFetch(`/exports/tasks.xlsx?${qs.toString()}`)
+
+      const res = await apiFetch(`/exports/all-tasks-report.xlsx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "ALL ADMIN TASK REPORT",
+          usersInitials: (() => {
+            const unique = Array.from(
+              new Set(
+                rowsPayload
+                  .map((r) => (r.userInitials || "").trim().toUpperCase())
+                  .filter(Boolean)
+              )
+            ).sort()
+            return unique.join("_")
+          })(),
+          rows: rowsPayload,
+        }),
+      })
       if (!res.ok) {
         toast.error("Failed to export all tasks")
         return
@@ -1283,9 +1325,8 @@ export default function GaKaTasksPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      const today = new Date()
-      const dateStr = `${today.getDate().toString().padStart(2, "0")}_${(today.getMonth() + 1).toString().padStart(2, "0")}_${today.getFullYear().toString().slice(-2)}`
-      link.download = `all_tasks_${dateStr}_${printInitials || "user"}.xlsx`
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      link.download = filename || "ALL_ADMIN_TASK_REPORT.xlsx"
       document.body.appendChild(link)
       link.click()
       link.remove()
