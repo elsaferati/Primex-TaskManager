@@ -15,7 +15,7 @@ class SystemTaskTemplateOut(BaseModel):
     internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
-    assignees: list[uuid.UUID] | None = None
+    assignee_ids: list[uuid.UUID] | None = None
     scope: SystemTaskScope
     frequency: FrequencyType
     day_of_week: int | None = None
@@ -38,7 +38,7 @@ class SystemTaskTemplateCreate(BaseModel):
     internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
-    assignees: list[uuid.UUID] | None = None
+    assignee_ids: list[uuid.UUID] | None = None
     scope: SystemTaskScope | None = None
     frequency: FrequencyType
     day_of_week: int | None = None
@@ -60,7 +60,7 @@ class SystemTaskTemplateUpdate(BaseModel):
     internal_notes: str | None = None
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
-    assignees: list[uuid.UUID] | None = None
+    assignee_ids: list[uuid.UUID] | None = None
     scope: SystemTaskScope | None = None
     frequency: FrequencyType | None = None
     day_of_week: int | None = None
