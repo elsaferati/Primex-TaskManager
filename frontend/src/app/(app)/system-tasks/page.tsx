@@ -499,8 +499,8 @@ export function SystemTasksView({
             ])
           )
         }
-        // Group tasks by template_id and merge assignees
-        const groupedByTemplate = new Map<string, typeof rows[0] & { assignees: typeof rows[0]['assignees'] }>()
+        // Group tasks by template_id and merge assignees and departments
+        const groupedByTemplate = new Map<string, typeof rows[0] & { assignees: typeof rows[0]['assignees'], department_ids?: string[] }>()
         
         for (const row of rows) {
           const templateId = row.template_id ?? row.id
@@ -525,6 +525,19 @@ export function SystemTasksView({
             if (newAssignees.length > 0) {
               existing.assignees = [...(existing.assignees || []), ...newAssignees]
             }
+            // Collect department IDs from all tasks in the group
+            const existingDeptIds = new Set(existing.department_ids || [])
+            if (merged.department_id && !existingDeptIds.has(merged.department_id)) {
+              existing.department_ids = [...(existing.department_ids || []), merged.department_id]
+            }
+            // Also use department_ids from backend if available
+            if ((merged as any).department_ids) {
+              for (const deptId of (merged as any).department_ids) {
+                if (!existingDeptIds.has(deptId)) {
+                  existing.department_ids = [...(existing.department_ids || []), deptId]
+                }
+              }
+            }
             // Use the first task's status (or prefer DONE if any is done)
             if (merged.status === "DONE" && existing.status !== "DONE") {
               existing.status = merged.status
@@ -535,7 +548,18 @@ export function SystemTasksView({
             }
           } else {
             // First task for this template
-            groupedByTemplate.set(key, { ...merged, assignees: merged.assignees || [] })
+            const deptIds: string[] = []
+            if (merged.department_id) {
+              deptIds.push(merged.department_id)
+            }
+            if ((merged as any).department_ids) {
+              for (const deptId of (merged as any).department_ids) {
+                if (!deptIds.includes(deptId)) {
+                  deptIds.push(deptId)
+                }
+              }
+            }
+            groupedByTemplate.set(key, { ...merged, assignees: merged.assignees || [], department_ids: deptIds.length > 0 ? deptIds : undefined })
           }
         }
         
@@ -1029,7 +1053,7 @@ export function SystemTasksView({
         description: description.trim() || null,
         scope,
         department_id: resolveDepartmentId(finalDeptId),
-        assignees: assigneeIds,
+        assignee_ids: assigneeIds,
         frequency,
         priority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
@@ -1153,7 +1177,7 @@ export function SystemTasksView({
         description: editDescription.trim() || null,
         scope,
         department_id: resolveDepartmentId(finalDeptId),
-        assignees: editAssigneeIds,
+        assignee_ids: editAssigneeIds,
         frequency: editFrequency,
         priority: editPriority,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
@@ -3224,16 +3248,24 @@ export function SystemTasksView({
                           const taskNumber = globalIndex + 1
                           globalIndex++
                         const priorityValue = normalizePriority(template.priority)
-                        const department = template.department_id ? departmentMap.get(template.department_id) : null
+                        // Get all departments from department_ids if available, otherwise use single department_id
+                        const departmentIds = (template as any).department_ids || (template.department_id ? [template.department_id] : [])
+                        const departments = departmentIds
+                          .map((deptId: string) => departmentMap.get(deptId))
+                          .filter((dept: Department | undefined): dept is Department => dept !== undefined)
+                        const department = departments.length > 0 ? departments[0] : (template.department_id ? departmentMap.get(template.department_id) : null)
                         const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+                        // Display all departments if multiple, otherwise show single or ALL
                         const departmentLabel =
                           scope === "GA"
                             ? "GA"
                             : scope === "ALL"
                               ? "ALL"
-                              : department
-                                ? formatDepartmentName(department.name)
-                                : "-"
+                              : departments.length > 1
+                                ? departments.map(d => formatDepartmentName(d.name)).join(", ")
+                                : department
+                                  ? formatDepartmentName(department.name)
+                                  : "-"
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =

@@ -16,6 +16,7 @@ class SystemTaskOut(BaseModel):
     description: str | None = None
     internal_notes: str | None = None
     department_id: uuid.UUID | None = None
+    department_ids: list[uuid.UUID] | None = None  # All departments from assignees
     default_assignee_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     scope: SystemTaskScope
