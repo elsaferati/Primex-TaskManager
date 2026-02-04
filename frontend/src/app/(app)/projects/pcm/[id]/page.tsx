@@ -2686,9 +2686,61 @@ export default function PcmProjectPage() {
     const productTasks = tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
     const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
     const existingOrigins = new Set(controlTasks.map((task) => getOriginTaskId(task.internal_notes)).filter(Boolean))
+    const controlByTitleAndAssignee = new Map<string, Task>()
+    const controlWithoutOriginByTitle = new Map<string, Task[]>()
+    for (const t of controlTasks) {
+      const normalizedTitle = normalizeTaskTitle(t.title || "")
+      if (!normalizedTitle) continue
+      const key = `${normalizedTitle}|${t.assigned_to || ""}`
+      if (!controlByTitleAndAssignee.has(key)) controlByTitleAndAssignee.set(key, t)
+      if (!getOriginTaskId(t.internal_notes)) {
+        const items = controlWithoutOriginByTitle.get(normalizedTitle) ?? []
+        items.push(t)
+        controlWithoutOriginByTitle.set(normalizedTitle, items)
+      }
+    }
     const createMissing = async () => {
       for (const task of productTasks) {
         if (existingOrigins.has(task.id)) continue
+        const normalizedTitle = normalizeTaskTitle(task.title || "")
+        const titleKey = `${normalizedTitle}|${task.assigned_to || ""}`
+        const existingControl =
+          normalizedTitle
+            ? controlByTitleAndAssignee.get(titleKey) ??
+              (controlWithoutOriginByTitle.get(normalizedTitle)?.length === 1
+                ? controlWithoutOriginByTitle.get(normalizedTitle)?.[0]
+                : undefined)
+            : undefined
+
+        // If a control task already exists (typically created manually / legacy) but it's missing origin metadata,
+        // attach `origin_task_id` instead of creating a duplicate row.
+        if (existingControl && !getOriginTaskId(existingControl.internal_notes)) {
+          const existingTotals = parseTaskTotals(existingControl.internal_notes)
+          const productTotals = parseTaskTotals(task.internal_notes)
+          const koUserId = parseKoUserId(existingControl.internal_notes)
+          const totalValue = existingTotals.total || productTotals.total || task.daily_products || 0
+          const completedValue = existingTotals.completed || productTotals.completed || 0
+
+          const res = await apiFetch(`/tasks/${existingControl.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              internal_notes: serializeInternalNotes({
+                originTaskId: task.id,
+                total: totalValue,
+                completed: completedValue,
+                koUserId,
+              }),
+            }),
+          })
+          if (res?.ok) {
+            const updated = (await res.json()) as Task
+            setTasks((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+            existingOrigins.add(task.id)
+          }
+          continue
+        }
+
         const totals = parseTaskTotals(task.internal_notes)
         const res = await apiFetch("/tasks", {
           method: "POST",
@@ -2712,6 +2764,7 @@ export default function PcmProjectPage() {
         if (res?.ok) {
           const created = (await res.json()) as Task
           setTasks((prev) => [...prev, created])
+          existingOrigins.add(task.id)
         }
       }
     }
