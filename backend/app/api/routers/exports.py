@@ -18,6 +18,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
@@ -48,6 +49,26 @@ from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_ran
 
 router = APIRouter()
 
+
+class AllTasksReportRowIn(BaseModel):
+    typeLabel: str = Field(default="-")
+    subtype: str = Field(default="-")
+    period: str = Field(default="-")
+    department: str = Field(default="-")
+    title: str = Field(default="-")
+    status: str = Field(default="-")
+    bz: str = Field(default="-")
+    kohaBz: str = Field(default="-")
+    tyo: str = Field(default="-")
+    comment: str | None = None
+    userInitials: str | None = None
+
+
+class AllTasksReportExportIn(BaseModel):
+    title: str = Field(default="ALL TASKS REPORT")
+    usersInitials: str | None = None
+    rows: list[AllTasksReportRowIn]
+
 DATE_LABEL_RE = re.compile(r"Date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 DATE_RANGE_RE = re.compile(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -59,9 +80,21 @@ TIME_RANGE_RE = re.compile(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)")
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 
-def _initials(label: str) -> str:
+def _initials_compact(label: str | None) -> str:
+    if not label:
+        return ""
     parts = [part for part in re.split(r"\s+", label.strip()) if part]
     return "".join(part[0].upper() for part in parts)
+
+
+def _initials_filename(label: str | None) -> str:
+    """
+    Initials format for filenames, e.g. "R_A" instead of "RA".
+    """
+    compact = _initials_compact(label)
+    if not compact:
+        return ""
+    return "_".join(list(compact))
 
 
 def _format_excel_date(d: date) -> str:
@@ -358,9 +391,8 @@ def _task_rows(tasks: list[Task], status_map: dict[uuid.UUID, str], user_map: di
 
 
 def _initials(label: str | None) -> str:
-    if not label:
-        return ""
-    return "".join(part[0] for part in label.split() if part).upper()
+    # Backwards-compatible alias used throughout this module (compact initials like "DV").
+    return _initials_compact(label)
 
 
 def _resolve_period(finish_period: str | None, date_value: date | datetime | None) -> str:
@@ -576,6 +608,8 @@ async def export_tasks_xlsx(
     status_id: uuid.UUID | None = None,
     planned_from: date | None = None,
     planned_to: date | None = None,
+    title: str | None = None,
+    standard: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -595,18 +629,306 @@ async def export_tasks_xlsx(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Tasks"
-    ws.append(EXPORT_HEADERS)
-    for row in rows:
-        ws.append(row)
+
+    if standard:
+        # Standard printable export (Admin Tasks requirement)
+        std_title_raw = title or "TASKS"
+        std_title = _safe_filename(std_title_raw)
+        headers = ["NR", "TASK TITLE", "STATUS", "PRIORITY", "DUE DATE", "PUNOI"]
+
+        ws.title = (std_title_raw[:31] if std_title_raw else "Tasks")[:31]
+
+        last_col = len(headers)
+
+        # Row 1: Title (merged across all columns)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+        title_cell = ws.cell(row=1, column=1, value=std_title)
+        title_cell.font = Font(bold=True, size=16)
+        title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+
+        # Row 2: (blank / spacing)
+        # Row 3: (blank / spacing)
+
+        header_row = 4
+        data_row = header_row + 1
+
+        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=header_row, column=col_idx, value=header.upper())
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(
+                horizontal="left",
+                vertical="bottom",
+                wrap_text=True if header == "NR" else False,
+                readingOrder=1,
+            )
+
+        # Data (simple table)
+        # Use the same task list but present human-friendly columns
+        # NOTE: This uses attributes already referenced elsewhere in this file, to avoid schema drift.
+        for idx, t in enumerate(tasks, start=1):
+            status_label = status_map.get(t.status_id, "") if hasattr(t, "status_id") else getattr(t, "status", "") or ""
+            priority_value = getattr(t, "priority", "") or ""
+            due_value = ""
+            due_dt = getattr(t, "due_date", None)
+            if due_dt:
+                try:
+                    due_value = due_dt.date().isoformat()
+                except Exception:
+                    due_value = str(due_dt)
+            assignee_name = ""
+            assignee_id = getattr(t, "assigned_to_user_id", None)
+            if assignee_id:
+                assignee_name = user_map.get(assignee_id, "") or ""
+            row_values = [
+                idx,
+                getattr(t, "title", "") or "",
+                status_label,
+                str(priority_value).upper() if priority_value else "",
+                due_value,
+                _initials_compact(assignee_name),
+            ]
+            for col_idx, value in enumerate(row_values, start=1):
+                cell = ws.cell(row=data_row, column=col_idx, value=value)
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", readingOrder=1, wrap_text=False)
+                if col_idx == 1:
+                    cell.font = Font(bold=True)
+            data_row += 1
+
+        last_row = data_row - 1
+
+        # Column widths
+        widths = {
+            1: 5,   # NR
+            2: 46,  # TASK TITLE
+            3: 14,  # STATUS
+            4: 12,  # PRIORITY
+            5: 14,  # DUE DATE
+            6: 10,  # PUNOI
+        }
+        for col_idx in range(1, last_col + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+
+        # Filters for all columns
+        if last_row >= header_row:
+            ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+        # Freeze: column A (NR) + header row (row 4)
+        ws.freeze_panes = "B5"
+
+        # Repeat header row on each printed page
+        ws.print_title_rows = f"{header_row}:{header_row}"
+
+        # Page setup + margins (exact values provided)
+        ws.page_setup.paperSize = 9
+        ws.page_setup.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.page_margins.left = 0.1
+        ws.page_margins.right = 0.1
+        ws.page_margins.top = 0.36
+        ws.page_margins.bottom = 0.51
+        ws.page_margins.header = 0.15
+        ws.page_margins.footer = 0.2
+
+        # Header/footer: date+time top-right, page x/y center bottom, initials bottom-right
+        ws.oddHeader.right.text = "&D &T"
+        ws.oddFooter.center.text = "Page &P / &N"
+        ws.oddFooter.right.text = _initials_compact(user.full_name or user.username or "") or "____"
+
+        # Thick outside border for header row
+        thin = Side(style="thin", color="000000")
+        thick = Side(style="medium", color="000000")
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=header_row, column=c)
+            cell.border = Border(left=thick, right=thick, top=thick, bottom=thick)
+
+        # Ensure all cells bottom-aligned (including blanks within used range)
+        for r in range(1, last_row + 1):
+            for c in range(1, last_col + 1):
+                cell = ws.cell(row=r, column=c)
+                if cell.alignment is None:
+                    cell.alignment = Alignment(horizontal="left", vertical="bottom", readingOrder=1)
+                else:
+                    cell.alignment = Alignment(
+                        horizontal=cell.alignment.horizontal or "left",
+                        vertical="bottom",
+                        wrap_text=cell.alignment.wrap_text,
+                        readingOrder=1,
+                    )
+    else:
+        ws.title = "Tasks"
+        ws.append(EXPORT_HEADERS)
+        for row in rows:
+            ws.append(row)
 
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
     today = datetime.now(timezone.utc).date()
     filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
-    user_initials = _initials(user.full_name or user.username or "") or "USER"
-    filename = f"TASKS_{filename_date}_{user_initials}.xlsx"
+    user_initials = _initials_filename(user.full_name or user.username or "") or "U_S_E_R"
+    if standard:
+        file_title = _safe_filename(title or "TASKS")
+        filename = f"{file_title} {filename_date}_{user_initials}.xlsx".replace("__", "_")
+    else:
+        filename = f"TASKS_{filename_date}_{_initials_compact(user.full_name or user.username or '') or 'USER'}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.post("/all-tasks-report.xlsx")
+async def export_all_tasks_report_xlsx(
+    payload: AllTasksReportExportIn,
+    user=Depends(get_current_user),
+):
+    ensure_manager_or_admin(user)
+
+    headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "PUNOI"]
+    title_text = _safe_filename(payload.title or "ALL TASKS REPORT")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (payload.title or "All Tasks Report")[:31]
+
+    last_col = len(headers)
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_text)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+
+    # Row 2-3: spacing (empty)
+
+    header_row = 4
+    data_row = header_row + 1
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, header in enumerate(headers, start=1):
+        header_text = "AM/\nPM" if header == "AM/PM" else header.upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=header_text)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    # Data rows (exactly matching Print All columns)
+    for idx, r in enumerate(payload.rows or [], start=1):
+        values = [
+            idx,
+            (r.typeLabel or "-"),
+            (r.subtype or "-"),
+            (r.period or "-"),
+            (r.department or "-"),
+            (r.title or "-"),
+            (r.status or "-"),
+            (r.bz or "-"),
+            (r.kohaBz or "-"),
+            (r.tyo or "-"),
+            (r.comment or ""),
+            (r.userInitials or "-"),
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = data_row - 1
+
+    # Column widths (close to print layout)
+    widths = {
+        1: 5,   # NR
+        2: 6,   # LL
+        3: 7,   # NLL
+        4: 7,   # AM/PM
+        5: 7,   # DEP
+        6: 42,  # TITULLI
+        7: 10,  # STS
+        8: 10,  # BZ
+        9: 12,  # KOHA BZ
+        10: 6,  # T/Y/O
+        11: 22, # KOMENT
+        12: 10, # PUNOI
+    }
+    for col_idx in range(1, last_col + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+
+    # Filters, freeze, repeated header row
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+
+    # Page setup + margins
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    # Header/footer
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
+
+    # Borders: thick outside on header row, thin elsewhere with thick outside frame
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    if last_row >= header_row:
+        for r_idx in range(header_row, last_row + 1):
+            for c_idx in range(1, last_col + 1):
+                is_header = r_idx == header_row
+                is_first_col = c_idx == 1
+                is_last_col = c_idx == last_col
+                is_last_row = r_idx == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+
+                if is_header:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+
+    # Use exported users initials (from the report rows) for the filename.
+    filename_users = (payload.usersInitials or "").strip().upper()
+    if not filename_users:
+        unique_users = sorted(
+            {
+                (r.userInitials or "").strip().upper()
+                for r in (payload.rows or [])
+                if (r.userInitials or "").strip()
+            }
+        )
+        filename_users = "_".join(unique_users) if unique_users else "USER"
+
+    # Standard required filename:
+    # ALL ADMIN TASK REPORT_DD_MM_YY_USERS_INITIALS.xlsx
+    filename = f"ALL_ADMIN_TASK_REPORT_{filename_date}_{filename_users}.xlsx".replace("__", "_")
+
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
