@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
-import type { DailyReportResponse, Department, Task, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
+import type { DailyReportResponse, Department, SystemTaskOut, Task, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
 
 import { SystemTasksView } from "../system-tasks/page"
 
@@ -353,6 +353,7 @@ export default function GaKaTasksPage() {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
   const [tasks, setTasks] = React.useState<Task[]>([])
+  const [systemTasks, setSystemTasks] = React.useState<SystemTaskOut[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<AssigneeUser[]>([])
   const [loadingTasks, setLoadingTasks] = React.useState(true)
@@ -420,15 +421,19 @@ export default function GaKaTasksPage() {
   const load = React.useCallback(async () => {
     setLoadingTasks(true)
     try {
-      const [tasksRes, departmentsRes] = await Promise.all([
+      const [tasksRes, departmentsRes, systemTasksRes] = await Promise.all([
         apiFetch("/tasks?include_done=true"),
         apiFetch("/departments"),
+        apiFetch("/system-tasks?only_active=false"),
       ])
       if (tasksRes.ok) {
         setTasks((await tasksRes.json()) as Task[])
       }
       if (departmentsRes.ok) {
         setDepartments((await departmentsRes.json()) as Department[])
+      }
+      if (systemTasksRes.ok) {
+        setSystemTasks((await systemTasksRes.json()) as SystemTaskOut[])
       }
       const usersRes = await apiFetch(user?.role === "STAFF" ? "/users/lookup" : "/users")
       if (usersRes.ok) {
@@ -917,6 +922,55 @@ export default function GaKaTasksPage() {
     }
   }
 
+  const saveAllTasksReportSystemComment = async (
+    templateId: string,
+    occurrenceDate: string,
+    status: string,
+    nextValue: string,
+    previousValue: string,
+    commentKey: string
+  ) => {
+    const trimmed = nextValue.trim()
+    const previousTrimmed = previousValue.trim()
+    if (trimmed === previousTrimmed) return
+
+    const payloadComment = trimmed.length ? trimmed : null
+    setAllTasksReportCommentSaving(commentKey, true)
+    try {
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: templateId,
+          occurrence_date: occurrenceDate || todayIso,
+          status: status || "OPEN",
+          comment: payloadComment,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.detail || "Failed to save comment")
+        setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+        return
+      }
+      setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+      // Update system tasks state
+      setSystemTasks((prev) =>
+        prev.map((st) =>
+          st.template_id === templateId
+            ? { ...st, user_comment: payloadComment }
+            : st
+        )
+      )
+    } catch (error) {
+      console.error("Failed to save comment", error)
+      toast.error("Failed to save comment")
+      setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+    } finally {
+      setAllTasksReportCommentSaving(commentKey, false)
+    }
+  }
+
   const isDragTargetInteractive = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false
     const tag = target.tagName
@@ -1092,6 +1146,9 @@ export default function GaKaTasksPage() {
       userInitials?: string
       taskId?: string
       createdDate?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      systemStatus?: string
     }> = []
 
     if (!ganeUserId) return rows
@@ -1118,7 +1175,7 @@ export default function GaKaTasksPage() {
         task.assignees?.some((assignee) => assignee.id === ganeUserId)
       if (!isAssigned) continue
       if (task.is_active === false) continue
-      if (task.system_template_origin_id) continue // Skip system tasks
+      if (task.system_template_origin_id) continue // Skip system tasks (handled separately)
 
       const isProject = Boolean(task.project_id)
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
@@ -1142,6 +1199,56 @@ export default function GaKaTasksPage() {
       })
     }
 
+    // Process all system tasks assigned to Gane
+    for (const systemTask of systemTasks) {
+      const isAssigned =
+        systemTask.default_assignee_id === ganeUserId ||
+        systemTask.assignees?.some((assignee) => assignee.id === ganeUserId)
+      if (!isAssigned) continue
+      if (systemTask.is_active === false) continue
+
+      // Only include GA-scoped occurrences (scope GA or department GA)
+      const isGaScope =
+        systemTask.scope === "GA" ||
+        (adminDepartmentId && systemTask.department_id === adminDepartmentId)
+      if (!isGaScope && systemTask.scope !== "ALL") continue
+
+      const systemSubtype =
+        systemTask.frequency === "DAILY"
+          ? "D"
+          : systemTask.frequency === "WEEKLY"
+            ? "W"
+            : systemTask.frequency === "MONTHLY"
+              ? "M"
+              : systemTask.frequency === "YEARLY"
+                ? "Y"
+                : systemTask.frequency === "3_MONTHS"
+                  ? "3M"
+                  : systemTask.frequency === "6_MONTHS"
+                    ? "6M"
+                    : "SYS"
+      
+      const createdDate = systemTask.created_at ? new Date(systemTask.created_at).toISOString().slice(0, 10) : undefined
+      const baseDate = createdDate ? toDate(createdDate) : null
+
+      rows.push({
+        typeLabel: "SYS",
+        subtype: systemSubtype,
+        period: systemTask.finish_period || "AM",
+        department: resolveDepartmentLabel(systemTask.department_id, systemTask.scope || null, false),
+        title: systemTask.title || "-",
+        description: systemTask.description || "-",
+        status: formatSystemOccurrenceStatus(systemTask.status),
+        bz: "-",
+        kohaBz: "-",
+        tyo: baseDate ? getTyoLabel(baseDate, null, todayDate) : "-",
+        comment: systemTask.user_comment ?? null,
+        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        systemTemplateId: systemTask.template_id,
+        createdDate,
+      })
+    }
+
     // Sort by created date (newest first)
     rows.sort((a, b) => {
       if (!a.createdDate && !b.createdDate) return 0
@@ -1151,7 +1258,7 @@ export default function GaKaTasksPage() {
     })
 
     return rows
-  }, [tasks, ganeUserId, ganeUser, departments, taskCommentMap, todayDate])
+  }, [tasks, systemTasks, ganeUserId, ganeUser, departments, taskCommentMap, todayDate, adminDepartmentId])
 
   const exportAllTasks = async () => {
     if (!user?.id) return
@@ -1567,12 +1674,18 @@ export default function GaKaTasksPage() {
                   <tbody>
                     {allTasksReportRows.length ? (
                       allTasksReportRows.map((row, index) => {
-                        const commentKey = row.taskId ? `all-task:${row.taskId}` : ""
+                        const commentKey = row.taskId
+                          ? `all-task:${row.taskId}`
+                          : row.systemTemplateId && row.systemOccurrenceDate
+                            ? `all-system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
+                            : row.systemTemplateId
+                              ? `all-system:${row.systemTemplateId}`
+                              : ""
                         const previousValue = row.comment ?? ""
                         const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
                         const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
                         return (
-                          <tr key={`${row.taskId}-${index}`}>
+                          <tr key={`${row.taskId || row.systemTemplateId}-${index}`}>
                             <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                               {index + 1}
                             </td>
@@ -1608,6 +1721,19 @@ export default function GaKaTasksPage() {
                                     const nextValue = e.target.value
                                     if (row.taskId) {
                                       void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                      return
+                                    }
+                                    if (row.systemTemplateId) {
+                                      // For system tasks, use today's date as occurrence date if not provided
+                                      const occurrenceDate = row.systemOccurrenceDate || todayIso
+                                      void saveAllTasksReportSystemComment(
+                                        row.systemTemplateId,
+                                        occurrenceDate,
+                                        row.systemStatus || "OPEN",
+                                        nextValue,
+                                        previousValue,
+                                        commentKey
+                                      )
                                     }
                                   }}
                                   disabled={!commentKey}
@@ -1620,6 +1746,18 @@ export default function GaKaTasksPage() {
                                     if (!commentKey) return
                                     if (row.taskId) {
                                       void saveAllTasksReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
+                                      return
+                                    }
+                                    if (row.systemTemplateId) {
+                                      const occurrenceDate = row.systemOccurrenceDate || todayIso
+                                      void saveAllTasksReportSystemComment(
+                                        row.systemTemplateId,
+                                        occurrenceDate,
+                                        row.systemStatus || "OPEN",
+                                        commentValue,
+                                        previousValue,
+                                        commentKey
+                                      )
                                     }
                                   }}
                                 >
@@ -2224,7 +2362,7 @@ export default function GaKaTasksPage() {
               <tbody>
                 {allTasksReportRows.length ? (
                   allTasksReportRows.map((row, index) => (
-                    <tr key={`${row.taskId}-${index}`}>
+                    <tr key={`${row.taskId || row.systemTemplateId}-${index}`}>
                       <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                       <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
