@@ -645,6 +645,34 @@ function getOriginTaskId(notes?: string | null) {
   return match ? match[1] : null
 }
 
+function parseKoUserId(notes?: string | null): string | null {
+  if (!notes) return null
+  const match = notes.match(/ko_user_id[:=]\s*([a-f0-9-]+)/i)
+  return match ? match[1] : null
+}
+
+function serializeInternalNotes(params: {
+  total?: string | number
+  completed?: string | number
+  originTaskId?: string
+  koUserId?: string | null
+}): string {
+  const parts: string[] = []
+  if (params.originTaskId) {
+    parts.push(`origin_task_id=${params.originTaskId}`)
+  }
+  if (params.total !== undefined) {
+    parts.push(`total_products=${params.total}`)
+  }
+  if (params.completed !== undefined) {
+    parts.push(`completed_products=${params.completed}`)
+  }
+  if (params.koUserId) {
+    parts.push(`ko_user_id=${params.koUserId}`)
+  }
+  return parts.join("; ")
+}
+
 function addBusinessDaysToIso(baseIso: string, days: number) {
   const base = new Date(baseIso)
   if (Number.isNaN(base.getTime())) return null
@@ -1133,6 +1161,7 @@ export default function PcmProjectPage() {
   const [newMemberId, setNewMemberId] = React.useState<string>("")
   const [controlTitle, setControlTitle] = React.useState("")
   const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
+  const [controlKoUserId, setControlKoUserId] = React.useState<string>("__unassigned__")
   const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
@@ -1172,6 +1201,7 @@ export default function PcmProjectPage() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
   const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
+  const [editingTaskKoUserId, setEditingTaskKoUserId] = React.useState<string>("__unassigned__")
   const [editingTaskDueDate, setEditingTaskDueDate] = React.useState("")
   const [editingTaskFinishPeriod, setEditingTaskFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
@@ -5365,12 +5395,16 @@ export default function PcmProjectPage() {
       setEditingTaskCompleted(
         controlEdits[latestTask.id]?.completed || completedMatch?.[1] || "0"
       )
+      // Initialize KO user ID from internal_notes
+      const koUserId = parseKoUserId(notes)
+      setEditingTaskKoUserId(koUserId || "__unassigned__")
     }
 
     const cancelEditTask = () => {
       setEditingTaskId(null)
       setEditingTaskTitle("")
       setEditingTaskAssignee("__unassigned__")
+      setEditingTaskKoUserId("__unassigned__")
       setEditingTaskDueDate("")
       setEditingTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setEditingTaskTotal("")
@@ -5393,6 +5427,16 @@ export default function PcmProjectPage() {
         const totalNum = parseInt(totalValue, 10) || 0
         const completedNum = parseInt(completed, 10) || 0
         const nextStatus = totalNum > 0 && completedNum >= totalNum ? "DONE" : "TODO"
+        
+        // Preserve origin_task_id if it exists
+        const originTaskId = getOriginTaskId(currentNotes)
+        const internalNotes = serializeInternalNotes({
+          originTaskId: originTaskId || undefined,
+          total: totalValue,
+          completed,
+          koUserId: editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId,
+        })
+        
         const res = await apiFetch(`/tasks/${editingTaskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -5403,7 +5447,7 @@ export default function PcmProjectPage() {
             finish_period:
               editingTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editingTaskFinishPeriod,
             daily_products: totalNum || null,
-            internal_notes: `completed_products=${completed}`,
+            internal_notes: internalNotes,
             status: nextStatus,
           }),
         })
@@ -6102,11 +6146,20 @@ export default function PcmProjectPage() {
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
+                                    const currentNotes = task.internal_notes || ""
+                                    const originTaskId = getOriginTaskId(currentNotes)
+                                    const koUserId = parseKoUserId(currentNotes)
+                                    const internalNotes = serializeInternalNotes({
+                                      originTaskId: originTaskId || undefined,
+                                      total: controlEdits[task.id]?.total || "0",
+                                      completed: newCompleted,
+                                      koUserId: koUserId || null,
+                                    })
                                     await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
-                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        internal_notes: internalNotes,
                                         status: newStatus,
                                       }),
                                     })
@@ -6130,11 +6183,20 @@ export default function PcmProjectPage() {
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
+                                    const currentNotes = task.internal_notes || ""
+                                    const originTaskId = getOriginTaskId(currentNotes)
+                                    const koUserId = parseKoUserId(currentNotes)
+                                    const internalNotes = serializeInternalNotes({
+                                      originTaskId: originTaskId || undefined,
+                                      total: controlEdits[task.id]?.total || "0",
+                                      completed: newCompleted,
+                                      koUserId: koUserId || null,
+                                    })
                                     await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
-                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        internal_notes: internalNotes,
                                         status: newStatus,
                                       }),
                                     })
@@ -6817,15 +6879,20 @@ export default function PcmProjectPage() {
                         className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
                       />
                     </div>
-                    <div className="col-span-1 text-sm text-slate-400">
-                      {(() => {
-                        if (controlAssignee === "__unassigned__") return "-"
-                        const assignedUser = allUsers.find((u) => u.id === controlAssignee)
-                        const assignedName = assignedUser?.full_name?.toLowerCase() || ""
-                        if (assignedName.includes("diellza")) return "Lea Murturi"
-                        if (assignedName.includes("lea")) return "Diellza Veliu"
-                        return "Elsa Ferati"
-                      })()}
+                    <div className="col-span-1">
+                      <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
+                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                          <SelectValue placeholder="-" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__unassigned__">-</SelectItem>
+                          {members.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.full_name || u.username || u.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="col-span-1">
                       <Button
@@ -6848,7 +6915,11 @@ export default function PcmProjectPage() {
                                 phase: "CONTROL",
                                 finish_period:
                                   controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
-                                internal_notes: `total_products=${controlTotal || "0"}; completed_products=${controlCompleted || "0"}`,
+                                internal_notes: serializeInternalNotes({
+                                  total: controlTotal || "0",
+                                  completed: controlCompleted || "0",
+                                  koUserId: controlKoUserId === "__unassigned__" ? null : controlKoUserId,
+                                }),
                               }),
                             })
                             if (!res?.ok) {
@@ -6859,6 +6930,7 @@ export default function PcmProjectPage() {
                             setTasks((prev) => [...prev, created])
                             setControlTitle("")
                             setControlAssignee("__unassigned__")
+                            setControlKoUserId("__unassigned__")
                             setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                             setControlTotal("0")
                             setControlCompleted("0")
@@ -6878,16 +6950,9 @@ export default function PcmProjectPage() {
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
-                      const assignedUser = allUsers.find((u) => u.id === task.assigned_to)
-                      const assignedName = assignedUser?.full_name?.toLowerCase() || ""
-                      const koFullName = !task.assigned_to
-                        ? "-"
-                        : assignedName.includes("diellza")
-                          ? "Lea Murturi"
-                          : assignedName.includes("lea")
-                            ? "Diellza Veliu"
-                            : "Elsa Ferati"
-                      const koName = koFullName === "-" ? "-" : initialsWithDots(koFullName)
+                      const koUserId = parseKoUserId(task.internal_notes)
+                      const koUser = koUserId ? members.find((u) => u.id === koUserId) || allUsers.find((u) => u.id === koUserId) : null
+                      const koDisplayName = koUser ? (koUser.full_name || koUser.username || koUser.email || "-") : "-"
                       const isEditing = editingTaskId === task.id
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
@@ -7002,11 +7067,20 @@ export default function PcmProjectPage() {
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
+                                    const currentNotes = task.internal_notes || ""
+                                    const originTaskId = getOriginTaskId(currentNotes)
+                                    const koUserId = parseKoUserId(currentNotes)
+                                    const internalNotes = serializeInternalNotes({
+                                      originTaskId: originTaskId || undefined,
+                                      total: controlEdits[task.id]?.total || "0",
+                                      completed: newCompleted,
+                                      koUserId: koUserId || null,
+                                    })
                                     await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
-                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        internal_notes: internalNotes,
                                         status: newStatus,
                                       }),
                                     })
@@ -7030,11 +7104,20 @@ export default function PcmProjectPage() {
                                       ...prev,
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
+                                    const currentNotes = task.internal_notes || ""
+                                    const originTaskId = getOriginTaskId(currentNotes)
+                                    const koUserId = parseKoUserId(currentNotes)
+                                    const internalNotes = serializeInternalNotes({
+                                      originTaskId: originTaskId || undefined,
+                                      total: controlEdits[task.id]?.total || "0",
+                                      completed: newCompleted,
+                                      koUserId: koUserId || null,
+                                    })
                                     await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
-                                        internal_notes: `total_products=${controlEdits[task.id]?.total || 0}; completed_products=${newCompleted}`,
+                                        internal_notes: internalNotes,
                                         status: newStatus,
                                       }),
                                     })
@@ -7045,7 +7128,27 @@ export default function PcmProjectPage() {
                               </div>
                             )}
                           </div>
-                          <div className="col-span-1 text-slate-500">{koName}</div>
+                          <div className="col-span-1 px-2">
+                            {isEditing ? (
+                              <Select value={editingTaskKoUserId} onValueChange={setEditingTaskKoUserId}>
+                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue placeholder="-" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">-</SelectItem>
+                                  {members.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name || u.username || u.email}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-slate-500">
+                                {koDisplayName === "-" ? "-" : initialsWithDots(koDisplayName)}
+                              </span>
+                            )}
+                          </div>
                           <div className="col-span-1 px-2">
                             <Badge
                               variant={task.status === "DONE" ? "default" : "outline"}

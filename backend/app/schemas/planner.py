@@ -116,8 +116,6 @@ class MonthlyPlannerResponse(BaseModel):
     summary: MonthlyPlannerSummary
 
 
-
-
 class WeeklyPlannerLegendEntryOut(BaseModel):
     """Legend entry for weekly planner questions"""
     id: uuid.UUID
