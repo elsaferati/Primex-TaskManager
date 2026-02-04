@@ -571,30 +571,50 @@ async def create_system_task_template(
             alignment_users_map.get(template.id),
         )
     else:
-        # No tasks created, return a basic response
+        # No tasks created, return a response using template data directly
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Create a minimal task for response
-        task = Task(
+        
+        # Get all assignees from the template's assignee_ids
+        assignees_list = []
+        if template.assignee_ids:
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            ).scalars().all()
+            assignees_list = [_user_to_assignee(user) for user in assignee_users]
+        elif template.default_assignee_id:
+            assignee_user = (
+                await db.execute(select(User).where(User.id == template.default_assignee_id))
+            ).scalar_one_or_none()
+            if assignee_user:
+                assignees_list = [_user_to_assignee(assignee_user)]
+        
+        # Return using template data directly (no task needed)
+        return SystemTaskOut(
+            id=template.id,  # Use template ID as the task ID for display
+            template_id=template.id,
             title=template.title,
             description=template.description,
             internal_notes=template.internal_notes,
             department_id=template.department_id,
-            assigned_to=template.default_assignee_id,
+            default_assignee_id=template.default_assignee_id,
+            assignees=assignees_list,
+            scope=SystemTaskScope(template.scope),
+            frequency=FrequencyType(template.frequency),
+            day_of_week=template.day_of_week,
+            days_of_week=template.days_of_week,
+            day_of_month=template.day_of_month,
+            month_of_year=template.month_of_year,
+            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+            status=TaskStatus.TODO,  # Default status
+            is_active=template.is_active,
+            user_comment=None,
+            requires_alignment=getattr(template, "requires_alignment", False),
+            alignment_time=getattr(template, "alignment_time", None),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
             created_by=user.id,
-            status=_enum_value(TaskStatus.TODO),
-            priority=_enum_value(template.priority or TaskPriority.NORMAL),
-            finish_period=_enum_value(template.finish_period),
-            system_template_origin_id=template.id,
-            start_date=datetime.now(timezone.utc),
-            is_active=_task_is_active(template),
-        )
-        return _task_row_to_out(
-            task,
-            template,
-            [],
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
+            created_at=template.created_at,
         )
 
 
@@ -804,28 +824,48 @@ async def update_system_task_template(
             alignment_users_map.get(template.id),
         )
     else:
-        # No tasks created, return a basic response
+        # No tasks created, return a response using template data directly
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Create a minimal task for response
-        task = Task(
+        
+        # Get all assignees from the template's assignee_ids
+        assignees_list = []
+        if template.assignee_ids:
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            ).scalars().all()
+            assignees_list = [_user_to_assignee(user) for user in assignee_users]
+        elif template.default_assignee_id:
+            assignee_user = (
+                await db.execute(select(User).where(User.id == template.default_assignee_id))
+            ).scalar_one_or_none()
+            if assignee_user:
+                assignees_list = [_user_to_assignee(assignee_user)]
+        
+        # Return using template data directly (no task needed)
+        return SystemTaskOut(
+            id=template.id,  # Use template ID as the task ID for display
+            template_id=template.id,
             title=template.title,
             description=template.description,
             internal_notes=template.internal_notes,
             department_id=template.department_id,
-            assigned_to=template.default_assignee_id,
+            default_assignee_id=template.default_assignee_id,
+            assignees=assignees_list,
+            scope=SystemTaskScope(template.scope),
+            frequency=FrequencyType(template.frequency),
+            day_of_week=template.day_of_week,
+            days_of_week=template.days_of_week,
+            day_of_month=template.day_of_month,
+            month_of_year=template.month_of_year,
+            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+            status=TaskStatus.TODO,  # Default status
+            is_active=template.is_active,
+            user_comment=None,
+            requires_alignment=getattr(template, "requires_alignment", False),
+            alignment_time=getattr(template, "alignment_time", None),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
             created_by=user.id,
-            status=_enum_value(TaskStatus.TODO),
-            priority=_enum_value(template.priority or TaskPriority.NORMAL),
-            finish_period=_enum_value(template.finish_period),
-            system_template_origin_id=template.id,
-            start_date=datetime.now(timezone.utc),
-            is_active=_task_is_active(template),
-        )
-        return _task_row_to_out(
-            task,
-            template,
-            [],
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
+            created_at=template.created_at,
         )
