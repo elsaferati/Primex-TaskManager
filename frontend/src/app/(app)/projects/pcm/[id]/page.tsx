@@ -1209,6 +1209,7 @@ export default function PcmProjectPage() {
   const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
   const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
+  const [updatingKoTaskId, setUpdatingKoTaskId] = React.useState<string | null>(null)
   const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
   const mstChecklistDragRef = React.useRef({
     active: false,
@@ -2685,21 +2686,10 @@ export default function PcmProjectPage() {
     const productTasks = tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT")
     const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
     const existingOrigins = new Set(controlTasks.map((task) => getOriginTaskId(task.internal_notes)).filter(Boolean))
-    const findUserIdByName = (needle: string) =>
-      allUsers.find((u) => (u.full_name || u.username || "").toLowerCase().includes(needle))?.id || null
-    const getKoAssigneeId = (assignedTo?: string | null) => {
-      if (!assignedTo) return null
-      const assignedUser = allUsers.find((u) => u.id === assignedTo)
-      const assignedName = (assignedUser?.full_name || assignedUser?.username || "").toLowerCase()
-      if (assignedName.includes("diellza")) return findUserIdByName("lea")
-      if (assignedName.includes("lea")) return findUserIdByName("diellza")
-      return findUserIdByName("elsa")
-    }
     const createMissing = async () => {
       for (const task of productTasks) {
         if (existingOrigins.has(task.id)) continue
         const totals = parseTaskTotals(task.internal_notes)
-        const koAssigneeId = getKoAssigneeId(task.assigned_to)
         const res = await apiFetch("/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2707,11 +2697,16 @@ export default function PcmProjectPage() {
             title: task.title,
             project_id: project.id,
             department_id: project.department_id,
-            assigned_to: koAssigneeId,
+            assigned_to: task.assigned_to || null,
             status: "TODO",
             priority: task.priority || "NORMAL",
             phase: "CONTROL",
-            internal_notes: `origin_task_id=${task.id}; total_products=${totals.total || 0}; completed_products=0`,
+            internal_notes: serializeInternalNotes({
+              originTaskId: task.id,
+              total: totals.total || 0,
+              completed: 0,
+              koUserId: null,
+            }),
           }),
         })
         if (res?.ok) {
@@ -2721,6 +2716,63 @@ export default function PcmProjectPage() {
       }
     }
     void createMissing()
+  }, [allUsers, apiFetch, mstPhase, project, tasks])
+
+  const migratedControlTaskIdsRef = React.useRef(new Set<string>())
+  React.useEffect(() => {
+    if (!project || mstPhase !== "CONTROL") return
+    if (!tasks.length) return
+    const userById = new Map(allUsers.map((u) => [u.id, u]))
+    const isLegacyKoCandidate = (userId?: string | null) => {
+      if (!userId) return false
+      const u = userById.get(userId)
+      const label = (u?.full_name || u?.username || u?.email || "").toLowerCase()
+      return label.includes("elsa") || label.includes("lea") || label.includes("diellza")
+    }
+
+    const migrateLegacyControlTasks = async () => {
+      for (const t of tasks) {
+        if (t.phase !== "CONTROL") continue
+        if (migratedControlTaskIdsRef.current.has(t.id)) continue
+        const originTaskId = getOriginTaskId(t.internal_notes)
+        if (!originTaskId) continue
+        const origin = tasks.find((x) => x.id === originTaskId)
+        if (!origin) continue
+
+        const desiredAssignedTo = origin.assigned_to || null
+        if (t.assigned_to === desiredAssignedTo) {
+          migratedControlTaskIdsRef.current.add(t.id)
+          continue
+        }
+
+        if (!isLegacyKoCandidate(t.assigned_to)) continue
+
+        const existingKoUserId = parseKoUserId(t.internal_notes)
+        const totals = parseTaskTotals(t.internal_notes)
+        const internalNotes = serializeInternalNotes({
+          originTaskId,
+          total: totals.total,
+          completed: totals.completed,
+          koUserId: existingKoUserId || t.assigned_to || null,
+        })
+
+        const res = await apiFetch(`/tasks/${t.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assigned_to: desiredAssignedTo,
+            internal_notes: internalNotes,
+          }),
+        })
+        if (res?.ok) {
+          const updated = (await res.json()) as Task
+          setTasks((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+          migratedControlTaskIdsRef.current.add(t.id)
+        }
+      }
+    }
+
+    void migrateLegacyControlTasks()
   }, [allUsers, apiFetch, mstPhase, project, tasks])
 
   const activePhase = phaseValue
@@ -5476,6 +5528,40 @@ export default function PcmProjectPage() {
       }
     }
 
+    const updateKoUserForTask = async (task: Task, koUserIdValue: string) => {
+      if (!project) return
+      setUpdatingKoTaskId(task.id)
+      try {
+        const currentNotes = task.internal_notes || ""
+        const originTaskId = getOriginTaskId(currentNotes)
+        const totals = parseTaskTotals(currentNotes)
+        const totalValue = controlEdits[task.id]?.total || totals.total.toString()
+        const completedValue = controlEdits[task.id]?.completed || totals.completed.toString()
+        const internalNotes = serializeInternalNotes({
+          originTaskId: originTaskId || undefined,
+          total: totalValue,
+          completed: completedValue,
+          koUserId: koUserIdValue === "__unassigned__" ? null : koUserIdValue,
+        })
+
+        const res = await apiFetch(`/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ internal_notes: internalNotes }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to update KO")
+          return
+        }
+        const updated = (await res.json()) as Task
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      } catch {
+        toast.error("Failed to update KO")
+      } finally {
+        setUpdatingKoTaskId(null)
+      }
+    }
+
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
@@ -6951,8 +7037,6 @@ export default function PcmProjectPage() {
                     {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
                       const totalVal = parseInt(controlEdits[task.id]?.total || "0", 10) || 0
                       const koUserId = parseKoUserId(task.internal_notes)
-                      const koUser = koUserId ? members.find((u) => u.id === koUserId) || allUsers.find((u) => u.id === koUserId) : null
-                      const koDisplayName = koUser ? (koUser.full_name || koUser.username || koUser.email || "-") : "-"
                       const isEditing = editingTaskId === task.id
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
@@ -7144,9 +7228,23 @@ export default function PcmProjectPage() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <span className="text-slate-500">
-                                {koDisplayName === "-" ? "-" : initialsWithDots(koDisplayName)}
-                              </span>
+                              <Select
+                                value={koUserId || "__unassigned__"}
+                                onValueChange={(value) => void updateKoUserForTask(task, value)}
+                                disabled={updatingKoTaskId === task.id}
+                              >
+                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-slate-200 rounded-none bg-transparent shadow-none px-1">
+                                  <SelectValue placeholder="-" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__unassigned__">-</SelectItem>
+                                  {members.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>
+                                      {u.full_name || u.username || u.email}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             )}
                           </div>
                           <div className="col-span-1 px-2">
