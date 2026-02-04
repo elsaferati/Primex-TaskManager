@@ -29,6 +29,7 @@ import {
   LEGEND_COLORS,
   buildLegendDisplayEntries,
   getLegendQuestions,
+  getLegendLabelDisplay,
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
@@ -1365,10 +1366,7 @@ export default function WeeklyPlannerPage() {
         row.appendChild(colorCell)
 
         const labelCell = doc.createElement("td")
-        labelCell.textContent =
-          entry.label === "MBINGARKESE?" || entry.label === "KOMPLET (100% PROJEKTE)"
-            ? "-"
-            : entry.label
+        labelCell.textContent = getLegendLabelDisplay(entry.label)
         row.appendChild(labelCell)
 
         const questionCell = doc.createElement("td")
