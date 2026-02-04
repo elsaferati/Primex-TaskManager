@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import UserRole
+from app.models.enums import TaskStatus, UserRole
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.task import Task
 from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
 
 
@@ -46,6 +47,17 @@ async def set_system_task_occurrence_status(
     if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+    # Check if user is in the assignee list
+    assignee_ids = getattr(tmpl, 'assignee_ids', None) or []
+    if not assignee_ids and tmpl.default_assignee_id:
+        assignee_ids = [tmpl.default_assignee_id]
+    
+    if user.id not in assignee_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You are not assigned to this system task"
+        )
+
     # Ensure the occurrence row exists (idempotent).
     await ensure_occurrences_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date, template_ids=[tmpl.id])
 
@@ -58,13 +70,42 @@ async def set_system_task_occurrence_status(
         )
     ).scalar_one_or_none()
     if occ is None:
-        # Not assigned to user, or template has no assignee mapping.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Occurrence not available for this user")
+        # This shouldn't happen if ensure_occurrences_in_range worked, but handle it gracefully
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Occurrence not available for this user. Please refresh and try again."
+        )
 
     now = datetime.now(timezone.utc)
     occ.status = payload.status
     occ.comment = payload.comment
     occ.acted_at = None if payload.status == OPEN else now
+
+    # Also update the corresponding Task status if it exists
+    # Find the task for this user and template
+    task = (
+        await db.execute(
+            select(Task)
+            .where(Task.system_template_origin_id == tmpl.id)
+            .where(Task.assigned_to == user.id)
+            .order_by(Task.created_at.desc())
+        )
+    ).scalars().first()
+    
+    if task:
+        # Map occurrence status to task status
+        if payload.status == DONE:
+            task.status = TaskStatus.DONE
+            task.completed_at = now
+        elif payload.status == NOT_DONE:
+            task.status = TaskStatus.NOT_DONE
+            task.completed_at = now
+        elif payload.status == SKIPPED:
+            task.status = TaskStatus.NOT_DONE  # Map SKIPPED to NOT_DONE for tasks
+            task.completed_at = now
+        elif payload.status == OPEN:
+            task.status = TaskStatus.TODO
+            task.completed_at = None
 
     await db.commit()
     return {"ok": True}
