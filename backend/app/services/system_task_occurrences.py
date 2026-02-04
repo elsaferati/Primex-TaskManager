@@ -21,29 +21,22 @@ SKIPPED = "SKIPPED"
 
 
 async def _assignee_ids_for_template(db: AsyncSession, template_id: uuid.UUID) -> list[uuid.UUID]:
-    """
-    Determine which users a template applies to.
-
-    We prefer explicit TaskAssignee rows (for the synced Task row), otherwise fall back to template.default_assignee_id.
-    """
-    # Some DBs may contain multiple rows per template (historical data). Pick the newest.
-    task = (
-        await db.execute(
-            select(Task)
-            .where(Task.system_template_origin_id == template_id)
-            .order_by(Task.created_at.desc())
-        )
-    ).scalars().first()
-    if task is None:
-        tmpl = (await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))).scalar_one()
-        return [tmpl.default_assignee_id] if tmpl.default_assignee_id is not None else []
-
-    assignees = (
-        await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
-    ).scalars().all()
-    if assignees:
-        return list(dict.fromkeys(assignees))
-    return [task.assigned_to] if task.assigned_to is not None else []
+    """Get assignees from assignee_ids array in template."""
+    tmpl = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
+    ).scalar_one_or_none()
+    
+    if not tmpl:
+        return []
+    
+    # Get assignees from the array
+    assignee_ids = tmpl.assignee_ids or []
+    
+    # Fallback to default_assignee_id if array is empty
+    if not assignee_ids and tmpl.default_assignee_id:
+        assignee_ids = [tmpl.default_assignee_id]
+    
+    return assignee_ids
 
 
 async def ensure_occurrences_in_range(

@@ -1172,7 +1172,8 @@ export default function GaKaTasksPage() {
     for (const task of tasks) {
       const isAssigned =
         task.assigned_to === ganeUserId ||
-        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+        task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
+        task.alignment_user_ids?.includes(ganeUserId)
       if (!isAssigned) continue
       if (task.is_active === false) continue
       if (task.system_template_origin_id) continue // Skip system tasks (handled separately)
