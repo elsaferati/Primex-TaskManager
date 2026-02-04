@@ -13,7 +13,8 @@ from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority,
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (UniqueConstraint("system_template_origin_id", name="uq_tasks_system_template_origin_id"),)
+    # Unique constraint removed - now allows multiple tasks per template (one per user)
+    # Database has unique index: uq_tasks_system_template_user_date
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
