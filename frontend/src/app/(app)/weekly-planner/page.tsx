@@ -2303,55 +2303,57 @@ export default function WeeklyPlannerPage() {
                   <CardTitle>{formatDepartmentName(dept.department_name)}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div
-                    ref={setScrollRef(dept.department_id)}
-                    className="overflow-x-auto cursor-grab"
-                    onPointerDown={(e) => handlePointerDown(e, dept.department_id)}
-                    onWheel={(e) => handleWheel(e, dept.department_id)}
-                    style={{
-                      scrollbarWidth: "thin",
-                      scrollbarColor: "#94a3b8 #e2e8f0",
-                      touchAction: "pan-y",
+                  <Table
+                    className="table-fixed w-full"
+                    containerProps={{
+                      ref: setScrollRef(dept.department_id),
+                      className: "max-h-[75vh] overflow-x-auto overflow-y-auto cursor-grab",
+                      onPointerDown: (e) => handlePointerDown(e, dept.department_id),
+                      onWheel: (e) => handleWheel(e, dept.department_id),
+                      style: {
+                        scrollbarWidth: "thin",
+                        scrollbarColor: "#94a3b8 #e2e8f0",
+                        touchAction: "pan-y",
+                      },
                     }}
                   >
-                    <Table className="table-fixed w-full">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-24 min-w-24 sticky left-0 bg-background z-10 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-24 bg-background z-10 text-center text-xs font-bold uppercase">Time</TableHead>
-                          <TableHead className="w-10 min-w-10 sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">LL</TableHead>
-                          {(() => {
-                            // Get all unique users from all days
-                            const userMap = new Map<string, WeeklyTableUserDay>()
-                            dept.days.forEach((day) => {
-                              day.users.forEach((userDay) => {
-                                if (!userMap.has(userDay.user_id)) {
-                                  userMap.set(userDay.user_id, userDay)
-                                }
-                              })
-                            })
-                            const allUsers = Array.from(userMap.values())
-
-                            return allUsers.map((user) => (
-                              <TableHead key={user.user_id} className="w-56 min-w-56 text-center text-xs font-bold uppercase">
-                                <div className="font-semibold">{user.user_name}</div>
-                              </TableHead>
-                            ))
-                          })()}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {dept.days.map((day, dayIndex) => {
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-24 min-w-24 sticky top-0 left-0 bg-background z-30 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
+                        <TableHead className="w-10 min-w-10 sticky top-0 left-24 bg-background z-30 text-center text-xs font-bold uppercase">Time</TableHead>
+                        <TableHead className="w-10 min-w-10 sticky top-0 left-34 bg-background z-30 text-center text-xs font-bold uppercase">LL</TableHead>
+                        {(() => {
                           // Get all unique users from all days
                           const userMap = new Map<string, WeeklyTableUserDay>()
-                          dept.days.forEach((d) => {
-                            d.users.forEach((userDay) => {
+                          dept.days.forEach((day) => {
+                            day.users.forEach((userDay) => {
                               if (!userMap.has(userDay.user_id)) {
                                 userMap.set(userDay.user_id, userDay)
                               }
                             })
                           })
                           const allUsers = Array.from(userMap.values())
+
+                          return allUsers.map((user) => (
+                            <TableHead key={user.user_id} className="w-56 min-w-56 sticky top-0 bg-background z-20 text-center text-xs font-bold uppercase">
+                              <div className="font-semibold">{user.user_name}</div>
+                            </TableHead>
+                          ))
+                        })()}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dept.days.map((day, dayIndex) => {
+                        // Get all unique users from all days
+                        const userMap = new Map<string, WeeklyTableUserDay>()
+                        dept.days.forEach((d) => {
+                          d.users.forEach((userDay) => {
+                            if (!userMap.has(userDay.user_id)) {
+                              userMap.set(userDay.user_id, userDay)
+                            }
+                          })
+                        })
+                        const allUsers = Array.from(userMap.values())
 
                           const renderCellContent = (
                             projects: WeeklyTableProjectEntry[],
@@ -2730,10 +2732,9 @@ export default function WeeklyPlannerPage() {
                               </TableRow>
                             </React.Fragment>
                           )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                      })}
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
             ))}

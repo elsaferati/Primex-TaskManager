@@ -824,7 +824,8 @@ async def update_task(
                 else:
                     task.completed_at = None
 
-            # Per-day progress logging: only touches today's record (never overwrites other days).
+            # Per-day progress logging: touches the record for the task's due_date (today/past only).
+            # If due_date is in the future, skip logging; if due_date is None, fall back to today.
             if total is not None and total > 0:
                 made_progress = completed > old_completed
                 became_done_today = completed >= total and old_completed < total
@@ -833,14 +834,24 @@ async def update_task(
                 # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
                 if made_progress or became_done_today or is_already_done or values_changed:
                     today = datetime.now(timezone.utc).date()
-                    await upsert_task_daily_progress(
-                        db,
-                        task_id=task.id,
-                        day_date=today,
-                        old_completed=old_completed,
-                        new_completed=completed,
-                        total=total,
-                    )
+                    progress_day: date | None = today
+                    if task.due_date is not None:
+                        due_dt = task.due_date
+                        due_day = due_dt.astimezone(timezone.utc).date() if due_dt.tzinfo else due_dt.date()
+                        if due_day > today:
+                            progress_day = None
+                        else:
+                            progress_day = due_day
+
+                    if progress_day is not None:
+                        await upsert_task_daily_progress(
+                            db,
+                            task_id=task.id,
+                            day_date=progress_day,
+                            old_completed=old_completed,
+                            new_completed=completed,
+                            total=total,
+                        )
 
     if payload.status is not None and task.assigned_to is not None and task.status == payload.status:
         created_notifications.append(
