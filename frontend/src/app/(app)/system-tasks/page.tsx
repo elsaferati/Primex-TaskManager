@@ -499,23 +499,47 @@ export function SystemTasksView({
             ])
           )
         }
-        setTemplates(
-          rows.map((row) => {
-            const templateId = row.template_id ?? row.id
-            const meta = metaById.get(templateId)
-            if (!meta) return row
-            const merged = { ...row, ...meta }
-            if (row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
-            if (row.alignment_time != null) merged.alignment_time = row.alignment_time
-            if (row.alignment_roles && row.alignment_roles.length) {
-              merged.alignment_roles = row.alignment_roles
+        // Group tasks by template_id and merge assignees
+        const groupedByTemplate = new Map<string, typeof rows[0] & { assignees: typeof rows[0]['assignees'] }>()
+        
+        for (const row of rows) {
+          const templateId = row.template_id ?? row.id
+          const meta = metaById.get(templateId)
+          const merged = meta ? { ...row, ...meta } : row
+          if (merged.requires_alignment != null && row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
+          if (merged.alignment_time != null && row.alignment_time != null) merged.alignment_time = row.alignment_time
+          if (row.alignment_roles && row.alignment_roles.length) {
+            merged.alignment_roles = row.alignment_roles
+          }
+          if (row.alignment_user_ids && row.alignment_user_ids.length) {
+            merged.alignment_user_ids = row.alignment_user_ids
+          }
+          
+          // Group by template_id
+          const key = String(templateId)
+          if (groupedByTemplate.has(key)) {
+            // Merge assignees from this task into the existing group
+            const existing = groupedByTemplate.get(key)!
+            const existingAssigneeIds = new Set(existing.assignees?.map(a => a.id) || [])
+            const newAssignees = (merged.assignees || []).filter(a => !existingAssigneeIds.has(a.id))
+            if (newAssignees.length > 0) {
+              existing.assignees = [...(existing.assignees || []), ...newAssignees]
             }
-            if (row.alignment_user_ids && row.alignment_user_ids.length) {
-              merged.alignment_user_ids = row.alignment_user_ids
+            // Use the first task's status (or prefer DONE if any is done)
+            if (merged.status === "DONE" && existing.status !== "DONE") {
+              existing.status = merged.status
             }
-            return merged
-          })
-        )
+            // Keep the first task's id for reference
+            if (!existing.id) {
+              existing.id = merged.id
+            }
+          } else {
+            // First task for this template
+            groupedByTemplate.set(key, { ...merged, assignees: merged.assignees || [] })
+          }
+        }
+        
+        setTemplates(Array.from(groupedByTemplate.values()))
       } else {
         console.error("Failed to load system tasks", templatesRes.status)
       }
@@ -544,20 +568,20 @@ export function SystemTasksView({
   )
 
   const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
-    if (!template.id) return
+    const templateId = template.template_id ?? template.id
+    if (!templateId) return
     if (!canMarkDone) return
-    const taskId = template.id
     const currentStatus = template.status || "OPEN"
     const newStatus = currentStatus === "DONE" ? "OPEN" : "DONE"
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
     
-    setUpdatingTaskIds((prev) => new Set(prev).add(taskId))
+    setUpdatingTaskIds((prev) => new Set(prev).add(String(templateId)))
     try {
       const res = await apiFetch("/system-tasks/occurrences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template_id: taskId,
+          template_id: templateId,
           occurrence_date: today,
           status: newStatus,
         }),
@@ -573,9 +597,12 @@ export function SystemTasksView({
         toast.error(detail)
         return
       }
-      // Update the template status in local state
+      // Update the template status in local state (match by template_id)
       setTemplates((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+        prev.map((t) => {
+          const tId = t.template_id ?? t.id
+          return tId === templateId ? { ...t, status: newStatus } : t
+        })
       )
       toast.success(`Task marked as ${newStatus === "DONE" ? "done" : "open"}`)
     } catch (error) {
@@ -583,7 +610,7 @@ export function SystemTasksView({
     } finally {
       setUpdatingTaskIds((prev) => {
         const next = new Set(prev)
-        next.delete(taskId)
+        next.delete(String(templateId))
         return next
       })
     }
@@ -3231,8 +3258,9 @@ export function SystemTasksView({
                           prevPriority !== priorityValue &&
                           priorityValue === "HIGH"
 
+                        const templateKey = template.template_id ?? template.id
                         return (
-                          <React.Fragment key={template.id}>
+                          <React.Fragment key={templateKey}>
                             {/* Dividers */}
                             {showInactiveDivider && (
                               <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400 print:border print:border-slate-900 print:bg-slate-100 print:text-slate-700 print:rounded-none">
@@ -3307,11 +3335,11 @@ export function SystemTasksView({
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      disabled={updatingTaskIds.has(template.id)}
+                                      disabled={updatingTaskIds.has(String(templateKey))}
                                       onClick={() => void toggleTaskStatus(template)}
                                       className="h-7 text-xs"
                                     >
-                                      {updatingTaskIds.has(template.id)
+                                      {updatingTaskIds.has(String(templateKey))
                                         ? "Updating..."
                                         : template.status === "DONE"
                                           ? "Mark as TODO"
