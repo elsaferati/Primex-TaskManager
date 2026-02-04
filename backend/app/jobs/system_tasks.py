@@ -30,8 +30,8 @@ async def generate_system_tasks() -> int:
             if not active_value:
                 continue
             
-            # Get all assignees from the array
-            assignee_ids = tmpl.assignee_ids or []
+            # Get all assignees from the array (safely handle NULL or missing field)
+            assignee_ids = getattr(tmpl, 'assignee_ids', None) or []
             if not assignee_ids and tmpl.default_assignee_id:
                 assignee_ids = [tmpl.default_assignee_id]
             

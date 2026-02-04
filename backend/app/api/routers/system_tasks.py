@@ -140,8 +140,8 @@ async def _sync_task_for_template(
     now = datetime.now(timezone.utc)
     active_value = _task_is_active(template)
     
-    # Get all assignees from the array
-    assignee_ids = template.assignee_ids or []
+    # Get all assignees from the array (safely handle NULL or missing field)
+    assignee_ids = getattr(template, 'assignee_ids', None) or []
     if not assignee_ids and template.default_assignee_id:
         assignee_ids = [template.default_assignee_id]
     

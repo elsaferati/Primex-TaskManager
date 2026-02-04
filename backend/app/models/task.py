@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,7 +13,8 @@ from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority,
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (UniqueConstraint("system_template_origin_id", name="uq_tasks_system_template_origin_id"),)
+    # Unique constraint removed - now allows multiple tasks per template (one per user)
+    # Database has unique index: uq_tasks_system_template_user_date
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 

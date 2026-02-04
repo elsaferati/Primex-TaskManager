@@ -29,8 +29,8 @@ async def _assignee_ids_for_template(db: AsyncSession, template_id: uuid.UUID) -
     if not tmpl:
         return []
     
-    # Get assignees from the array
-    assignee_ids = tmpl.assignee_ids or []
+    # Get assignees from the array (safely handle NULL or missing field)
+    assignee_ids = getattr(tmpl, 'assignee_ids', None) or []
     
     # Fallback to default_assignee_id if array is empty
     if not assignee_ids and tmpl.default_assignee_id:
