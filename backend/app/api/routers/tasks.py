@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
 from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
@@ -30,6 +30,53 @@ from app.services.notifications import add_notification, publish_notification
 router = APIRouter()
 
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
+TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
+COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
+
+
+def _is_mst_or_tt_project(project: Project) -> bool:
+    title = (project.title or "").upper().strip()
+    is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+    return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
+
+
+def _extract_total_and_completed(daily_products: int | None, internal_notes: str | None) -> tuple[int | None, int]:
+    total: int | None = daily_products
+    completed = 0
+
+    if internal_notes:
+        if total is None:
+            m_total = TOTAL_PRODUCTS_RE.search(internal_notes)
+            if m_total:
+                try:
+                    total = int(m_total.group(1))
+                except Exception:
+                    total = None
+
+        m_completed = COMPLETED_PRODUCTS_RE.search(internal_notes)
+        if m_completed:
+            try:
+                completed = int(m_completed.group(1))
+            except Exception:
+                completed = 0
+
+    if completed < 0:
+        completed = 0
+    if total is not None and total < 0:
+        total = 0
+    return total, completed
+
+
+def _compute_status_from_completed(total: int | None, completed: int) -> TaskStatus | None:
+    if total is None:
+        return None
+    if total <= 0:
+        return TaskStatus.TODO
+    if completed <= 0:
+        return TaskStatus.TODO
+    if completed < total:
+        return TaskStatus.IN_PROGRESS
+    return TaskStatus.DONE
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -84,7 +131,12 @@ async def _user_comments_for_tasks(
     return {task_id: comment for task_id, comment in rows}
 
 
-def _task_to_out(task: Task, assignees: list[TaskAssigneeOut], user_comment: str | None = None) -> TaskOut:
+def _task_to_out(
+    task: Task,
+    assignees: list[TaskAssigneeOut],
+    user_comment: str | None = None,
+    status_override: TaskStatus | None = None,
+) -> TaskOut:
     return TaskOut(
         id=task.id,
         title=task.title,
@@ -98,7 +150,7 @@ def _task_to_out(task: Task, assignees: list[TaskAssigneeOut], user_comment: str
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
         system_template_origin_id=task.system_template_origin_id,
-        status=task.status,
+        status=status_override or task.status,
         priority=task.priority,
         finish_period=task.finish_period,
         phase=task.phase,
@@ -160,6 +212,12 @@ async def list_tasks(
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
     stmt = select(Task)
+    project: Project | None = None
+    is_mst_tt_project = False
+    if project_id is not None:
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if project is not None:
+            is_mst_tt_project = _is_mst_or_tt_project(project)
 
     if project_id is None:
         if include_all_departments:
@@ -245,7 +303,11 @@ async def list_tasks(
 
     out = []
     for t in tasks:
-        dto = _task_to_out(t, assignee_map.get(t.id, []))
+        status_override: TaskStatus | None = None
+        if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
+            total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
+            status_override = _compute_status_from_completed(total, completed)
+        dto = _task_to_out(t, assignee_map.get(t.id, []), status_override=status_override)
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)
     return out
@@ -275,7 +337,17 @@ async def get_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    status_override: TaskStatus | None = None
+    if task.project_id is not None and task.phase in (
+        ProjectPhaseStatus.PRODUCT.value,
+        ProjectPhaseStatus.CONTROL.value,
+    ):
+        project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
+        if project is not None and _is_mst_or_tt_project(project):
+            total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+            status_override = _compute_status_from_completed(total, completed)
+
+    dto = _task_to_out(task, assignee_map.get(task.id, []), status_override=status_override)
     rows = (
         await db.execute(
             select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id)
@@ -358,9 +430,21 @@ async def create_task(
     status_value = payload.status or TaskStatus.TODO
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
+
+    if project is not None and _is_mst_or_tt_project(project) and phase_value in (
+        ProjectPhaseStatus.PRODUCT,
+        ProjectPhaseStatus.CONTROL,
+    ):
+        total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
+        auto_status = _compute_status_from_completed(total, completed)
+        if auto_status is not None:
+            status_value = auto_status
+
     completed_at = payload.completed_at
-    if completed_at is None and status_value == TaskStatus.DONE:
-        completed_at = datetime.now(timezone.utc)
+    if status_value == TaskStatus.DONE:
+        completed_at = completed_at or datetime.now(timezone.utc)
+    else:
+        completed_at = None
 
     task = Task(
         title=payload.title,
@@ -702,7 +786,23 @@ async def update_task(
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
-    if payload.status is not None and task.assigned_to is not None:
+    # Auto-status for MST/TT Product Content tasks: compute status from completed/total products.
+    if task.project_id is not None and task.phase in (
+        ProjectPhaseStatus.PRODUCT.value,
+        ProjectPhaseStatus.CONTROL.value,
+    ):
+        project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
+        if project is not None and _is_mst_or_tt_project(project):
+            total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+            auto_status = _compute_status_from_completed(total, completed)
+            if auto_status is not None:
+                task.status = auto_status
+                if task.status == TaskStatus.DONE:
+                    task.completed_at = task.completed_at or datetime.now(timezone.utc)
+                else:
+                    task.completed_at = None
+
+    if payload.status is not None and task.assigned_to is not None and task.status == payload.status:
         created_notifications.append(
             add_notification(
                 db=db,
