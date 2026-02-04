@@ -186,13 +186,40 @@ async def _sync_task_for_template(
                 is_active=active_value,
             )
             db.add(task)
-            await db.flush()
+            try:
+                await db.flush()
+            except Exception as e:
+                # Check if it's a unique constraint violation
+                error_msg = str(e).lower()
+                if 'unique' in error_msg or 'duplicate' in error_msg:
+                    # Task might already exist, try to fetch it again
+                    task = (
+                        await db.execute(
+                            select(Task)
+                            .where(
+                                Task.system_template_origin_id == template.id,
+                                Task.assigned_to == assignee_id
+                            )
+                            .order_by(Task.created_at.desc())
+                        )
+                    ).scalars().first()
+                    if task is None:
+                        raise  # Re-raise if we still can't find it
+                else:
+                    raise  # Re-raise if it's a different error
             
-            # Add single assignee to TaskAssignee table
-            await db.execute(
-                insert(TaskAssignee),
-                [{"task_id": task.id, "user_id": assignee_id}],
-            )
+            # Add single assignee to TaskAssignee table (only if not already exists)
+            existing_assignee = (
+                await db.execute(
+                    select(TaskAssignee)
+                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == assignee_id)
+                )
+            ).scalar_one_or_none()
+            if not existing_assignee:
+                await db.execute(
+                    insert(TaskAssignee),
+                    [{"task_id": task.id, "user_id": assignee_id}],
+                )
         else:
             # Update existing task
             task.title = template.title
@@ -277,7 +304,16 @@ async def list_system_tasks(
         return []
 
     for tmpl in templates:
-        await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
+        try:
+            await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
+        except Exception as e:
+            # Log the error but continue with other templates
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error syncing task for template {tmpl.id}: {str(e)}", exc_info=True)
+            # Rollback this template's changes
+            await db.rollback()
+            continue
     await db.commit()
 
     template_ids = [t.id for t in templates]
