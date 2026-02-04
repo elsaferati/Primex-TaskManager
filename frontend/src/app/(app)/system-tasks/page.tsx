@@ -174,8 +174,12 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 
 // Define the grid layout once so header and body always match.
 // Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
-// MODIFIED: Added Responsive Breakpoints (tighten columns on smaller screens, expand on XL)
-const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+// Responsive breakpoints:
+// - sm (640px+): Compact layout with essential columns
+// - md (768px+): Add more columns
+// - lg (1024px+): More columns visible
+// - xl (1280px+): Full columns
+const GRID_CLASS = "grid grid-cols-[28px_minmax(150px,1fr)_80px_80px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(180px,1fr)_100px_100px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(200px,1fr)_110px_110px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
 
 type Section = {
   id: string
@@ -456,6 +460,13 @@ export function SystemTasksView({
   const isManagerOrAdmin = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canCreate = showSystemActions
 
+  // Resolve Gane user id once for GA scoping checks
+  const ganeUser = React.useMemo(
+    () => users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null,
+    [users]
+  )
+  const ganeUserId = React.useMemo(() => ganeUser?.id ?? null, [ganeUser])
+
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
@@ -499,23 +510,71 @@ export function SystemTasksView({
             ])
           )
         }
-        setTemplates(
-          rows.map((row) => {
-            const templateId = row.template_id ?? row.id
-            const meta = metaById.get(templateId)
-            if (!meta) return row
-            const merged = { ...row, ...meta }
-            if (row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
-            if (row.alignment_time != null) merged.alignment_time = row.alignment_time
-            if (row.alignment_roles && row.alignment_roles.length) {
-              merged.alignment_roles = row.alignment_roles
+        // Group tasks by template_id and merge assignees and departments
+        const groupedByTemplate = new Map<string, typeof rows[0] & { assignees: typeof rows[0]['assignees'], department_ids?: string[] }>()
+        
+        for (const row of rows) {
+          const templateId = row.template_id ?? row.id
+          const meta = metaById.get(templateId)
+          const merged = meta ? { ...row, ...meta } : row
+          if (merged.requires_alignment != null && row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
+          if (merged.alignment_time != null && row.alignment_time != null) merged.alignment_time = row.alignment_time
+          if (row.alignment_roles && row.alignment_roles.length) {
+            merged.alignment_roles = row.alignment_roles
+          }
+          if (row.alignment_user_ids && row.alignment_user_ids.length) {
+            merged.alignment_user_ids = row.alignment_user_ids
+          }
+          
+          // Group by template_id
+          const key = String(templateId)
+          if (groupedByTemplate.has(key)) {
+            // Merge assignees from this task into the existing group
+            const existing = groupedByTemplate.get(key)!
+            const existingAssigneeIds = new Set(existing.assignees?.map(a => a.id) || [])
+            const newAssignees = (merged.assignees || []).filter(a => !existingAssigneeIds.has(a.id))
+            if (newAssignees.length > 0) {
+              existing.assignees = [...(existing.assignees || []), ...newAssignees]
             }
-            if (row.alignment_user_ids && row.alignment_user_ids.length) {
-              merged.alignment_user_ids = row.alignment_user_ids
+            // Collect department IDs from all tasks in the group
+            const existingDeptIds = new Set(existing.department_ids || [])
+            if (merged.department_id && !existingDeptIds.has(merged.department_id)) {
+              existing.department_ids = [...(existing.department_ids || []), merged.department_id]
             }
-            return merged
-          })
-        )
+            // Also use department_ids from backend if available
+            if ((merged as any).department_ids) {
+              for (const deptId of (merged as any).department_ids) {
+                if (!existingDeptIds.has(deptId)) {
+                  existing.department_ids = [...(existing.department_ids || []), deptId]
+                }
+              }
+            }
+            // Use the first task's status (or prefer DONE if any is done)
+            if (merged.status === "DONE" && existing.status !== "DONE") {
+              existing.status = merged.status
+            }
+            // Keep the first task's id for reference
+            if (!existing.id) {
+              existing.id = merged.id
+            }
+          } else {
+            // First task for this template
+            const deptIds: string[] = []
+            if (merged.department_id) {
+              deptIds.push(merged.department_id)
+            }
+            if ((merged as any).department_ids) {
+              for (const deptId of (merged as any).department_ids) {
+                if (!deptIds.includes(deptId)) {
+                  deptIds.push(deptId)
+                }
+              }
+            }
+            groupedByTemplate.set(key, { ...merged, assignees: merged.assignees || [], department_ids: deptIds.length > 0 ? deptIds : undefined })
+          }
+        }
+        
+        setTemplates(Array.from(groupedByTemplate.values()))
       } else {
         console.error("Failed to load system tasks", templatesRes.status)
       }
@@ -544,20 +603,20 @@ export function SystemTasksView({
   )
 
   const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
-    if (!template.id) return
+    const templateId = template.template_id ?? template.id
+    if (!templateId) return
     if (!canMarkDone) return
-    const taskId = template.id
     const currentStatus = template.status || "OPEN"
     const newStatus = currentStatus === "DONE" ? "OPEN" : "DONE"
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
     
-    setUpdatingTaskIds((prev) => new Set(prev).add(taskId))
+    setUpdatingTaskIds((prev) => new Set(prev).add(String(templateId)))
     try {
       const res = await apiFetch("/system-tasks/occurrences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template_id: taskId,
+          template_id: templateId,
           occurrence_date: today,
           status: newStatus,
         }),
@@ -573,9 +632,12 @@ export function SystemTasksView({
         toast.error(detail)
         return
       }
-      // Update the template status in local state
+      // Update the template status in local state (match by template_id)
       setTemplates((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+        prev.map((t) => {
+          const tId = t.template_id ?? t.id
+          return tId === templateId ? { ...t, status: newStatus } : t
+        })
       )
       toast.success(`Task marked as ${newStatus === "DONE" ? "done" : "open"}`)
     } catch (error) {
@@ -583,7 +645,7 @@ export function SystemTasksView({
     } finally {
       setUpdatingTaskIds((prev) => {
         const next = new Set(prev)
-        next.delete(taskId)
+        next.delete(String(templateId))
         return next
       })
     }
@@ -686,6 +748,38 @@ export function SystemTasksView({
     [departmentNamesForOwnerIds]
   )
 
+  const templateDepartmentLabel = React.useCallback(
+    (template: SystemTaskTemplate) => {
+      const scope = resolveTemplateScope(template)
+      const department = template.department_id ? departmentMap.get(template.department_id) : null
+
+      const assigneeDeptCodes = template.assignees
+        ? Array.from(
+            new Set(
+              template.assignees
+                .map((a) => {
+                  const userDeptId = a.department_id || userMap.get(a.id || "")?.department_id
+                  return userDeptId ? departmentMap.get(userDeptId)?.code : null
+                })
+                .filter(Boolean) as string[]
+            )
+          )
+        : []
+
+      if (scope === "GA") {
+        return assigneeDeptCodes.length ? assigneeDeptCodes.join(" / ") : "GA"
+      }
+      if (scope === "ALL") {
+        if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+        return "ALL"
+      }
+      if (department) return formatDepartmentName(department.name)
+      if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+      return "-"
+    },
+    [departmentMap, userMap]
+  )
+
   const formatDepartmentNames = React.useCallback((names: string[]) => {
     if (!names.length) return "All departments"
     const formatted = names.map((name) => formatDepartmentName(name))
@@ -785,12 +879,6 @@ export function SystemTasksView({
     handleEditAssigneesChange(editAssigneeIds.filter((item) => item !== id))
   }
 
-  // Find gane user for filtering
-  const ganeUser = React.useMemo(() => {
-    return users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null
-  }, [users])
-  const ganeUserId = ganeUser?.id ?? null
-
   // Find GA department by code
   const gaDepartmentId = React.useMemo(() => {
     const gaDept = departments.find((dept) => dept.code?.toUpperCase() === "GA")
@@ -800,29 +888,19 @@ export function SystemTasksView({
   const scopeTemplates = React.useMemo(() => {
     if (!scopeFilter) return templates
 
-    // GA view should include tasks explicitly scoped to GA OR tasks that belong to the GA department code.
+    // GA view: show any template where Gane is an assignee (default or list), regardless of department/scope.
     if (scopeFilter === "GA") {
-      return templates.filter((template) => {
-        const templateScope = resolveTemplateScope(template)
-        const isGaScoped = templateScope === "GA"
-        const isGaDepartment = gaDepartmentId ? template.department_id === gaDepartmentId : false
+      const isAssignedToGane = (template: SystemTaskTemplate) =>
+        (ganeUserId &&
+          (template.default_assignee_id === ganeUserId ||
+            template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
+        template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
 
-        // Must belong to GA scope (explicit) or GA department.
-        if (!isGaScoped && !isGaDepartment) return false
-
-        // And must be assigned to gane.arifaj (default assignee or among assignees).
-        const isAssignedToGane =
-          (ganeUserId &&
-            (template.default_assignee_id === ganeUserId ||
-              template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
-          template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
-
-        return Boolean(isAssignedToGane)
-      })
+      return templates.filter((template) => isAssignedToGane(template))
     }
 
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
-  }, [scopeFilter, templates, ganeUserId, gaDepartmentId])
+  }, [scopeFilter, templates, ganeUserId])
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
@@ -1002,7 +1080,7 @@ export function SystemTasksView({
         description: description.trim() || null,
         scope,
         department_id: resolveDepartmentId(finalDeptId),
-        assignees: assigneeIds,
+        assignee_ids: assigneeIds,
         frequency,
         priority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
@@ -1126,7 +1204,7 @@ export function SystemTasksView({
         description: editDescription.trim() || null,
         scope,
         department_id: resolveDepartmentId(finalDeptId),
-        assignees: editAssigneeIds,
+        assignee_ids: editAssigneeIds,
         frequency: editFrequency,
         priority: editPriority,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
@@ -1582,16 +1660,7 @@ export function SystemTasksView({
 
     const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
       const priorityValue = normalizePriority(template.priority)
-      const department = template.department_id ? departmentMap.get(template.department_id) : null
-      const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-      const departmentLabel =
-        scope === "GA"
-          ? "GA"
-          : scope === "ALL"
-            ? "ALL"
-            : department
-              ? formatDepartmentName(department.name)
-              : "-"
+                        const departmentLabel = templateDepartmentLabel(template)
       const ownerLabel = assigneeInitials(template.assignees)
       const frequencyLabelResolved =
         FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency
@@ -3163,23 +3232,23 @@ export function SystemTasksView({
           )}
         >
           {/* SCROLL WRAPPER for responsive table */}
-          <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain print:max-h-none print:overflow-visible">
+          <div className="print:overflow-visible">
             {/* STICKY HEADER ROW */}
-            <div className="min-w-[1000px] xl:min-w-0 print:min-w-0">
-              <div className="sticky top-0 z-30 print:static">
-                <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
+            <div className="w-full print:min-w-0">
+              <div className="sticky top-[var(--system-tasks-sticky-offset)] z-30 print:static">
+                <div className="border-b bg-slate-50/95 backdrop-blur py-2 sm:py-2.5 md:py-3 px-2 sm:px-3 md:px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
                   <div
                     className={cn(
                       GRID_CLASS,
-                      "text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
+                      "text-[10px] sm:text-[10.5px] md:text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
                     )}
                   >
                     <div>No.</div>
                     <div>Task Title</div>
                     <div>Department</div>
                     <div>Owner</div>
-                    <div>Frequency</div>
-                    <div>Finish by</div>
+                    <div className="hidden sm:block">Frequency</div>
+                    <div className="hidden md:block">Finish by</div>
                     <div>Priority</div>
                     <div className="text-right">Actions</div>
                   </div>
@@ -3187,7 +3256,7 @@ export function SystemTasksView({
               </div>
 
               {/* TABLE BODY */}
-              <div className="p-4 space-y-2 bg-slate-50 print:bg-white print:p-0 print:space-y-0">
+              <div className="p-2 sm:p-3 md:p-4 space-y-2 bg-slate-50 print:bg-white print:p-0 print:space-y-0">
                 {(() => {
                   let globalIndex = 0
                   return sections.map((section) => (
@@ -3197,16 +3266,24 @@ export function SystemTasksView({
                           const taskNumber = globalIndex + 1
                           globalIndex++
                         const priorityValue = normalizePriority(template.priority)
-                        const department = template.department_id ? departmentMap.get(template.department_id) : null
+                        // Get all departments from department_ids if available, otherwise use single department_id
+                        const departmentIds = (template as any).department_ids || (template.department_id ? [template.department_id] : [])
+                        const departments = departmentIds
+                          .map((deptId: string) => departmentMap.get(deptId))
+                          .filter((dept: Department | undefined): dept is Department => dept !== undefined)
+                        const department = departments.length > 0 ? departments[0] : (template.department_id ? departmentMap.get(template.department_id) : null)
                         const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
+                        // Display all departments if multiple, otherwise show single or ALL
                         const departmentLabel =
                           scope === "GA"
                             ? "GA"
                             : scope === "ALL"
                               ? "ALL"
-                              : department
-                                ? formatDepartmentName(department.name)
-                                : "-"
+                              : departments.length > 1
+                                ? departments.map(d => formatDepartmentName(d.name)).join(", ")
+                                : department
+                                  ? formatDepartmentName(department.name)
+                                  : "-"
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =
@@ -3231,8 +3308,9 @@ export function SystemTasksView({
                           prevPriority !== priorityValue &&
                           priorityValue === "HIGH"
 
+                        const templateKey = template.template_id ?? template.id
                         return (
-                          <React.Fragment key={template.id}>
+                          <React.Fragment key={templateKey}>
                             {/* Dividers */}
                             {showInactiveDivider && (
                               <div className="col-span-full border-b border-dashed bg-slate-50 px-2 py-2 text-xs font-semibold uppercase text-slate-400 print:border print:border-slate-900 print:bg-slate-100 print:text-slate-700 print:rounded-none">
@@ -3259,13 +3337,13 @@ export function SystemTasksView({
                                 isInactive && "opacity-60 grayscale"
                               )}
                             >
-                              <div className="text-sm font-semibold text-slate-600">
+                              <div className="text-xs sm:text-sm font-semibold text-slate-600">
                                 {taskNumber}
                               </div>
                               {/* Title Only (Description removed from list view) */}
-                              <div className="min-w-0 pr-4">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                              <div className="min-w-0 pr-2 sm:pr-4">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                     {template.title}
                                   </div>
                                   <Badge variant="secondary" className="h-5 text-[10px] uppercase">
@@ -3274,28 +3352,28 @@ export function SystemTasksView({
                                 </div>
                               </div>
 
-                              <div className="truncate text-sm text-slate-700 font-normal" title={departmentLabel}>
+                              <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={departmentLabel}>
                                 {departmentLabel}
                               </div>
 
-                              <div className="truncate text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
+                              <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
                                 {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
                               </div>
 
-                              <div>
-                                <span className="text-sm text-slate-700 font-normal">
+                              <div className="hidden sm:block">
+                                <span className="text-xs sm:text-sm text-slate-700 font-normal">
                                   {frequencyLabel}
                                 </span>
                               </div>
 
-                              <div className="text-sm text-slate-700 font-normal">
+                              <div className="hidden md:block text-xs sm:text-sm text-slate-700 font-normal">
                                 {template.finish_period || "-"}
                               </div>
 
                               <div>
                                 <Badge
                                   variant="outline"
-                                  className={cn("px-2 py-0.5 text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
+                                  className={cn("px-1.5 sm:px-2 py-0.5 text-[11px] sm:text-[12px] md:text-[13px] border", PRIORITY_BADGE_STYLES[priorityValue])}
                                 >
                                   {PRIORITY_LABELS[priorityValue]}
                                 </Badge>
@@ -3307,11 +3385,11 @@ export function SystemTasksView({
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      disabled={updatingTaskIds.has(template.id)}
+                                      disabled={updatingTaskIds.has(String(templateKey))}
                                       onClick={() => void toggleTaskStatus(template)}
                                       className="h-7 text-xs"
                                     >
-                                      {updatingTaskIds.has(template.id)
+                                      {updatingTaskIds.has(String(templateKey))
                                         ? "Updating..."
                                         : template.status === "DONE"
                                           ? "Mark as TODO"

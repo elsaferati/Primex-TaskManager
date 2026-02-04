@@ -186,13 +186,40 @@ async def _sync_task_for_template(
                 is_active=active_value,
             )
             db.add(task)
-            await db.flush()
+            try:
+                await db.flush()
+            except Exception as e:
+                # Check if it's a unique constraint violation
+                error_msg = str(e).lower()
+                if 'unique' in error_msg or 'duplicate' in error_msg:
+                    # Task might already exist, try to fetch it again
+                    task = (
+                        await db.execute(
+                            select(Task)
+                            .where(
+                                Task.system_template_origin_id == template.id,
+                                Task.assigned_to == assignee_id
+                            )
+                            .order_by(Task.created_at.desc())
+                        )
+                    ).scalars().first()
+                    if task is None:
+                        raise  # Re-raise if we still can't find it
+                else:
+                    raise  # Re-raise if it's a different error
             
-            # Add single assignee to TaskAssignee table
-            await db.execute(
-                insert(TaskAssignee),
-                [{"task_id": task.id, "user_id": assignee_id}],
-            )
+            # Add single assignee to TaskAssignee table (only if not already exists)
+            existing_assignee = (
+                await db.execute(
+                    select(TaskAssignee)
+                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == assignee_id)
+                )
+            ).scalar_one_or_none()
+            if not existing_assignee:
+                await db.execute(
+                    insert(TaskAssignee),
+                    [{"task_id": task.id, "user_id": assignee_id}],
+                )
         else:
             # Update existing task
             task.title = template.title
@@ -277,34 +304,56 @@ async def list_system_tasks(
         return []
 
     for tmpl in templates:
-        await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
+        try:
+            await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
+        except Exception as e:
+            # Log the error but continue with other templates
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error syncing task for template {tmpl.id}: {str(e)}", exc_info=True)
+            # Rollback this template's changes
+            await db.rollback()
+            continue
     await db.commit()
 
     template_ids = [t.id for t in templates]
+    # Start from templates and LEFT JOIN tasks to include templates without tasks
     task_stmt = (
-        select(Task, SystemTaskTemplate)
-        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
-        .where(Task.system_template_origin_id.in_(template_ids))
+        select(SystemTaskTemplate, Task)
+        .outerjoin(Task, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(SystemTaskTemplate.id.in_(template_ids))
     )
     if only_active:
-        task_stmt = task_stmt.where(Task.is_active.is_(True))
-    task_stmt = task_stmt.order_by(Task.is_active.desc(), Task.created_at.desc())
+        task_stmt = task_stmt.where(
+            or_(
+                Task.is_active.is_(True),
+                Task.id.is_(None)  # Include templates without tasks
+            )
+        )
+    task_stmt = task_stmt.order_by(
+        SystemTaskTemplate.created_at.desc(),
+        Task.is_active.desc().nullslast(),
+        Task.created_at.desc().nullslast()
+    )
 
     rows = (await db.execute(task_stmt)).all()
     # Return all tasks for each template (no de-duplication)
-    task_ids = [task.id for task, _ in rows]
+    # Also include templates that don't have tasks yet
+    task_ids = [task.id for template, task in rows if task is not None]
     assignee_map = await _assignees_for_tasks(db, task_ids)
     fallback_ids = [
         task.assigned_to
-        for task, _ in rows
-        if task.assigned_to is not None and not assignee_map.get(task.id)
+        for template, task in rows
+        if task is not None and task.assigned_to is not None and not assignee_map.get(task.id)
     ]
     if fallback_ids:
         fallback_users = (
             await db.execute(select(User).where(User.id.in_(fallback_ids)))
         ).scalars().all()
         fallback_map = {user.id: user for user in fallback_users}
-        for task, _ in rows:
+        for template, task in rows:
+            if task is None:
+                continue
             if assignee_map.get(task.id):
                 continue
             if task.assigned_to in fallback_map:
@@ -312,7 +361,7 @@ async def list_system_tasks(
 
     # Fetch user comments for all tasks
     user_comment_map: dict[uuid.UUID, str | None] = {}
-    if user.id:
+    if user.id and task_ids:
         comment_rows = (
             await db.execute(
                 select(TaskUserComment.task_id, TaskUserComment.comment)
@@ -324,17 +373,106 @@ async def list_system_tasks(
 
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
 
-    return [
-        _task_row_to_out(
-            task,
+    # Group tasks by template_id to collect all departments
+    template_tasks_map: dict[uuid.UUID, list[tuple[Task, SystemTaskTemplate]]] = {}
+    template_only_map: dict[uuid.UUID, SystemTaskTemplate] = {}
+    
+    for template, task in rows:
+        if task is None:
+            template_only_map[template.id] = template
+        else:
+            if template.id not in template_tasks_map:
+                template_tasks_map[template.id] = []
+            template_tasks_map[template.id].append((task, template))
+    
+    result = []
+    
+    # Process templates with tasks - group by template and collect all departments
+    for template_id, task_list in template_tasks_map.items():
+        template = task_list[0][1]  # Get template from first task
+        # Collect all unique department IDs from tasks
+        department_ids_set = {task.department_id for task, _ in task_list if task.department_id is not None}
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        
+        # Collect all unique assignees from all tasks
+        all_assignees_map = {}
+        for task, _ in task_list:
+            task_assignees = assignee_map.get(task.id, [])
+            for assignee in task_assignees:
+                if assignee.id not in all_assignees_map:
+                    all_assignees_map[assignee.id] = assignee
+        all_assignees = list(all_assignees_map.values())
+        
+        # Use the first task for the main response, but include all department_ids and all assignees
+        first_task, _ = task_list[0]
+        task_out = _task_row_to_out(
+            first_task,
             template,
-            assignee_map.get(task.id, []),
-            user_comment_map.get(task.id),
+            all_assignees,
+            user_comment_map.get(first_task.id),
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
         )
-        for task, template in rows
-    ]
+        # Add department_ids to the response
+        task_out.department_ids = department_ids if department_ids else None
+        result.append(task_out)
+    
+    # Process templates without tasks
+    for template_id, template in template_only_map.items():
+        assignees_list = []
+        department_ids_set = set()
+        
+        if template.assignee_ids:
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            ).scalars().all()
+            assignees_list = [_user_to_assignee(user) for user in assignee_users]
+            # Collect department IDs from assignees
+            department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
+        elif template.default_assignee_id:
+            assignee_user = (
+                await db.execute(select(User).where(User.id == template.default_assignee_id))
+            ).scalar_one_or_none()
+            if assignee_user:
+                assignees_list = [_user_to_assignee(assignee_user)]
+                if assignee_user.department_id:
+                    department_ids_set.add(assignee_user.department_id)
+        
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        if template.department_id and template.department_id not in department_ids_set:
+            department_ids_set.add(template.department_id)
+            department_ids = sorted(list(department_ids_set))
+        
+        result.append(SystemTaskOut(
+            id=template.id,
+            template_id=template.id,
+            title=template.title,
+            description=template.description,
+            internal_notes=template.internal_notes,
+            department_id=template.department_id,
+            department_ids=department_ids,
+            default_assignee_id=template.default_assignee_id,
+            assignees=assignees_list,
+            scope=SystemTaskScope(template.scope),
+            frequency=FrequencyType(template.frequency),
+            day_of_week=template.day_of_week,
+            days_of_week=template.days_of_week,
+            day_of_month=template.day_of_month,
+            month_of_year=template.month_of_year,
+            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+            status=TaskStatus.TODO,
+            is_active=template.is_active,
+            user_comment=None,
+            requires_alignment=getattr(template, "requires_alignment", False),
+            alignment_time=getattr(template, "alignment_time", None),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
+            created_by=None,
+            created_at=template.created_at,
+        ))
+    
+    return result
 
 
 @router.get("/templates", response_model=list[SystemTaskTemplateOut])
@@ -416,26 +554,6 @@ async def create_system_task_template(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
         days_of_week = cleaned_days
 
-    scope_value = payload.scope
-    if scope_value is None:
-        scope_value = SystemTaskScope.DEPARTMENT if payload.department_id is not None else SystemTaskScope.ALL
-
-    department_id = payload.department_id
-    if scope_value == SystemTaskScope.DEPARTMENT:
-        if department_id is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
-    else:
-        if department_id is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for this scope")
-        department_id = None
-
-    if department_id is not None:
-        department = (
-            await db.execute(select(Department).where(Department.id == department_id))
-        ).scalar_one_or_none()
-        if department is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
-
     assignee_ids = None
     if payload.assignee_ids is not None:
         seen: set[uuid.UUID] = set()
@@ -443,6 +561,7 @@ async def create_system_task_template(
     elif payload.default_assignee_id is not None:
         assignee_ids = [payload.default_assignee_id]
 
+    # Get assignee users first to determine department automatically
     assignee_users: list[User] | None = None
     if assignee_ids is not None:
         assignee_users = (
@@ -450,7 +569,12 @@ async def create_system_task_template(
         ).scalars().all()
         if len(assignee_users) != len(assignee_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        
+
+    # Determine department and scope from assignees if not explicitly set
+    department_id = payload.department_id
+    scope_value = payload.scope
+    
+    if assignee_users and len(assignee_users) > 0:
         # Check if any assignee is gane.arifaj - if so, set department to GA
         gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
         if gane_user:
@@ -462,13 +586,43 @@ async def create_system_task_template(
                 # Set department to GA and scope to DEPARTMENT
                 department_id = ga_department.id
                 scope_value = SystemTaskScope.DEPARTMENT
-        # If assignees are from different departments, automatically change scope to ALL
-        elif assignee_users and scope_value == SystemTaskScope.DEPARTMENT and department_id is not None:
+        else:
+            # Get unique departments from assignees
             assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-            if len(assignee_departments) > 1 or (len(assignee_departments) == 1 and list(assignee_departments)[0] != department_id):
-                # Multiple departments or different department - change to ALL scope
-                scope_value = SystemTaskScope.ALL
+            
+            if len(assignee_departments) == 1:
+                # All assignees are from the same department - use that department
+                department_id = list(assignee_departments)[0]
+                scope_value = SystemTaskScope.DEPARTMENT
+            elif len(assignee_departments) > 1:
+                # Assignees are from different departments - use ALL scope
                 department_id = None
+                scope_value = SystemTaskScope.ALL
+            elif len(assignee_departments) == 0:
+                # Assignees have no department - if no department was set, use ALL scope
+                if department_id is None:
+                    scope_value = SystemTaskScope.ALL
+    else:
+        # No assignees - use scope/department from payload or defaults
+        if scope_value is None:
+            scope_value = SystemTaskScope.DEPARTMENT if payload.department_id is not None else SystemTaskScope.ALL
+        if scope_value == SystemTaskScope.DEPARTMENT and department_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required when scope is DEPARTMENT and no assignees are provided")
+
+    # Validate scope and department consistency
+    if scope_value == SystemTaskScope.DEPARTMENT:
+        if department_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
+    else:
+        if department_id is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for ALL scope")
+
+    if department_id is not None:
+        department = (
+            await db.execute(select(Department).where(Department.id == department_id))
+        ).scalar_one_or_none()
+        if department is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
     priority_value = payload.priority or TaskPriority.NORMAL
 
@@ -526,7 +680,10 @@ async def create_system_task_template(
             if assigned_user is not None:
                 assignee_map[task.id] = [_user_to_assignee(assigned_user)]
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        return _task_row_to_out(
+        # Collect all department IDs from all tasks
+        department_ids_set = {t.department_id for t in tasks if t.department_id is not None}
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        task_out = _task_row_to_out(
             task,
             template,
             assignee_map.get(task.id, []),
@@ -534,31 +691,62 @@ async def create_system_task_template(
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
         )
+        task_out.department_ids = department_ids
+        return task_out
     else:
-        # No tasks created, return a basic response
+        # No tasks created, return a response using template data directly
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Create a minimal task for response
-        task = Task(
+        
+        # Get all assignees from the template's assignee_ids
+        assignees_list = []
+        department_ids_set = set()
+        if template.assignee_ids:
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            ).scalars().all()
+            assignees_list = [_user_to_assignee(user) for user in assignee_users]
+            department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
+        elif template.default_assignee_id:
+            assignee_user = (
+                await db.execute(select(User).where(User.id == template.default_assignee_id))
+            ).scalar_one_or_none()
+            if assignee_user:
+                assignees_list = [_user_to_assignee(assignee_user)]
+                if assignee_user.department_id:
+                    department_ids_set.add(assignee_user.department_id)
+        
+        if template.department_id and template.department_id not in department_ids_set:
+            department_ids_set.add(template.department_id)
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        
+        # Return using template data directly (no task needed)
+        return SystemTaskOut(
+            id=template.id,  # Use template ID as the task ID for display
+            template_id=template.id,
             title=template.title,
             description=template.description,
             internal_notes=template.internal_notes,
             department_id=template.department_id,
-            assigned_to=template.default_assignee_id,
+            department_ids=department_ids,
+            default_assignee_id=template.default_assignee_id,
+            assignees=assignees_list,
+            scope=SystemTaskScope(template.scope),
+            frequency=FrequencyType(template.frequency),
+            day_of_week=template.day_of_week,
+            days_of_week=template.days_of_week,
+            day_of_month=template.day_of_month,
+            month_of_year=template.month_of_year,
+            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+            status=TaskStatus.TODO,  # Default status
+            is_active=template.is_active,
+            user_comment=None,
+            requires_alignment=getattr(template, "requires_alignment", False),
+            alignment_time=getattr(template, "alignment_time", None),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
             created_by=user.id,
-            status=_enum_value(TaskStatus.TODO),
-            priority=_enum_value(template.priority or TaskPriority.NORMAL),
-            finish_period=_enum_value(template.finish_period),
-            system_template_origin_id=template.id,
-            start_date=datetime.now(timezone.utc),
-            is_active=_task_is_active(template),
-        )
-        return _task_row_to_out(
-            task,
-            template,
-            [],
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
+            created_at=template.created_at,
         )
 
 
@@ -620,6 +808,26 @@ async def update_system_task_template(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
         days_of_week = cleaned_days
 
+    assignee_ids = None
+    if "assignee_ids" in fields_set:
+        seen: set[uuid.UUID] = set()
+        assignee_ids = [uid for uid in (payload.assignee_ids or []) if not (uid in seen or seen.add(uid))]
+    elif "default_assignee_id" in fields_set and payload.default_assignee_id is not None:
+        assignee_ids = [payload.default_assignee_id]
+    elif assignee_set:
+        # Use existing assignees from template
+        assignee_ids = template.assignee_ids or ([template.default_assignee_id] if template.default_assignee_id else None)
+
+    # Get assignee users first to determine department automatically
+    assignee_users: list[User] | None = None
+    if assignee_ids is not None:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        ).scalars().all()
+        if len(assignee_users) != len(assignee_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+
+    # Determine department and scope from assignees if assignees are being set
     scope_value = template.scope
     if scope_set:
         if payload.scope is None:
@@ -627,37 +835,9 @@ async def update_system_task_template(
         scope_value = payload.scope
 
     target_department = payload.department_id if department_set else template.department_id
-    if scope_value == SystemTaskScope.DEPARTMENT:
-        if target_department is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
-    else:
-        if department_set and payload.department_id is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for this scope")
-        target_department = None
-
-    if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
-        # Allow all users to edit tasks from any department
-        department = (
-            await db.execute(select(Department).where(Department.id == target_department))
-        ).scalar_one_or_none()
-        if department is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
-
-    assignee_ids = None
-    if "assignee_ids" in fields_set:
-        seen: set[uuid.UUID] = set()
-        assignee_ids = [uid for uid in (payload.assignee_ids or []) if not (uid in seen or seen.add(uid))]
-    elif payload.default_assignee_id is not None:
-        assignee_ids = [payload.default_assignee_id]
-
-    assignee_users: list[User] | None = None
-    if assignee_set and assignee_ids is not None:
-        assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_ids)))
-        ).scalars().all()
-        if len(assignee_users) != len(assignee_ids):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-        
+    
+    # If assignees are being set/changed, automatically determine department from assignees
+    if assignee_set and assignee_users and len(assignee_users) > 0:
         # Check if any assignee is gane.arifaj - if so, set department to GA
         gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
         if gane_user:
@@ -669,10 +849,39 @@ async def update_system_task_template(
                 # Set department to GA and scope to DEPARTMENT
                 target_department = ga_department.id
                 scope_value = SystemTaskScope.DEPARTMENT
-                # Update template fields - override any existing values
-                template.department_id = target_department
-                template.scope = _enum_value(scope_value)
-        # Allow assigning users from any department - no department restriction
+        else:
+            # Get unique departments from assignees
+            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
+            
+            if len(assignee_departments) == 1:
+                # All assignees are from the same department - use that department
+                target_department = list(assignee_departments)[0]
+                scope_value = SystemTaskScope.DEPARTMENT
+            elif len(assignee_departments) > 1:
+                # Assignees are from different departments - use ALL scope
+                target_department = None
+                scope_value = SystemTaskScope.ALL
+            elif len(assignee_departments) == 0:
+                # Assignees have no department - if no department was set, use ALL scope
+                if target_department is None:
+                    scope_value = SystemTaskScope.ALL
+
+    # Validate scope and department consistency
+    if scope_value == SystemTaskScope.DEPARTMENT:
+        if target_department is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
+    else:
+        if department_set and payload.department_id is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department must be empty for ALL scope")
+        target_department = None
+
+    if scope_value == SystemTaskScope.DEPARTMENT and target_department is not None:
+        # Allow all users to edit tasks from any department
+        department = (
+            await db.execute(select(Department).where(Department.id == target_department))
+        ).scalar_one_or_none()
+        if department is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
     if payload.title is not None:
         template.title = payload.title
@@ -759,7 +968,10 @@ async def update_system_task_template(
             if assigned_user is not None:
                 assignee_map[task.id] = [_user_to_assignee(assigned_user)]
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        return _task_row_to_out(
+        # Collect all department IDs from all tasks
+        department_ids_set = {t.department_id for t in tasks if t.department_id is not None}
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        task_out = _task_row_to_out(
             task,
             template,
             assignee_map.get(task.id, []),
@@ -767,29 +979,60 @@ async def update_system_task_template(
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
         )
+        task_out.department_ids = department_ids
+        return task_out
     else:
-        # No tasks created, return a basic response
+        # No tasks created, return a response using template data directly
         roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Create a minimal task for response
-        task = Task(
+        
+        # Get all assignees from the template's assignee_ids
+        assignees_list = []
+        department_ids_set = set()
+        if template.assignee_ids:
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+            ).scalars().all()
+            assignees_list = [_user_to_assignee(user) for user in assignee_users]
+            department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
+        elif template.default_assignee_id:
+            assignee_user = (
+                await db.execute(select(User).where(User.id == template.default_assignee_id))
+            ).scalar_one_or_none()
+            if assignee_user:
+                assignees_list = [_user_to_assignee(assignee_user)]
+                if assignee_user.department_id:
+                    department_ids_set.add(assignee_user.department_id)
+        
+        if template.department_id and template.department_id not in department_ids_set:
+            department_ids_set.add(template.department_id)
+        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+        
+        # Return using template data directly (no task needed)
+        return SystemTaskOut(
+            id=template.id,  # Use template ID as the task ID for display
+            template_id=template.id,
             title=template.title,
             description=template.description,
             internal_notes=template.internal_notes,
             department_id=template.department_id,
-            assigned_to=template.default_assignee_id,
+            department_ids=department_ids,
+            default_assignee_id=template.default_assignee_id,
+            assignees=assignees_list,
+            scope=SystemTaskScope(template.scope),
+            frequency=FrequencyType(template.frequency),
+            day_of_week=template.day_of_week,
+            days_of_week=template.days_of_week,
+            day_of_month=template.day_of_month,
+            month_of_year=template.month_of_year,
+            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+            status=TaskStatus.TODO,  # Default status
+            is_active=template.is_active,
+            user_comment=None,
+            requires_alignment=getattr(template, "requires_alignment", False),
+            alignment_time=getattr(template, "alignment_time", None),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
             created_by=user.id,
-            status=_enum_value(TaskStatus.TODO),
-            priority=_enum_value(template.priority or TaskPriority.NORMAL),
-            finish_period=_enum_value(template.finish_period),
-            system_template_origin_id=template.id,
-            start_date=datetime.now(timezone.utc),
-            is_active=_task_is_active(template),
-        )
-        return _task_row_to_out(
-            task,
-            template,
-            [],
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
+            created_at=template.created_at,
         )
