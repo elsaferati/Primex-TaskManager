@@ -105,7 +105,8 @@ export default function CommonViewPage() {
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
   const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
-  const commonDepartmentId = user?.department_id || ""
+  // Common view should show all data for all roles (same as admin)
+  const commonDepartmentId = ""
   const printedAt = React.useMemo(() => new Date(), [])
   const printInitials = initials(user?.full_name || user?.username || "")
 

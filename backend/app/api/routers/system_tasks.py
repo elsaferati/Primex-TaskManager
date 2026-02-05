@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ from app.schemas.system_task_template import (
     SystemTaskTemplateOut,
     SystemTaskTemplateUpdate,
 )
-from app.services.system_task_schedule import should_reopen_system_task
+from app.services.system_task_schedule import matches_template_date, should_reopen_system_task
 from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
 
 
@@ -297,11 +297,22 @@ def _task_row_to_out(
     )
 
 
+def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
+    """Find the most recent occurrence date on or before target."""
+    candidate = target
+    for _ in range(370):
+        if matches_template_date(template, candidate):
+            return candidate
+        candidate = candidate - timedelta(days=1)
+    return target
+
+
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
     only_active: bool = False,
     assigned_to: uuid.UUID | None = None,  # Filter by user for "My View"
+    occurrence_date: date | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
@@ -396,19 +407,35 @@ async def list_system_tasks(
         ).all()
         user_comment_map = {task_id: comment for task_id, comment in comment_rows}
 
-    # Fetch occurrence statuses for the current user (for My View)
+    # Fetch occurrence statuses for the current user (for My View / per-user status)
     occurrence_status_map: dict[uuid.UUID, str] = {}
     if user.id and template_ids:
-        today = date.today()
-        occ_rows = (
-            await db.execute(
-                select(SystemTaskOccurrence.template_id, SystemTaskOccurrence.status)
-                .where(SystemTaskOccurrence.template_id.in_(template_ids))
-                .where(SystemTaskOccurrence.user_id == user.id)
-                .where(SystemTaskOccurrence.occurrence_date == today)
+        base_date = occurrence_date or date.today()
+        target_dates_by_template: dict[uuid.UUID, date] = {
+            tmpl.id: (_previous_occurrence_date(tmpl, base_date) if not matches_template_date(tmpl, base_date) else base_date)
+            for tmpl in templates
+        }
+        templates_by_date: dict[date, list[uuid.UUID]] = {}
+        for template_id, target_date in target_dates_by_template.items():
+            templates_by_date.setdefault(target_date, []).append(template_id)
+
+        for target_date, date_template_ids in templates_by_date.items():
+            await ensure_occurrences_in_range(
+                db=db,
+                start=target_date,
+                end=target_date,
+                template_ids=date_template_ids,
             )
-        ).all()
-        occurrence_status_map = {template_id: status for template_id, status in occ_rows}
+            occ_rows = (
+                await db.execute(
+                    select(SystemTaskOccurrence.template_id, SystemTaskOccurrence.status)
+                    .where(SystemTaskOccurrence.template_id.in_(date_template_ids))
+                    .where(SystemTaskOccurrence.user_id == user.id)
+                    .where(SystemTaskOccurrence.occurrence_date == target_date)
+                )
+            ).all()
+            for template_id, status_value in occ_rows:
+                occurrence_status_map[template_id] = status_value
 
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
 
@@ -430,6 +457,12 @@ async def list_system_tasks(
             
             # Get occurrence status for this template and user
             occ_status = occurrence_status_map.get(template.id)
+            if occ_status is None and user.id:
+                assignee_ids = getattr(template, "assignee_ids", None) or []
+                if not assignee_ids and template.default_assignee_id:
+                    assignee_ids = [template.default_assignee_id]
+                if user.id in assignee_ids:
+                    occ_status = OPEN
             
             task_out = _task_row_to_out(
                 task,
@@ -479,6 +512,12 @@ async def list_system_tasks(
         first_task, _ = task_list[0]
         # Get occurrence status for the current user (if viewing their own tasks)
         occ_status = occurrence_status_map.get(template.id) if user.id else None
+        if occ_status is None and user.id:
+            assignee_ids = getattr(template, "assignee_ids", None) or []
+            if not assignee_ids and template.default_assignee_id:
+                assignee_ids = [template.default_assignee_id]
+            if user.id in assignee_ids:
+                occ_status = OPEN
         task_out = _task_row_to_out(
             first_task,
             template,
