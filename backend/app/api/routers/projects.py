@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,30 @@ from datetime import timedelta
 
 
 router = APIRouter()
+
+
+class ProjectTitleLookupOut(BaseModel):
+    id: uuid.UUID
+    title: str
+
+
+@router.get("/lookup", response_model=list[ProjectTitleLookupOut])
+async def lookup_project_titles(
+    ids: list[uuid.UUID] | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[ProjectTitleLookupOut]:
+    # Title-only lookup for UI display (safe to return across departments).
+    if not ids:
+        return []
+    rows = (
+        await db.execute(
+            select(Project.id, Project.title)
+            .where(Project.is_template == False)
+            .where(Project.id.in_(list(dict.fromkeys(ids))))
+        )
+    ).all()
+    return [ProjectTitleLookupOut(id=pid, title=title) for pid, title in rows if title]
 
 
 async def _copy_tasks_from_template_project(
