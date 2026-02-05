@@ -389,6 +389,15 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   return false
 }
 
+function findPreviousOccurrenceDate(t: SystemTaskTemplate, fromDate: Date) {
+  const candidate = new Date(fromDate)
+  for (let i = 0; i < 370; i += 1) {
+    if (shouldShowTemplate(t, candidate)) return candidate
+    candidate.setDate(candidate.getDate() - 1)
+  }
+  return fromDate
+}
+
 function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
   const today = new Date(fromDate)
   today.setHours(0, 0, 0, 0)
@@ -724,6 +733,7 @@ export default function DepartmentKanban() {
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
+  const [taskToCloseTemplate, setTaskToCloseTemplate] = React.useState<SystemTaskTemplate | null>(null)
   const [closeTaskComment, setCloseTaskComment] = React.useState("")
   const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
@@ -3029,6 +3039,7 @@ export default function DepartmentKanban() {
   const handleCloseTaskClick = (task: SystemTaskTemplate) => {
     const templateId = task.template_id ?? task.id
     setTaskToCloseId(templateId)
+    setTaskToCloseTemplate(task)
     setCloseTaskComment("")
     setCloseTaskDialogOpen(true)
   }
@@ -3041,13 +3052,18 @@ export default function DepartmentKanban() {
     }
 
     setClosingTask(true)
+    const occurrenceBaseDate = taskToCloseTemplate
+      ? findPreviousOccurrenceDate(taskToCloseTemplate, systemDate)
+      : systemDate
+    const occurrenceDate = formatDateInput(occurrenceBaseDate)
+
     try {
       const res = await apiFetch("/system-tasks/occurrences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template_id: taskToCloseId,
-          occurrence_date: formatDateInput(systemDate),
+          occurrence_date: occurrenceDate,
           status: "DONE",
           comment: closeTaskComment.trim(),
         }),
@@ -3073,6 +3089,7 @@ export default function DepartmentKanban() {
 
       setCloseTaskDialogOpen(false)
       setTaskToCloseId(null)
+      setTaskToCloseTemplate(null)
       setCloseTaskComment("")
       toast.success("Task closed successfully")
     } catch (err) {
