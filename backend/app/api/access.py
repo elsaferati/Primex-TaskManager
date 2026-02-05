@@ -9,7 +9,7 @@ from app.models.user import User
 
 
 def ensure_department_access(user: User, department_id: uuid.UUID) -> None:
-    if user.role == UserRole.ADMIN:
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         return
     if user.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")

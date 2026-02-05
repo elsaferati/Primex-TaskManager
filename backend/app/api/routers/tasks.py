@@ -20,6 +20,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
+from app.models.task_daily_progress import TaskDailyProgress
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
 from pydantic import BaseModel
@@ -654,6 +655,9 @@ async def update_task(
     # Snapshot completion values before update for MST/TT daily progress logging.
     old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
 
+    # Track if status was explicitly set in payload to prevent auto-status from overriding it
+    status_was_explicitly_set = payload.status is not None
+
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
     # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
@@ -758,11 +762,61 @@ async def update_task(
         )
 
     if payload.status is not None and payload.status != task.status:
+        old_status = task.status
         task.status = payload.status
         if task.status == TaskStatus.DONE:
             task.completed_at = task.completed_at or datetime.now(timezone.utc)
         else:
             task.completed_at = None
+        
+        # Update TaskDailyProgress for MST/TT tasks when status changes
+        # This ensures the color (yellow/green) only appears on the day status changed
+        # Use "today" (the day status is being changed) instead of due_date
+        if task.project_id is not None and task.phase in (
+            ProjectPhaseStatus.PRODUCT.value,
+            ProjectPhaseStatus.CONTROL.value,
+        ):
+            project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
+            if project is not None and _is_mst_or_tt_project(project):
+                # Use today (the day status is being changed) instead of due_date
+                today = datetime.now(timezone.utc).date()
+                
+                # Get or create TaskDailyProgress for today
+                existing_progress = (
+                    await db.execute(
+                        select(TaskDailyProgress).where(
+                            TaskDailyProgress.task_id == task.id,
+                            TaskDailyProgress.day_date == today,
+                        )
+                    )
+                ).scalar_one_or_none()
+                
+                if existing_progress is None:
+                    # Create new entry with explicit status
+                    total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+                    db.add(
+                        TaskDailyProgress(
+                            task_id=task.id,
+                            day_date=today,
+                            completed_value=completed or 0,
+                            total_value=total or 0,
+                            completed_delta=0,
+                            daily_status=task.status.value,
+                        )
+                    )
+                else:
+                    # Update existing entry's daily_status based on status change
+                    # If status is DONE, always set to DONE
+                    if task.status == TaskStatus.DONE:
+                        existing_progress.daily_status = TaskStatus.DONE.value
+                    elif task.status == TaskStatus.IN_PROGRESS:
+                        # Only set to IN_PROGRESS if it was TODO before
+                        # This ensures we don't override a DONE status from a previous day
+                        if old_status == TaskStatus.TODO:
+                            existing_progress.daily_status = TaskStatus.IN_PROGRESS.value
+                        # If it was already IN_PROGRESS or DONE, keep the current daily_status
+                    # If status is TODO, don't change daily_status (keep existing or default to TODO)
+    
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
     # Optional: update alignment users if provided
@@ -832,6 +886,7 @@ async def update_task(
             )
 
     # Auto-status for MST/TT Product Content tasks: compute status from completed/total products.
+    # Only auto-compute status if status wasn't explicitly set by user
     if task.project_id is not None and task.phase in (
         ProjectPhaseStatus.PRODUCT.value,
         ProjectPhaseStatus.CONTROL.value,
@@ -839,13 +894,17 @@ async def update_task(
         project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
         if project is not None and _is_mst_or_tt_project(project):
             total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-            auto_status = _compute_status_from_completed(total, completed)
-            if auto_status is not None:
-                task.status = auto_status
-                if task.status == TaskStatus.DONE:
-                    task.completed_at = task.completed_at or datetime.now(timezone.utc)
-                else:
-                    task.completed_at = None
+            
+            # Only auto-compute status if status wasn't explicitly set in payload
+            # This preserves user's explicit status changes
+            if not status_was_explicitly_set:
+                auto_status = _compute_status_from_completed(total, completed)
+                if auto_status is not None:
+                    task.status = auto_status
+                    if task.status == TaskStatus.DONE:
+                        task.completed_at = task.completed_at or datetime.now(timezone.utc)
+                    else:
+                        task.completed_at = None
 
             # Per-day progress logging: touches the record for the task's due_date (today/past only).
             # If due_date is in the future, skip logging; if due_date is None, fall back to today.
@@ -867,6 +926,26 @@ async def update_task(
                             progress_day = due_day
 
                     if progress_day is not None:
+                        # Check if there's an existing TaskDailyProgress for today with explicit status
+                        # If status was explicitly set today, preserve it
+                        explicit_status_for_today: TaskStatus | None = None
+                        if status_was_explicitly_set and progress_day == today:
+                            # Check if we just set a status for today in the status change block above
+                            existing_today_progress = (
+                                await db.execute(
+                                    select(TaskDailyProgress).where(
+                                        TaskDailyProgress.task_id == task.id,
+                                        TaskDailyProgress.day_date == today,
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                            if existing_today_progress and existing_today_progress.daily_status in (
+                                TaskStatus.IN_PROGRESS.value,
+                                TaskStatus.DONE.value,
+                            ):
+                                # Preserve the explicit status that was set today
+                                explicit_status_for_today = TaskStatus(existing_today_progress.daily_status)
+                        
                         await upsert_task_daily_progress(
                             db,
                             task_id=task.id,
@@ -874,6 +953,7 @@ async def update_task(
                             old_completed=old_completed,
                             new_completed=completed,
                             total=total,
+                            explicit_status=explicit_status_for_today,
                         )
 
     if payload.status is not None and task.assigned_to is not None and task.status == payload.status:
