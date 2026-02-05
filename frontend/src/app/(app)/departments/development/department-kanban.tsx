@@ -990,7 +990,7 @@ export default function DepartmentKanban() {
 
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
-          apiFetch(`/system-tasks?department_id=${dep.id}`),
+          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
           // Remove department_id filter to get all tasks, then filter client-side
           apiFetch(`/tasks?include_done=true`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
@@ -1035,6 +1035,19 @@ export default function DepartmentKanban() {
     }
     void load()
   }, [apiFetch, departmentName, user?.role])
+
+  React.useEffect(() => {
+    if (!department?.id) return
+    const loadSystemTasks = async () => {
+      const res = await apiFetch(
+        `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
+      )
+      if (res.ok) {
+        setSystemTasks((await res.json()) as SystemTaskTemplate[])
+      }
+    }
+    void loadSystemTasks()
+  }, [apiFetch, department?.id, systemDate])
 
   React.useEffect(() => {
     if (!internalNoteDepartmentId && department?.id) {
@@ -3216,7 +3229,9 @@ export default function DepartmentKanban() {
       )
       
       // Reload system tasks
-      const sysRes = await apiFetch(`/system-tasks?department_id=${department?.id || ""}`)
+      const sysRes = await apiFetch(
+        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
+      )
       if (sysRes.ok) {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }

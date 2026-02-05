@@ -667,11 +667,18 @@ function parseKoUserId(notes?: string | null): string | null {
   return match ? match[1] : null
 }
 
+function parseProductionDate(notes?: string | null): string | null {
+  if (!notes) return null
+  const match = notes.match(/production_date[:=]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i)
+  return match ? match[1] : null
+}
+
 function serializeInternalNotes(params: {
   total?: string | number
   completed?: string | number
   originTaskId?: string
   koUserId?: string | null
+  productionDate?: string | null
 }): string {
   const parts: string[] = []
   if (params.originTaskId) {
@@ -685,6 +692,9 @@ function serializeInternalNotes(params: {
   }
   if (params.koUserId) {
     parts.push(`ko_user_id=${params.koUserId}`)
+  }
+  if (params.productionDate) {
+    parts.push(`production_date=${params.productionDate}`)
   }
   return parts.join("; ")
 }
@@ -1181,6 +1191,7 @@ export default function PcmProjectPage() {
   const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
+  const [controlProductionDate, setControlProductionDate] = React.useState("")
   const [controlTotal, setControlTotal] = React.useState("0")
   const [controlCompleted, setControlCompleted] = React.useState("0")
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
@@ -1224,6 +1235,7 @@ export default function PcmProjectPage() {
   >(FINISH_PERIOD_NONE_VALUE)
   const [editingTaskTotal, setEditingTaskTotal] = React.useState("")
   const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
+  const [editingTaskProductionDate, setEditingTaskProductionDate] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
   const [updatingKoTaskId, setUpdatingKoTaskId] = React.useState<string | null>(null)
   const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
@@ -2682,15 +2694,33 @@ export default function PcmProjectPage() {
       let total = ""
       let completed = ""
       let hasProductCounts = false
+      
+      // For CONTROL phase tasks, try to get TOTAL from origin task's daily_products
+      if (t.phase === "CONTROL") {
+        const originTaskId = getOriginTaskId(t.internal_notes)
+        if (originTaskId) {
+          const originTask = tasks.find((ot) => ot.id === originTaskId)
+          if (originTask && originTask.daily_products !== null && originTask.daily_products !== undefined) {
+            total = originTask.daily_products.toString()
+            hasProductCounts = true
+          }
+        }
+      }
+      
       if (t.internal_notes) {
         const totalMatch = t.internal_notes.match(/total_products[:=]\s*(\d+)/i)
         const completedMatch = t.internal_notes.match(/completed_products[:=]\s*(\d+)/i)
-        if (totalMatch) total = totalMatch[1]
+        // Only use internal_notes total if we didn't find it from origin task
+        if (!total && totalMatch) total = totalMatch[1]
         if (completedMatch) completed = completedMatch[1]
-        hasProductCounts = Boolean(totalMatch || completedMatch)
+        if (totalMatch || completedMatch) hasProductCounts = true
       }
       if (t.daily_products !== null && t.daily_products !== undefined) {
-        hasProductCounts = true
+        // For PRODUCT phase, use daily_products directly
+        if (t.phase === "PRODUCT") {
+          total = t.daily_products.toString()
+          hasProductCounts = true
+        }
       }
 
       const totalNum = t.daily_products ?? toNonNegativeInt(total)
@@ -2864,9 +2894,13 @@ export default function PcmProjectPage() {
             const existingTotals = parseTaskTotals(existingLegacyControl.internal_notes)
             const productTotals = parseTaskTotals(task.internal_notes)
             const koUserId = parseKoUserId(existingLegacyControl.internal_notes)
-            const totalValue = existingTotals.total || productTotals.total || task.daily_products || 0
+            // Prefer PRODUCT task's daily_products as TOTAL
+            const totalValue = task.daily_products !== null && task.daily_products !== undefined
+              ? task.daily_products
+              : (existingTotals.total || productTotals.total || 0)
             const completedValue = existingTotals.completed || productTotals.completed || 0
 
+            const productionDate = parseProductionDate(existingLegacyControl.internal_notes) || null
             const res = await apiFetch(`/tasks/${existingLegacyControl.id}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -2877,7 +2911,9 @@ export default function PcmProjectPage() {
                   total: totalValue,
                   completed: completedValue,
                   koUserId,
+                  productionDate,
                 }),
+                due_date: productionDate ? new Date(productionDate).toISOString() : null,
               }),
             })
             if (res?.ok) {
@@ -2892,6 +2928,10 @@ export default function PcmProjectPage() {
           }
 
           const totals = parseTaskTotals(task.internal_notes)
+          // Use PRODUCT task's daily_products as TOTAL for CONTROL task
+          const totalValue = task.daily_products !== null && task.daily_products !== undefined 
+            ? task.daily_products 
+            : (totals.total || 0)
           const res = await apiFetch("/tasks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2906,9 +2946,10 @@ export default function PcmProjectPage() {
               phase: "CONTROL",
               internal_notes: serializeInternalNotes({
                 originTaskId: task.id,
-                total: totals.total || 0,
+                total: totalValue,
                 completed: 0,
                 koUserId: null,
+                productionDate: null,
               }),
             }),
           })
@@ -2981,11 +3022,13 @@ export default function PcmProjectPage() {
 
         const existingKoUserId = parseKoUserId(t.internal_notes)
         const totals = parseTaskTotals(t.internal_notes)
+        const productionDate = parseProductionDate(t.internal_notes)
         const internalNotes = serializeInternalNotes({
           originTaskId,
           total: totals.total,
           completed: totals.completed,
           koUserId: existingKoUserId || t.assigned_to || null,
+          productionDate: productionDate || null,
         })
 
         const res = await apiFetch(`/tasks/${t.id}`, {
@@ -2994,6 +3037,7 @@ export default function PcmProjectPage() {
           body: JSON.stringify({
             assigned_to: desiredAssignedTo,
             internal_notes: internalNotes,
+            due_date: productionDate ? new Date(productionDate).toISOString() : null,
           }),
         })
         if (res?.ok) {
@@ -5674,14 +5718,29 @@ export default function PcmProjectPage() {
       const notes = latestTask.internal_notes || ""
       const totalMatch = notes.match(/total_products=(\d+)/)
       const completedMatch = notes.match(/completed_products=(\d+)/)
-      // Prefer daily_products field over internal_notes
-      setEditingTaskTotal(latestTask.daily_products?.toString() || totalMatch?.[1] || controlEdits[latestTask.id]?.total || "0")
+      
+      // Get TOTAL from origin task if CONTROL phase
+      let totalValue = latestTask.daily_products?.toString() || totalMatch?.[1] || controlEdits[latestTask.id]?.total || "0"
+      if (latestTask.phase === "CONTROL") {
+        const originTaskId = getOriginTaskId(notes)
+        if (originTaskId) {
+          const originTask = tasks.find((t) => t.id === originTaskId)
+          if (originTask?.daily_products !== null && originTask.daily_products !== undefined) {
+            totalValue = originTask.daily_products.toString()
+          }
+        }
+      }
+      
+      setEditingTaskTotal(totalValue)
       setEditingTaskCompleted(
         controlEdits[latestTask.id]?.completed || completedMatch?.[1] || "0"
       )
       // Initialize KO user ID from internal_notes
       const koUserId = parseKoUserId(notes)
       setEditingTaskKoUserId(koUserId || "__unassigned__")
+      // Initialize production date from internal_notes
+      const productionDate = parseProductionDate(notes)
+      setEditingTaskProductionDate(productionDate || "")
     }
 
     const cancelEditTask = () => {
@@ -5693,6 +5752,7 @@ export default function PcmProjectPage() {
       setEditingTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setEditingTaskTotal("")
       setEditingTaskCompleted("")
+      setEditingTaskProductionDate("")
     }
 
     const saveTaskEdit = async () => {
@@ -5707,18 +5767,30 @@ export default function PcmProjectPage() {
         const completed =
           editingTaskCompleted || controlEdits[task.id]?.completed || completedMatch?.[1] || "0"
 
-        const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+        // Get TOTAL from origin task if CONTROL phase
+        let totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+        if (task.phase === "CONTROL") {
+          const originTaskId = getOriginTaskId(currentNotes)
+          if (originTaskId) {
+            const originTask = tasks.find((t) => t.id === originTaskId)
+            if (originTask?.daily_products !== null && originTask.daily_products !== undefined) {
+              totalValue = originTask.daily_products.toString()
+            }
+          }
+        }
         const totalNum = toNonNegativeInt(totalValue)
         const completedNum = toNonNegativeInt(completed)
         const nextStatus = computeStatusFromCompleted(totalNum, completedNum)
 
         // Preserve origin_task_id if it exists
         const originTaskId = getOriginTaskId(currentNotes)
+        const productionDate = editingTaskProductionDate || parseProductionDate(currentNotes) || null
         const internalNotes = serializeInternalNotes({
           originTaskId: originTaskId || undefined,
           total: totalValue,
           completed,
           koUserId: editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId,
+          productionDate,
         })
         
         const res = await apiFetch(`/tasks/${editingTaskId}`, {
@@ -5727,7 +5799,9 @@ export default function PcmProjectPage() {
           body: JSON.stringify({
             title: editingTaskTitle.trim(),
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
-            due_date: editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null,
+            due_date: task.phase === "CONTROL" && productionDate
+              ? new Date(productionDate).toISOString()
+              : (editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null),
             finish_period:
               editingTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editingTaskFinishPeriod,
             daily_products: totalNum,
@@ -5768,17 +5842,22 @@ export default function PcmProjectPage() {
         const totals = parseTaskTotals(currentNotes)
         const totalValue = controlEdits[task.id]?.total || totals.total.toString()
         const completedValue = controlEdits[task.id]?.completed || totals.completed.toString()
+        const productionDate = parseProductionDate(currentNotes)
         const internalNotes = serializeInternalNotes({
           originTaskId: originTaskId || undefined,
           total: totalValue,
           completed: completedValue,
           koUserId: koUserIdValue === "__unassigned__" ? null : koUserIdValue,
+          productionDate: productionDate || null,
         })
 
         const res = await apiFetch(`/tasks/${task.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ internal_notes: internalNotes }),
+          body: JSON.stringify({ 
+            internal_notes: internalNotes,
+            due_date: productionDate ? new Date(productionDate).toISOString() : null,
+          }),
         })
         if (!res.ok) {
           toast.error("Failed to update KO")
@@ -6442,8 +6521,10 @@ export default function PcmProjectPage() {
                                   const completedNum = toNonNegativeInt(rawValue)
                                   const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
                                   const totalNum = toNonNegativeInt(totalValue)
-                                  const newCompleted = completedNum.toString()
-                                  const newStatus = computeStatusFromCompleted(totalNum, completedNum)
+                                  // Cap completed at total
+                                  const cappedCompleted = Math.min(completedNum, totalNum)
+                                  const newCompleted = cappedCompleted.toString()
+                                  const newStatus = computeStatusFromCompleted(totalNum, cappedCompleted)
                                   setEditingTaskCompleted(newCompleted)
                                   setControlEdits((prev) => ({
                                     ...prev,
@@ -6509,7 +6590,13 @@ export default function PcmProjectPage() {
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
                                     const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const completedNum = toNonNegativeInt(prevCompleted) + 1
+                                    const prevCompletedNum = toNonNegativeInt(prevCompleted)
+                                    // Cap completed at total - don't allow exceeding total
+                                    const completedNum = Math.min(prevCompletedNum + 1, totalVal)
+                                    if (completedNum === prevCompletedNum) {
+                                      // Already at max, don't update
+                                      return
+                                    }
                                     const newCompleted = completedNum.toString()
                                     const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
@@ -7153,8 +7240,9 @@ export default function PcmProjectPage() {
                   <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
                   {/* Table header */}
                   <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
-                    <div className="col-span-3">Task</div>
+                    <div className="col-span-2">Task</div>
                     <div className="col-span-1">Assigned</div>
+                    <div className="col-span-1">Date</div>
                     <div className="col-span-1">Finish</div>
                     <div className="col-span-2">Total</div>
                     <div className="col-span-2">Completed</div>
@@ -7164,7 +7252,7 @@ export default function PcmProjectPage() {
                   </div>
                   {/* Inline form row */}
                   <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                    <div className="col-span-3">
+                    <div className="col-span-2">
                       <input
                         type="text"
                         placeholder="Enter task name..."
@@ -7176,7 +7264,11 @@ export default function PcmProjectPage() {
                     <div className="col-span-1">
                       <Select value={controlAssignee} onValueChange={setControlAssignee}>
                         <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-" />
+                          <SelectValue placeholder="-">
+                            {controlAssignee === "__unassigned__" 
+                              ? "-" 
+                              : memberLabel(controlAssignee)}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
@@ -7187,6 +7279,14 @@ export default function PcmProjectPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="col-span-1">
+                      <input
+                        type="date"
+                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
+                        value={controlProductionDate}
+                        onChange={(e) => setControlProductionDate(e.target.value)}
+                      />
                     </div>
                     <div className="col-span-1">
                       <Select
@@ -7229,7 +7329,11 @@ export default function PcmProjectPage() {
                     <div className="col-span-1">
                       <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
                         <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-" />
+                          <SelectValue placeholder="-">
+                            {controlKoUserId === "__unassigned__" 
+                              ? "-" 
+                              : memberLabel(controlKoUserId)}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
@@ -7261,10 +7365,12 @@ export default function PcmProjectPage() {
                                 phase: "CONTROL",
                                 finish_period:
                                   controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
+                                due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
                                 internal_notes: serializeInternalNotes({
                                   total: controlTotal || "0",
                                   completed: controlCompleted || "0",
                                   koUserId: controlKoUserId === "__unassigned__" ? null : controlKoUserId,
+                                  productionDate: controlProductionDate || null,
                                 }),
                               }),
                             })
@@ -7296,8 +7402,16 @@ export default function PcmProjectPage() {
                   <div className="divide-y divide-slate-100">
                     {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
                       const koUserId = parseKoUserId(task.internal_notes)
+                      const productionDate = parseProductionDate(task.internal_notes)
                       const isEditing = editingTaskId === task.id
-                      const baseTotalVal = toNonNegativeInt(controlEdits[task.id]?.total || "0")
+                      
+                      // Get TOTAL from origin task's daily_products
+                      const originTaskId = getOriginTaskId(task.internal_notes)
+                      const originTask = originTaskId ? tasks.find((t) => t.id === originTaskId) : null
+                      const totalFromOrigin = originTask?.daily_products ?? null
+                      const baseTotalVal = totalFromOrigin !== null 
+                        ? totalFromOrigin 
+                        : toNonNegativeInt(controlEdits[task.id]?.total || "0")
                       const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
                       const completedValue = isEditing
                         ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
@@ -7306,7 +7420,7 @@ export default function PcmProjectPage() {
                       const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
                       return (
                         <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-3 pr-2">
+                          <div className="col-span-2 pr-2">
                             {isEditing ? (
                               <input
                                 type="text"
@@ -7323,7 +7437,11 @@ export default function PcmProjectPage() {
                             {isEditing ? (
                               <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
                                 <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue />
+                                  <SelectValue>
+                                    {editingTaskAssignee === "__unassigned__" 
+                                      ? "-" 
+                                      : memberLabel(editingTaskAssignee)}
+                                  </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__unassigned__">-</SelectItem>
@@ -7336,6 +7454,18 @@ export default function PcmProjectPage() {
                               </Select>
                             ) : (
                               <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
+                            )}
+                          </div>
+                          <div className="col-span-1 px-2">
+                            {isEditing ? (
+                              <input
+                                type="date"
+                                value={editingTaskProductionDate}
+                                onChange={(e) => setEditingTaskProductionDate(e.target.value)}
+                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                              />
+                            ) : (
+                              <span className="text-slate-500">{productionDate ? new Date(productionDate).toLocaleDateString() : "-"}</span>
                             )}
                           </div>
                           <div className="col-span-1 px-2">
@@ -7368,13 +7498,15 @@ export default function PcmProjectPage() {
                             {isEditing ? (
                               <input
                                 type="number"
-                                value={editingTaskTotal}
+                                value={totalFromOrigin !== null ? totalFromOrigin.toString() : editingTaskTotal}
                                 onChange={(e) => setEditingTaskTotal(e.target.value)}
                                 placeholder="0"
                                 className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                readOnly={totalFromOrigin !== null}
+                                title={totalFromOrigin !== null ? "TOTAL from PRODUCT phase (read-only)" : ""}
                               />
                             ) : (
-                              <span className="text-slate-500">{controlEdits[task.id]?.total || "-"}</span>
+                              <span className="text-slate-500">{totalFromOrigin !== null ? totalFromOrigin.toString() : (controlEdits[task.id]?.total || "-")}</span>
                             )}
                           </div>
                           <div className="col-span-2 px-2">
@@ -7415,17 +7547,20 @@ export default function PcmProjectPage() {
                                     const currentNotes = task.internal_notes || ""
                                     const originTaskId = getOriginTaskId(currentNotes)
                                     const koUserId = parseKoUserId(currentNotes)
+                                    const productionDate = parseProductionDate(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
                                       total: controlEdits[task.id]?.total || totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
+                                      productionDate: productionDate || null,
                                     })
                                     const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
+                                        due_date: productionDate ? new Date(productionDate).toISOString() : null,
                                       }),
                                     })
                                     if (!res?.ok) {
@@ -7455,7 +7590,13 @@ export default function PcmProjectPage() {
                                   className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
                                   onClick={async () => {
                                     const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const completedNum = toNonNegativeInt(prevCompleted) + 1
+                                    const prevCompletedNum = toNonNegativeInt(prevCompleted)
+                                    // Cap completed at total - don't allow exceeding total
+                                    const completedNum = Math.min(prevCompletedNum + 1, totalVal)
+                                    if (completedNum === prevCompletedNum) {
+                                      // Already at max, don't update
+                                      return
+                                    }
                                     const newCompleted = completedNum.toString()
                                     const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                     setControlEdits((prev) => ({
@@ -7465,17 +7606,20 @@ export default function PcmProjectPage() {
                                     const currentNotes = task.internal_notes || ""
                                     const originTaskId = getOriginTaskId(currentNotes)
                                     const koUserId = parseKoUserId(currentNotes)
+                                    const productionDate = parseProductionDate(currentNotes)
                                     const internalNotes = serializeInternalNotes({
                                       originTaskId: originTaskId || undefined,
                                       total: controlEdits[task.id]?.total || totalVal.toString(),
                                       completed: newCompleted,
                                       koUserId: koUserId || null,
+                                      productionDate: productionDate || null,
                                     })
                                     const res = await apiFetch(`/tasks/${task.id}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
                                         internal_notes: internalNotes,
+                                        due_date: productionDate ? new Date(productionDate).toISOString() : null,
                                       }),
                                     })
                                     if (!res?.ok) {
@@ -7504,7 +7648,11 @@ export default function PcmProjectPage() {
                             {isEditing ? (
                               <Select value={editingTaskKoUserId} onValueChange={setEditingTaskKoUserId}>
                                 <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="-" />
+                                  <SelectValue placeholder="-">
+                                    {editingTaskKoUserId === "__unassigned__" 
+                                      ? "-" 
+                                      : memberLabel(editingTaskKoUserId)}
+                                  </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__unassigned__">-</SelectItem>
@@ -7516,23 +7664,7 @@ export default function PcmProjectPage() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <Select
-                                value={koUserId || "__unassigned__"}
-                                onValueChange={(value) => void updateKoUserForTask(task, value)}
-                                disabled={updatingKoTaskId === task.id}
-                              >
-                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-slate-200 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="-" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">-</SelectItem>
-                                  {members.map((u) => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.username || u.email}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <span className="block truncate text-slate-500">{memberLabel(koUserId)}</span>
                             )}
                           </div>
                           <div className="col-span-1 px-2">
