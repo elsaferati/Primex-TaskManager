@@ -4,6 +4,16 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    # Fallback for Python < 3.9
+    try:
+        import pytz
+        ZoneInfo = None  # Will use pytz instead
+    except ImportError:
+        ZoneInfo = None
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,6 +115,70 @@ def _month_range(year: int, month: int) -> tuple[date, date]:
     month_start = date(year, month, 1)
     next_month = date(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
     return month_start, next_month - timedelta(days=1)
+
+
+def _as_utc_date(value: datetime | date | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+    return value
+
+
+def _as_local_date(value: datetime | date | None) -> date | None:
+    """
+    Extract the date component from a datetime, preserving the local date meaning.
+    For planning purposes, we want the date in Europe/Pristina timezone (UTC+1/+2), not UTC.
+    
+    When PostgreSQL stores a date like "2026-02-05 00:00:00+01" (midnight in Europe/Pristina),
+    it stores the UTC equivalent "2026-02-04 23:00:00 UTC". SQLAlchemy retrieves it as UTC.
+    We need to convert back to Europe/Pristina timezone before extracting the date.
+    
+    Example:
+    - Input: 2026-02-04 23:00:00+00:00 (UTC representation of 2026-02-05 00:00:00+01)
+    - Output: 2026-02-05 (the intended local date in Europe/Pristina)
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo:
+            # Convert UTC datetime back to Europe/Pristina timezone (UTC+1/+2)
+            # This ensures we get the date as it was intended (local date)
+            pristina_tz = None
+            
+            # Try zoneinfo with Europe/Pristina
+            if ZoneInfo is not None:
+                try:
+                    pristina_tz = ZoneInfo("Europe/Pristina")
+                except Exception:
+                    # Europe/Pristina not available, try Europe/Belgrade (same timezone)
+                    try:
+                        pristina_tz = ZoneInfo("Europe/Belgrade")
+                    except Exception:
+                        pass
+            
+            # If zoneinfo failed, try pytz
+            if pristina_tz is None:
+                try:
+                    import pytz
+                    try:
+                        pristina_tz = pytz.timezone("Europe/Pristina")
+                    except Exception:
+                        # Fallback to Europe/Belgrade (same timezone as Pristina)
+                        pristina_tz = pytz.timezone("Europe/Belgrade")
+                except ImportError:
+                    # pytz not available, use fixed offset UTC+1
+                    pristina_tz = timezone(timedelta(hours=1))
+            
+            # Convert to local timezone
+            local_dt = value.astimezone(pristina_tz)
+            # Extract date from local timezone datetime
+            return local_dt.date()
+        else:
+            # Naive datetime, use as-is
+            return value.date()
+    # Already a date
+    return value
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -348,7 +422,9 @@ async def weekly_planner(
     def _planned_range_weekly(task: Task) -> tuple[date | None, date | None]:
         if task.due_date is None:
             return None, None
-        due = task.due_date.date()
+        due = _as_local_date(task.due_date)
+        if due is None:
+            return None, None
         
         # MST/TT project tasks: show only on due_date (ignore start_date)
         is_mst_tt_project = False
@@ -360,7 +436,9 @@ async def weekly_planner(
             return due, due
 
         if task.start_date is not None:
-            start = task.start_date.date()
+            start = _as_local_date(task.start_date)
+            if start is None:
+                return due, due
             if start <= due:
                 return start, due
         return due, due
@@ -754,7 +832,22 @@ async def weekly_table_planner(
     def _planned_range(task: Task) -> tuple[date | None, date | None]:
         if task.due_date is None:
             return None, None
-        due = task.due_date.date()
+        due = _as_local_date(task.due_date)
+        if due is None:
+            return None, None
+        
+        # DEBUG: Log for LEA BLLOK TASK
+        if task.title and "LEA BLLOK" in task.title.upper():
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"[PLANNED_RANGE DEBUG] task_id={task.id}, title={task.title}: "
+                f"due_date_raw={task.due_date}, "
+                f"due_date_type={type(task.due_date)}, "
+                f"due_date_tzinfo={task.due_date.tzinfo if hasattr(task.due_date, 'tzinfo') else None}, "
+                f"due_converted={due}, "
+                f"start_date_raw={task.start_date}, "
+                f"start_date_tzinfo={task.start_date.tzinfo if task.start_date and hasattr(task.start_date, 'tzinfo') else None}"
+            )
         
         # MST/TT project tasks: show only on due_date (ignore start_date)
         task_dept_id = task.department_id
@@ -783,7 +876,20 @@ async def weekly_table_planner(
         
         # For all other tasks (including fast tasks), use start_date if available
         if task.start_date is not None:
-            start = task.start_date.date()
+            start = _as_local_date(task.start_date)
+            if start is None:
+                return due, due
+            
+            # DEBUG: Log start date conversion
+            if task.title and "LEA BLLOK" in task.title.upper():
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"[PLANNED_RANGE DEBUG] task_id={task.id}: "
+                    f"start_converted={start}, "
+                    f"due_converted={due}, "
+                    f"range=({start}, {due})"
+                )
+            
             # Only treat start_date as planning start if it forms a valid interval.
             if start <= due:
                 return start, due
@@ -801,18 +907,45 @@ async def weekly_table_planner(
         is_dev_task = (task_dept_id in dev_dept_ids) or (project_dept_id in dev_dept_ids)
         
         if is_dev_task and task.project_id is not None:
-            start = task.created_at.date()
-            end = task.completed_at.date() if task.completed_at else week_end
+            start = _as_utc_date(task.created_at)
+            if start is None:
+                return None, None
+            completed_day = _as_utc_date(task.completed_at)
+            end = completed_day if completed_day is not None else week_end
             if end < start:
                 return None, None
             return start, end
         start, end = _planned_range(task)
         if start is None or end is None:
             return None, None
-        if task.completed_at:
-            completed_date = task.completed_at.date()
-            if completed_date < end:
+        
+        # DEBUG: Log for LEA BLLOK TASK
+        if task.title and "LEA BLLOK" in task.title.upper():
+            logger = logging.getLogger(__name__)
+            is_fast = _is_fast_task(task)
+            logger.warning(
+                f"[TASK_ACTIVE_RANGE DEBUG] task_id={task.id}, title={task.title}: "
+                f"is_fast_task={is_fast}, "
+                f"status={task.status}, "
+                f"completed_at={task.completed_at}, "
+                f"planned_range=({start}, {end})"
+            )
+        
+        # For FAST TASKS, never adjust date range based on completed_at or status.
+        # Always use the original start_date and due_date from _planned_range.
+        if not _is_fast_task(task) and task.completed_at:
+            completed_date = _as_utc_date(task.completed_at)
+            if completed_date is not None and completed_date < end:
                 end = completed_date
+        
+        # DEBUG: Log final range
+        if task.title and "LEA BLLOK" in task.title.upper():
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"[TASK_ACTIVE_RANGE DEBUG] task_id={task.id}: "
+                f"final_range=({start}, {end})"
+            )
+        
         if end < start:
             return None, None
         return start, end
@@ -993,7 +1126,7 @@ async def weekly_table_planner(
     logger.debug(f"Total projects in department: {len(projects)}")
     logger.debug(f"Projects with due dates (not completed): {len(projects_with_due_dates)}")
     for p in projects_with_due_dates:
-        logger.debug(f"  - {p.title} (id={p.id}, due={p.due_date.date() if p.due_date else None}, dept={p.department_id})")
+        logger.debug(f"  - {p.title} (id={p.id}, due={_as_utc_date(p.due_date)}, dept={p.department_id})")
     
     # Get project members for all projects with due dates
     project_members_map: dict[uuid.UUID, set[uuid.UUID]] = {}
@@ -1016,7 +1149,7 @@ async def weekly_table_planner(
         for p in projects_with_due_dates:
             members_count = len(project_members_map.get(p.id, set()))
             member_ids = list(project_members_map.get(p.id, set()))
-            logger.debug(f"Project {p.title} (id={p.id}, due={p.due_date.date()}) has {members_count} members: {member_ids}")
+            logger.debug(f"Project {p.title} (id={p.id}, due={_as_utc_date(p.due_date)}) has {members_count} members: {member_ids}")
     
     # Build table structure: Departments -> Days -> Users -> AM/PM
     def get_fast_task_type(task: Task) -> str | None:
@@ -1079,6 +1212,18 @@ async def weekly_table_planner(
                     start, end = _task_active_range(t)
                     if start is None or end is None:
                         continue
+                    
+                    # DEBUG: Log day filtering for LEA BLLOK TASK
+                    if t.title and "LEA BLLOK" in t.title.upper():
+                        logger = logging.getLogger(__name__)
+                        appears_today = start <= day_date <= end
+                        logger.warning(
+                            f"[DAY_FILTER DEBUG] task_id={t.id}, day={day_date}: "
+                            f"range=({start}, {end}), "
+                            f"appears_today={appears_today}, "
+                            f"check: {start} <= {day_date} <= {end}"
+                        )
+                    
                     if start <= day_date <= end:
                         user_tasks.append(t)
                 
@@ -1098,11 +1243,17 @@ async def weekly_table_planner(
                     
                     # No department filter here: project visibility is based on membership
                     
-                    project_due_date = project.due_date.date()
-                    project_start_date = project.created_at.date()
+                    project_due_date = _as_utc_date(project.due_date)
+                    if project_due_date is None:
+                        continue
+                    project_start_date = _as_utc_date(project.created_at)
+                    if project_start_date is None:
+                        continue
                     project_end_date = project_due_date
                     if project.completed_at is not None:
-                        project_end_date = min(project_end_date, project.completed_at.date())
+                        completed_day = _as_utc_date(project.completed_at)
+                        if completed_day is not None:
+                            project_end_date = min(project_end_date, completed_day)
                     monday_of_week = working_days[0]
                     week_end = working_days[-1]
                     
