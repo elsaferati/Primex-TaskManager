@@ -338,11 +338,11 @@ async def weekly_planner(
         department_id = user.department_id
 
     # Handle "All Departments" case - if department_id is provided, check access
-    # If not provided (None), admins can see all, others see their department
+    # If not provided (None), admins and managers can see all, others see their department
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
-        # Non-admin users without department_id should see their own department
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        # Non-admin/manager users without department_id should see their own department
         department_id = user.department_id
 
     # Get active projects (not completed, not templates)
@@ -553,7 +553,7 @@ async def monthly_planner(
 
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         department_id = user.department_id
 
     month_start, month_end = _month_range(year, month)
@@ -626,7 +626,7 @@ async def list_weekly_plans(
     if department_id is not None:
         ensure_department_access(user, department_id)
         stmt = stmt.where(WeeklyPlan.department_id == department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         if user.department_id is not None:
             stmt = stmt.where(WeeklyPlan.department_id == user.department_id)
         else:
@@ -667,7 +667,7 @@ async def get_weekly_plan(
     
     if plan.department_id is not None:
         ensure_department_access(user, plan.department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     
     return WeeklyPlanOut(
@@ -734,7 +734,7 @@ async def update_weekly_plan(
     
     if plan.department_id is not None:
         ensure_department_access(user, plan.department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     
     if payload.content is not None:
@@ -772,7 +772,7 @@ async def delete_weekly_plan(
     
     if plan.department_id is not None:
         ensure_department_access(user, plan.department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     
     await db.delete(plan)
@@ -803,17 +803,6 @@ async def weekly_table_planner(
     working_days = _get_next_5_working_days(week_start_date)
     week_end = working_days[-1]
     
-    # Check if there's a saved plan for this week
-    saved_plan_id: uuid.UUID | None = None
-    if department_id is not None:
-        plan_stmt = select(WeeklyPlan).where(
-            WeeklyPlan.department_id == department_id,
-            WeeklyPlan.start_date == week_start_date,
-        )
-        saved_plan = (await db.execute(plan_stmt)).scalar_one_or_none()
-        if saved_plan:
-            saved_plan_id = saved_plan.id
-    
     # Identify departments with special weekly planner logic (use all departments, not filtered)
     all_dept_rows = (await db.execute(select(Department.id, Department.name))).all()
     dev_dept_names = {"Development"}
@@ -824,23 +813,52 @@ async def weekly_table_planner(
     pc_dept_ids = {dept_id for dept_id, name in all_dept_rows if name in pc_dept_names}
 
     # Get departments to show
+    # For STAFF users, always use their own department
     if user.role == UserRole.STAFF:
         department_id = user.department_id
     
     dept_stmt = select(Department)
     if department_id is not None:
-        ensure_department_access(user, department_id)
+        # MANAGERs should have the same access as ADMINS for weekly planner
+        # For non-ADMIN/MANAGER users, ensure they can only access their own department
+        # If they try to access a different department, silently use their own instead
+        if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+            if user.department_id is not None and user.department_id != department_id:
+                # User tried to access a different department - use their own instead
+                department_id = user.department_id
+            elif user.department_id is None:
+                # User has no department - return empty response
+                return WeeklyTableResponse(
+                    week_start=week_start_date,
+                    week_end=week_end,
+                    departments=[],
+                    saved_plan_id=None,
+                )
         dept_stmt = dept_stmt.where(Department.id == department_id)
-    elif user.role != UserRole.ADMIN:
+    elif user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        # Non-admin/manager users without department_id parameter should see their own department
         if user.department_id is not None:
+            department_id = user.department_id
             dept_stmt = dept_stmt.where(Department.id == user.department_id)
         else:
+            # User has no department - return empty response
             return WeeklyTableResponse(
                 week_start=week_start_date,
                 week_end=week_end,
                 departments=[],
-                saved_plan_id=saved_plan_id,
+                saved_plan_id=None,
             )
+    
+    # Check if there's a saved plan for this week (after department_id is finalized)
+    saved_plan_id: uuid.UUID | None = None
+    if department_id is not None:
+        plan_stmt = select(WeeklyPlan).where(
+            WeeklyPlan.department_id == department_id,
+            WeeklyPlan.start_date == week_start_date,
+        )
+        saved_plan = (await db.execute(plan_stmt)).scalar_one_or_none()
+        if saved_plan:
+            saved_plan_id = saved_plan.id
     
     departments = (await db.execute(dept_stmt.order_by(Department.name))).scalars().all()
     
@@ -972,8 +990,21 @@ async def weekly_table_planner(
         # Always use the original start_date and due_date from _planned_range.
         if not _is_fast_task(task) and task.completed_at:
             completed_date = _as_utc_date(task.completed_at)
-            if completed_date is not None and completed_date < end:
-                end = completed_date
+            if completed_date is not None:
+                # Check if this is an MST/TT task
+                is_mst_tt_task = False
+                if task.project_id and task.project_id in project_map:
+                    project = project_map[task.project_id]
+                    if project:
+                        is_mst_tt_task = _is_mst_or_tt_project(project)
+                
+                if is_mst_tt_task:
+                    # For MST/TT tasks, if completed, show on the completion day
+                    # Use completed_date as both start and end to ensure it shows on that day
+                    start = completed_date
+                    end = completed_date
+                elif completed_date < end:
+                    end = completed_date
         
         # DEBUG: Log final range
         if task.title and "LEA BLLOK" in task.title.upper():
@@ -1468,7 +1499,17 @@ async def weekly_table_planner(
                                     task_title=t.title,
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                     daily_status=(
-                                        daily_progress_map.get((t.id, day_date), TaskStatus.TODO)
+                                        # For MST/TT tasks, find the most recent daily_status on or before the displayed day
+                                        # This ensures we get the status from the day it was actually changed, not just the due_date
+                                        next(
+                                            (daily_progress_map[(t.id, check_date)] 
+                                             for check_date in sorted(
+                                                 [d for d in working_days if d <= day_date],
+                                                 reverse=True
+                                             )
+                                             if (t.id, check_date) in daily_progress_map),
+                                            TaskStatus.TODO  # Default if no record found
+                                        )
                                         if t.id in mst_tt_task_ids
                                         else None
                                     ),
@@ -1500,7 +1541,17 @@ async def weekly_table_planner(
                                     task_title=t.title,
                                     status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                     daily_status=(
-                                        daily_progress_map.get((t.id, day_date), TaskStatus.TODO)
+                                        # For MST/TT tasks, find the most recent daily_status on or before the displayed day
+                                        # This ensures we get the status from the day it was actually changed, not just the due_date
+                                        next(
+                                            (daily_progress_map[(t.id, check_date)] 
+                                             for check_date in sorted(
+                                                 [d for d in working_days if d <= day_date],
+                                                 reverse=True
+                                             )
+                                             if (t.id, check_date) in daily_progress_map),
+                                            TaskStatus.TODO  # Default if no record found
+                                        )
                                         if t.id in mst_tt_task_ids
                                         else None
                                     ),

@@ -771,10 +771,18 @@ export default function WeeklyPlannerPage() {
       dayDate?: string | null,
       dailyStatus?: string | null
     ) => {
+      const normalized = (status || "TODO").toUpperCase()
+      // If the task was completed on this specific day, show it as DONE even if daily_status is stale.
+      if (normalized === "DONE" && completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10)
+        const currentDate = dayDate.slice(0, 10)
+        if (completedDate === currentDate) {
+          return getStatusCardClasses("DONE")
+        }
+      }
       if (dailyStatus) {
         return getStatusCardClasses(dailyStatus)
       }
-      const normalized = (status || "TODO").toUpperCase()
       if (normalized !== "DONE") {
         return getStatusCardClasses(normalized)
       }
@@ -798,11 +806,19 @@ export default function WeeklyPlannerPage() {
       dayDate?: string | null,
       dailyStatus?: string | null
     ) => {
+      const normalized = (status || "TODO").toUpperCase()
+      // If the task was completed on this specific day, treat it as DONE even if daily_status is stale.
+      if (normalized === "DONE" && completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10)
+        const currentDate = dayDate.slice(0, 10)
+        if (completedDate === currentDate) {
+          return "DONE"
+        }
+      }
       if (dailyStatus) {
         const normalizedDaily = dailyStatus.toUpperCase()
         return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
       }
-      const normalized = (status || "TODO").toUpperCase()
       if (normalized !== "DONE") {
         return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
       }

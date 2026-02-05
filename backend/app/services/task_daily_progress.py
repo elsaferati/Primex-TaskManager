@@ -33,8 +33,14 @@ async def upsert_task_daily_progress(
     old_completed: int,
     new_completed: int,
     total: int,
+    explicit_status: TaskStatus | None = None,
 ) -> None:
-    status = _derive_daily_status(old_completed=old_completed, new_completed=new_completed, total=total)
+    # Use explicit_status if provided, otherwise derive from products
+    if explicit_status is not None:
+        status = explicit_status
+    else:
+        status = _derive_daily_status(old_completed=old_completed, new_completed=new_completed, total=total)
+    
     delta = new_completed - old_completed
     delta_positive = delta if delta > 0 else 0
 
@@ -64,4 +70,10 @@ async def upsert_task_daily_progress(
     existing.total_value = max(0, total)
     if delta_positive:
         existing.completed_delta = max(0, (existing.completed_delta or 0) + delta_positive)
-    existing.daily_status = status.value
+    # Only update daily_status if explicit_status is provided, or if no explicit status was previously set
+    # This preserves user-set status changes
+    if explicit_status is not None:
+        existing.daily_status = status.value
+    elif existing.daily_status == TaskStatus.TODO.value:
+        # Only auto-update if current status is TODO (no explicit status set)
+        existing.daily_status = status.value
