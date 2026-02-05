@@ -154,6 +154,17 @@ async def daily_report(
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
+    project_title_by_id: dict[uuid.UUID, str] = {}
+    project_ids = {t.project_id for t in tasks if t.project_id is not None}
+    if project_ids:
+        project_rows = (
+            await db.execute(
+                select(Project.id, Project.title).where(Project.id.in_(project_ids))
+            )
+        ).all()
+        for pid, title in project_rows:
+            if title:
+                project_title_by_id[pid] = title
 
     tasks_today: list[DailyReportTaskItem] = []
     tasks_overdue: list[DailyReportTaskItem] = []
@@ -166,6 +177,7 @@ async def daily_report(
             tasks_today.append(
                 DailyReportTaskItem(
                     task=_task_to_out(t, assignee_map.get(t.id, [])),
+                    project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
@@ -178,6 +190,7 @@ async def daily_report(
             tasks_overdue.append(
                 DailyReportTaskItem(
                     task=_task_to_out(t, assignee_map.get(t.id, [])),
+                    project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
