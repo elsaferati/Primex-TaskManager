@@ -20,11 +20,11 @@ type CommonType =
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
 type LeaveItem = { entryId?: string; person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
-type BlockedItem = { title: string; person: string; date: string; note?: string }
-type OneHItem = { title: string; person: string; date: string; note?: string }
-type PersonalItem = { title: string; person: string; date: string; note?: string }
-type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string }
-type R1Item = { title: string; date: string; owner: string; note?: string }
+type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type OneHItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[] }
+type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
 type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type PriorityItem = { project: string; date: string; assignees: string[] }
@@ -97,6 +97,10 @@ const initials = (name: string) => {
   const first = parts[0]?.[0] || ""
   const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : ""
   return `${first}${last}`.toUpperCase()
+}
+const stripInitialsPrefix = (value: string) => {
+  if (!value) return value
+  return value.replace(/^\s*[A-Z]{2,3}\s*:\s*/u, "")
 }
 
 export default function CommonViewPage() {
@@ -933,6 +937,7 @@ export default function CommonViewPage() {
               : ownerName
               ? [ownerName]
               : []
+            const assigneeLabel = assigneeNames.length ? assigneeNames.join(", ") : "Unknown"
             
             const phaseValue = (t.phase || "").toUpperCase()
             const isCheckPhase = phaseValue === "CHECK" || phaseValue === "CONTROL"
@@ -985,7 +990,8 @@ export default function CommonViewPage() {
               if (t.is_bllok) {
                 allData.blocked.push({
                   title: t.title,
-                  person: ownerName || "Unknown",
+                  person: assigneeLabel,
+                  assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
                 })
@@ -993,7 +999,8 @@ export default function CommonViewPage() {
               if (t.is_1h_report) {
                 allData.oneH.push({
                   title: t.title,
-                  person: ownerName || "Unknown",
+                  person: assigneeLabel,
+                  assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
                 })
@@ -1001,7 +1008,8 @@ export default function CommonViewPage() {
               if (t.is_personal) {
                 allData.personal.push({
                   title: t.title,
-                  person: ownerName || "Unknown",
+                  person: assigneeLabel,
+                  assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
                 })
@@ -1010,7 +1018,8 @@ export default function CommonViewPage() {
                 allData.r1.push({
                   title: t.title,
                   date: taskDate,
-                  owner: ownerName || "Unknown",
+                  owner: assigneeLabel,
+                  assignees: assigneeNames,
                   note: t.description || undefined,
                 })
               }
@@ -1023,7 +1032,8 @@ export default function CommonViewPage() {
                 date: externalDate,
                 time: "14:00",
                 platform: "Zoom",
-                owner: ownerName || "Unknown",
+                owner: assigneeLabel,
+                assignees: assigneeNames,
               })
             }
 
@@ -1777,32 +1787,32 @@ export default function CommonViewPage() {
       }
     })
     const blockedItems: SwimlaneCell[] = filtered.blocked.map((x) => ({
-      title: `${initials(x.person || "")}: ${x.title}`,
-      assignees: x.person ? [x.person] : [],
+      title: x.title,
+      assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent blocked",
     }))
     const oneHItems: SwimlaneCell[] = filtered.oneH.map((x) => ({
-      title: `${initials(x.person || "")}: ${x.title}`,
-      assignees: x.person ? [x.person] : [],
+      title: x.title,
+      assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent oneh",
     }))
     const personalItems: SwimlaneCell[] = filtered.personal.map((x) => ({
-      title: `${initials(x.person || "")}: ${x.title}`,
-      assignees: x.person ? [x.person] : [],
+      title: x.title,
+      assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent personal",
     }))
     const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
-      title: `${initials(x.owner || "")}: ${x.title} ${x.time}`,
-      assignees: x.owner ? [x.owner] : [],
+      title: `${x.title} ${x.time}`.trim(),
+      assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)} - ${x.platform}`,
       accentClass: "swimlane-accent external",
     }))
     const r1Items: SwimlaneCell[] = filtered.r1.map((x) => ({
-      title: `${initials(x.owner || "")}: ${x.title}`,
-      assignees: x.owner ? [x.owner] : [],
+      title: x.title,
+      assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       accentClass: "swimlane-accent r1",
     }))
@@ -1844,7 +1854,7 @@ export default function CommonViewPage() {
       },
       {
         id: "leave",
-        label: "PV/FEST",
+        label: "PV/FESTE",
         count: filtered.leave.length,
         headerClass: "swimlane-header leave",
         badgeClass: "swimlane-badge leave",
@@ -4812,11 +4822,29 @@ export default function CommonViewPage() {
                     const getCellContent = (iso: string) => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
+                      const normalizeAssignees = (value?: string) =>
+                        value
+                          ? value
+                              .split(",")
+                              .map((v) => v.trim())
+                              .filter(Boolean)
+                          : []
+                      const entryAssignees = (entry: any) =>
+                        entry.assignees && entry.assignees.length
+                          ? entry.assignees
+                          : normalizeAssignees(entry.person || entry.owner || "")
                       
                       if (row.id === "late") {
         return entries.map((e: LateItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{initials(e.person)} {e.start || "08:00"}-{e.until}</span>
+            <span>{e.start || "08:00"}-{e.until}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.start}-${name}`} className="week-table-avatar" title={name}>
+                  {initials(name)}
+                </span>
+              ))}
+            </div>
             {canDeleteCommon && e.entryId ? (
               <button
                 type="button"
@@ -4833,7 +4861,14 @@ export default function CommonViewPage() {
                       } else if (row.id === "absent") {
                         return entries.map((e: AbsentItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person)} {e.from} - {e.to}</span>
+                            <span>{e.from} - {e.to}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                             {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
@@ -4853,9 +4888,16 @@ export default function CommonViewPage() {
                           return (
                             <div key={idx} className="week-table-entry">
                               <span>
-                                {initials(e.person)} {e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`}
+                                {e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`}
                                 {range ? ` ${range}` : ""}
                               </span>
+                              <div className="week-table-avatars">
+                                {entryAssignees(e).map((name: string) => (
+                                  <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
+                                    {initials(name)}
+                                  </span>
+                                ))}
+                              </div>
                               {canDeleteCommon && e.entryId ? (
                                 <button
                                   type="button"
@@ -4873,7 +4915,14 @@ export default function CommonViewPage() {
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person || "")}: {e.title}</span>
+                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         ))
                       } else if (row.id === "problem" || row.id === "feedback") {
@@ -4896,19 +4945,40 @@ export default function CommonViewPage() {
                       } else if (row.id === "oneH" || row.id === "r1") {
                         return entries.map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.person || e.owner || "")}: {e.title}
+                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         ))
                       } else if (row.id === "personal") {
                         return entries.map((e: PersonalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.person || "")}: {e.title}
+                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         ))
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            {initials(e.owner || "")}: {e.title} {e.time}
+                            <span>{stripInitialsPrefix(`${e.title} ${e.time}`.trim())}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         ))
                       } else if (row.id === "priority") {
@@ -5023,7 +5093,7 @@ export default function CommonViewPage() {
                                 <div className="swimlane-title-row">
                                   <div className="swimlane-title">
                                     {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
-                                    {cell.title}
+                                    {stripInitialsPrefix(cell.title)}
                                   </div>
                                   {!cell.placeholder && cell.assignees?.length ? (
                                     <div className="swimlane-assignees">
