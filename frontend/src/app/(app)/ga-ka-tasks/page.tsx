@@ -556,31 +556,32 @@ export default function GaKaTasksPage() {
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
-  const gaTasks = React.useMemo(() => {
-    if (!ganeUserId) return []
-    return tasks.filter((task) => {
+  const adminTaskRows = React.useMemo(() => {
+    const rows: Task[] = []
+    const hasGane = Boolean(ganeUserId)
+
+    for (const task of tasks) {
       const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-      if (isSystem) return false
+      if (isSystem) continue
+      if (task.is_active === false) continue
 
-      // Only show fast tasks (no project) assigned to gane.arifaj
-      const isFastTask = !task.project_id
-      if (!isFastTask) return false
+      const assignedToGane =
+        hasGane &&
+        (task.assigned_to === ganeUserId ||
+          task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
+          task.alignment_user_ids?.includes(ganeUserId as string))
+      const inGaDepartment = Boolean(adminDepartmentId && task.department_id === adminDepartmentId)
+      if (!assignedToGane && !inGaDepartment) continue
 
-      const isAssignedToGane =
-        task.assigned_to === ganeUserId ||
-        task.assignees?.some((assignee) => assignee.id === ganeUserId)
+      rows.push(task)
+    }
 
-      if (!isAssignedToGane) return false
-
-      // Keep the same 7-day recency window
-      const createdAt = task.created_at ? new Date(task.created_at).getTime() : 0
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
-      return createdAt >= cutoff
-    })
-  }, [ganeUserId, tasks])
+    return rows
+  }, [adminDepartmentId, ganeUserId, tasks])
 
   const filteredTasks = React.useMemo(() => {
-    let filtered = gaTasks
+    if (viewFilter === "system") return []
+    let filtered = adminTaskRows
     if (priorityFilter !== "all") {
       filtered = filtered.filter(
         (task) => getDisplayPriority(task).toUpperCase() === priorityFilter
@@ -604,7 +605,7 @@ export default function GaKaTasksPage() {
       }
     }
     return filtered
-  }, [dateFilter, dayFilter, gaTasks, priorityFilter])
+  }, [adminTaskRows, dateFilter, dayFilter, priorityFilter, viewFilter])
 
   const sortedTasks = React.useMemo(
     () =>
@@ -1351,7 +1352,7 @@ export default function GaKaTasksPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Badge variant="outline" className="border-slate-200 bg-white">
-                  GA tasks: {gaTasks.length}
+                  Admin items: {adminTaskRows.length}
                 </Badge>
                 <Badge variant="outline" className="border-slate-200 bg-white">
                   Filtered: {sortedTasks.length}
@@ -2056,8 +2057,6 @@ export default function GaKaTasksPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {sortedTasks.map((task, index) => {
-                        const department = task.department_id ? departmentMap.get(task.department_id) : null
-                        const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
                         return (
                           <tr
                             key={task.id}
@@ -2125,7 +2124,7 @@ export default function GaKaTasksPage() {
                   </table>
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">No tasks found.</div>
+                <div className="text-sm text-muted-foreground">No items found.</div>
               )}
             </CardContent>
           </Card>
@@ -2333,12 +2332,10 @@ export default function GaKaTasksPage() {
           <SystemTasksView
             scopeFilter="GA"
             headingTitle="Admin System Tasks"
-            headingDescription="System tasks scoped for Kosove and Gane admins."
+            headingDescription="System tasks for Gane Arifaj and GA department."
             showSystemActions={false}
             showFilters={false}
             allowMarkAsDone={true}
-            assigneeRoleFilter={["ADMIN"]}
-            assigneeUsernamesFilter={["gane.arifaj"]}
             externalPriorityFilter={priorityFilter}
             externalDayFilter={dayFilter}
             externalDateFilter={dateFilter}

@@ -894,7 +894,7 @@ export function SystemTasksView({
   const scopeTemplates = React.useMemo(() => {
     if (!scopeFilter) return templates
 
-    // GA view: show any template where Gane is an assignee (default or list), regardless of department/scope.
+    // GA view: show any template where Gane is an assignee OR the template is scoped to GA department.
     if (scopeFilter === "GA") {
       const isAssignedToGane = (template: SystemTaskTemplate) =>
         (ganeUserId &&
@@ -902,11 +902,14 @@ export function SystemTasksView({
             template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
         template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
 
-      return templates.filter((template) => isAssignedToGane(template))
+      const isGaDepartment = (template: SystemTaskTemplate) =>
+        template.scope === "GA" || (gaDepartmentId ? template.department_id === gaDepartmentId : false)
+
+      return templates.filter((template) => isAssignedToGane(template) || isGaDepartment(template))
     }
 
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
-  }, [scopeFilter, templates, ganeUserId])
+  }, [scopeFilter, templates, ganeUserId, gaDepartmentId])
 
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
