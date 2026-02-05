@@ -1486,8 +1486,15 @@ export default function DepartmentKanban() {
   )
   const visibleSystemTemplates = React.useMemo(
     () => {
-      if (!isMineView || !user?.id) return systemTasks
-      return systemTasks.filter((t) => {
+      const depTasks = department
+        ? systemTasks.filter((t) => {
+            if (t.department_id === department.id) return true
+            if (t.department_ids?.includes(department.id)) return true
+            return false
+          })
+        : []
+      if (!isMineView || !user?.id) return depTasks
+      return depTasks.filter((t) => {
         // Check if user is the default assignee
         if (t.default_assignee_id === user.id) return true
         // Check if user is in the assignees array
@@ -1497,7 +1504,7 @@ export default function DepartmentKanban() {
         return false
       })
     },
-    [systemTasks, isMineView, user?.id]
+    [systemTasks, isMineView, user?.id, department]
   )
 
   const projectTasks = React.useMemo(
@@ -3150,8 +3157,9 @@ export default function DepartmentKanban() {
     }
   }
 
-  const handleCloseTaskClick = (taskId: string) => {
-    setTaskToCloseId(taskId)
+  const handleCloseTaskClick = (task: SystemTaskTemplate) => {
+    const templateId = task.template_id ?? task.id
+    setTaskToCloseId(templateId)
     setCloseTaskComment("")
     setCloseTaskDialogOpen(true)
   }
@@ -3166,29 +3174,30 @@ export default function DepartmentKanban() {
 
     setClosingTask(true)
     try {
-      const commentRes = await apiFetch(`/tasks/${taskToCloseId}/comment`, {
-        method: "PATCH",
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comment: closeTaskComment.trim() }),
-      })
-      if (!commentRes.ok) {
-        const data = await commentRes.json()
-        toast.error(data.detail || "Failed to save comment")
-        setClosingTask(false)
-        return
-      }
-
-      // Close the task
-      const res = await apiFetch(`/tasks/${taskToCloseId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "DONE" }),
+        body: JSON.stringify({
+          template_id: taskToCloseId,
+          occurrence_date: formatDateInput(systemDate),
+          status: "DONE",
+          comment: closeTaskComment.trim(),
+        }),
       })
       if (!res.ok) {
         toast.error("Failed to close system task")
         setClosingTask(false)
         return
       }
+
+      setSystemTasks((prev) =>
+        prev.map((task) => {
+          const templateId = task.template_id ?? task.id
+          return templateId === taskToCloseId
+            ? { ...task, status: "DONE", user_comment: closeTaskComment.trim() }
+            : task
+        })
+      )
       
       // Reload system tasks
       const sysRes = await apiFetch(`/system-tasks?department_id=${department?.id || ""}`)
@@ -5730,7 +5739,7 @@ export default function DepartmentKanban() {
                                       variant="outline"
                                       size="sm"
                                       disabled={closingTask}
-                                      onClick={() => handleCloseTaskClick(template.id)}
+                                      onClick={() => handleCloseTaskClick(template)}
                                       className="h-7 text-xs"
                                     >
                                       {closingTask ? "Updating..." : "Mark done"}
