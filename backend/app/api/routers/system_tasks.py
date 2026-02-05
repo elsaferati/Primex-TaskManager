@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel
 from sqlalchemy import and_, delete, insert, or_, select, text, cast, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from app.models.enums import (
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
+from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
@@ -34,6 +36,7 @@ from app.schemas.system_task_template import (
     SystemTaskTemplateUpdate,
 )
 from app.services.system_task_schedule import should_reopen_system_task
+from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
 
 
 router = APIRouter()
@@ -245,8 +248,26 @@ def _task_row_to_out(
     user_comment: str | None = None,
     alignment_roles: list[str] | None = None,
     alignment_user_ids: list[uuid.UUID] | None = None,
+    occurrence_status: str | None = None,  # NEW: occurrence status for current user
 ) -> SystemTaskOut:
     priority_value = task.priority or TaskPriority.NORMAL
+    
+    # Use occurrence status if provided, otherwise use task status
+    # Map occurrence status to TaskStatus
+    if occurrence_status:
+        if occurrence_status == "DONE":
+            final_status = TaskStatus.DONE
+        elif occurrence_status == "NOT_DONE":
+            final_status = TaskStatus.NOT_DONE
+        elif occurrence_status == "SKIPPED":
+            final_status = TaskStatus.NOT_DONE
+        elif occurrence_status == "OPEN":
+            final_status = TaskStatus.TODO
+        else:
+            final_status = task.status
+    else:
+        final_status = task.status
+    
     return SystemTaskOut(
         id=task.id,
         template_id=template.id,
@@ -264,7 +285,7 @@ def _task_row_to_out(
         month_of_year=template.month_of_year,
         priority=priority_value,
         finish_period=task.finish_period,
-        status=task.status,
+        status=final_status,
         is_active=task.is_active,
         user_comment=user_comment,
         requires_alignment=bool(getattr(template, "requires_alignment", False)),
@@ -280,6 +301,7 @@ def _task_row_to_out(
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
     only_active: bool = False,
+    assigned_to: uuid.UUID | None = None,  # Filter by user for "My View"
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
@@ -323,6 +345,9 @@ async def list_system_tasks(
         .outerjoin(Task, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(SystemTaskTemplate.id.in_(template_ids))
     )
+    # If filtering by user (My View), only show tasks assigned to that user
+    if assigned_to is not None:
+        task_stmt = task_stmt.where(Task.assigned_to == assigned_to)
     if only_active:
         task_stmt = task_stmt.where(
             or_(
@@ -371,9 +396,56 @@ async def list_system_tasks(
         ).all()
         user_comment_map = {task_id: comment for task_id, comment in comment_rows}
 
+    # Fetch occurrence statuses for the current user (for My View)
+    occurrence_status_map: dict[uuid.UUID, str] = {}
+    if user.id and template_ids:
+        today = date.today()
+        occ_rows = (
+            await db.execute(
+                select(SystemTaskOccurrence.template_id, SystemTaskOccurrence.status)
+                .where(SystemTaskOccurrence.template_id.in_(template_ids))
+                .where(SystemTaskOccurrence.user_id == user.id)
+                .where(SystemTaskOccurrence.occurrence_date == today)
+            )
+        ).all()
+        occurrence_status_map = {template_id: status for template_id, status in occ_rows}
+
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
 
-    # Group tasks by template_id to collect all departments
+    # If filtering by user (My View), return individual tasks instead of grouped
+    if assigned_to is not None:
+        result = []
+        for template, task in rows:
+            if task is None:
+                continue  # Skip templates without tasks in My View
+            
+            task_assignees = assignee_map.get(task.id, [])
+            if not task_assignees and task.assigned_to:
+                # Fallback to assigned_to user
+                assigned_user = (
+                    await db.execute(select(User).where(User.id == task.assigned_to))
+                ).scalar_one_or_none()
+                if assigned_user:
+                    task_assignees = [_user_to_assignee(assigned_user)]
+            
+            # Get occurrence status for this template and user
+            occ_status = occurrence_status_map.get(template.id)
+            
+            task_out = _task_row_to_out(
+                task,
+                template,
+                task_assignees,
+                user_comment_map.get(task.id),
+                roles_map.get(template.id),
+                alignment_users_map.get(template.id),
+                occurrence_status=occ_status,
+            )
+            # For individual tasks, department_ids is just the task's department
+            task_out.department_ids = [task.department_id] if task.department_id else None
+            result.append(task_out)
+        return result
+
+    # Group tasks by template_id to collect all departments (for Department View)
     template_tasks_map: dict[uuid.UUID, list[tuple[Task, SystemTaskTemplate]]] = {}
     template_only_map: dict[uuid.UUID, SystemTaskTemplate] = {}
     
@@ -405,6 +477,8 @@ async def list_system_tasks(
         
         # Use the first task for the main response, but include all department_ids and all assignees
         first_task, _ = task_list[0]
+        # Get occurrence status for the current user (if viewing their own tasks)
+        occ_status = occurrence_status_map.get(template.id) if user.id else None
         task_out = _task_row_to_out(
             first_task,
             template,
@@ -412,6 +486,7 @@ async def list_system_tasks(
             user_comment_map.get(first_task.id),
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
+            occurrence_status=occ_status,
         )
         # Add department_ids to the response
         task_out.department_ids = department_ids if department_ids else None
@@ -537,6 +612,108 @@ async def list_system_task_templates(
         )
         for t in templates
     ]
+
+
+class SystemTaskOccurrenceUpdate(BaseModel):
+    template_id: uuid.UUID
+    occurrence_date: date
+    status: str
+    comment: str | None = None
+
+
+@router.post("/occurrences", status_code=status.HTTP_200_OK)
+async def set_system_task_occurrence_status(
+    payload: SystemTaskOccurrenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    allowed = {OPEN, DONE, NOT_DONE, SKIPPED}
+    if payload.status not in allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status")
+
+    tmpl = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == payload.template_id))
+    ).scalar_one_or_none()
+    if tmpl is None:
+        # Some clients might send a task ID instead of a template ID.
+        task = (
+            await db.execute(select(Task).where(Task.id == payload.template_id))
+        ).scalar_one_or_none()
+        if task and task.system_template_origin_id:
+            tmpl = (
+                await db.execute(
+                    select(SystemTaskTemplate).where(SystemTaskTemplate.id == task.system_template_origin_id)
+                )
+            ).scalar_one_or_none()
+        if tmpl is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+
+    # Minimal permissions: user can update their own occurrence; admins/managers can also do it.
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    # Check if user is in the assignee list
+    assignee_ids = getattr(tmpl, 'assignee_ids', None) or []
+    if not assignee_ids and tmpl.default_assignee_id:
+        assignee_ids = [tmpl.default_assignee_id]
+    
+    if user.id not in assignee_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You are not assigned to this system task"
+        )
+
+    # Ensure the occurrence row exists (idempotent).
+    await ensure_occurrences_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date, template_ids=[tmpl.id])
+
+    occ = (
+        await db.execute(
+            select(SystemTaskOccurrence)
+            .where(SystemTaskOccurrence.template_id == tmpl.id)
+            .where(SystemTaskOccurrence.user_id == user.id)
+            .where(SystemTaskOccurrence.occurrence_date == payload.occurrence_date)
+        )
+    ).scalar_one_or_none()
+    if occ is None:
+        # This shouldn't happen if ensure_occurrences_in_range worked, but handle it gracefully
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Occurrence not available for this user. Please refresh and try again."
+        )
+
+    now = datetime.now(timezone.utc)
+    occ.status = payload.status
+    occ.comment = payload.comment
+    occ.acted_at = None if payload.status == OPEN else now
+
+    # Also update the corresponding Task status if it exists
+    # Find the task for this user and template
+    task = (
+        await db.execute(
+            select(Task)
+            .where(Task.system_template_origin_id == tmpl.id)
+            .where(Task.assigned_to == user.id)
+            .order_by(Task.created_at.desc())
+        )
+    ).scalars().first()
+    
+    if task:
+        # Map occurrence status to task status
+        if payload.status == DONE:
+            task.status = TaskStatus.DONE
+            task.completed_at = now
+        elif payload.status == NOT_DONE:
+            task.status = TaskStatus.NOT_DONE
+            task.completed_at = now
+        elif payload.status == SKIPPED:
+            task.status = TaskStatus.NOT_DONE  # Map SKIPPED to NOT_DONE for tasks
+            task.completed_at = now
+        elif payload.status == OPEN:
+            task.status = TaskStatus.TODO
+            task.completed_at = None
+
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("", response_model=SystemTaskOut, status_code=status.HTTP_201_CREATED)

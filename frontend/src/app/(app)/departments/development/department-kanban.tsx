@@ -361,6 +361,15 @@ function shouldShowTemplate(t: SystemTaskTemplate, date: Date) {
   return false
 }
 
+function findPreviousOccurrenceDate(t: SystemTaskTemplate, fromDate: Date) {
+  const candidate = new Date(fromDate)
+  for (let i = 0; i < 370; i += 1) {
+    if (shouldShowTemplate(t, candidate)) return candidate
+    candidate.setDate(candidate.getDate() - 1)
+  }
+  return fromDate
+}
+
 function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
   const today = new Date(fromDate)
   today.setHours(0, 0, 0, 0)
@@ -796,6 +805,7 @@ export default function DepartmentKanban() {
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
+  const [taskToCloseTemplate, setTaskToCloseTemplate] = React.useState<SystemTaskTemplate | null>(null)
   const [closeTaskComment, setCloseTaskComment] = React.useState("")
   const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
@@ -1486,8 +1496,15 @@ export default function DepartmentKanban() {
   )
   const visibleSystemTemplates = React.useMemo(
     () => {
-      if (!isMineView || !user?.id) return systemTasks
-      return systemTasks.filter((t) => {
+      const depTasks = department
+        ? systemTasks.filter((t) => {
+            if (t.department_id === department.id) return true
+            if (t.department_ids?.includes(department.id)) return true
+            return false
+          })
+        : []
+      if (!isMineView || !user?.id) return depTasks
+      return depTasks.filter((t) => {
         // Check if user is the default assignee
         if (t.default_assignee_id === user.id) return true
         // Check if user is in the assignees array
@@ -1497,7 +1514,7 @@ export default function DepartmentKanban() {
         return false
       })
     },
-    [systemTasks, isMineView, user?.id]
+    [systemTasks, isMineView, user?.id, department]
   )
 
   const projectTasks = React.useMemo(
@@ -3150,8 +3167,10 @@ export default function DepartmentKanban() {
     }
   }
 
-  const handleCloseTaskClick = (taskId: string) => {
-    setTaskToCloseId(taskId)
+  const handleCloseTaskClick = (task: SystemTaskTemplate) => {
+    const templateId = task.template_id ?? task.id
+    setTaskToCloseId(templateId)
+    setTaskToCloseTemplate(task)
     setCloseTaskComment("")
     setCloseTaskDialogOpen(true)
   }
@@ -3165,30 +3184,36 @@ export default function DepartmentKanban() {
     }
 
     setClosingTask(true)
-    try {
-      const commentRes = await apiFetch(`/tasks/${taskToCloseId}/comment`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comment: closeTaskComment.trim() }),
-      })
-      if (!commentRes.ok) {
-        const data = await commentRes.json()
-        toast.error(data.detail || "Failed to save comment")
-        setClosingTask(false)
-        return
-      }
+    const occurrenceBaseDate = taskToCloseTemplate
+      ? findPreviousOccurrenceDate(taskToCloseTemplate, systemDate)
+      : systemDate
+    const occurrenceDate = formatDateInput(occurrenceBaseDate)
 
-      // Close the task
-      const res = await apiFetch(`/tasks/${taskToCloseId}`, {
-        method: "PATCH",
+    try {
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "DONE" }),
+        body: JSON.stringify({
+          template_id: taskToCloseId,
+          occurrence_date: occurrenceDate,
+          status: "DONE",
+          comment: closeTaskComment.trim(),
+        }),
       })
       if (!res.ok) {
         toast.error("Failed to close system task")
         setClosingTask(false)
         return
       }
+
+      setSystemTasks((prev) =>
+        prev.map((task) => {
+          const templateId = task.template_id ?? task.id
+          return templateId === taskToCloseId
+            ? { ...task, status: "DONE", user_comment: closeTaskComment.trim() }
+            : task
+        })
+      )
       
       // Reload system tasks
       const sysRes = await apiFetch(`/system-tasks?department_id=${department?.id || ""}`)
@@ -3198,6 +3223,7 @@ export default function DepartmentKanban() {
       
       setCloseTaskDialogOpen(false)
       setTaskToCloseId(null)
+      setTaskToCloseTemplate(null)
       setCloseTaskComment("")
       toast.success("Task closed successfully")
     } catch (err) {
@@ -5730,7 +5756,7 @@ export default function DepartmentKanban() {
                                       variant="outline"
                                       size="sm"
                                       disabled={closingTask}
-                                      onClick={() => handleCloseTaskClick(template.id)}
+                                      onClick={() => handleCloseTaskClick(template)}
                                       className="h-7 text-xs"
                                     >
                                       {closingTask ? "Updating..." : "Mark done"}
