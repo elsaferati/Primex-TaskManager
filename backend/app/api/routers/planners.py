@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -105,6 +106,24 @@ def _is_mst_or_tt_project(project: Project) -> bool:
     title = (project.title or "").upper().strip()
     is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
     return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
+
+
+def _parse_ko_user_id(internal_notes: str | None) -> uuid.UUID | None:
+    """Parse ko_user_id from task internal_notes.
+    
+    The KO field is stored as 'ko_user_id=<uuid>' or 'ko_user_id: <uuid>' 
+    in the internal_notes field.
+    """
+    if not internal_notes:
+        return None
+    # Match pattern: ko_user_id=<uuid> or ko_user_id: <uuid>
+    match = re.search(r'ko_user_id[:=]\s*([a-f0-9-]+)', internal_notes, re.IGNORECASE)
+    if match:
+        try:
+            return uuid.UUID(match.group(1))
+        except (ValueError, AttributeError):
+            return None
+    return None
 
 
 def _week_start(d: date) -> date:
@@ -340,24 +359,42 @@ async def weekly_planner(
     task_stmt = select(Task).where(Task.is_active == True)
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
+    # Note: We don't filter by user_id at SQL level to allow KO field checking in Python
+    # Filtering by user will be done after fetching tasks
+    
+    all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
+    
+    # Filter by user_id if provided (check assigned_to, assignees, and KO field for MST/TT Control phase)
     if user_id is not None:
-        # Check both Task.assigned_to and TaskAssignee table for multiple assignees
+        # Get task IDs with this user as assignee
         task_ids_with_assignee = (
             await db.execute(
                 select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id).distinct()
             )
         ).scalars().all()
-        if task_ids_with_assignee:
-            task_stmt = task_stmt.where(
-                or_(
-                    Task.assigned_to == user_id,
-                    Task.id.in_(task_ids_with_assignee)
-                )
-            )
-        else:
-            task_stmt = task_stmt.where(Task.assigned_to == user_id)
-    
-    all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
+        task_ids_with_assignee_set = set(task_ids_with_assignee)
+        
+        # Filter tasks: include if assigned_to matches, assignee matches, or KO field matches (for MST/TT Control)
+        filtered_tasks = []
+        for t in all_tasks:
+            # Check assigned_to
+            if t.assigned_to == user_id:
+                filtered_tasks.append(t)
+                continue
+            # Check assignees
+            if t.id in task_ids_with_assignee_set:
+                filtered_tasks.append(t)
+                continue
+            # For MST/TT projects in Control phase, check KO field
+            if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
+                project = project_map.get(t.project_id)
+                if project is not None and _is_mst_or_tt_project(project):
+                    ko_user_id = _parse_ko_user_id(t.internal_notes)
+                    if ko_user_id == user_id:
+                        filtered_tasks.append(t)
+                        continue
+        
+        all_tasks = filtered_tasks
     
     # Get task assignees
     task_ids = [t.id for t in all_tasks]
@@ -1175,14 +1212,24 @@ async def weekly_table_planner(
         dept_users = [u for u in all_users if u.department_id is not None and u.department_id == dept.id]
         # Show tasks that belong to users in this department (regardless of task.department_id)
         dept_user_ids = {u.id for u in dept_users}
-        dept_tasks = [
-            t
-            for t in week_tasks
-            if (
-                t.assigned_to in dept_user_ids
-                or any(a.id in dept_user_ids for a in assignee_map.get(t.id, []))
-            )
-        ]
+        dept_tasks = []
+        for t in week_tasks:
+            # Check if task is assigned to a user in this department
+            if t.assigned_to in dept_user_ids:
+                dept_tasks.append(t)
+                continue
+            # Check if any assignee is in this department
+            if any(a.id in dept_user_ids for a in assignee_map.get(t.id, [])):
+                dept_tasks.append(t)
+                continue
+            # For MST/TT projects in Control phase, check KO field
+            if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
+                project = project_map.get(t.project_id)
+                if project is not None and _is_mst_or_tt_project(project):
+                    ko_user_id = _parse_ko_user_id(t.internal_notes)
+                    if ko_user_id in dept_user_ids:
+                        dept_tasks.append(t)
+                        continue
         
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
@@ -1201,6 +1248,13 @@ async def weekly_table_planner(
                     assignees = assignee_map.get(t.id, [])
                     if any(a.id == dept_user.id for a in assignees):
                         user_task_ids.add(t.id)
+                    # For MST/TT projects in Control phase, check KO field
+                    if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
+                        project = project_map.get(t.project_id)
+                        if project is not None and _is_mst_or_tt_project(project):
+                            ko_user_id = _parse_ko_user_id(t.internal_notes)
+                            if ko_user_id == dept_user.id:
+                                user_task_ids.add(t.id)
                 
                 # Planning-only per-day filtering:
                 # - single-day tasks show only on due_date
