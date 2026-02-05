@@ -22,6 +22,7 @@ import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
+import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
 import type {
   DailyReportGaEntry,
   DailyReportGaTableResponse,
@@ -719,6 +720,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
   const [templateProjects, setTemplateProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
@@ -1513,6 +1515,37 @@ export default function DepartmentKanban() {
       return false
     })
   }, [projectTasks, todayDate])
+
+  React.useEffect(() => {
+    const existingTitles = new Map<string, string>()
+    for (const p of projects) {
+      const title = p.title || p.name
+      if (title) {
+        existingTitles.set(p.id, title)
+      }
+    }
+    const missingIds = Array.from(
+      new Set(
+        dailyReportProjectTasks
+          .map((task) => task.project_id)
+          .filter((pid): pid is string => typeof pid === "string" && pid.trim().length > 0)
+      )
+    ).filter((pid) => !existingTitles.has(pid) && !projectTitleLookup.has(pid))
+
+    if (!missingIds.length) return
+
+    void (async () => {
+      const data = await fetchProjectTitlesById(apiFetch, missingIds)
+      if (!data.length) return
+      setProjectTitleLookup((prev) => {
+        const next = new Map(prev)
+        for (const item of data) {
+          if (item?.id && item?.title) next.set(item.id, item.title)
+        }
+        return next
+      })
+    })()
+  }, [apiFetch, dailyReportProjectTasks, projectTitleLookup, projects])
   const systemTemplateById = React.useMemo(() => {
     const map = new Map<string, SystemTaskTemplate>()
     for (const tmpl of visibleSystemTemplates) {
@@ -1696,7 +1729,12 @@ export default function DepartmentKanban() {
     for (const task of dailyReportProjectTasks) {
       const dueDate = task.due_date ? toDate(task.due_date) : null
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
+      const projectLabel =
+        project?.title ||
+        project?.name ||
+        (task.project_id ? projectTitleLookup.get(task.project_id) : null) ||
+        projectTitleByTaskId.get(task.id) ||
+        null
       projectRows.push({
         typeLabel: "PRJK",
         subtype: "-",
@@ -1730,6 +1768,7 @@ export default function DepartmentKanban() {
     dailyReportFastTasks,
     dailyReportProjectTasks,
     projects,
+    projectTitleLookup,
     systemTemplateById,
     todayDate,
     todayIso,
