@@ -561,6 +561,29 @@ export default function GaKaTasksPage() {
 
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
+  const taskAssigneeInitials = React.useCallback(
+    (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return ""
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+        })
+        .filter(Boolean)
+      if (!labels.length) return ""
+      return labels.map((label) => initials(label)).join(", ")
+    },
+    [userMap]
+  )
 
   const adminTaskRows = React.useMemo(() => {
     const rows: Task[] = []
@@ -696,7 +719,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
         comment: taskCommentMap.get(task.id) ?? null,
-        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        userInitials: taskAssigneeInitials(task),
         taskId: task.id,
       })
     }
@@ -742,7 +765,7 @@ export default function GaKaTasksPage() {
         // Show as "T" for every day within start->due window
         tyo: "T",
         comment: taskCommentMap.get(task.id) ?? null,
-        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        userInitials: taskAssigneeInitials(task),
         taskId: task.id,
       })
     }
@@ -798,7 +821,7 @@ export default function GaKaTasksPage() {
     systemOverdue.forEach(pushSystemRow)
 
     return rows
-  }, [dailyReport, departments, ganeUser, ganeUserId, taskCommentMap, tasks, todayDate])
+  }, [dailyReport, departments, ganeUser, ganeUserId, taskAssigneeInitials, taskCommentMap, tasks, todayDate])
 
   const startEditTask = (task: Task) => {
     setEditingTaskId(task.id)
@@ -1201,7 +1224,7 @@ export default function GaKaTasksPage() {
         kohaBz: "-",
         tyo: baseDate ? getTyoLabel(baseDate, task.completed_at, todayDate) : "-",
         comment: taskCommentMap.get(task.id) ?? null,
-        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        userInitials: taskAssigneeInitials(task),
         taskId: task.id,
         createdDate,
       })
@@ -1264,7 +1287,7 @@ export default function GaKaTasksPage() {
     })
 
     return rows
-  }, [tasks, systemTasks, ganeUserId, ganeUser, departments, taskCommentMap, todayDate, adminDepartmentId])
+  }, [tasks, systemTasks, ganeUserId, ganeUser, departments, taskAssigneeInitials, taskCommentMap, todayDate, adminDepartmentId])
 
   const exportAllTasks = async () => {
     if (!user?.id) return

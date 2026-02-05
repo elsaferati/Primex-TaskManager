@@ -293,14 +293,6 @@ function isTaskActiveForDate(task: Task, targetDate: Date) {
   const startKey = start ? dayKey(start) : null
   const dueKey = due ? dayKey(due) : startKey
 
-  const completedDate = task.completed_at ? toDate(task.completed_at) : null
-  // If task is completed, only show it on the day it was completed
-  if (completedDate) {
-    const completedKey = dayKey(completedDate)
-    // Only show if completed on the target date
-    return completedKey === targetKey
-  }
-
   if (startKey != null && targetKey < startKey) return false
   if (dueKey != null && targetKey > dueKey) return false
   return true
@@ -748,6 +740,7 @@ export default function DepartmentKanban() {
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "projects"
   )
+  const [allRange, setAllRange] = React.useState<"today" | "week">("today")
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
@@ -1078,6 +1071,25 @@ export default function DepartmentKanban() {
 
   // --- MEMOS ---
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const taskAssigneeLabels = React.useCallback(
+    (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return ["Unassigned"]
+      return Array.from(ids).map((userId) => {
+        const userFromMap = userMap.get(userId)
+        if (userFromMap) return assigneeLabel(userFromMap)
+        const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+        return assigneeFromArray?.full_name || assigneeFromArray?.username || "Unknown"
+      })
+    },
+    [userMap]
+  )
   const departmentUsers = React.useMemo(
     () =>
       department
@@ -1118,6 +1130,11 @@ export default function DepartmentKanban() {
   }, [templateProjects])
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
+  const weekStart = React.useMemo(() => startOfWeekMonday(todayDate), [todayDate])
+  const weekEnd = React.useMemo(
+    () => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 4),
+    [weekStart]
+  )
   const weekDates = React.useMemo(() => {
     const start = startOfWeekMonday(todayDate)
     return Array.from({ length: 5 }, (_, index) => {
@@ -1125,6 +1142,26 @@ export default function DepartmentKanban() {
     })
   }, [todayDate])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
+  const isTaskAssignedToUser = React.useCallback(
+    (task: Task, userId?: string | null) => {
+      if (!userId) return false
+      if (task.assigned_to === userId) return true
+      return Boolean(task.assignees?.some((assignee) => assignee.id === userId))
+    },
+    []
+  )
+  const isTaskOverlappingWeek = React.useCallback(
+    (task: Task) => {
+      const start = task.start_date ? toDate(task.start_date) : null
+      const due = task.due_date ? toDate(task.due_date) : null
+      if (!start && !due) return false
+      const rangeStart = start ?? due
+      const rangeEnd = due ?? start
+      if (!rangeStart || !rangeEnd) return false
+      return dayKey(rangeStart) <= dayKey(weekEnd) && dayKey(rangeEnd) >= dayKey(weekStart)
+    },
+    [weekEnd, weekStart]
+  )
 
   const filteredProjects = React.useMemo(() => {
     let filtered = projects.filter((p) => p.project_type !== "GENERAL")
@@ -1135,11 +1172,12 @@ export default function DepartmentKanban() {
   }, [projects, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
-    () => (isMineView && user?.id ? departmentTasks.filter((t) => t.assigned_to === user.id) : departmentTasks),
-    [departmentTasks, isMineView, user?.id]
+    () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
+    [departmentTasks, isMineView, isTaskAssignedToUser, user?.id]
   )
   const visibleNoProjectTasks = React.useMemo(() => {
-    const base = isMineView && user?.id ? noProjectTasks.filter((t) => t.assigned_to === user.id) : noProjectTasks
+    const base =
+      isMineView && user?.id ? noProjectTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : noProjectTasks
     const filtered = base.filter(isNoProjectTask)
     
     // Deduplicate tasks by ID first, then by title+properties as fallback
@@ -1387,22 +1425,26 @@ export default function DepartmentKanban() {
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
-      if (!isTaskActiveForDate(task, todayDate)) return false
+      const matchesRange =
+        allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
+      if (!matchesRange) return false
       if (selectedUserId !== "__all__") {
-        return task.assigned_to === selectedUserId
+        return isTaskAssignedToUser(task, selectedUserId)
       }
       return true
     })
-  }, [projectTasks, todayDate, selectedUserId])
+  }, [projectTasks, todayDate, selectedUserId, allRange, isTaskAssignedToUser, isTaskOverlappingWeek])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
-      if (!isTaskActiveForDate(task, todayDate)) return false
+      const matchesRange =
+        allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
+      if (!matchesRange) return false
       if (selectedUserId !== "__all__") {
-        return task.assigned_to === selectedUserId
+        return isTaskAssignedToUser(task, selectedUserId)
       }
       return true
     })
-  }, [visibleNoProjectTasks, todayDate, selectedUserId])
+  }, [visibleNoProjectTasks, todayDate, selectedUserId, allRange, isTaskAssignedToUser, isTaskOverlappingWeek])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
       const date = toDate(note.created_at)
@@ -3780,6 +3822,34 @@ export default function DepartmentKanban() {
                       </button>
                     )
                   })}
+                  {activeTab === "all" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setAllRange("today")}
+                        className={[
+                          "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                          allRange === "today"
+                            ? "bg-foreground text-background shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                        ].join(" ")}
+                      >
+                        <span className="uppercase tracking-wide">Today</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAllRange("week")}
+                        className={[
+                          "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                          allRange === "week"
+                            ? "bg-foreground text-background shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/70",
+                        ].join(" ")}
+                      >
+                        <span className="uppercase tracking-wide">This Week</span>
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -4042,7 +4112,9 @@ export default function DepartmentKanban() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-2xl font-bold tracking-tight text-slate-800">
-                      {viewMode === "department" ? "All (Today) - Department" : "All (Today)"}
+                      {viewMode === "department"
+                        ? `All (${allRange === "week" ? "This Week" : "Today"}) - Department`
+                        : `All (${allRange === "week" ? "This Week" : "Today"})`}
                     </div>
                     <div className="text-sm text-slate-600 mt-1">
                       {viewMode === "department"
@@ -4422,7 +4494,7 @@ export default function DepartmentKanban() {
                               <div className="text-xs font-semibold text-slate-700">{group.name}</div>
                               <div className="mt-2 space-y-2">
                                 {group.tasks.map((task) => {
-                                  const assignee = task.assigned_to ? userMap.get(task.assigned_to) : null
+                                  const assigneeList = taskAssigneeLabels(task)
                                   const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
                                   const priorityValue = normalizePriority(task.priority)
                                   return (
@@ -4447,7 +4519,7 @@ export default function DepartmentKanban() {
                                         <div className="font-medium text-slate-800">{task.title}</div>
                                       </div>
                                       <div className="mt-1 text-xs text-slate-600">
-                                        {assignee?.full_name || assignee?.username || "Unassigned"}
+                                        {assigneeList.join(", ")}
                                       </div>
                                     </Link>
                                   )
