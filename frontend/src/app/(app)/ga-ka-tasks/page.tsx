@@ -413,7 +413,13 @@ export default function GaKaTasksPage() {
 
   const isAdmin = user?.role === "ADMIN"
   const ganeUser = React.useMemo(
-    () => users.find((person) => person.username?.toLowerCase() === "gane.arifaj") ?? null,
+    () =>
+      users.find((person) => {
+        const username = person.username?.toLowerCase()
+        const email =
+          "email" in person && typeof person.email === "string" ? person.email.toLowerCase() : null
+        return username === "gane.arifaj" || email === "ga@primexeu.com"
+      }) ?? null,
     [users]
   )
   const ganeUserId = ganeUser?.id ?? null
@@ -1201,19 +1207,17 @@ export default function GaKaTasksPage() {
       })
     }
 
-    // Process all system tasks assigned to Gane
+    // Process all system tasks assigned to Gane or scoped to GA
     for (const systemTask of systemTasks) {
-      const isAssigned =
+      const isAssignedToGane =
         systemTask.default_assignee_id === ganeUserId ||
         systemTask.assignees?.some((assignee) => assignee.id === ganeUserId)
-      if (!isAssigned) continue
       if (systemTask.is_active === false) continue
 
-      // Only include GA-scoped occurrences (scope GA or department GA)
       const isGaScope =
         systemTask.scope === "GA" ||
         (adminDepartmentId && systemTask.department_id === adminDepartmentId)
-      if (!isGaScope && systemTask.scope !== "ALL") continue
+      if (!isAssignedToGane && !isGaScope) continue
 
       const systemSubtype =
         systemTask.frequency === "DAILY"
@@ -2332,10 +2336,11 @@ export default function GaKaTasksPage() {
           <SystemTasksView
             scopeFilter="GA"
             headingTitle="Admin System Tasks"
-            headingDescription="System tasks for Gane Arifaj and GA department."
+            headingDescription="System tasks assigned to Gane Arifaj or scoped to GA department."
             showSystemActions={false}
             showFilters={false}
             allowMarkAsDone={true}
+            forceLoadAll={isAdmin}
             externalPriorityFilter={priorityFilter}
             externalDayFilter={dayFilter}
             externalDateFilter={dateFilter}

@@ -374,6 +374,7 @@ type SystemTasksViewProps = {
   showSystemActions?: boolean
   showFilters?: boolean
   allowMarkAsDone?: boolean
+  forceLoadAll?: boolean
   externalPriorityFilter?: TaskPriority | "all"
   externalDayFilter?: string | "all"
   externalDateFilter?: string | null
@@ -386,6 +387,7 @@ export function SystemTasksView({
   showSystemActions = true,
   showFilters = true,
   allowMarkAsDone = false,
+  forceLoadAll = false,
   externalPriorityFilter = "all",
   externalDayFilter = "all",
   externalDateFilter = null,
@@ -473,8 +475,8 @@ export function SystemTasksView({
       const templateMetaPromise = isManagerOrAdmin 
         ? apiFetch("/system-tasks/templates")
         : Promise.resolve({ ok: false } as Response)
-      // For My View (allowMarkAsDone), filter by current user
-      const systemTasksUrl = allowMarkAsDone && user?.id 
+      // For My View (allowMarkAsDone), filter by current user unless forced to load all.
+      const systemTasksUrl = allowMarkAsDone && user?.id && !forceLoadAll
         ? `/system-tasks?assigned_to=${user.id}`
         : "/system-tasks"
       const [templatesRes, departmentsRes, templateMetaRes] = await Promise.all([
