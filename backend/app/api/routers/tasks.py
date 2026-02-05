@@ -808,6 +808,29 @@ async def update_task(
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
+    # Validate fast task type flags are mutually exclusive (only for fast tasks)
+    # Fast tasks: no project_id, no system_template_origin_id
+    if task.project_id is None and task.system_template_origin_id is None:
+        # Get the final flag values after applying payload updates
+        final_is_bllok = payload.is_bllok if payload.is_bllok is not None else task.is_bllok
+        final_is_r1 = payload.is_r1 if payload.is_r1 is not None else task.is_r1
+        final_is_1h_report = payload.is_1h_report if payload.is_1h_report is not None else task.is_1h_report
+        final_is_personal = payload.is_personal if payload.is_personal is not None else task.is_personal
+        
+        # Count how many type flags are set (GA type uses ga_note_origin_id, not a boolean flag)
+        active_flags_count = sum([
+            final_is_bllok,
+            final_is_r1,
+            final_is_1h_report,
+            final_is_personal,
+        ])
+        
+        if active_flags_count > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fast task can only have one type: BLL, R1, 1H, or Personal"
+            )
+
     # Auto-status for MST/TT Product Content tasks: compute status from completed/total products.
     if task.project_id is not None and task.phase in (
         ProjectPhaseStatus.PRODUCT.value,

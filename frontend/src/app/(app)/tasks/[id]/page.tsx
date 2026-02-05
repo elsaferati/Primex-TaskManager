@@ -27,6 +27,37 @@ const TASK_PRIORITY_LABELS: Record<string, string> = {
   HIGH: "High",
 }
 
+const FAST_TASK_TYPES = [
+  { value: "N", label: "N (Normal)" },
+  { value: "BLL", label: "BLL (BLLOK)" },
+  { value: "R1", label: "R1" },
+  { value: "1H", label: "1H (1 Hour Report)" },
+  { value: "GA", label: "GA" },
+  { value: "P:", label: "P: (Personal)" },
+] as const
+
+type FastTaskType = typeof FAST_TASK_TYPES[number]["value"]
+
+function getCurrentFastTaskType(task: Task | null): FastTaskType {
+  if (!task) return "N"
+  if (task.is_bllok) return "BLL"
+  if (task.is_r1) return "R1"
+  if (task.is_1h_report) return "1H"
+  if (task.ga_note_origin_id) return "GA"
+  if (task.is_personal) return "P:"
+  return "N"
+}
+
+function isFastTask(task: Task | null): boolean {
+  if (!task) return false
+  // Fast tasks: no project, no dependency, no system template
+  return (
+    task.project_id === null &&
+    task.dependency_task_id === null &&
+    task.system_template_origin_id === null
+  )
+}
+
 function toDateInput(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
@@ -98,6 +129,7 @@ export default function TaskDetailsPage() {
   const [assignees, setAssignees] = React.useState<string[]>([])
   const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
+  const [fastTaskType, setFastTaskType] = React.useState<FastTaskType>("N")
 
   React.useEffect(() => {
     if (!task) return
@@ -112,6 +144,8 @@ export default function TaskDetailsPage() {
       : (task.assigned_to ? [task.assigned_to] : [])
     setAssignees(assigneeIds)
     setReminder(Boolean(task.reminder_enabled))
+    // Initialize fast task type
+    setFastTaskType(getCurrentFastTaskType(task))
   }, [task])
 
   const canAssign =
@@ -136,6 +170,46 @@ export default function TaskDetailsPage() {
         // Also send assignees array if backend supports it
         if (assignees.length > 0) {
           payload.assignees = assignees
+        }
+      }
+
+      // Handle fast task type changes (only for fast tasks)
+      if (isFastTask(task)) {
+        const currentType = getCurrentFastTaskType(task)
+        if (fastTaskType !== currentType) {
+          // Reset all flags first
+          payload.is_bllok = false
+          payload.is_r1 = false
+          payload.is_1h_report = false
+          payload.is_personal = false
+          
+          // Set the appropriate flag based on selected type
+          switch (fastTaskType) {
+            case "BLL":
+              payload.is_bllok = true
+              break
+            case "R1":
+              payload.is_r1 = true
+              break
+            case "1H":
+              payload.is_1h_report = true
+              break
+            case "P:":
+              payload.is_personal = true
+              break
+            case "GA":
+              // GA type requires ga_note_origin_id - if task doesn't have it, we can't change to GA
+              if (!task.ga_note_origin_id) {
+                toast.error("Cannot change to GA type: task must originate from a GA note")
+                setSaving(false)
+                return
+              }
+              // If already GA, no change needed
+              break
+            case "N":
+              // Normal - all flags already false
+              break
+          }
         }
       }
 
@@ -278,6 +352,36 @@ export default function TaskDetailsPage() {
                 <Label>Description</Label>
                 <BoldOnlyEditor value={description} onChange={setDescription} />
               </div>
+
+              {isFastTask(task) ? (
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select 
+                    value={fastTaskType} 
+                    onValueChange={(value) => setFastTaskType(value as FastTaskType)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FAST_TASK_TYPES.map((option) => (
+                        <SelectItem 
+                          key={option.value} 
+                          value={option.value}
+                          disabled={option.value === "GA" && !task?.ga_note_origin_id}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {fastTaskType === "GA" && !task?.ga_note_origin_id && (
+                    <p className="text-xs text-muted-foreground">
+                      Note: GA type is only available for tasks created from GA notes.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               {canAssign ? (
                 <div className="grid gap-3 md:grid-cols-2">
@@ -422,7 +526,7 @@ export default function TaskDetailsPage() {
               <div className="space-y-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Flags</div>
                 <div className="flex flex-wrap gap-2">
-                  {task.is_bllok ? <Badge variant="secondary">Blocked</Badge> : null}
+                  {task.is_bllok ? <Badge variant="secondary">BLLOK</Badge> : null}
                   {task.is_1h_report ? <Badge variant="secondary">1H</Badge> : null}
                   {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
                   {task.ga_note_origin_id ? <Badge variant="secondary">GA/KA Note</Badge> : null}
