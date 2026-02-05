@@ -902,6 +902,10 @@ export default function DepartmentKanban() {
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
+  const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
+  const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
+  const [closeTaskComment, setCloseTaskComment] = React.useState("")
+  const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -1547,8 +1551,15 @@ export default function DepartmentKanban() {
   )
   const visibleSystemTemplates = React.useMemo(
     () => {
-      if (!isMineView || !user?.id) return systemTasks
-      return systemTasks.filter((t) => {
+      const depTasks = department
+        ? systemTasks.filter((t) => {
+            if (t.department_id === department.id) return true
+            if (t.department_ids?.includes(department.id)) return true
+            return false
+          })
+        : []
+      if (!isMineView || !user?.id) return depTasks
+      return depTasks.filter((t) => {
         // Check if user is the default assignee
         if (t.default_assignee_id === user.id) return true
         // Check if user is in the assignees array
@@ -1558,7 +1569,7 @@ export default function DepartmentKanban() {
         return false
       })
     },
-    [systemTasks, isMineView, user?.id]
+    [systemTasks, isMineView, user?.id, department]
   )
 
   const projectTasks = React.useMemo(
@@ -3291,20 +3302,96 @@ export default function DepartmentKanban() {
     }
   }
 
-  const updateSystemTaskStatus = async (taskId: string, nextStatus: "TODO" | "DONE") => {
-    setSystemStatusUpdatingId(taskId)
+  const handleCloseTaskClick = (task: SystemTaskTemplate) => {
+    const templateId = task.template_id ?? task.id
+    setTaskToCloseId(templateId)
+    setCloseTaskComment("")
+    setCloseTaskDialogOpen(true)
+  }
+
+  const confirmCloseTask = async () => {
+    if (!taskToCloseId) return
+    if (!closeTaskComment.trim()) {
+      toast.error("Comment is required to close this task")
+      return
+    }
+
+    setClosingTask(true)
     try {
-      const res = await apiFetch(`/tasks/${taskId}`, {
-        method: "PATCH",
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({
+          template_id: taskToCloseId,
+          occurrence_date: formatDateInput(systemDate),
+          status: "DONE",
+          comment: closeTaskComment.trim(),
+        }),
       })
       if (!res.ok) {
-        toast.error("Failed to update system task status")
+        toast.error("Failed to close system task")
+        return
+      }
+
+      setSystemTasks((prev) =>
+        prev.map((task) => {
+          const templateId = task.template_id ?? task.id
+          return templateId === taskToCloseId
+            ? { ...task, status: "DONE", user_comment: closeTaskComment.trim() }
+            : task
+        })
+      )
+
+      const sysRes = await apiFetch(`/system-tasks?department_id=${department?.id || ""}`)
+      if (sysRes.ok) {
+        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
+      }
+
+      setCloseTaskDialogOpen(false)
+      setTaskToCloseId(null)
+      setCloseTaskComment("")
+      toast.success("Task closed successfully")
+    } catch (err) {
+      console.error("Failed to close task", err)
+      toast.error("Failed to close task")
+    } finally {
+      setClosingTask(false)
+    }
+  }
+
+  const updateSystemTaskStatus = async (templateId: string, nextStatus: "TODO" | "DONE") => {
+    setSystemStatusUpdatingId(templateId)
+    try {
+      // Use the system-tasks/occurrences endpoint for system tasks
+      // Map TaskStatus to occurrence status
+      const occurrenceStatus = nextStatus === "DONE" ? "DONE" : "OPEN"
+      const occurrenceDate = formatDateInput(systemDate)
+      
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: templateId,
+          occurrence_date: occurrenceDate,
+          status: occurrenceStatus,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update system task status"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
         return
       }
       setSystemTasks((prev) =>
-        prev.map((item) => (item.id === taskId ? { ...item, status: nextStatus } : item))
+        prev.map((item) => {
+          const itemTemplateId = item.template_id ?? item.id
+          return itemTemplateId === templateId ? { ...item, status: nextStatus } : item
+        })
       )
       toast.success(nextStatus === "DONE" ? "System task closed" : "System task reopened")
     } finally {
@@ -5448,13 +5535,11 @@ export default function DepartmentKanban() {
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        disabled={systemStatusUpdatingId === template.id}
-                                        onClick={() => void updateSystemTaskStatus(template.id, "DONE")}
+                                        disabled={closingTask}
+                                        onClick={() => handleCloseTaskClick(template)}
                                         className="h-7 text-xs"
                                       >
-                                        {systemStatusUpdatingId === template.id
-                                          ? "Updating..."
-                                          : "Mark done"}
+                                        {closingTask ? "Updating..." : "Mark done"}
                                       </Button>
                                     )}
                                     {isClosed && (
@@ -5477,6 +5562,34 @@ export default function DepartmentKanban() {
               </div>
             </div>
           ) : null}
+
+          <Dialog open={closeTaskDialogOpen} onOpenChange={setCloseTaskDialogOpen}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Close System Task</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="close-task-comment">Employee Comment</Label>
+                  <Textarea
+                    id="close-task-comment"
+                    placeholder="Describe what was done in this task..."
+                    value={closeTaskComment}
+                    onChange={(e) => setCloseTaskComment(e.target.value)}
+                    className="min-h-[120px]"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setCloseTaskDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={() => void confirmCloseTask()} disabled={closingTask}>
+                    {closingTask ? "Updating..." : "Close Task"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {activeTab === "no-project" ? (
             <div className="space-y-4">

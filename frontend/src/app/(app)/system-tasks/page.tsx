@@ -473,8 +473,12 @@ export function SystemTasksView({
       const templateMetaPromise = isManagerOrAdmin 
         ? apiFetch("/system-tasks/templates")
         : Promise.resolve({ ok: false } as Response)
+      // For My View (allowMarkAsDone), filter by current user
+      const systemTasksUrl = allowMarkAsDone && user?.id 
+        ? `/system-tasks?assigned_to=${user.id}`
+        : "/system-tasks"
       const [templatesRes, departmentsRes, templateMetaRes] = await Promise.all([
-        apiFetch("/system-tasks"),
+        apiFetch(systemTasksUrl),
         apiFetch("/departments"),
         templateMetaPromise,
       ])
@@ -592,13 +596,15 @@ export function SystemTasksView({
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, isManagerOrAdmin])
+  }, [apiFetch, isManagerOrAdmin, allowMarkAsDone, user?.id])
 
   React.useEffect(() => {
     void load()
   }, [load])
 
-  const canMarkDone = allowMarkAsDone && (
+  // In My View (allowMarkAsDone=true), all users can mark their own tasks as done
+  // In Department View, only ADMIN or gane.arifaj can mark tasks as done
+  const canMarkDone = allowMarkAsDone || (
     user?.role === "ADMIN" || user?.username?.toLowerCase() === "gane.arifaj"
   )
 
