@@ -923,7 +923,7 @@ async def weekly_table_planner(
     # - show tasks ONLY if they belong to the selected week
     # - show tasks ONLY on their planned days
     # - NEVER carry over tasks from previous weeks
-    # - NEVER include unscheduled tasks (no due_date), except Development project tasks
+    # - NEVER include unscheduled tasks (no due_date), except special-cases handled in _planned_range
     def _planned_range(task: Task) -> tuple[date | None, date | None]:
         if task.due_date is None:
             # Special-case: Product Content MST/TT CONTROL tasks without a due_date.
@@ -1025,11 +1025,18 @@ async def weekly_table_planner(
         is_dev_task = (task_dept_id in dev_dept_ids) or (project_dept_id in dev_dept_ids)
         
         if is_dev_task and task.project_id is not None:
-            start = _as_utc_date(task.created_at)
-            if start is None:
+            # Development weekly plan: show project tasks from start_date to due_date (not created_at).
+            start, end = _planned_range(task)
+            if start is None or end is None:
+                # Ensures dev project tasks without due_date do not appear in weekly plan.
                 return None, None
-            completed_day = _as_utc_date(task.completed_at)
-            end = completed_day if completed_day is not None else week_end
+
+            # Completed tasks should stop on their completion day, but never extend past due_date.
+            if task.completed_at:
+                completed_date = _as_utc_date(task.completed_at)
+                if completed_date is not None and completed_date < end:
+                    end = completed_date
+
             if end < start:
                 return None, None
             return start, end
