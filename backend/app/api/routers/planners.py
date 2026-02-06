@@ -126,6 +126,45 @@ def _parse_ko_user_id(internal_notes: str | None) -> uuid.UUID | None:
     return None
 
 
+def _parse_origin_task_id(internal_notes: str | None) -> uuid.UUID | None:
+    """Parse origin_task_id from task internal_notes."""
+    if not internal_notes:
+        return None
+    match = re.search(r"origin_task_id[:=]\s*([a-f0-9-]+)", internal_notes, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return uuid.UUID(match.group(1))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _parse_total_products(internal_notes: str | None) -> int | None:
+    """Parse total_products from task internal_notes."""
+    if not internal_notes:
+        return None
+    match = re.search(r"total_products[:=]\s*(\d+)", internal_notes, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _parse_production_date(internal_notes: str | None) -> date | None:
+    """Parse production_date (YYYY-MM-DD) from task internal_notes."""
+    if not internal_notes:
+        return None
+    match = re.search(r"production_date[:=]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", internal_notes, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
 def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
@@ -884,9 +923,32 @@ async def weekly_table_planner(
     # - show tasks ONLY if they belong to the selected week
     # - show tasks ONLY on their planned days
     # - NEVER carry over tasks from previous weeks
-    # - NEVER include unscheduled tasks (no due_date), except Development project tasks
+    # - NEVER include unscheduled tasks (no due_date), except special-cases handled in _planned_range
     def _planned_range(task: Task) -> tuple[date | None, date | None]:
         if task.due_date is None:
+            # Special-case: Product Content MST/TT CONTROL tasks without a due_date.
+            # These tasks are driven by KO and totals; if no explicit production_date/due_date is set,
+            # show them across the visible week (up to project due date) so they still appear in Weekly Planner.
+            if task.project_id is None:
+                return None, None
+            project = project_map.get(task.project_id)
+            if project is None:
+                return None, None
+            is_mst_tt_project = _is_mst_or_tt_project(project)
+            is_control = task.phase == ProjectPhaseStatus.CONTROL.value
+            is_pc_task = (task.department_id in pc_dept_ids) or (project.department_id in pc_dept_ids)
+            if is_pc_task and is_mst_tt_project and is_control:
+                production_date = _parse_production_date(task.internal_notes)
+                if production_date is not None:
+                    return production_date, production_date
+                project_due = _as_local_date(project.due_date)
+                if project_due is None:
+                    return None, None
+                start = working_days[0]
+                end = min(project_due, week_end)
+                if end < start:
+                    return None, None
+                return start, end
             return None, None
         due = _as_local_date(task.due_date)
         if due is None:
@@ -963,11 +1025,18 @@ async def weekly_table_planner(
         is_dev_task = (task_dept_id in dev_dept_ids) or (project_dept_id in dev_dept_ids)
         
         if is_dev_task and task.project_id is not None:
-            start = _as_utc_date(task.created_at)
-            if start is None:
+            # Development weekly plan: show project tasks from start_date to due_date (not created_at).
+            start, end = _planned_range(task)
+            if start is None or end is None:
+                # Ensures dev project tasks without due_date do not appear in weekly plan.
                 return None, None
-            completed_day = _as_utc_date(task.completed_at)
-            end = completed_day if completed_day is not None else week_end
+
+            # Completed tasks should stop on their completion day, but never extend past due_date.
+            if task.completed_at:
+                completed_date = _as_utc_date(task.completed_at)
+                if completed_date is not None and completed_date < end:
+                    end = completed_date
+
             if end < start:
                 return None, None
             return start, end
@@ -1091,6 +1160,78 @@ async def weekly_table_planner(
                 continue
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
+
+    # Derive product totals for MST/TT CONTROL tasks.
+    # These tasks often store totals in internal_notes (total_products=...) or reference an origin task
+    # via origin_task_id whose daily_products holds the total.
+    mst_tt_control_total_by_task_id: dict[uuid.UUID, int] = {}
+    mst_tt_control_origin_by_task_id: dict[uuid.UUID, uuid.UUID] = {}
+    origin_task_ids: set[uuid.UUID] = set()
+    for t in week_tasks:
+        if t.id not in mst_tt_task_ids:
+            continue
+        if t.phase != ProjectPhaseStatus.CONTROL.value:
+            continue
+        notes_total = _parse_total_products(t.internal_notes)
+        if notes_total is not None:
+            mst_tt_control_total_by_task_id[t.id] = notes_total
+            continue
+        origin_id = _parse_origin_task_id(t.internal_notes)
+        if origin_id is not None:
+            mst_tt_control_origin_by_task_id[t.id] = origin_id
+            origin_task_ids.add(origin_id)
+
+    if origin_task_ids:
+        origin_rows = (
+            await db.execute(
+                select(Task.id, Task.daily_products, Task.internal_notes).where(Task.id.in_(list(origin_task_ids)))
+            )
+        ).all()
+        origin_total_by_id: dict[uuid.UUID, int] = {}
+        for origin_id, origin_daily_products, origin_internal_notes in origin_rows:
+            if origin_daily_products is not None:
+                origin_total_by_id[origin_id] = int(origin_daily_products)
+                continue
+            notes_total = _parse_total_products(origin_internal_notes)
+            if notes_total is not None:
+                origin_total_by_id[origin_id] = notes_total
+
+        for task_id, origin_id in mst_tt_control_origin_by_task_id.items():
+            if task_id in mst_tt_control_total_by_task_id:
+                continue
+            if origin_id in origin_total_by_id:
+                mst_tt_control_total_by_task_id[task_id] = origin_total_by_id[origin_id]
+
+    def _effective_weekly_assignee_ids(task: Task) -> set[uuid.UUID]:
+        """
+        Effective assignee rule for Weekly Planner (table):
+        - For Product Content MST/TT tasks in CONTROL phase: assign ONLY to KO user (if set),
+          otherwise hide from weekly planner (empty set).
+        - For all other tasks: assign to explicit assignees (TaskAssignee) plus assigned_to fallback.
+        """
+        project: Project | None = None
+        if task.project_id is not None:
+            project = project_map.get(task.project_id)
+
+        # Product Content detection mirrors _planned_range logic: check task.department_id and project.department_id.
+        task_dept_id = task.department_id
+        project_dept_id = project.department_id if project is not None else None
+        is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
+
+        if (
+            is_pc_task
+            and task.project_id is not None
+            and task.phase == ProjectPhaseStatus.CONTROL.value
+            and project is not None
+            and _is_mst_or_tt_project(project)
+        ):
+            ko_user_id = _parse_ko_user_id(task.internal_notes)
+            return {ko_user_id} if ko_user_id is not None else set()
+
+        ids = {a.id for a in (assignee_map.get(task.id) or [])}
+        if task.assigned_to is not None:
+            ids.add(task.assigned_to)
+        return ids
 
     exclusion_map: dict[tuple[uuid.UUID, uuid.UUID, date], set[str]] = {}
     if task_ids and all_users:
@@ -1246,22 +1387,10 @@ async def weekly_table_planner(
         dept_user_ids = {u.id for u in dept_users}
         dept_tasks = []
         for t in week_tasks:
-            # Check if task is assigned to a user in this department
-            if t.assigned_to in dept_user_ids:
+            effective_ids = _effective_weekly_assignee_ids(t)
+            if effective_ids.intersection(dept_user_ids):
                 dept_tasks.append(t)
                 continue
-            # Check if any assignee is in this department
-            if any(a.id in dept_user_ids for a in assignee_map.get(t.id, [])):
-                dept_tasks.append(t)
-                continue
-            # For MST/TT projects in Control phase, check KO field
-            if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
-                project = project_map.get(t.project_id)
-                if project is not None and _is_mst_or_tt_project(project):
-                    ko_user_id = _parse_ko_user_id(t.internal_notes)
-                    if ko_user_id in dept_user_ids:
-                        dept_tasks.append(t)
-                        continue
         
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
@@ -1273,20 +1402,9 @@ async def weekly_table_planner(
                 # Get tasks for this user on this day
                 user_task_ids = set()
                 for t in dept_tasks:
-                    # Check if task is assigned to this user
-                    if t.assigned_to == dept_user.id:
+                    effective_ids = _effective_weekly_assignee_ids(t)
+                    if dept_user.id in effective_ids:
                         user_task_ids.add(t.id)
-                    # Check assignees
-                    assignees = assignee_map.get(t.id, [])
-                    if any(a.id == dept_user.id for a in assignees):
-                        user_task_ids.add(t.id)
-                    # For MST/TT projects in Control phase, check KO field
-                    if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
-                        project = project_map.get(t.project_id)
-                        if project is not None and _is_mst_or_tt_project(project):
-                            ko_user_id = _parse_ko_user_id(t.internal_notes)
-                            if ko_user_id == dept_user.id:
-                                user_task_ids.add(t.id)
                 
                 # Planning-only per-day filtering:
                 # - single-day tasks show only on due_date
@@ -1515,7 +1633,11 @@ async def weekly_table_planner(
                                         else None
                                     ),
                                     completed_at=t.completed_at,
-                                    daily_products=t.daily_products,
+                                    daily_products=(
+                                        t.daily_products
+                                        if t.daily_products is not None
+                                        else mst_tt_control_total_by_task_id.get(t.id)
+                                    ),
                                     finish_period=t.finish_period,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,
@@ -1557,7 +1679,11 @@ async def weekly_table_planner(
                                         else None
                                     ),
                                     completed_at=t.completed_at,
-                                    daily_products=t.daily_products,
+                                    daily_products=(
+                                        t.daily_products
+                                        if t.daily_products is not None
+                                        else mst_tt_control_total_by_task_id.get(t.id)
+                                    ),
                                     finish_period=t.finish_period,
                                     is_bllok=t.is_bllok,
                                     is_1h_report=t.is_1h_report,
