@@ -144,6 +144,8 @@ async def delete_internal_note(
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal note not found")
 
+    ensure_department_access(user, note.department_id)
+
     is_admin_or_manager = user.role in (UserRole.ADMIN, UserRole.MANAGER)
     is_target_user = note.to_user_id == user.id
     if not (is_admin_or_manager or is_target_user):
@@ -178,6 +180,8 @@ async def update_internal_note_done(
     note = (await db.execute(select(InternalNote).where(InternalNote.id == note_id))).scalar_one_or_none()
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal note not found")
+
+    ensure_department_access(user, note.department_id)
 
     is_admin_or_manager = user.role in (UserRole.ADMIN, UserRole.MANAGER)
     is_target_user = note.to_user_id == user.id

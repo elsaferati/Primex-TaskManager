@@ -1557,7 +1557,7 @@ export default function DepartmentKanban() {
       !isMineView && selectedUserId !== "__all__"
         ? base.filter((n) => n.to_user_id === selectedUserId)
         : base
-    if (showDoneInternalNotes) return filteredByUser
+    if (showDoneInternalNotes) return filteredByUser.filter((n) => n.is_done)
     return filteredByUser.filter((n) => !n.is_done)
   }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
   const groupedInternalNotes = React.useMemo(() => {
@@ -1597,9 +1597,9 @@ export default function DepartmentKanban() {
     if (!isMineView && selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
-    if (!showDoneInternalNotes) {
-      grouped = grouped.filter((group) => group.notes.some((n) => !n.is_done))
-    }
+    grouped = showDoneInternalNotes
+      ? grouped.filter((group) => group.notes.length > 0 && group.notes.every((n) => n.is_done))
+      : grouped.filter((group) => group.notes.some((n) => !n.is_done))
     return grouped.sort((a, b) => {
       const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
       const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
@@ -6663,22 +6663,23 @@ export default function DepartmentKanban() {
                             projects.find((p) => p.id === note.project_id)?.title ||
                             projects.find((p) => p.id === note.project_id)?.name ||
                             "-"
-                          const canDeleteNote =
-                            user?.role === "ADMIN" ||
-                            user?.role === "MANAGER" ||
-                            (user?.id ? group.toUserIds.includes(user.id) : false)
-                          const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
-                          const noteIdsForAction = (() => {
-                            const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
-                            if (isAdminOrManager) return group.notes.map((n) => n.id)
-                            return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
-                          })()
+                            const canDeleteNote =
+                              user?.role === "ADMIN" ||
+                              user?.role === "MANAGER" ||
+                              (user?.id ? group.toUserIds.includes(user.id) : false)
+                            const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
+                            const noteIdsForAction = (() => {
+                              const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
+                              if (isAdminOrManager) return group.notes.map((n) => n.id)
+                              return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
+                            })()
+                            const canUpdateDone = noteIdsForAction.length > 0
 
-                            return (
-                              <tr
-                                key={note.id}
-                                className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
-                              >
+                              return (
+                                <tr
+                                  key={note.id}
+                                  className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
+                                >
                                 <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
                                 <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
                                   <div className="flex flex-col gap-1">
@@ -6696,21 +6697,23 @@ export default function DepartmentKanban() {
                                 <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
                                   <div className="flex items-center justify-center gap-2">
                                     {!groupIsDone ? (
+                                      canUpdateDone ? (
                                       <Button
                                         variant="outline"
                                         size="sm"
                                         className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                                        disabled={noteIdsForAction.length === 0 || noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                        disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
                                         onClick={() => void updateInternalNoteDone(noteIdsForAction, true)}
                                       >
                                         <Check className="h-3.5 w-3.5 mr-1" />
                                         Mark as done
                                       </Button>
+                                      ) : null
                                     ) : (
                                       <div className="flex items-center gap-1">
                                         <span className="text-xs text-emerald-700">Done</span>
                                         <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                        {noteIdsForAction.length ? (
+                                        {canUpdateDone ? (
                                           <Button
                                             variant="outline"
                                             size="icon"
