@@ -75,6 +75,13 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
+type TaskChecklist = {
+  id: string
+  title?: string | null
+  task_id?: string | null
+  items: ChecklistItem[]
+}
+
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -355,6 +362,12 @@ export default function ProjectPage() {
   const [prompts, setPrompts] = React.useState<ProjectPrompt[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [activeTab, setActiveTab] = React.useState<TabId>("description")
+  const [taskChecklistOpen, setTaskChecklistOpen] = React.useState<Record<string, boolean>>({})
+  const [taskChecklistLoading, setTaskChecklistLoading] = React.useState<Record<string, boolean>>({})
+  const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
+  const [taskChecklistInputs, setTaskChecklistInputs] = React.useState<Record<string, string>>({})
+  const [taskChecklistSaving, setTaskChecklistSaving] = React.useState<Record<string, boolean>>({})
+  const [taskChecklistItemBusy, setTaskChecklistItemBusy] = React.useState<Record<string, boolean>>({})
   const [developmentChecklistItems, setDevelopmentChecklistItems] = React.useState<ProjectPhaseChecklistItem[]>([])
   const [developmentChecklistLoading, setDevelopmentChecklistLoading] = React.useState(false)
   const [developmentChecklistError, setDevelopmentChecklistError] = React.useState<string | null>(null)
@@ -709,6 +722,196 @@ export default function ProjectPage() {
     const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
+
+  const canEditTaskChecklist = React.useMemo(() => {
+    if (!user || !project?.department_id) return false
+    if (user.role === "ADMIN" || user.role === "MANAGER") return true
+    return user.department_id === project.department_id
+  }, [user, project?.department_id])
+
+  const loadTaskChecklist = React.useCallback(
+    async (taskId: string) => {
+      setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
+      try {
+        const res = await apiFetch(`/checklists?task_id=${taskId}&include_items=true`)
+        if (!res.ok) {
+          let detail = "Failed to load checklist"
+          try {
+            const data = (await res.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(typeof detail === "string" ? detail : "Failed to load checklist")
+          return
+        }
+        const data = (await res.json()) as TaskChecklist[]
+        const checklist = data.length ? data[0] : null
+        setTaskChecklists((prev) => ({ ...prev, [taskId]: checklist }))
+      } catch (error) {
+        console.error("Failed to load task checklist", error)
+        toast.error("Failed to load checklist")
+      } finally {
+        setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: false }))
+      }
+    },
+    [apiFetch]
+  )
+
+  const toggleTaskChecklist = async (taskId: string) => {
+    const next = !taskChecklistOpen[taskId]
+    setTaskChecklistOpen((prev) => ({ ...prev, [taskId]: next }))
+    if (next && taskChecklists[taskId] === undefined) {
+      await loadTaskChecklist(taskId)
+    }
+  }
+
+  const addTaskChecklistItem = async (taskId: string) => {
+    const content = (taskChecklistInputs[taskId] || "").trim()
+    if (!content || !canEditTaskChecklist) return
+    setTaskChecklistSaving((prev) => ({ ...prev, [taskId]: true }))
+    try {
+      let checklist = taskChecklists[taskId] || null
+      if (!checklist) {
+        const createRes = await apiFetch("/checklists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_id: taskId,
+            title: "Task Checklist",
+          }),
+        })
+        if (!createRes.ok) {
+          let detail = "Failed to create checklist"
+          try {
+            const data = (await createRes.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // ignore
+          }
+          toast.error(typeof detail === "string" ? detail : "Failed to create checklist")
+          return
+        }
+        const created = (await createRes.json()) as { id: string; title?: string | null; task_id?: string | null }
+        checklist = { id: created.id, title: created.title, task_id: created.task_id, items: [] }
+      }
+
+      const position = checklist.items.length
+      const itemRes = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checklist_id: checklist.id,
+          item_type: "CHECKBOX",
+          title: content,
+          is_checked: false,
+          position,
+        }),
+      })
+      if (!itemRes.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await itemRes.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to add checklist item")
+        return
+      }
+      const createdItem = (await itemRes.json()) as ChecklistItem
+      const updatedChecklist: TaskChecklist = {
+        ...(checklist || { id: createdItem.checklist_id || "", items: [] }),
+        items: [...(checklist?.items || []), createdItem],
+      }
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: updatedChecklist }))
+      setTaskChecklistInputs((prev) => ({ ...prev, [taskId]: "" }))
+    } finally {
+      setTaskChecklistSaving((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }
+
+  const toggleTaskChecklistItem = async (taskId: string, item: ChecklistItem, checked: boolean) => {
+    if (!canEditTaskChecklist) return
+    const previousChecked = Boolean(item.is_checked)
+    if (previousChecked && !checked) return
+    if (previousChecked === checked) return
+    setTaskChecklists((prev) => {
+      const checklist = prev[taskId]
+      if (!checklist) return prev
+      const items = checklist.items.map((i) => (i.id === item.id ? { ...i, is_checked: checked } : i))
+      return { ...prev, [taskId]: { ...checklist, items } }
+    })
+    setTaskChecklistItemBusy((prev) => ({ ...prev, [item.id]: true }))
+    try {
+      const res = await apiFetch(`/checklist-items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_checked: checked }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to update checklist item")
+        setTaskChecklists((prev) => {
+          const checklist = prev[taskId]
+          if (!checklist) return prev
+          const items = checklist.items.map((i) => (i.id === item.id ? { ...i, is_checked: previousChecked } : i))
+          return { ...prev, [taskId]: { ...checklist, items } }
+        })
+        return
+      }
+      setTaskChecklists((prev) => {
+        const checklist = prev[taskId]
+        if (!checklist) return prev
+        const items = checklist.items.map((i) => (i.id === item.id ? { ...i, is_checked: checked } : i))
+        return { ...prev, [taskId]: { ...checklist, items } }
+      })
+    } catch (error) {
+      console.error("Failed to update checklist item", error)
+      toast.error("Failed to update checklist item")
+      setTaskChecklists((prev) => {
+        const checklist = prev[taskId]
+        if (!checklist) return prev
+        const items = checklist.items.map((i) => (i.id === item.id ? { ...i, is_checked: previousChecked } : i))
+        return { ...prev, [taskId]: { ...checklist, items } }
+      })
+    } finally {
+      setTaskChecklistItemBusy((prev) => ({ ...prev, [item.id]: false }))
+    }
+  }
+
+  const deleteTaskChecklistItem = async (taskId: string, item: ChecklistItem) => {
+    if (!canEditTaskChecklist) return
+    setTaskChecklistItemBusy((prev) => ({ ...prev, [item.id]: true }))
+    try {
+      const res = await apiFetch(`/checklist-items/${item.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to delete checklist item")
+        return
+      }
+      setTaskChecklists((prev) => {
+        const checklist = prev[taskId]
+        if (!checklist) return prev
+        const items = checklist.items.filter((i) => i.id !== item.id)
+        return { ...prev, [taskId]: { ...checklist, items } }
+      })
+    } finally {
+      setTaskChecklistItemBusy((prev) => ({ ...prev, [item.id]: false }))
+    }
+  }
 
   const submitCreateTask = async () => {
     if (!project) return
@@ -3301,98 +3504,170 @@ export default function ProjectPage() {
                   const overdue = isOverdue(task)
                   const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
                   const isHighPriority = taskPriority === "HIGH"
+                  const checklist = taskChecklists[task.id]
+                  const checklistItems = checklist?.items
+                    ? [...checklist.items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                    : []
+                  const isChecklistOpen = Boolean(taskChecklistOpen[task.id])
+                  const isChecklistLoading = Boolean(taskChecklistLoading[task.id])
+                  const checklistInputValue = taskChecklistInputs[task.id] || ""
                   return (
                     <div
                       key={task.id}
-                      className="grid grid-cols-5 gap-3 px-6 py-4 text-sm"
+                      className="px-6 py-4 text-sm"
                     >
-                      <div className="font-medium flex items-center gap-2 flex-wrap">
-                        <span>{task.title}</span>
-                        {isDevelopmentProject && (
-                          <Badge
-                            variant="secondary"
-                            className={`text-xs ${
-                              isHighPriority
-                                ? "bg-red-100 text-red-700 border-red-200"
-                                : "bg-slate-100 text-slate-700 border-slate-200"
-                            }`}
-                          >
-                            {taskPriority}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {assignees.length > 0 ? (
-                          assignees.map((assignee, idx) => {
-                            const displayName = assignee.full_name || assignee.username || assignee.email || "-"
-                            const initials = getInitials(displayName)
-                            return (
-                              <Badge key={assignee.id || idx} variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200 text-xs" title={displayName}>
-                                {initials}
-                              </Badge>
-                            )
-                          })
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </div>
-                      <div>
-                        <Select
-                          value={task.status || "TODO"}
-                          onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
-                          disabled={updatingTaskId === task.id}
-                        >
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TASK_STATUSES.map((status) => {
-                              // Disable all non-DONE options if task is DONE and user is not admin
-                              const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
+                      <div className="grid grid-cols-5 gap-3">
+                        <div className="font-medium flex items-center gap-2 flex-wrap">
+                          <span>{task.title}</span>
+                          {isDevelopmentProject && (
+                            <Badge
+                              variant="secondary"
+                              className={`text-xs ${
+                                isHighPriority
+                                  ? "bg-red-100 text-red-700 border-red-200"
+                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {taskPriority}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {assignees.length > 0 ? (
+                            assignees.map((assignee, idx) => {
+                              const displayName = assignee.full_name || assignee.username || assignee.email || "-"
+                              const initials = getInitials(displayName)
                               return (
-                                <SelectItem key={status} value={status} disabled={isDisabled}>
-                                  {statusLabel(status)}
-                                </SelectItem>
+                                <Badge key={assignee.id || idx} variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200 text-xs" title={displayName}>
+                                  {initials}
+                                </Badge>
                               )
-                            })}
-                          </SelectContent>
-                        </Select>
+                            })
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </div>
+                        <div>
+                          <Select
+                            value={task.status || "TODO"}
+                            onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
+                            disabled={updatingTaskId === task.id}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TASK_STATUSES.map((status) => {
+                                // Disable all non-DONE options if task is DONE and user is not admin
+                                const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
+                                return (
+                                  <SelectItem key={status} value={status} disabled={isDisabled}>
+                                    {statusLabel(status)}
+                                  </SelectItem>
+                                )
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <span className={overdue ? "text-red-600 font-semibold" : undefined}>
+                            {formatDateDisplay(task.due_date)}
+                          </span>
+                          {overdue ? (
+                            <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
+                              Late
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void toggleTaskChecklist(task.id)}
+                          >
+                            {isChecklistOpen ? "Hide" : "Subtasks"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => startViewDescription(task)}
+                            disabled={!task.description || task.description.trim().length === 0}
+                            className="hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={!task.description || task.description.trim().length === 0 ? "No description available" : "View description"}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => startEditTask(task)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={deletingTaskId === task.id}
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => void deleteTask(task.id, task.title)}
+                          >
+                            {deletingTaskId === task.id ? "Deleting..." : "Delete"}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <span className={overdue ? "text-red-600 font-semibold" : undefined}>
-                          {formatDateDisplay(task.due_date)}
-                        </span>
-                        {overdue ? (
-                          <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
-                            Late
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => startViewDescription(task)}
-                          disabled={!task.description || task.description.trim().length === 0}
-                          className="hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={!task.description || task.description.trim().length === 0 ? "No description available" : "View description"}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => startEditTask(task)}>
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={deletingTaskId === task.id}
-                          className="text-red-600 border-red-200 hover:bg-red-50"
-                          onClick={() => void deleteTask(task.id, task.title)}
-                        >
-                          {deletingTaskId === task.id ? "Deleting..." : "Delete"}
-                        </Button>
-                      </div>
+                      {isChecklistOpen ? (
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          {isChecklistLoading ? (
+                            <div className="text-sm text-muted-foreground">Loading checklist...</div>
+                          ) : checklistItems.length ? (
+                            <div className="space-y-2">
+                              {checklistItems.map((item) => (
+                                <div key={item.id} className="flex items-center gap-3 text-sm">
+                                  <Checkbox
+                                    checked={Boolean(item.is_checked)}
+                                    onCheckedChange={(checked) =>
+                                      void toggleTaskChecklistItem(task.id, item, checked === true)
+                                    }
+                                    disabled={!canEditTaskChecklist || taskChecklistItemBusy[item.id]}
+                                  />
+                                  <div className={item.is_checked ? "text-muted-foreground line-through flex-1" : "text-slate-700 flex-1"}>
+                                    {item.title || "-"}
+                                  </div>
+                                  {canEditTaskChecklist ? (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => void deleteTaskChecklistItem(task.id, item)}
+                                      disabled={taskChecklistItemBusy[item.id]}
+                                      className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
+                                    >
+                                      ×
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">No checklist items yet.</div>
+                          )}
+                          {canEditTaskChecklist ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <Input
+                                value={checklistInputValue}
+                                onChange={(e) =>
+                                  setTaskChecklistInputs((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                }
+                                placeholder="Add checklist item..."
+                                className="flex-1 min-w-[220px]"
+                              />
+                              <Button
+                                variant="outline"
+                                disabled={!checklistInputValue.trim() || taskChecklistSaving[task.id]}
+                                onClick={() => void addTaskChecklistItem(task.id)}
+                              >
+                                {taskChecklistSaving[task.id] ? "Saving..." : "Add"}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })
