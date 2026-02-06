@@ -473,8 +473,8 @@ function formatSchedule(t: SystemTaskTemplate, date: Date) {
 
 function formatMeetingLabel(meeting: Meeting) {
   const platformLabel = meeting.platform ? ` (${meeting.platform})` : ""
-  if (!meeting.starts_at) return `${meeting.title}${platformLabel}`
-  const date = new Date(meeting.starts_at)
+  const date = resolveMeetingDisplayDate(meeting)
+  if (!date) return `${meeting.title}${platformLabel}`
   if (Number.isNaN(date.getTime())) return `${meeting.title}${platformLabel}`
   const today = new Date()
   const sameDay =
@@ -488,8 +488,8 @@ function formatMeetingLabel(meeting: Meeting) {
 }
 
 function formatMeetingDateTime(meeting: Meeting): string {
-  if (!meeting.starts_at) return "-"
-  const date = new Date(meeting.starts_at)
+  const date = resolveMeetingDisplayDate(meeting)
+  if (!date) return "-"
   if (Number.isNaN(date.getTime())) return "-"
   const today = new Date()
   const sameDay =
@@ -523,6 +523,89 @@ function toMeetingInputValue(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   return date.toISOString().slice(0, 16)
+}
+
+function toMeetingTimeInputValue(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(11, 16)
+}
+
+function parseTimeValue(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  return { hours, minutes }
+}
+
+function computeNextOccurrenceDate(params: {
+  recurrenceType: "weekly" | "monthly"
+  daysOfWeek: number[]
+  daysOfMonth: number[]
+  timeValue: string
+}) {
+  const parsedTime = parseTimeValue(params.timeValue)
+  if (!parsedTime) return null
+  const now = new Date()
+  const { hours, minutes } = parsedTime
+
+  if (params.recurrenceType === "weekly") {
+    if (!params.daysOfWeek.length) return null
+    const daySet = new Set(params.daysOfWeek.map((d) => (d + 1) % 7))
+    for (let offset = 0; offset < 14; offset++) {
+      const candidate = new Date(now)
+      candidate.setDate(now.getDate() + offset)
+      candidate.setHours(hours, minutes, 0, 0)
+      if (!daySet.has(candidate.getDay())) continue
+      if (offset === 0 && candidate.getTime() < now.getTime()) continue
+      return candidate
+    }
+    return null
+  }
+
+  if (params.recurrenceType === "monthly") {
+    if (!params.daysOfMonth.length) return null
+    const sortedDays = [...new Set(params.daysOfMonth)].sort((a, b) => a - b)
+    for (let monthOffset = 0; monthOffset < 12; monthOffset++) {
+      const base = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+      const year = base.getFullYear()
+      const month = base.getMonth()
+      const daysInMonth = new Date(year, month + 1, 0).getDate()
+      for (const day of sortedDays) {
+        if (day < 1 || day > daysInMonth) continue
+        if (monthOffset === 0 && day < now.getDate()) continue
+        const candidate = new Date(year, month, day, hours, minutes, 0, 0)
+        if (monthOffset === 0 && day === now.getDate() && candidate.getTime() < now.getTime()) {
+          continue
+        }
+        return candidate
+      }
+    }
+  }
+
+  return null
+}
+
+function resolveMeetingDisplayDate(meeting: Meeting) {
+  const recurrenceType = meeting.recurrence_type
+  if (recurrenceType && recurrenceType !== "none" && meeting.starts_at) {
+    const timeValue = toMeetingTimeInputValue(meeting.starts_at)
+    if (timeValue) {
+      const next = computeNextOccurrenceDate({
+        recurrenceType: recurrenceType as "weekly" | "monthly",
+        daysOfWeek: meeting.recurrence_days_of_week || [],
+        daysOfMonth: meeting.recurrence_days_of_month || [],
+        timeValue,
+      })
+      if (next) return next
+    }
+  }
+  if (!meeting.starts_at) return null
+  return new Date(meeting.starts_at)
 }
 
 function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
@@ -758,8 +841,8 @@ function reportPriorityLabel(priority?: TaskPriority | string | null) {
 }
 
 function formatMeetingPrintLabel(meeting: Meeting) {
-  if (!meeting.starts_at) return meeting.title || "Meeting"
-  const date = new Date(meeting.starts_at)
+  const date = resolveMeetingDisplayDate(meeting)
+  if (!date) return meeting.title || "Meeting"
   if (Number.isNaN(date.getTime())) return meeting.title || "Meeting"
   const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   return `${timeLabel} ${meeting.title || "Meeting"}`
@@ -883,6 +966,7 @@ export default function DepartmentKanban() {
   const [meetingTitle, setMeetingTitle] = React.useState("")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
+  const [meetingStartTime, setMeetingStartTime] = React.useState("")
   const [meetingUrl, setMeetingUrl] = React.useState("")
   const [meetingRecurrenceType, setMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly">("none")
   const [meetingRecurrenceDaysOfWeek, setMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
@@ -895,6 +979,7 @@ export default function DepartmentKanban() {
   const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
   const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
   const [editMeetingStartsAt, setEditMeetingStartsAt] = React.useState("")
+  const [editMeetingStartTime, setEditMeetingStartTime] = React.useState("")
   const [editMeetingUrl, setEditMeetingUrl] = React.useState("")
   const [editMeetingRecurrenceType, setEditMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly">("none")
   const [editMeetingRecurrenceDaysOfWeek, setEditMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
@@ -3875,7 +3960,34 @@ export default function DepartmentKanban() {
     if (!meetingTitle.trim() || !department) return
     setCreatingMeeting(true)
     try {
-      const startsAt = meetingStartsAt ? new Date(meetingStartsAt).toISOString() : null
+      let startsAt: string | null = null
+      if (meetingRecurrenceType === "none") {
+        startsAt = meetingStartsAt ? new Date(meetingStartsAt).toISOString() : null
+      } else {
+        if (!meetingStartTime) {
+          toast.error("Time is required for recurring meetings")
+          return
+        }
+        if (meetingRecurrenceType === "weekly" && meetingRecurrenceDaysOfWeek.length === 0) {
+          toast.error("Select at least one day")
+          return
+        }
+        if (meetingRecurrenceType === "monthly" && meetingRecurrenceDaysOfMonth.length === 0) {
+          toast.error("Select at least one day")
+          return
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: meetingRecurrenceType,
+          daysOfWeek: meetingRecurrenceDaysOfWeek,
+          daysOfMonth: meetingRecurrenceDaysOfMonth,
+          timeValue: meetingStartTime,
+        })
+        if (!next) {
+          toast.error("Failed to compute next occurrence")
+          return
+        }
+        startsAt = next.toISOString()
+      }
       const payload = {
         title: meetingTitle.trim(),
         platform: meetingPlatform.trim() || null,
@@ -3909,6 +4021,7 @@ export default function DepartmentKanban() {
       setMeetingTitle("")
       setMeetingPlatform("")
       setMeetingStartsAt("")
+      setMeetingStartTime("")
       setMeetingUrl("")
       setMeetingRecurrenceType("none")
       setMeetingRecurrenceDaysOfWeek([])
@@ -3927,6 +4040,7 @@ export default function DepartmentKanban() {
     setEditMeetingTitle(meeting.title)
     setEditMeetingPlatform(meeting.platform || "")
     setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at))
+    setEditMeetingStartTime(toMeetingTimeInputValue(meeting.starts_at))
     setEditMeetingUrl(meeting.meeting_url || "")
     setEditMeetingRecurrenceType((meeting.recurrence_type as "none" | "weekly" | "monthly") || "none")
     setEditMeetingRecurrenceDaysOfWeek(meeting.recurrence_days_of_week || [])
@@ -3940,6 +4054,7 @@ export default function DepartmentKanban() {
     setEditMeetingTitle("")
     setEditMeetingPlatform("")
     setEditMeetingStartsAt("")
+    setEditMeetingStartTime("")
     setEditMeetingUrl("")
     setEditMeetingRecurrenceType("none")
     setEditMeetingRecurrenceDaysOfWeek([])
@@ -3956,7 +4071,34 @@ export default function DepartmentKanban() {
     if (!department) return
     setSavingMeeting(true)
     try {
-      const startsAt = editMeetingStartsAt ? new Date(editMeetingStartsAt).toISOString() : null
+      let startsAt: string | null = null
+      if (editMeetingRecurrenceType === "none") {
+        startsAt = editMeetingStartsAt ? new Date(editMeetingStartsAt).toISOString() : null
+      } else {
+        if (!editMeetingStartTime) {
+          toast.error("Time is required for recurring meetings")
+          return
+        }
+        if (editMeetingRecurrenceType === "weekly" && editMeetingRecurrenceDaysOfWeek.length === 0) {
+          toast.error("Select at least one day")
+          return
+        }
+        if (editMeetingRecurrenceType === "monthly" && editMeetingRecurrenceDaysOfMonth.length === 0) {
+          toast.error("Select at least one day")
+          return
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: editMeetingRecurrenceType,
+          daysOfWeek: editMeetingRecurrenceDaysOfWeek,
+          daysOfMonth: editMeetingRecurrenceDaysOfMonth,
+          timeValue: editMeetingStartTime,
+        })
+        if (!next) {
+          toast.error("Failed to compute next occurrence")
+          return
+        }
+        startsAt = next.toISOString()
+      }
       const payload = {
         title: editMeetingTitle.trim(),
         platform: editMeetingPlatform.trim() || null,
@@ -7098,11 +7240,20 @@ export default function DepartmentKanban() {
                                           onChange={(e) => setEditMeetingPlatform(e.target.value)}
                                           placeholder="Platform"
                                         />
-                                        <Input
-                                          type="datetime-local"
-                                          value={editMeetingStartsAt}
-                                          onChange={(e) => setEditMeetingStartsAt(e.target.value)}
-                                        />
+                                        {editMeetingRecurrenceType === "none" ? (
+                                          <Input
+                                            type="datetime-local"
+                                            value={editMeetingStartsAt}
+                                            onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                          />
+                                        ) : (
+                                          <Input
+                                            type="time"
+                                            value={editMeetingStartTime}
+                                            onChange={(e) => setEditMeetingStartTime(e.target.value)}
+                                            placeholder="Time (HH:MM)"
+                                          />
+                                        )}
                                       </div>
                                       <Input
                                         type="url"
@@ -7358,11 +7509,20 @@ export default function DepartmentKanban() {
                               value={meetingPlatform}
                               onChange={(e) => setMeetingPlatform(e.target.value)}
                             />
-                            <Input
-                              type="datetime-local"
-                              value={meetingStartsAt}
-                              onChange={(e) => setMeetingStartsAt(e.target.value)}
-                            />
+                            {meetingRecurrenceType === "none" ? (
+                              <Input
+                                type="datetime-local"
+                                value={meetingStartsAt}
+                                onChange={(e) => setMeetingStartsAt(e.target.value)}
+                              />
+                            ) : (
+                              <Input
+                                type="time"
+                                value={meetingStartTime}
+                                onChange={(e) => setMeetingStartTime(e.target.value)}
+                                placeholder="Time (HH:MM)"
+                              />
+                            )}
                           </div>
                           <Input
                             type="url"
@@ -7497,6 +7657,7 @@ export default function DepartmentKanban() {
                                   setMeetingTitle("")
                                   setMeetingPlatform("")
                                   setMeetingStartsAt("")
+                                  setMeetingStartTime("")
                                   setMeetingUrl("")
                                   setMeetingRecurrenceType("none")
                                   setMeetingRecurrenceDaysOfWeek([])

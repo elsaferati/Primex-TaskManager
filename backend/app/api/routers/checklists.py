@@ -7,12 +7,14 @@ from sqlalchemy import nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.enums import UserRole
 from app.models.project import Project
+from app.models.task import Task
 from app.schemas.checklist import ChecklistCreate, ChecklistOut, ChecklistUpdate, ChecklistWithItemsOut
 from app.schemas.checklist_item import ChecklistItemAssigneeOut, ChecklistItemOut
 
@@ -51,6 +53,7 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
 
 @router.get("", response_model=list[ChecklistWithItemsOut])
 async def list_checklists(
+    task_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     group_key: str | None = None,
     meeting_only: bool = False,
@@ -60,7 +63,22 @@ async def list_checklists(
     user=Depends(get_current_user),
 ) -> list[ChecklistWithItemsOut]:
     stmt = select(Checklist)
-    if project_id is not None:
+    # If task_id is provided, it takes precedence over project_id.
+    if task_id is not None:
+        task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        if task.project_id is None:
+            if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        else:
+            project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
+            if project is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+            if project.department_id is not None:
+                ensure_department_access(user, project.department_id)
+        stmt = stmt.where(Checklist.task_id == task_id)
+    elif project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
