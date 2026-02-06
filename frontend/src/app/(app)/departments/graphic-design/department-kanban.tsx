@@ -42,7 +42,7 @@ import type {
 // --- CONSTANTS ---
 
 const TABS = [
-  { id: "all", label: "Overview", tone: "neutral" },
+  { id: "all", label: "ALL", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
   { id: "no-project", label: "Fast Tasks", tone: "red" },
@@ -781,6 +781,7 @@ export default function DepartmentKanban() {
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [pendingPrint, setPendingPrint] = React.useState(false)
+  const [showTemplates, setShowTemplates] = React.useState(false)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -795,6 +796,7 @@ export default function DepartmentKanban() {
 
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
@@ -873,6 +875,17 @@ export default function DepartmentKanban() {
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
 
   // --- DATA LOADING ---
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const stored = window.localStorage.getItem("gd_show_templates")
+    if (stored === "true") {
+      setShowTemplates(true)
+    }
+  }, [])
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("gd_show_templates", showTemplates ? "true" : "false")
+  }, [showTemplates])
   React.useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -1179,7 +1192,8 @@ export default function DepartmentKanban() {
   )
 
   const filteredProjects = React.useMemo(() => {
-    let filtered = projects.filter((p) => p.project_type !== "GENERAL")
+    const base = showTemplates ? templateProjects : projects
+    let filtered = base.filter((p) => p.project_type !== "GENERAL")
     if (viewMode === "mine" && user?.id) {
       filtered = filtered.filter((p) => {
         const members = projectMembers[p.id] || []
@@ -1187,7 +1201,7 @@ export default function DepartmentKanban() {
       })
     }
     return filtered
-  }, [projects, projectMembers, user?.id, viewMode])
+  }, [projects, templateProjects, showTemplates, projectMembers, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
     () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
@@ -2755,6 +2769,7 @@ export default function DepartmentKanban() {
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
+  const canDeleteProjects = (user?.role === "ADMIN" || user?.role === "MANAGER") && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -3154,6 +3169,32 @@ export default function DepartmentKanban() {
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
+    }
+  }
+
+  const deleteProject = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId)
+    const projectLabel = project?.title || project?.name || "this project"
+    if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
+
+    setDeletingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete project"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      toast.success("Project deleted")
+    } finally {
+      setDeletingProjectId((prev) => (prev === projectId ? null : prev))
     }
   }
 
@@ -3742,7 +3783,18 @@ export default function DepartmentKanban() {
             {activeTab === "projects" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                    {user?.role === "ADMIN" && (
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={showTemplates}
+                          onCheckedChange={(checked) => setShowTemplates(checked === true)}
+                        />
+                        <span className="text-muted-foreground">Show Templates</span>
+                      </label>
+                    )}
+                  </div>
                   {canManage && (
                     <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                       <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
@@ -3933,6 +3985,21 @@ export default function DepartmentKanban() {
                               </Badge>
                             </div>
                             <div className="text-right flex-shrink-0">
+                              {canDeleteProjects ? (
+                                <button
+                                  type="button"
+                                  className="mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-rose-200 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                                  disabled={deletingProjectId === project.id}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    void deleteProject(project.id)
+                                  }}
+                                  title="Delete project"
+                                >
+                                  {deletingProjectId === project.id ? "…" : "×"}
+                                </button>
+                              ) : null}
                               <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Tasks</div>
                               <div className="text-lg font-semibold text-slate-900 dark:text-white">{tasks.length}</div>
                             </div>
@@ -5186,7 +5253,8 @@ export default function DepartmentKanban() {
                           return (
                           <Link
                             key={t.id}
-                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            id={`task-${t.id}`}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
                             className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
                               isCompleted 
                                 ? "border-green-500 bg-green-50/30 opacity-75" 

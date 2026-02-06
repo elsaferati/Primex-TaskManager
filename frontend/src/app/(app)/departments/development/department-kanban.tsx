@@ -6260,7 +6260,8 @@ export default function DepartmentKanban() {
                           return (
                           <Link
                             key={t.id}
-                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            id={`task-${t.id}`}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
                             className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
                               isCompleted 
                                 ? "border-green-500 bg-green-50/30 opacity-75" 
