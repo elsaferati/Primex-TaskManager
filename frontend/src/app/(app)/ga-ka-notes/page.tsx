@@ -647,7 +647,16 @@ export default function GaKaNotesPage() {
   const visibleNotes = React.useMemo(() => {
     const now = Date.now()
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000
+    const closedCutoff = now - 30 * 24 * 60 * 60 * 1000
+
     const withinRange = (note: GaNote) => {
+      const isClosed = note.status === "CLOSED"
+      if (isClosed) {
+        if (!note.completed_at) return true
+        const completed = new Date(note.completed_at).getTime()
+        if (Number.isNaN(completed)) return true
+        return completed >= closedCutoff
+      }
       if (rangeFilter === "all") return true
       const created = note.created_at ? new Date(note.created_at).getTime() : 0
       return created >= weekAgo

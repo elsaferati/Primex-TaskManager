@@ -26,13 +26,12 @@ async def list_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[GaNoteOut]:
-    cutoff = datetime.utcnow() - timedelta(days=7)
-    # Filter out closed notes that were closed more than 5 days ago
-    closed_cutoff = datetime.utcnow() - timedelta(days=5)
-    
-    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
-    
-    # Exclude closed notes that are older than 5 days
+    # Filter out closed notes that were closed more than 30 days ago
+    closed_cutoff = datetime.utcnow() - timedelta(days=30)
+
+    stmt = select(GaNote).order_by(GaNote.created_at.desc())
+
+    # Include all open notes; include closed notes only if recently closed
     stmt = stmt.where(
         or_(
             GaNote.status != GaNoteStatus.CLOSED,
