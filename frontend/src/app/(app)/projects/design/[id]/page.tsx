@@ -47,6 +47,12 @@ const MST_PHASE_LABELS: Record<string, string> = {
 const CONTROL_CHECKLIST_PATH = "control ko1/ko2"
 const CONTROL_CHECKLIST_TITLE = "PËRGATITJA PËR DËRGIM KO1/KO2"
 const FINALIZATION_PATH = "finalization"
+const GD_MST_GJENERALE_PATH = "gd_mst_gjenerale"
+const GD_MST_SOFA_NEW_PATH = "gd_mst_sofa_new"
+const GD_MST_VITRINE_NEW_PATH = "gd_mst_vitrine_new"
+const GD_MST_SIDEBOARD_NEW_PATH = "gd_mst_sideboard_new"
+const GD_MST_LOWBOARD_PATH = "gd_mst_lowboard"
+const LEGACY_GD_MST_PLANNING_PATH = "gd_mst_planning"
 const FINALIZATION_TITLE = "Finalizimi"
 
 // Tabs for Planning phase
@@ -142,6 +148,21 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function orderChecklistItems(items: ChecklistItem[]) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aPos = a.item.position
+      const bPos = b.item.position
+      if (aPos == null && bPos == null) return a.index - b.index
+      if (aPos == null) return 1
+      if (bPos == null) return -1
+      if (aPos !== bPos) return aPos - bPos
+      return a.index - b.index
+    })
+    .map((entry) => entry.item)
+}
+
 function parseProductTotals(notes?: string | null) {
   if (!notes) return { total: "", completed: "" }
   const totalMatch = notes.match(/total_products[:=]\s*(\d+)/i)
@@ -163,7 +184,14 @@ function hasProductTotals(notes?: string | null) {
 function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
   if (phase === "PLANNING") {
     return items.filter(
-      (item) => item.path === "project acceptance" || item.path === "ga/dv meeting"
+      (item) =>
+        item.path === "project acceptance" ||
+        item.path === "ga/dv meeting" ||
+        item.path === GD_MST_GJENERALE_PATH ||
+        item.path === GD_MST_SOFA_NEW_PATH ||
+        item.path === GD_MST_VITRINE_NEW_PATH ||
+        item.path === GD_MST_SIDEBOARD_NEW_PATH ||
+        item.path === GD_MST_LOWBOARD_PATH
     )
   }
   if (phase === "PRODUCT") {
@@ -206,6 +234,19 @@ export default function DesignProjectPage() {
   const [newChecklistContent, setNewChecklistContent] = React.useState("")
   const [newChecklistNumber, setNewChecklistNumber] = React.useState("")
   const [addingChecklist, setAddingChecklist] = React.useState(false)
+  const [mstGjeneraleContent, setMstGjeneraleContent] = React.useState("")
+  const [mstGjeneraleNumber, setMstGjeneraleNumber] = React.useState("")
+  const [mstSofaNewContent, setMstSofaNewContent] = React.useState("")
+  const [mstSofaNewNumber, setMstSofaNewNumber] = React.useState("")
+  const [mstVitrineNewContent, setMstVitrineNewContent] = React.useState("")
+  const [mstVitrineNewNumber, setMstVitrineNewNumber] = React.useState("")
+  const [mstSideboardNewContent, setMstSideboardNewContent] = React.useState("")
+  const [mstSideboardNewNumber, setMstSideboardNewNumber] = React.useState("")
+  const [mstLowboardContent, setMstLowboardContent] = React.useState("")
+  const [mstLowboardNumber, setMstLowboardNumber] = React.useState("")
+  const [mstChecklistTab, setMstChecklistTab] = React.useState<
+    "gjenerale" | "sofa_new" | "vitrine_new" | "sideboard_new" | "lowboard"
+  >("gjenerale")
   const [createOpen, setCreateOpen] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
@@ -462,9 +503,16 @@ export default function DesignProjectPage() {
   }
 
   // Add checklist item
-  const submitChecklistItem = async () => {
-    if (!project || !newChecklistContent.trim()) return
-    const rawNumber = newChecklistNumber.trim()
+  const submitChecklistItem = async (options?: {
+    path?: string
+    content?: string
+    number?: string
+    onReset?: () => void
+  }) => {
+    if (!project) return
+    const content = (options?.content ?? newChecklistContent).trim()
+    if (!content) return
+    const rawNumber = (options?.number ?? newChecklistNumber).trim()
     const parsedNumber = Number.parseInt(rawNumber, 10)
     const position =
       rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
@@ -473,10 +521,14 @@ export default function DesignProjectPage() {
       const payload: Record<string, unknown> = {
         project_id: project.id,
         item_type: "CHECKBOX",
-        title: newChecklistContent.trim(),
+        title: content,
         is_checked: false,
       }
-      if (activePhase === "CONTROL") payload.path = CONTROL_CHECKLIST_PATH
+      if (options?.path) {
+        payload.path = options.path
+      } else if (activePhase === "CONTROL") {
+        payload.path = CONTROL_CHECKLIST_PATH
+      }
       if (position != null) payload.position = position
 
       const res = await apiFetch("/checklist-items", {
@@ -495,8 +547,12 @@ export default function DesignProjectPage() {
         toast.error(detail)
         return
       }
-      setNewChecklistContent("")
-      setNewChecklistNumber("")
+      if (options?.onReset) {
+        options.onReset()
+      } else {
+        setNewChecklistContent("")
+        setNewChecklistNumber("")
+      }
       await reloadChecklistItems()
       toast.success("Checklist item added")
     } finally {
@@ -1359,6 +1415,28 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
 
+  const mstGjeneraleItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_GJENERALE_PATH)),
+    [checklistItems]
+  )
+  const mstSofaNewItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_SOFA_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstVitrineNewItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_VITRINE_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstSideboardNewItems = React.useMemo(
+    () =>
+      orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_SIDEBOARD_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstLowboardItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_LOWBOARD_PATH)),
+    [checklistItems]
+  )
+
   // Filter general checklist items (not project acceptance, GA meeting, propozim, or punimi)
   const generalChecklistItems = React.useMemo(
     () =>
@@ -1369,7 +1447,13 @@ export default function DesignProjectPage() {
           item.path !== "propozim ko1/ko2" &&
           item.path !== "punimi" &&
           item.path !== FINALIZATION_PATH &&
-          item.path !== CONTROL_CHECKLIST_PATH
+          item.path !== CONTROL_CHECKLIST_PATH &&
+          item.path !== GD_MST_GJENERALE_PATH &&
+          item.path !== GD_MST_SOFA_NEW_PATH &&
+          item.path !== GD_MST_VITRINE_NEW_PATH &&
+          item.path !== GD_MST_SIDEBOARD_NEW_PATH &&
+          item.path !== GD_MST_LOWBOARD_PATH &&
+          item.path !== LEGACY_GD_MST_PLANNING_PATH
       ),
     [checklistItems]
   )
@@ -1382,37 +1466,18 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
   const finalizationItemsOrdered = React.useMemo(
-    () =>
-      finalizationItems
-        .map((item, index) => ({ item, index }))
-        .sort((a, b) => {
-          const aPos = a.item.position
-          const bPos = b.item.position
-          if (aPos == null && bPos == null) return a.index - b.index
-          if (aPos == null) return 1
-          if (bPos == null) return -1
-          if (aPos !== bPos) return aPos - bPos
-          return a.index - b.index
-        })
-        .map((entry) => entry.item),
+    () => orderChecklistItems(finalizationItems),
     [finalizationItems]
   )
   const checklistItemsForTab = React.useMemo(() => {
     const baseItems = activePhase === "CONTROL" ? controlChecklistItems : generalChecklistItems
-    return baseItems
-      .map((item, index) => ({ item, index }))
-      .sort((a, b) => {
-        const aPos = a.item.position
-        const bPos = b.item.position
-        if (aPos == null && bPos == null) return a.index - b.index
-        if (aPos == null) return 1
-        if (bPos == null) return -1
-        if (aPos !== bPos) return aPos - bPos
-        return a.index - b.index
-      })
-      .map((entry) => entry.item)
+    return orderChecklistItems(baseItems)
   }, [activePhase, controlChecklistItems, generalChecklistItems])
   const checklistTitle = activePhase === "CONTROL" ? CONTROL_CHECKLIST_TITLE : "Checklist"
+  const isMstProject =
+    (project?.project_type || "").toUpperCase() === "MST" ||
+    (project?.title || "").toUpperCase().includes("MST")
+  const showMstPlanningSections = isMstProject && activePhase === "PLANNING"
 
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
   const assignableUsers = React.useMemo(() => allUsers, [allUsers])
@@ -1421,6 +1486,180 @@ export default function DesignProjectPage() {
     const member = userMap.get(id)
     return member?.full_name || member?.username || member?.email || "-"
   }
+
+  const renderChecklistItemsList = (items: ChecklistItem[]) => {
+    if (items.length === 0) {
+      return <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item, idx) => (
+          <div key={item.id} className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+              <Checkbox
+                checked={item.is_checked || false}
+                onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+              />
+              <div className="flex-1">
+                {activePhase === "CONTROL" && isAdmin ? (
+                  controlChecklistEditingId === item.id ? (
+                    <Input
+                      value={controlChecklistEditingText}
+                      onChange={(e) => setControlChecklistEditingText(e.target.value)}
+                    />
+                  ) : (
+                    <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                      {item.title || item.content}
+                    </span>
+                  )
+                ) : (
+                  <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                    {item.title || item.content}
+                  </span>
+                )}
+              </div>
+              {activePhase === "CONTROL" && isAdmin ? (
+                <div className="ml-auto flex items-center gap-2">
+                  {controlChecklistEditingId === item.id ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={controlChecklistSaving || !controlChecklistEditingText.trim()}
+                        onClick={() => void saveControlChecklistItem()}
+                      >
+                        {controlChecklistSaving ? "Saving..." : "Save"}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={cancelEditControlChecklistItem}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => startEditControlChecklistItem(item)}>
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-600"
+                        disabled={controlChecklistSaving}
+                        onClick={() => void deleteControlChecklistItem(item.id)}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="ml-9 space-y-2">
+              {commentEditingId === item.id ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={commentEditingText}
+                    onChange={(e) => setCommentEditingText(e.target.value)}
+                    placeholder="Add a comment..."
+                    rows={2}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={commentSaving}
+                      onClick={() => void saveComment(item.id)}
+                    >
+                      {commentSaving ? "Saving..." : "Save Comment"}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2">
+                  {item.comment ? (
+                    <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                      {item.comment}
+                    </div>
+                  ) : (
+                    <div className="flex-1 text-sm text-muted-foreground italic">No comment</div>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                    {item.comment ? "Edit" : "Add"} Comment
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const renderMstChecklistSection = (options: {
+    title: string
+    items: ChecklistItem[]
+    path: string
+    number: string
+    setNumber: (value: string) => void
+    content: string
+    setContent: (value: string) => void
+  }) => (
+    <div className="space-y-4">
+      {renderChecklistItemsList(options.items)}
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={options.number}
+            onChange={(e) => options.setNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Item</Label>
+          <Input
+            value={options.content}
+            onChange={(e) => options.setContent(e.target.value)}
+            placeholder="Add new checklist item..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter")
+                void submitChecklistItem({
+                  path: options.path,
+                  content: options.content,
+                  number: options.number,
+                  onReset: () => {
+                    options.setContent("")
+                    options.setNumber("")
+                  },
+                })
+            }}
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() =>
+              void submitChecklistItem({
+                path: options.path,
+                content: options.content,
+                number: options.number,
+                onReset: () => {
+                  options.setContent("")
+                  options.setNumber("")
+                },
+              })
+            }
+            disabled={addingChecklist}
+          >
+            {addingChecklist ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -1793,146 +2032,122 @@ export default function DesignProjectPage() {
         {activeTab === "checklist" && (
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">{checklistTitle}</h3>
-            {checklistItemsForTab.length === 0 ? (
-              <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
-            ) : (
-              <div className="space-y-2">
-                {checklistItemsForTab.map((item, idx) => (
-                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
-                    <div className="flex items-center gap-3">
-                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                      <Checkbox
-                        checked={item.is_checked || false}
-                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      />
-                      <div className="flex-1">
-                        {activePhase === "CONTROL" && isAdmin ? (
-                          controlChecklistEditingId === item.id ? (
-                            <Input
-                              value={controlChecklistEditingText}
-                              onChange={(e) => setControlChecklistEditingText(e.target.value)}
-                            />
-                          ) : (
-                            <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                              {item.title || item.content}
-                            </span>
-                          )
-                        ) : (
-                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                            {item.title || item.content}
-                          </span>
-                        )}
-                      </div>
-                      {activePhase === "CONTROL" && isAdmin ? (
-                        <div className="ml-auto flex items-center gap-2">
-                          {controlChecklistEditingId === item.id ? (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={controlChecklistSaving || !controlChecklistEditingText.trim()}
-                                onClick={() => void saveControlChecklistItem()}
-                              >
-                                {controlChecklistSaving ? "Saving..." : "Save"}
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={cancelEditControlChecklistItem}>
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => startEditControlChecklistItem(item)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-500 hover:text-red-600"
-                                disabled={controlChecklistSaving}
-                                onClick={() => void deleteControlChecklistItem(item.id)}
-                              >
-                                Delete
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                    {/* Comment section */}
-                    <div className="ml-9 space-y-2">
-                      {commentEditingId === item.id ? (
-                        <div className="space-y-2">
-                          <Textarea
-                            value={commentEditingText}
-                            onChange={(e) => setCommentEditingText(e.target.value)}
-                            placeholder="Add a comment..."
-                            rows={2}
-                          />
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={commentSaving}
-                              onClick={() => void saveComment(item.id)}
-                            >
-                              {commentSaving ? "Saving..." : "Save Comment"}
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start gap-2">
-                          {item.comment ? (
-                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
-                              {item.comment}
-                            </div>
-                          ) : (
-                            <div className="flex-1 text-sm text-muted-foreground italic">
-                              No comment
-                            </div>
-                          )}
-                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
-                            {item.comment ? "Edit" : "Add"} Comment
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+            {showMstPlanningSections ? (
+              <div className="space-y-4">
+                <div className="border-b">
+                  <div className="flex flex-wrap gap-6">
+                    {[
+                      { id: "gjenerale", label: "Gjenerale" },
+                      { id: "sofa_new", label: "SOFA NEW" },
+                      { id: "vitrine_new", label: "VITRINE_NEW" },
+                      { id: "sideboard_new", label: "SIDEBOARD_NEW" },
+                      { id: "lowboard", label: "LOWBOARD" },
+                    ].map((tab) => {
+                      const isActive = tab.id === mstChecklistTab
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() =>
+                            setMstChecklistTab(
+                              tab.id as "gjenerale" | "sofa_new" | "vitrine_new" | "sideboard_new" | "lowboard"
+                            )
+                          }
+                          className={[
+                            "relative pb-3 text-sm font-medium",
+                            isActive ? "text-purple-600" : "text-muted-foreground",
+                          ].join(" ")}
+                        >
+                          {tab.label}
+                          {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" /> : null}
+                        </button>
+                      )
+                    })}
                   </div>
-                ))}
+                </div>
+
+                {mstChecklistTab === "gjenerale" &&
+                  renderMstChecklistSection({
+                    title: "Gjenerale",
+                    items: mstGjeneraleItems,
+                    path: GD_MST_GJENERALE_PATH,
+                    number: mstGjeneraleNumber,
+                    setNumber: setMstGjeneraleNumber,
+                    content: mstGjeneraleContent,
+                    setContent: setMstGjeneraleContent,
+                  })}
+                {mstChecklistTab === "sofa_new" &&
+                  renderMstChecklistSection({
+                    title: "SOFA NEW",
+                    items: mstSofaNewItems,
+                    path: GD_MST_SOFA_NEW_PATH,
+                    number: mstSofaNewNumber,
+                    setNumber: setMstSofaNewNumber,
+                    content: mstSofaNewContent,
+                    setContent: setMstSofaNewContent,
+                  })}
+                {mstChecklistTab === "vitrine_new" &&
+                  renderMstChecklistSection({
+                    title: "VITRINE_NEW",
+                    items: mstVitrineNewItems,
+                    path: GD_MST_VITRINE_NEW_PATH,
+                    number: mstVitrineNewNumber,
+                    setNumber: setMstVitrineNewNumber,
+                    content: mstVitrineNewContent,
+                    setContent: setMstVitrineNewContent,
+                  })}
+                {mstChecklistTab === "sideboard_new" &&
+                  renderMstChecklistSection({
+                    title: "SIDEBOARD_NEW",
+                    items: mstSideboardNewItems,
+                    path: GD_MST_SIDEBOARD_NEW_PATH,
+                    number: mstSideboardNewNumber,
+                    setNumber: setMstSideboardNewNumber,
+                    content: mstSideboardNewContent,
+                    setContent: setMstSideboardNewContent,
+                  })}
+                {mstChecklistTab === "lowboard" &&
+                  renderMstChecklistSection({
+                    title: "LOWBOARD",
+                    items: mstLowboardItems,
+                    path: GD_MST_LOWBOARD_PATH,
+                    number: mstLowboardNumber,
+                    setNumber: setMstLowboardNumber,
+                    content: mstLowboardContent,
+                    setContent: setMstLowboardContent,
+                  })}
               </div>
+            ) : (
+              <>
+                {renderChecklistItemsList(checklistItemsForTab)}
+                <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                  <div className="space-y-1">
+                    <Label>Number</Label>
+                    <Input
+                      value={newChecklistNumber}
+                      onChange={(e) => setNewChecklistNumber(e.target.value)}
+                      placeholder="e.g. 3"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Item</Label>
+                    <Input
+                      value={newChecklistContent}
+                      onChange={(e) => setNewChecklistContent(e.target.value)}
+                      placeholder="Add new checklist item..."
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void submitChecklistItem()
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
+                      {addingChecklist ? "Adding..." : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
-            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-              <div className="space-y-1">
-                <Label>Number</Label>
-                <Input
-                  value={newChecklistNumber}
-                  onChange={(e) => setNewChecklistNumber(e.target.value)}
-                  placeholder="e.g. 3"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Item</Label>
-                <Input
-                  value={newChecklistContent}
-                  onChange={(e) => setNewChecklistContent(e.target.value)}
-                  placeholder="Add new checklist item..."
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void submitChecklistItem()
-                  }}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
-                  {addingChecklist ? "Adding..." : "Add"}
-                </Button>
-              </div>
-            </div>
           </Card>
         )}
 

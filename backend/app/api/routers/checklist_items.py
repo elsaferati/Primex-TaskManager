@@ -41,6 +41,11 @@ PROPOZIM_KO1_KO2_PATH = "propozim ko1/ko2"
 PUNIMI_PATH = "punimi"
 CONTROL_KO1_KO2_PATH = "control ko1/ko2"
 FINALIZATION_PATH = "finalization"
+GD_MST_GJENERALE_PATH = "gd_mst_gjenerale"
+GD_MST_SOFA_NEW_PATH = "gd_mst_sofa_new"
+GD_MST_VITRINE_NEW_PATH = "gd_mst_vitrine_new"
+GD_MST_SIDEBOARD_NEW_PATH = "gd_mst_sideboard_new"
+GD_MST_LOWBOARD_PATH = "gd_mst_lowboard"
 
 # Graphic Design (GD) - "Pranimi i Projektit" checklist items
 GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
@@ -91,6 +96,13 @@ GD_CONTROL_KO1_KO2_TEMPLATE: list[str] = [
 GD_FINALIZATION_TEMPLATE: list[str] = [
     "A eshte derguar?",
 ]
+
+# Graphic Design (GD) - MST Planning checklist templates (to be filled later)
+GD_MST_GJENERALE_TEMPLATE: list[str] = []
+GD_MST_SOFA_NEW_TEMPLATE: list[str] = []
+GD_MST_VITRINE_NEW_TEMPLATE: list[str] = []
+GD_MST_SIDEBOARD_NEW_TEMPLATE: list[str] = []
+GD_MST_LOWBOARD_TEMPLATE: list[str] = []
 
 
 
@@ -475,6 +487,88 @@ async def _ensure_gd_finalization_items(db: AsyncSession, project: Project) -> N
     await db.commit()
 
 
+async def _is_gd_mst_planning(db: AsyncSession, project: Project) -> bool:
+    if project.department_id is None:
+        return False
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if dept is None or dept.code != "GD":
+        return False
+
+    is_mst = project.project_type == "MST"
+    if not is_mst:
+        title = (project.title or "").upper()
+        is_mst = "MST" in title
+    if not is_mst:
+        return False
+
+    return (project.current_phase or "").upper() == "PLANNING"
+
+
+async def _ensure_gd_mst_section_items(
+    db: AsyncSession,
+    project: Project,
+    path: str,
+    template: list[str],
+) -> None:
+    """
+    Ensure a GD MST Planning checklist section exists for a project.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    - Stores items with the provided path.
+    """
+    if not template:
+        return
+
+    existing_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project.id,
+                ChecklistItem.path == path,
+                ChecklistItem.item_type == ChecklistItemType.CHECKBOX,
+            )
+        )
+    ).scalars().all()
+    existing_titles = {i.title for i in existing_items if i.title}
+
+    missing = [t for t in template if t not in existing_titles]
+    if not missing:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.project_id == project.id, Checklist.group_key.is_(None))
+            .order_by(Checklist.created_at)
+        )
+    ).scalars().first()
+    if checklist is None:
+        checklist = Checklist(project_id=project.id, title="Checklist")
+        db.add(checklist)
+        await db.flush()
+
+    for position, title in enumerate(template):
+        if title in existing_titles:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=path,
+                title=title,
+                is_checked=False,
+            )
+        )
+
+    await db.commit()
+
+
 def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
     """Convert ChecklistItem model to ChecklistItemOut schema."""
     assignees = [
@@ -532,6 +626,23 @@ async def list_checklist_items(
         await _ensure_gd_control_ko1_ko2_items(db, project)
         # Auto-seed GD "Finalizimi" checklist (no deletes, only inserts missing items).
         await _ensure_gd_finalization_items(db, project)
+        # Auto-seed GD MST Planning checklist sections (no deletes, only inserts missing items).
+        if await _is_gd_mst_planning(db, project):
+            await _ensure_gd_mst_section_items(
+                db, project, GD_MST_GJENERALE_PATH, GD_MST_GJENERALE_TEMPLATE
+            )
+            await _ensure_gd_mst_section_items(
+                db, project, GD_MST_SOFA_NEW_PATH, GD_MST_SOFA_NEW_TEMPLATE
+            )
+            await _ensure_gd_mst_section_items(
+                db, project, GD_MST_VITRINE_NEW_PATH, GD_MST_VITRINE_NEW_TEMPLATE
+            )
+            await _ensure_gd_mst_section_items(
+                db, project, GD_MST_SIDEBOARD_NEW_PATH, GD_MST_SIDEBOARD_NEW_TEMPLATE
+            )
+            await _ensure_gd_mst_section_items(
+                db, project, GD_MST_LOWBOARD_PATH, GD_MST_LOWBOARD_TEMPLATE
+            )
 
         stmt = (
             select(ChecklistItem)
