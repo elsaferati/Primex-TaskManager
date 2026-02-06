@@ -4,8 +4,13 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, insert, select, cast, String as SQLString
+from sqlalchemy import delete, insert, select, cast, update, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
@@ -15,6 +20,7 @@ from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, 
 from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
+from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
@@ -27,6 +33,7 @@ from pydantic import BaseModel
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.task_daily_progress import upsert_task_daily_progress
+from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
 
 router = APIRouter()
@@ -34,6 +41,34 @@ router = APIRouter()
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
 COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
+
+def _as_local_date(value: datetime | date | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo:
+            tz = None
+            if ZoneInfo is not None:
+                try:
+                    tz = ZoneInfo("Europe/Pristina")
+                except Exception:
+                    try:
+                        tz = ZoneInfo("Europe/Belgrade")
+                    except Exception:
+                        tz = None
+            if tz is None:
+                try:
+                    import pytz  # type: ignore[import-not-found]
+
+                    try:
+                        tz = pytz.timezone("Europe/Pristina")
+                    except Exception:
+                        tz = pytz.timezone("Europe/Belgrade")
+                except ImportError:
+                    tz = timezone(timedelta(hours=1))
+            return value.astimezone(tz).date()
+        return value.date()
+    return value
 
 
 def _is_mst_or_tt_project(project: Project) -> bool:
@@ -107,6 +142,39 @@ async def _assignees_for_tasks(
     for task_id, user in rows:
         assignees.setdefault(task_id, []).append(_user_to_assignee(user))
     return assignees
+
+
+async def _assignees_for_fast_task_groups(
+    db: AsyncSession, group_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
+    """
+    For fast tasks split into per-user copies, we still want TaskOut.assignees to
+    show the full group membership (active copies only).
+    """
+    if not group_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Task.fast_task_group_id, User)
+            .join(TaskAssignee, TaskAssignee.task_id == Task.id)
+            .join(User, TaskAssignee.user_id == User.id)
+            .where(Task.fast_task_group_id.in_(group_ids))
+            .where(Task.is_active.is_(True))
+            .order_by(Task.fast_task_group_id, User.full_name)
+        )
+    ).all()
+    out: dict[uuid.UUID, list[TaskAssigneeOut]] = {}
+    seen: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for group_id, user in rows:
+        if group_id is None:
+            continue
+        if group_id not in seen:
+            seen[group_id] = set()
+        if user.id in seen[group_id]:
+            continue
+        seen[group_id].add(user.id)
+        out.setdefault(group_id, []).append(_user_to_assignee(user))
+    return out
 
 
 async def _replace_task_assignees(
@@ -291,6 +359,15 @@ async def list_tasks(
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
+    fast_group_ids = sorted(
+        {
+            t.fast_task_group_id
+            for t in tasks
+            if t.fast_task_group_id is not None and is_fast_task_model(t)
+        }
+    )
+    fast_group_assignees = await _assignees_for_fast_task_groups(db, fast_group_ids)
+
     # Fetch alignment users for returned tasks
     alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
     if task_ids:
@@ -309,7 +386,12 @@ async def list_tasks(
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
             total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
             status_override = _compute_status_from_completed(total, completed)
-        dto = _task_to_out(t, assignee_map.get(t.id, []), status_override=status_override)
+        dto_assignees = (
+            fast_group_assignees.get(t.fast_task_group_id)
+            if t.fast_task_group_id is not None and is_fast_task_model(t)
+            else assignee_map.get(t.id, [])
+        )
+        dto = _task_to_out(t, dto_assignees or [], status_override=status_override)
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)
     return out
@@ -339,6 +421,10 @@ async def get_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    dto_assignees = assignee_map.get(task.id, [])
+    if task.fast_task_group_id is not None and is_fast_task_model(task):
+        group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
+        dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
     status_override: TaskStatus | None = None
     if task.project_id is not None and task.phase in (
         ProjectPhaseStatus.PRODUCT.value,
@@ -349,7 +435,7 @@ async def get_task(
             total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
             status_override = _compute_status_from_completed(total, completed)
 
-    dto = _task_to_out(task, assignee_map.get(task.id, []), status_override=status_override)
+    dto = _task_to_out(task, dto_assignees or [], status_override=status_override)
     rows = (
         await db.execute(
             select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id)
@@ -448,6 +534,109 @@ async def create_task(
     else:
         completed_at = None
 
+    is_fast = is_fast_task_fields(
+        title=payload.title,
+        project_id=payload.project_id,
+        dependency_task_id=dependency_task_id,
+        system_template_origin_id=None,
+        ga_note_origin_id=payload.ga_note_origin_id,
+    )
+
+    # Fast task multi-assignee: create per-user copies tied by fast_task_group_id.
+    if is_fast and assignee_ids is not None and len(assignee_ids) > 1:
+        fast_task_group_id = uuid.uuid4()
+        created_tasks: list[Task] = []
+        created_notifications: list[Notification] = []
+
+        # Keep deterministic ordering: prefer payload.assigned_to first if provided.
+        ordered_assignee_ids = list(assignee_ids)
+        if payload.assigned_to in ordered_assignee_ids:
+            ordered_assignee_ids.remove(payload.assigned_to)  # type: ignore[arg-type]
+            ordered_assignee_ids.insert(0, payload.assigned_to)  # type: ignore[arg-type]
+
+        for assignee_id in ordered_assignee_ids:
+            t = Task(
+                title=payload.title,
+                description=payload.description,
+                internal_notes=payload.internal_notes,
+                project_id=payload.project_id,
+                dependency_task_id=dependency_task_id,
+                department_id=department_id,
+                assigned_to=assignee_id,
+                created_by=user.id,
+                ga_note_origin_id=payload.ga_note_origin_id,
+                fast_task_group_id=fast_task_group_id,
+                status=status_value,
+                priority=priority_value,
+                finish_period=payload.finish_period,
+                phase=phase_value,
+                progress_percentage=payload.progress_percentage or 0,
+                daily_products=payload.daily_products,
+                start_date=payload.start_date or datetime.now(timezone.utc),
+                due_date=payload.due_date,
+                completed_at=completed_at,
+                is_bllok=payload.is_bllok or False,
+                is_1h_report=payload.is_1h_report or False,
+                is_r1=payload.is_r1 or False,
+                is_personal=payload.is_personal or False,
+            )
+            db.add(t)
+            await db.flush()
+            await _replace_task_assignees(db, t, [assignee_id])
+
+            # Optional: store alignment users for this task (fast-task alignment).
+            if payload.alignment_user_ids:
+                seen_align: set[uuid.UUID] = set()
+                ids = [uid for uid in payload.alignment_user_ids if not (uid in seen_align or seen_align.add(uid))]
+                await db.execute(
+                    insert(TaskAlignmentUser),
+                    [{"task_id": t.id, "user_id": uid} for uid in ids],
+                )
+
+            created_tasks.append(t)
+            created_notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=assignee_id,
+                    type=NotificationType.assignment,
+                    title="Task assigned",
+                    body=t.title,
+                    data={"task_id": str(t.id)},
+                )
+            )
+
+            add_audit_log(
+                db=db,
+                actor_user_id=user.id,
+                entity_type="task",
+                entity_id=t.id,
+                action="created",
+                before=None,
+                after={
+                    "title": t.title,
+                    "status": _enum_value(t.status),
+                    "assigned_to": str(t.assigned_to) if t.assigned_to else None,
+                },
+            )
+
+        await db.commit()
+
+        for n in created_notifications:
+            try:
+                await publish_notification(user_id=n.user_id, notification=n)
+            except Exception:
+                pass
+
+        # Return the first created task; clients typically refetch lists.
+        first = created_tasks[0]
+        await db.refresh(first)
+        group_assignees = await _assignees_for_fast_task_groups(db, [fast_task_group_id])
+        dto = _task_to_out(first, group_assignees.get(fast_task_group_id, []))
+        dto.alignment_user_ids = payload.alignment_user_ids
+        return dto
+
+    fast_task_group_id = uuid.uuid4() if is_fast else None
+
     task = Task(
         title=payload.title,
         description=payload.description,
@@ -458,6 +647,7 @@ async def create_task(
         assigned_to=assignee_ids[0] if assignee_ids else None,
         created_by=user.id,
         ga_note_origin_id=payload.ga_note_origin_id,
+        fast_task_group_id=fast_task_group_id,
         status=status_value,
         priority=priority_value,
         finish_period=payload.finish_period,
@@ -505,6 +695,26 @@ async def create_task(
         await _replace_task_assignees(db, task, assignee_ids)
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
             task.is_active = False
+
+    # If this is a project task, and the project was previously removed from the weekly planner
+    # for this user/day/slot, auto-clear that exclusion so the newly created task is visible.
+    if task.project_id is not None and assignee_ids:
+        planned_day = _as_local_date(task.due_date)
+        if planned_day is not None:
+            finish_period = (str(task.finish_period).strip().upper() if task.finish_period else "")
+            if finish_period in ("AM", "PM"):
+                slots_to_clear = {finish_period, "ALL"}
+            else:
+                # Unknown/empty -> shows in both slots in weekly table, so clear both + ALL.
+                slots_to_clear = {"AM", "PM", "ALL"}
+            await db.execute(
+                delete(ProjectPlannerExclusion).where(
+                    ProjectPlannerExclusion.project_id == task.project_id,
+                    ProjectPlannerExclusion.user_id.in_(assignee_ids),
+                    ProjectPlannerExclusion.day_date == planned_day,
+                    ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
+                )
+            )
 
     add_audit_log(
         db=db,
@@ -572,7 +782,11 @@ async def create_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    dto_assignees = assignee_map.get(task.id, [])
+    if task.fast_task_group_id is not None and is_fast_task_model(task):
+        group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
+        dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
+    dto = _task_to_out(task, dto_assignees or [])
     dto.alignment_user_ids = payload.alignment_user_ids
     return dto
 
@@ -664,6 +878,13 @@ async def update_task(
     # This matches the logic in create_task endpoint
     allow_cross_department = task.project_id is not None or task.ga_note_origin_id is not None or task.project_id is None
 
+    # Fast tasks are stored as per-user copies tied by fast_task_group_id.
+    # For older rows, initialize the group id lazily on first update.
+    if is_fast_task_model(task) and task.fast_task_group_id is None:
+        task.fast_task_group_id = task.id
+    is_fast_group_task = task.fast_task_group_id is not None and is_fast_task_model(task)
+    fast_group_desired_assignee_ids: list[uuid.UUID] | None = None
+
     if payload.title is not None:
         task.title = payload.title
     if payload.description is not None:
@@ -703,43 +924,57 @@ async def update_task(
         task.department_id = payload.department_id
 
     if payload.assignees is not None:
-        # Allow anyone who can edit the task to update assignees
-        # (can_edit already checked above: Admin, Manager, task creator, or assignees)
-        rows = (
-            await db.execute(
-                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
-            )
-        ).scalars().all()
-        existing_assignee_ids = set(rows)
-        seen: set[uuid.UUID] = set()
-        assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
-        assignee_users = (
-            await db.execute(select(User).where(User.id.in_(assignee_ids)))
-        ).scalars().all()
-        if len(assignee_users) != len(assignee_ids):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
-        for assignee in assignee_users:
-            if not allow_cross_department and assignee.department_id != task.department_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
-        await _replace_task_assignees(db, task, assignee_ids)
-        task.assigned_to = assignee_ids[0] if assignee_ids else None
-        if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
-            task.is_active = False
-        new_ids = set(assignee_ids) - existing_assignee_ids
-        for assignee in assignee_users:
-            if assignee.id not in new_ids:
-                continue
-            created_notifications.append(
-                add_notification(
-                    db=db,
-                    user_id=assignee.id,
-                    type=NotificationType.assignment,
-                    title="Task assigned",
-                    body=task.title,
-                    data={"task_id": str(task.id)},
+        # Fast task group: assignees represent group membership; don't mutate task.assigned_to.
+        if is_fast_group_task:
+            seen: set[uuid.UUID] = set()
+            fast_group_desired_assignee_ids = [
+                uid for uid in payload.assignees if not (uid in seen or seen.add(uid))
+            ]
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(fast_group_desired_assignee_ids)))
+            ).scalars().all()
+            if len(assignee_users) != len(fast_group_desired_assignee_ids):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+            for assignee in assignee_users:
+                if not allow_cross_department and assignee.department_id != task.department_id:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+        else:
+            # Non-fast tasks: keep existing multi-assignee behavior (single task row).
+            rows = (
+                await db.execute(
+                    select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
                 )
-            )
-    elif payload.assigned_to is not None and payload.assigned_to != task.assigned_to:
+            ).scalars().all()
+            existing_assignee_ids = set(rows)
+            seen: set[uuid.UUID] = set()
+            assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
+            assignee_users = (
+                await db.execute(select(User).where(User.id.in_(assignee_ids)))
+            ).scalars().all()
+            if len(assignee_users) != len(assignee_ids):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+            for assignee in assignee_users:
+                if not allow_cross_department and assignee.department_id != task.department_id:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+            await _replace_task_assignees(db, task, assignee_ids)
+            task.assigned_to = assignee_ids[0] if assignee_ids else None
+            if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
+                task.is_active = False
+            new_ids = set(assignee_ids) - existing_assignee_ids
+            for assignee in assignee_users:
+                if assignee.id not in new_ids:
+                    continue
+                created_notifications.append(
+                    add_notification(
+                        db=db,
+                        user_id=assignee.id,
+                        type=NotificationType.assignment,
+                        title="Task assigned",
+                        body=task.title,
+                        data={"task_id": str(task.id)},
+                    )
+                )
+    elif payload.assigned_to is not None and payload.assigned_to != task.assigned_to and not is_fast_group_task:
         # Allow task editors (creator, assignee, manager, admin) to change assignee
         # ensure_manager_or_admin check removed - can_edit already verified permission
         assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
@@ -985,6 +1220,141 @@ async def update_task(
                 )
             )
 
+    # Fast task group behavior:
+    # - shared edits propagate to all active copies (status remains per-user)
+    # - assignees updates manage group membership (add copies / deactivate removed)
+    if is_fast_group_task and task.fast_task_group_id is not None:
+        shared_values: dict[str, object] = {}
+        if payload.title is not None:
+            shared_values["title"] = task.title
+        if payload.description is not None:
+            shared_values["description"] = task.description
+        if payload.internal_notes is not None:
+            shared_values["internal_notes"] = task.internal_notes
+        if payload.department_id is not None:
+            shared_values["department_id"] = task.department_id
+        if payload.due_date is not None:
+            shared_values["due_date"] = task.due_date
+        if payload.start_date is not None:
+            shared_values["start_date"] = task.start_date
+        if payload.priority is not None:
+            shared_values["priority"] = task.priority
+        if payload.finish_period is not None:
+            shared_values["finish_period"] = task.finish_period
+        if payload.phase is not None:
+            shared_values["phase"] = task.phase
+        if payload.progress_percentage is not None:
+            shared_values["progress_percentage"] = task.progress_percentage
+        if payload.daily_products is not None:
+            shared_values["daily_products"] = task.daily_products
+        if payload.is_bllok is not None:
+            shared_values["is_bllok"] = task.is_bllok
+        if payload.is_r1 is not None:
+            shared_values["is_r1"] = task.is_r1
+        if payload.is_1h_report is not None:
+            shared_values["is_1h_report"] = task.is_1h_report
+        if payload.is_personal is not None:
+            shared_values["is_personal"] = task.is_personal
+
+        if shared_values:
+            await db.execute(
+                update(Task)
+                .where(Task.fast_task_group_id == task.fast_task_group_id)
+                .where(Task.id != task.id)
+                .where(Task.is_active.is_(True))
+                .values(**shared_values)
+            )
+
+        if fast_group_desired_assignee_ids is not None:
+            group_rows = (
+                await db.execute(
+                    select(Task.id, Task.assigned_to)
+                    .where(Task.fast_task_group_id == task.fast_task_group_id)
+                    .where(Task.is_active.is_(True))
+                )
+            ).all()
+            current_user_ids = {uid for _, uid in group_rows if uid is not None}
+            desired_user_ids = set(fast_group_desired_assignee_ids)
+
+            to_add = sorted(desired_user_ids - current_user_ids)
+            to_remove = current_user_ids - desired_user_ids
+
+            if to_remove:
+                remove_task_ids = [tid for tid, uid in group_rows if uid in to_remove]
+                if remove_task_ids:
+                    await db.execute(update(Task).where(Task.id.in_(remove_task_ids)).values(is_active=False))
+                    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id.in_(remove_task_ids)))
+                    if task.id in remove_task_ids:
+                        task.is_active = False
+
+            if to_add:
+                # Use the current task's alignment users as the group default for new copies.
+                alignment_user_ids = (
+                    await db.execute(
+                        select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id)
+                    )
+                ).scalars().all()
+
+                # Validate added users exist and department rules.
+                add_users = (
+                    await db.execute(select(User).where(User.id.in_(to_add)))
+                ).scalars().all()
+                if len(add_users) != len(to_add):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+                for au in add_users:
+                    if not allow_cross_department and au.department_id != task.department_id:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+
+                for au in add_users:
+                    new_task = Task(
+                        title=task.title,
+                        description=task.description,
+                        internal_notes=task.internal_notes,
+                        project_id=task.project_id,
+                        dependency_task_id=task.dependency_task_id,
+                        department_id=task.department_id,
+                        assigned_to=au.id,
+                        created_by=task.created_by,
+                        ga_note_origin_id=task.ga_note_origin_id,
+                        system_template_origin_id=task.system_template_origin_id,
+                        fast_task_group_id=task.fast_task_group_id,
+                        status=TaskStatus.TODO,
+                        priority=task.priority,
+                        finish_period=task.finish_period,
+                        phase=task.phase,
+                        progress_percentage=task.progress_percentage,
+                        daily_products=task.daily_products,
+                        start_date=task.start_date,
+                        due_date=task.due_date,
+                        original_due_date=task.original_due_date,
+                        completed_at=None,
+                        is_bllok=task.is_bllok,
+                        is_1h_report=task.is_1h_report,
+                        is_r1=task.is_r1,
+                        is_personal=task.is_personal,
+                        is_active=True,
+                    )
+                    db.add(new_task)
+                    await db.flush()
+                    await _replace_task_assignees(db, new_task, [au.id])
+
+                    if alignment_user_ids:
+                        await db.execute(
+                            insert(TaskAlignmentUser),
+                            [{"task_id": new_task.id, "user_id": uid} for uid in alignment_user_ids],
+                        )
+
+                    created_notifications.append(
+                        add_notification(
+                            db=db,
+                            user_id=au.id,
+                            type=NotificationType.assignment,
+                            title="Task assigned",
+                            body=new_task.title,
+                            data={"task_id": str(new_task.id)},
+                        )
+                    )
+
     after = {
         "title": task.title,
         "description": task.description,
@@ -1023,7 +1393,11 @@ async def update_task(
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
         if assigned_user is not None:
             assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-    dto = _task_to_out(task, assignee_map.get(task.id, []))
+    dto_assignees = assignee_map.get(task.id, [])
+    if task.fast_task_group_id is not None and is_fast_task_model(task):
+        group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
+        dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
+    dto = _task_to_out(task, dto_assignees or [])
     if alignment_set:
         dto.alignment_user_ids = payload.alignment_user_ids
     else:
@@ -1190,6 +1564,13 @@ async def delete_task(
             "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         },
     )
+
+    # Fast task groups: "delete only for me" -> soft-delete only this copy.
+    if task.fast_task_group_id is not None and is_fast_task_model(task):
+        task.is_active = False
+        await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # Explicitly delete related records to avoid SQLAlchemy relationship synchronization issues
     # Since TaskAssignee has a composite primary key, SQLAlchemy can't "blank out" the foreign key

@@ -928,7 +928,7 @@ export default function CommonViewPage() {
             if (t.status && (t.status.toLowerCase() === "done" || t.status.toLowerCase() === "completed")) {
               continue
             }
-            
+
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
             const ownerName = assignee?.full_name || assignee?.username || null

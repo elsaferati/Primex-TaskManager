@@ -37,6 +37,9 @@ class Task(Base):
     system_template_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("system_task_templates.id")
     )
+    # Groups per-user copies of a single "logical" fast task.
+    # Only used for fast tasks (standalone ad-hoc tasks without project/template/GA links).
+    fast_task_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
 
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="TODO"
