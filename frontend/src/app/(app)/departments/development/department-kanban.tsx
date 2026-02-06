@@ -1446,7 +1446,6 @@ export default function DepartmentKanban() {
     let filtered = projects
     if (viewMode === "mine" && user?.id) {
       filtered = projects.filter((p) => {
-        if (p.manager_id === user.id) return true
         const members = projectMembers[p.id] || []
         return members.some((m) => m.id === user.id)
       })
@@ -4942,6 +4941,13 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
               {filteredProjects.map((project) => {
                 const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                const creator = project.created_by ? userMap.get(project.created_by) : null
+                const badgeUser = creator || manager
+                const badgeTitle = creator
+                  ? `Creator: ${creator.full_name || creator.username || "-"}`
+                  : manager
+                    ? `Manager: ${manager.full_name || manager.username || "-"}`
+                    : "No creator"
                 const membersForProject = projectMembers[project.id] || []
                 const combinedMembers = manager ? [...membersForProject, manager] : membersForProject
                 const uniqueMembers = Array.from(new Map(combinedMembers.map((m) => [m.id, m])).values())
@@ -4975,21 +4981,35 @@ export default function DepartmentKanban() {
                             {isClosed && <span className="ml-1.5 text-xs font-normal text-slate-400">(Closed)</span>}
                           </div>
                         </div>
-                        {canDeleteProjects ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={deletingProjectId === project.id}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              void deleteProject(project.id)
-                            }}
-                            className="h-5 w-5 rounded-full border-red-200 p-0 text-xs text-red-600 hover:bg-red-50 flex-shrink-0 flex items-center justify-center"
-                          >
-                            {deletingProjectId === project.id ? "..." : "×"}
-                          </Button>
-                        ) : null}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {badgeUser ? (
+                            <div
+                              className="h-6 w-6 rounded-full bg-amber-100 text-[10px] font-semibold text-amber-800 flex items-center justify-center shadow-sm"
+                              title={badgeTitle}
+                            >
+                              {initials(badgeUser.full_name || badgeUser.username || "-")}
+                            </div>
+                          ) : (
+                            <div className="h-6 w-6 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-500 flex items-center justify-center">
+                              -
+                            </div>
+                          )}
+                          {canDeleteProjects ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={deletingProjectId === project.id}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                void deleteProject(project.id)
+                              }}
+                              className="h-5 w-5 rounded-full border-red-200 p-0 text-xs text-red-600 hover:bg-red-50 flex-shrink-0 flex items-center justify-center"
+                            >
+                              {deletingProjectId === project.id ? "..." : "×"}
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
                       
                       {/* Current Phase */}

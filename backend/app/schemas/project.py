@@ -15,6 +15,7 @@ class ProjectOut(BaseModel):
     description: str | None = None
     department_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
+    created_by: uuid.UUID | None = None
     project_type: ProjectType | None = None
     current_phase: ProjectPhaseStatus
     status: TaskStatus
