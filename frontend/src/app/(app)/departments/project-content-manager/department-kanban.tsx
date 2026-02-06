@@ -1463,7 +1463,6 @@ export default function DepartmentKanban() {
     }
     if (viewMode === "mine" && user?.id) {
       next = next.filter((p) => {
-        if (p.manager_id === user.id) return true
         const members = projectMembers[p.id] || []
         return members.some((m) => m.id === user.id)
       })
@@ -4685,6 +4684,13 @@ export default function DepartmentKanban() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {filteredProjects.map((project) => {
                   const manager = project.manager_id ? userMap.get(project.manager_id) : null
+                  const creator = project.created_by ? userMap.get(project.created_by) : null
+                  const badgeUser = creator || manager
+                  const badgeTitle = creator
+                    ? `Creator: ${creator.full_name || creator.username || "-"}`
+                    : manager
+                      ? `Manager: ${manager.full_name || manager.username || "-"}`
+                      : "No creator"
                   const phase = project.current_phase || "MEETINGS"
                   const projectPhases = getProjectPhases(project)
                   const membersForProject = projectMembers[project.id] || []
@@ -4744,41 +4750,47 @@ export default function DepartmentKanban() {
                           )
                         })}
                       </div>
-                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Members</div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {membersForProject.length ? (
-                            <>
-                              {membersForProject.map((member, idx) => (
-                                <div
-                                  key={member.id}
-                                  className={[
-                                    "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
-                                    memberColors[idx % memberColors.length],
-                                  ].join(" ")}
-                                  title={member.full_name || member.username || "-"}
-                                >
-                                  {initials(member.full_name || member.username || "-")}
-                                </div>
-                              ))}
-                            </>
-                          ) : (
-                            <div className="text-[11px] text-muted-foreground">No members yet.</div>
-                          )}
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Members</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {membersForProject.length ? (
+                              <>
+                                {membersForProject.map((member, idx) => (
+                                  <div
+                                    key={member.id}
+                                    className={[
+                                      "h-6 w-6 rounded-full text-[9px] font-semibold flex items-center justify-center",
+                                      memberColors[idx % memberColors.length],
+                                    ].join(" ")}
+                                    title={member.full_name || member.username || "-"}
+                                  >
+                                    {initials(member.full_name || member.username || "-")}
+                                  </div>
+                                ))}
+                              </>
+                            ) : (
+                              <div className="text-[11px] text-muted-foreground">No members yet.</div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {manager ? (
-                            <div className="h-7 w-7 rounded-full bg-amber-100 text-xs font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200 shadow-sm">
-                              {initials(manager.full_name || manager.username || "-")}
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[9px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Creator</span>
+                          {badgeUser ? (
+                            <div
+                              className="h-5 w-5 rounded-full bg-amber-100 text-[8px] font-semibold text-amber-800 flex items-center justify-center dark:bg-amber-900/40 dark:text-amber-200 shadow-sm"
+                              title={badgeTitle}
+                            >
+                              {initials(badgeUser.full_name || badgeUser.username || "-")}
                             </div>
                           ) : (
-                            <div className="h-7 w-7 rounded-full bg-slate-100 text-xs font-semibold text-slate-500 flex items-center justify-center dark:bg-slate-700 dark:text-slate-400">
+                            <div className="h-5 w-5 rounded-full bg-slate-100 text-[8px] font-semibold text-slate-500 flex items-center justify-center dark:bg-slate-700 dark:text-slate-400">
                               -
                             </div>
                           )}
                         </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-end">
                         <div className="flex items-center gap-3">
                           <Link
                             href={`/projects/pcm/${project.id}`}

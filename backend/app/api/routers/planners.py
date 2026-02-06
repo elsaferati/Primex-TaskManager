@@ -287,6 +287,7 @@ def _project_to_out(p: Project) -> ProjectOut:
         description=p.description,
         department_id=p.department_id,
         manager_id=p.manager_id,
+        created_by=p.created_by,
         project_type=project_type_enum,
         current_phase=phase_enum,
         status=status_enum,

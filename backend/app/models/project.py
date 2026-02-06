@@ -19,6 +19,7 @@ class Project(Base):
     description: Mapped[str | None] = mapped_column(String)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
     manager_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     current_phase: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="MEETINGS"
     )

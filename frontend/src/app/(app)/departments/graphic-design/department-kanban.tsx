@@ -1170,7 +1170,6 @@ export default function DepartmentKanban() {
     let filtered = projects.filter((p) => p.project_type !== "GENERAL")
     if (viewMode === "mine" && user?.id) {
       filtered = filtered.filter((p) => {
-        if (p.manager_id === user.id) return true
         const members = projectMembers[p.id] || []
         return members.some((m) => m.id === user.id)
       })
@@ -4079,6 +4078,14 @@ export default function DepartmentKanban() {
                     const tasks = departmentTasks.filter(t => t.project_id === project.id);
                     const phase = project.current_phase || "MEETINGS";
                     const noteCount = gaNotes.filter(n => n.project_id === project.id).length;
+                    const manager = project.manager_id ? userMap.get(project.manager_id) : null;
+                    const creator = project.created_by ? userMap.get(project.created_by) : null;
+                    const badgeUser = creator || manager;
+                    const badgeTitle = creator
+                      ? `Creator: ${creator.full_name || creator.username || "-"}`
+                      : manager
+                        ? `Manager: ${manager.full_name || manager.username || "-"}`
+                        : "No creator";
 
                     // Get members from project-members API first, then add manager and task assignees
                     const apiMembers = projectMembers[project.id] || [];
@@ -4155,9 +4162,23 @@ export default function DepartmentKanban() {
                             )}
                           </div>
 
-                          <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400">
-                            View →
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            {badgeUser ? (
+                              <div
+                                className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-[10px] font-semibold text-amber-800 shadow-sm"
+                                title={badgeTitle}
+                              >
+                                {initials(badgeUser.full_name || badgeUser.username || "-")}
+                              </div>
+                            ) : (
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-500">
+                                -
+                              </div>
+                            )}
+                            <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400">
+                              View {"->"}
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     )
