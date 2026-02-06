@@ -740,6 +740,18 @@ function reportStatusLabel(status?: Task["status"] | null) {
   return status
 }
 
+function taskStatusValue(task: Task): Task["status"] {
+  if (task.status === "DONE" || task.completed_at) return "DONE"
+  if (task.status === "IN_PROGRESS") return "IN_PROGRESS"
+  return "TODO"
+}
+
+function statusBadgeClasses(status: Task["status"]) {
+  if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
+  if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
+  return "bg-slate-100 text-slate-700 border-slate-200"
+}
+
 function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "NOT_DONE") return "Not Done"
@@ -1479,28 +1491,13 @@ export default function DepartmentKanban() {
       isMineView && user?.id ? noProjectTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : noProjectTasks
     const filtered = base.filter(isNoProjectTask)
     
-    // Deduplicate tasks by ID first, then by title+properties as fallback
-    // This handles cases where backend creates separate task records per assignee
+    // Deduplicate only exact duplicates by ID.
+    // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
+    // so we must NOT merge by title/properties. Otherwise users can end up opening/editing
+    // someone else's copy from "My view" / "All users" lists.
     const taskMapById = new Map<string, Task>()
-    const taskMapByKey = new Map<string, Task>()
-    
-    // Helper to create a unique key for grouping similar tasks
-    const getTaskKey = (task: Task): string => {
-      return [
-        task.title || "",
-        task.department_id || "",
-        task.is_bllok ? "bllok" : "",
-        task.is_r1 ? "r1" : "",
-        task.is_1h_report ? "1h" : "",
-        task.is_personal ? "personal" : "",
-        task.ga_note_origin_id || "",
-        task.start_date || "",
-        task.due_date || "",
-      ].join("|")
-    }
     
     for (const t of filtered) {
-      // First try to deduplicate by ID
       const existingById = taskMapById.get(t.id)
       if (existingById) {
         // Merge assignees if task already exists with same ID
@@ -1544,62 +1541,11 @@ export default function DepartmentKanban() {
         continue
       }
       
-      // If not found by ID, check if we have a similar task by key (title+properties)
-      const taskKey = getTaskKey(t)
-      const existingByKey = taskMapByKey.get(taskKey)
-      if (existingByKey && existingByKey.id !== t.id) {
-        // Found a similar task with different ID - merge assignees into the existing task
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
-          const user = userMap.get(existingByKey.assigned_to)!
-          assigneeMap.set(existingByKey.assigned_to, {
-            id: existingByKey.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingByKey.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees
-        existingByKey.assignees = Array.from(assigneeMap.values())
-        if (!existingByKey.assigned_to && t.assigned_to) {
-          existingByKey.assigned_to = t.assigned_to
-        }
-        // Also add this task's ID to taskMapById so we don't process it again
-        taskMapById.set(t.id, existingByKey)
-        continue
-      }
-      
-      // New unique task - add it to both maps
       const taskCopy = { ...t }
       taskMapById.set(t.id, taskCopy)
-      taskMapByKey.set(taskKey, taskCopy)
     }
     
-    // Use a Set to ensure we only get unique task objects
-    const uniqueTasks = new Set<Task>(taskMapById.values())
-    return Array.from(uniqueTasks)
+    return Array.from(taskMapById.values())
   }, [noProjectTasks, isMineView, user?.id, userMap])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
@@ -3111,132 +3057,7 @@ export default function DepartmentKanban() {
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
-    // Deduplicate tasks by ID first, then by title+properties as fallback
-    // This handles cases where backend creates separate task records per assignee
-    const taskMapById = new Map<string, Task>()
-    const taskMapByKey = new Map<string, Task>()
-    
-    // Helper to create a unique key for grouping similar tasks
-    const getTaskKey = (task: Task): string => {
-      return [
-        task.title || "",
-        task.department_id || "",
-        task.is_bllok ? "bllok" : "",
-        task.is_r1 ? "r1" : "",
-        task.is_1h_report ? "1h" : "",
-        task.is_personal ? "personal" : "",
-        task.ga_note_origin_id || "",
-        task.start_date || "",
-        task.due_date || "",
-      ].join("|")
-    }
-    
     for (const t of visibleNoProjectTasks) {
-      // First try to deduplicate by ID
-      const existingById = taskMapById.get(t.id)
-      if (existingById) {
-        // Merge assignees if task already exists with same ID
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
-          const user = userMap.get(existingById.assigned_to)!
-          assigneeMap.set(existingById.assigned_to, {
-            id: existingById.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingById.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees
-        existingById.assignees = Array.from(assigneeMap.values())
-        if (!existingById.assigned_to && t.assigned_to) {
-          existingById.assigned_to = t.assigned_to
-        }
-        continue
-      }
-      
-      // If not found by ID, check if we have a similar task by key (title+properties)
-      const taskKey = getTaskKey(t)
-      const existingByKey = taskMapByKey.get(taskKey)
-      if (existingByKey && existingByKey.id !== t.id) {
-        // Found a similar task with different ID - merge assignees into the existing task
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
-          const user = userMap.get(existingByKey.assigned_to)!
-          assigneeMap.set(existingByKey.assigned_to, {
-            id: existingByKey.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingByKey.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees (this updates the same object in both maps)
-        existingByKey.assignees = Array.from(assigneeMap.values())
-        if (!existingByKey.assigned_to && t.assigned_to) {
-          existingByKey.assigned_to = t.assigned_to
-        }
-        // Also add this task's ID to taskMapById so we don't process it again
-        taskMapById.set(t.id, existingByKey)
-        // Don't add this task to taskMapByKey, we've merged it into existingByKey
-        continue
-      }
-      
-      // New unique task - add it to both maps (same object reference)
-      const taskCopy = { ...t }
-      taskMapById.set(t.id, taskCopy)
-      taskMapByKey.set(taskKey, taskCopy)
-    }
-    
-    // Use tasks from ID map (they're the source of truth)
-    // Use a Set to ensure we only get unique task objects (in case multiple IDs point to same object)
-    const uniqueTasks = new Set<Task>(taskMapById.values())
-    const deduplicatedTasks = Array.from(uniqueTasks)
-    
-    // Now categorize the deduplicated tasks
-    for (const t of deduplicatedTasks) {
       if (t.is_bllok) {
         blocked.push(t)
       } else if (t.is_r1) {
@@ -5349,7 +5170,8 @@ export default function DepartmentKanban() {
                       <div className="space-y-2">
                         {todayNoProjectTasks.map((task) => {
                         const typeLabel = noProjectTypeLabel(task)
-                        const isCompleted = task.completed_at != null || task.status === "DONE"
+                        const statusValue = taskStatusValue(task)
+                        const isCompleted = statusValue === "DONE"
                         // Collect all assignees: from assigned_to and assignees array
                         const assigneeIds = new Set<string>()
                         if (task.assigned_to) {
@@ -5385,11 +5207,9 @@ export default function DepartmentKanban() {
                                 <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                   {task.title}
                                 </div>
-                                  {isCompleted && (
-                                    <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
-                                      Done
-                                    </Badge>
-                                  )}
+                                <Badge className={`border text-xs ${statusBadgeClasses(statusValue)}`}>
+                                  {reportStatusLabel(statusValue)}
+                                </Badge>
                                 </div>
                                 <div className="flex items-center gap-1">
                                   {Array.from(assigneeIds).map((userId) => {
@@ -6140,7 +5960,8 @@ export default function DepartmentKanban() {
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
                         {row.items.map((t) => {
-                          const isCompleted = t.completed_at != null || t.status === "DONE"
+                          const statusValue = taskStatusValue(t)
+                          const isCompleted = statusValue === "DONE"
                           return (
                           <Link
                             key={t.id}
@@ -6161,11 +5982,9 @@ export default function DepartmentKanban() {
                                 <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                   {t.title}
                                 </div>
-                                {isCompleted && (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">
-                                    Done
-                                  </Badge>
-                                )}
+                                <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
+                                  {reportStatusLabel(statusValue)}
+                                </Badge>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
