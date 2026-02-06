@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
+import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import type { DailyReportResponse, Department, SystemTaskOut, Task, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
 
 import { SystemTasksView } from "../system-tasks/page"
@@ -661,6 +662,7 @@ export default function GaKaTasksPage() {
       period: string
       department: string
       title: string
+      projectTitle?: string | null
       description: string
       status: string
       bz: string
@@ -713,6 +715,7 @@ export default function GaKaTasksPage() {
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
+        projectTitle: isProject ? (item.project_title ?? null) : null,
         description: task.description || "-",
         status: taskStatusLabel(task),
         bz: "-",
@@ -1590,8 +1593,21 @@ export default function GaKaTasksPage() {
                               {row.period}
                             </td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              {row.typeLabel === "PRJK" && row.projectTitle ? (
+                                <>
+                                  <span className="font-semibold">{row.projectTitle}</span>
+                                  <span> : {row.title}</span>
+                                </>
+                              ) : (
+                                row.title
+                              )}
+                            </td>
+                            <td
+                              className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                            >
+                              {row.status}
+                            </td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
@@ -1767,8 +1783,21 @@ export default function GaKaTasksPage() {
                               {row.period}
                             </td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              {row.typeLabel === "PRJK" && row.projectTitle ? (
+                                <>
+                                  <span className="font-semibold">{row.projectTitle}</span>
+                                  <span> : {row.title}</span>
+                                </>
+                              ) : (
+                                row.title
+                              )}
+                            </td>
+                            <td
+                              className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                            >
+                              {row.status}
+                            </td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
                             <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
@@ -2439,7 +2468,16 @@ export default function GaKaTasksPage() {
                         {row.period}
                       </td>
                       <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                        {row.typeLabel === "PRJK" && row.projectTitle ? (
+                          <>
+                            <span className="font-semibold">{row.projectTitle}</span>
+                            <span> : {row.title}</span>
+                          </>
+                        ) : (
+                          row.title
+                        )}
+                      </td>
                       <td className="border border-slate-900 px-2 py-2 align-top uppercase">
                         {(row.status || "-").toString().toUpperCase()}
                       </td>
@@ -2543,7 +2581,16 @@ export default function GaKaTasksPage() {
                       {row.period}
                     </td>
                     <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
+                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                      {row.typeLabel === "PRJK" && row.projectTitle ? (
+                        <>
+                          <span className="font-semibold">{row.projectTitle}</span>
+                          <span> : {row.title}</span>
+                        </>
+                      ) : (
+                        row.title
+                      )}
+                    </td>
                     <td className="border border-slate-900 px-2 py-2 align-top uppercase">
                       {(row.status || "-").toString().toUpperCase()}
                     </td>

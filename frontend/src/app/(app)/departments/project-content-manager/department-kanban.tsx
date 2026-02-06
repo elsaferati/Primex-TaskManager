@@ -21,6 +21,8 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
+import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
+import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
 import type {
   ChecklistItem,
   DailyReportGaEntry,
@@ -921,6 +923,7 @@ export default function DepartmentKanban() {
   const [department, setDepartment] = React.useState<Department | null>(null)
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
   const [showTemplates, setShowTemplates] = React.useState(false)
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -1806,6 +1809,37 @@ export default function DepartmentKanban() {
       return isTaskActiveOnDate(task, todayDate)
     })
   }, [projectTasks, todayDate])
+
+  React.useEffect(() => {
+    const existingTitles = new Map<string, string>()
+    for (const p of projects) {
+      const title = p.title || p.name
+      if (title) {
+        existingTitles.set(p.id, title)
+      }
+    }
+    const missingIds = Array.from(
+      new Set(
+        dailyReportProjectTasks
+          .map((task) => task.project_id)
+          .filter((pid): pid is string => typeof pid === "string" && pid.trim().length > 0)
+      )
+    ).filter((pid) => !existingTitles.has(pid) && !projectTitleLookup.has(pid))
+
+    if (!missingIds.length) return
+
+    void (async () => {
+      const data = await fetchProjectTitlesById(apiFetch, missingIds)
+      if (!data.length) return
+      setProjectTitleLookup((prev) => {
+        const next = new Map(prev)
+        for (const item of data) {
+          if (item?.id && item?.title) next.set(item.id, item.title)
+        }
+        return next
+      })
+    })()
+  }, [apiFetch, dailyReportProjectTasks, projectTitleLookup, projects])
   const systemTemplateById = React.useMemo(() => {
     const map = new Map<string, SystemTaskTemplate>()
     for (const tmpl of visibleSystemTemplates) {
@@ -1822,6 +1856,7 @@ export default function DepartmentKanban() {
       subtype: string
       period: string
       title: string
+      projectTitle?: string | null
       description: string
       status: string
       bz: string
@@ -1838,6 +1873,12 @@ export default function DepartmentKanban() {
     const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
     const projectRows: typeof rows = []
     let fastIndex = 0
+    const projectTitleByTaskId = new Map<string, string>()
+    for (const item of [...(dailyReport?.tasks_today || []), ...(dailyReport?.tasks_overdue || [])]) {
+      if (item.project_title) {
+        projectTitleByTaskId.set(item.task.id, item.project_title)
+      }
+    }
 
     const pushSystemRow = (row: (typeof rows)[number]) => {
       if (row.period === "PM") {
@@ -1982,12 +2023,18 @@ export default function DepartmentKanban() {
     for (const task of dailyReportProjectTasks) {
       const dueDate = task.due_date ? toDate(task.due_date) : null
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      const projectLabel = project?.title || project?.name || "-"
+      const projectLabel =
+        project?.title ||
+        project?.name ||
+        (task.project_id ? projectTitleLookup.get(task.project_id) : null) ||
+        projectTitleByTaskId.get(task.id) ||
+        null
       projectRows.push({
         typeLabel: "PRJK",
         subtype: "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-        title: `${projectLabel} - ${task.title || "-"}`,
+        title: task.title || "-",
+        projectTitle: projectLabel,
         description: task.description || "-",
         status: taskStatusLabel(task),
         bz: "-",
@@ -2015,6 +2062,7 @@ export default function DepartmentKanban() {
     dailyReportFastTasks,
     dailyReportProjectTasks,
     projects,
+    projectTitleLookup,
     systemTemplateById,
     todayDate,
     todayIso,
@@ -2029,6 +2077,7 @@ export default function DepartmentKanban() {
       subtype: string
       period: string
       title: string
+      projectTitle?: string | null
       description: string
       status: string
       bz: string
@@ -2116,6 +2165,12 @@ export default function DepartmentKanban() {
         ...(report.tasks_today || []).map((item) => item.task),
         ...(report.tasks_overdue || []).map((item) => item.task),
       ]
+      const projectTitleByTaskId = new Map<string, string>()
+      for (const item of [...(report.tasks_today || []), ...(report.tasks_overdue || [])]) {
+        if (item.project_title) {
+          projectTitleByTaskId.set(item.task.id, item.project_title)
+        }
+      }
 
       for (const task of allTasks) {
         if (!isTaskActiveOnDate(task, todayDate)) {
@@ -2124,14 +2179,15 @@ export default function DepartmentKanban() {
         const baseDate = toDate(task.due_date || task.start_date || task.created_at)
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || "-"
+        const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
 
         if (isProject) {
           projectRows.push({
             typeLabel: "PRJK",
             subtype: "-",
             period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-            title: `${projectLabel} - ${task.title || "-"}`,
+            title: task.title || "-",
+            projectTitle: projectLabel,
             description: task.description || "-",
             status: taskStatusLabel(task),
             bz: "-",
@@ -4923,8 +4979,21 @@ export default function DepartmentKanban() {
                                   <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.title}</td>
-                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">{row.status}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                                    {row.typeLabel === "PRJK" && row.projectTitle ? (
+                                      <>
+                                        <span className="font-semibold">{row.projectTitle}</span>
+                                        <span> : {row.title}</span>
+                                      </>
+                                    ) : (
+                                      row.title
+                                    )}
+                                  </td>
+                                  <td
+                                    className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                                  >
+                                    {row.status}
+                                  </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
@@ -7103,8 +7172,21 @@ export default function DepartmentKanban() {
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
                               {row.period}
                             </td>
-                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                              {row.typeLabel === "PRJK" && row.projectTitle ? (
+                                <>
+                                  <span className="font-semibold">{row.projectTitle}</span>
+                                  <span> : {row.title}</span>
+                                </>
+                              ) : (
+                                row.title
+                              )}
+                            </td>
+                            <td
+                              className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                            >
+                              {row.status}
+                            </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
@@ -7169,8 +7251,21 @@ export default function DepartmentKanban() {
                           <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
-                          <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.title}</td>
-                          <td className="border border-slate-900 px-2 py-2 align-top uppercase">{row.status}</td>
+                          <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                            {row.typeLabel === "PRJK" && row.projectTitle ? (
+                              <>
+                                <span className="font-semibold">{row.projectTitle}</span>
+                                <span> : {row.title}</span>
+                              </>
+                            ) : (
+                              row.title
+                            )}
+                          </td>
+                          <td
+                            className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                          >
+                            {row.status}
+                          </td>
                           <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>

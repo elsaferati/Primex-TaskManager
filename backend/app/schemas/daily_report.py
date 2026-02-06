@@ -11,6 +11,7 @@ from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
 
 class DailyReportTaskItem(BaseModel):
     task: TaskOut
+    project_title: str | None = None
     planned_start: date | None = None
     planned_end: date | None = None
     original_planned_end: date | None = None

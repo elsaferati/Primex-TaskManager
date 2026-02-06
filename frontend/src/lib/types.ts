@@ -174,6 +174,7 @@ export type DailyReportSystemOccurrenceStatus = "OPEN" | "DONE" | "NOT_DONE" | "
 
 export interface DailyReportTaskItem {
   task: Task
+  project_title?: string | null
   planned_start?: string | null
   planned_end?: string | null
   original_planned_end?: string | null
