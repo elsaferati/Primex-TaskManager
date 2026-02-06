@@ -359,15 +359,6 @@ async def list_tasks(
             if t.assigned_to in fallback_map:
                 assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
-    fast_group_ids = sorted(
-        {
-            t.fast_task_group_id
-            for t in tasks
-            if t.fast_task_group_id is not None and is_fast_task_model(t)
-        }
-    )
-    fast_group_assignees = await _assignees_for_fast_task_groups(db, fast_group_ids)
-
     # Fetch alignment users for returned tasks
     alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
     if task_ids:
@@ -386,11 +377,11 @@ async def list_tasks(
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
             total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
             status_override = _compute_status_from_completed(total, completed)
-        dto_assignees = (
-            fast_group_assignees.get(t.fast_task_group_id)
-            if t.fast_task_group_id is not None and is_fast_task_model(t)
-            else assignee_map.get(t.id, [])
-        )
+        # Important: for list views we keep task-local assignees (TaskAssignee rows).
+        # Fast-task "group" membership is shown in the task details endpoint instead.
+        # Otherwise each per-user copy would appear assigned to everyone in the group,
+        # which breaks "My view" filtering and per-user status display.
+        dto_assignees = assignee_map.get(t.id, [])
         dto = _task_to_out(t, dto_assignees or [], status_override=status_override)
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)

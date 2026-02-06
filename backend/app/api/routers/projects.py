@@ -430,8 +430,8 @@ async def create_project(
     is_vs_vl_project = "VS" in title_upper or "VL" in title_upper
     if is_vs_vl_project:
         await _copy_tasks_from_template_project(db, project, user.id)
-    # Copy tasks from MST template project if this is an MST project
-    if project.project_type == ProjectType.MST.value:
+    # Copy tasks from MST template project only if explicitly selected
+    if project.project_type == ProjectType.MST.value and template_project is not None:
         await _copy_tasks_from_mst_template_project(db, project, user.id, template_project)
     
     await db.commit()

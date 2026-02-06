@@ -42,7 +42,7 @@ import type {
 // --- CONSTANTS ---
 
 const TABS = [
-  { id: "all", label: "Overview", tone: "neutral" },
+  { id: "all", label: "ALL", tone: "neutral" },
   { id: "projects", label: "Projects", tone: "neutral" },
   { id: "system", label: "System Tasks", tone: "blue" },
   { id: "no-project", label: "Fast Tasks", tone: "red" },
@@ -565,6 +565,18 @@ function reportStatusLabel(status?: Task["status"] | null) {
   return status
 }
 
+function taskStatusValue(task: Task): Task["status"] {
+  if (task.status === "DONE" || task.completed_at) return "DONE"
+  if (task.status === "IN_PROGRESS") return "IN_PROGRESS"
+  return "TODO"
+}
+
+function statusBadgeClasses(status: Task["status"]) {
+  if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
+  if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
+  return "bg-slate-100 text-slate-700 border-slate-200"
+}
+
 function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "NOT_DONE") return "Not Done"
@@ -769,6 +781,7 @@ export default function DepartmentKanban() {
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [pendingPrint, setPendingPrint] = React.useState(false)
+  const [showTemplates, setShowTemplates] = React.useState(false)
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -783,6 +796,7 @@ export default function DepartmentKanban() {
 
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [projectTitle, setProjectTitle] = React.useState("")
   const [projectDescription, setProjectDescription] = React.useState("")
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
@@ -861,6 +875,17 @@ export default function DepartmentKanban() {
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
 
   // --- DATA LOADING ---
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const stored = window.localStorage.getItem("gd_show_templates")
+    if (stored === "true") {
+      setShowTemplates(true)
+    }
+  }, [])
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem("gd_show_templates", showTemplates ? "true" : "false")
+  }, [showTemplates])
   React.useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -1167,7 +1192,8 @@ export default function DepartmentKanban() {
   )
 
   const filteredProjects = React.useMemo(() => {
-    let filtered = projects.filter((p) => p.project_type !== "GENERAL")
+    const base = showTemplates ? templateProjects : projects
+    let filtered = base.filter((p) => p.project_type !== "GENERAL")
     if (viewMode === "mine" && user?.id) {
       filtered = filtered.filter((p) => {
         const members = projectMembers[p.id] || []
@@ -1175,7 +1201,7 @@ export default function DepartmentKanban() {
       })
     }
     return filtered
-  }, [projects, projectMembers, user?.id, viewMode])
+  }, [projects, templateProjects, showTemplates, projectMembers, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
     () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
@@ -1186,28 +1212,13 @@ export default function DepartmentKanban() {
       isMineView && user?.id ? noProjectTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : noProjectTasks
     const filtered = base.filter(isNoProjectTask)
     
-    // Deduplicate tasks by ID first, then by title+properties as fallback
-    // This handles cases where backend creates separate task records per assignee
+    // Deduplicate only exact duplicates by ID.
+    // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
+    // so we must NOT merge by title/properties. Otherwise users can end up opening/editing
+    // someone else's copy from "My view" / "All users" lists.
     const taskMapById = new Map<string, Task>()
-    const taskMapByKey = new Map<string, Task>()
-    
-    // Helper to create a unique key for grouping similar tasks
-    const getTaskKey = (task: Task): string => {
-      return [
-        task.title || "",
-        task.department_id || "",
-        task.is_bllok ? "bllok" : "",
-        task.is_r1 ? "r1" : "",
-        task.is_1h_report ? "1h" : "",
-        task.is_personal ? "personal" : "",
-        task.ga_note_origin_id || "",
-        task.start_date || "",
-        task.due_date || "",
-      ].join("|")
-    }
     
     for (const t of filtered) {
-      // First try to deduplicate by ID
       const existingById = taskMapById.get(t.id)
       if (existingById) {
         // Merge assignees if task already exists with same ID
@@ -1251,62 +1262,11 @@ export default function DepartmentKanban() {
         continue
       }
       
-      // If not found by ID, check if we have a similar task by key (title+properties)
-      const taskKey = getTaskKey(t)
-      const existingByKey = taskMapByKey.get(taskKey)
-      if (existingByKey && existingByKey.id !== t.id) {
-        // Found a similar task with different ID - merge assignees into the existing task
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
-          const user = userMap.get(existingByKey.assigned_to)!
-          assigneeMap.set(existingByKey.assigned_to, {
-            id: existingByKey.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingByKey.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees
-        existingByKey.assignees = Array.from(assigneeMap.values())
-        if (!existingByKey.assigned_to && t.assigned_to) {
-          existingByKey.assigned_to = t.assigned_to
-        }
-        // Also add this task's ID to taskMapById so we don't process it again
-        taskMapById.set(t.id, existingByKey)
-        continue
-      }
-      
-      // New unique task - add it to both maps
       const taskCopy = { ...t }
       taskMapById.set(t.id, taskCopy)
-      taskMapByKey.set(taskKey, taskCopy)
     }
     
-    // Use a Set to ensure we only get unique task objects
-    const uniqueTasks = new Set<Task>(taskMapById.values())
-    return Array.from(uniqueTasks)
+    return Array.from(taskMapById.values())
   }, [noProjectTasks, isMineView, user?.id, userMap])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
@@ -1314,8 +1274,11 @@ export default function DepartmentKanban() {
   )
   const visibleInternalNotes = React.useMemo(() => {
     const base = isMineView && user?.id ? internalNotes.filter((n) => n.to_user_id === user.id) : internalNotes
-    const filteredByUser = selectedUserId === "__all__" ? base : base.filter((n) => n.to_user_id === selectedUserId)
-    if (showDoneInternalNotes) return filteredByUser
+    const filteredByUser =
+      !isMineView && selectedUserId !== "__all__"
+        ? base.filter((n) => n.to_user_id === selectedUserId)
+        : base
+    if (showDoneInternalNotes) return filteredByUser.filter((n) => n.is_done)
     return filteredByUser.filter((n) => !n.is_done)
   }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
   const groupedInternalNotes = React.useMemo(() => {
@@ -1352,12 +1315,12 @@ export default function DepartmentKanban() {
     if (isMineView && user?.id) {
       grouped = grouped.filter((group) => group.toUserIds.includes(user.id))
     }
-    if (selectedUserId !== "__all__") {
+    if (!isMineView && selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
-    if (!showDoneInternalNotes) {
-      grouped = grouped.filter((group) => group.notes.some((n) => !n.is_done))
-    }
+    grouped = showDoneInternalNotes
+      ? grouped.filter((group) => group.notes.length > 0 && group.notes.every((n) => n.is_done))
+      : grouped.filter((group) => group.notes.some((n) => !n.is_done))
     return grouped.sort((a, b) => {
       const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
       const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
@@ -2806,6 +2769,7 @@ export default function DepartmentKanban() {
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
+  const canDeleteProjects = (user?.role === "ADMIN" || user?.role === "MANAGER") && !isReadOnly
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -2819,133 +2783,7 @@ export default function DepartmentKanban() {
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
-    // Deduplicate tasks by ID first, then by title+properties as fallback
-    // This handles cases where backend creates separate task records per assignee
-    const taskMapById = new Map<string, Task>()
-    const taskMapByKey = new Map<string, Task>()
-    
-    // Helper to create a unique key for grouping similar tasks
-    const getTaskKey = (task: Task): string => {
-      return [
-        task.title || "",
-        task.department_id || "",
-        task.is_bllok ? "bllok" : "",
-        task.is_r1 ? "r1" : "",
-        task.is_1h_report ? "1h" : "",
-        task.is_personal ? "personal" : "",
-        task.ga_note_origin_id || "",
-        task.start_date || "",
-        task.due_date || "",
-      ].join("|")
-    }
-    
     for (const t of visibleNoProjectTasks) {
-      // First try to deduplicate by ID
-      const existingById = taskMapById.get(t.id)
-      if (existingById) {
-        // Merge assignees if task already exists with same ID
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
-          const user = userMap.get(existingById.assigned_to)!
-          assigneeMap.set(existingById.assigned_to, {
-            id: existingById.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingById.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees
-        existingById.assignees = Array.from(assigneeMap.values())
-        if (!existingById.assigned_to && t.assigned_to) {
-          existingById.assigned_to = t.assigned_to
-        }
-        continue
-      }
-      
-      // If not found by ID, check if we have a similar task by key (title+properties)
-      const taskKey = getTaskKey(t)
-      const existingByKey = taskMapByKey.get(taskKey)
-      if (existingByKey && existingByKey.id !== t.id) {
-        // Found a similar task with different ID - merge assignees into the existing task
-        // existingByKey should be the same reference as in taskMapById
-        const assigneeMap = new Map<string, TaskAssignee>()
-        
-        // Add existing assignees
-        if (existingByKey.assigned_to && userMap.has(existingByKey.assigned_to)) {
-          const user = userMap.get(existingByKey.assigned_to)!
-          assigneeMap.set(existingByKey.assigned_to, {
-            id: existingByKey.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        existingByKey.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Add new task's assignees
-        if (t.assigned_to && userMap.has(t.assigned_to)) {
-          const user = userMap.get(t.assigned_to)!
-          assigneeMap.set(t.assigned_to, {
-            id: t.assigned_to,
-            full_name: user.full_name || null,
-            username: user.username || null,
-            email: user.email || null,
-            department_id: user.department_id || null,
-          })
-        }
-        t.assignees?.forEach(a => {
-          if (a.id) assigneeMap.set(a.id, a)
-        })
-        
-        // Update existing task with merged assignees (this updates the same object in both maps)
-        existingByKey.assignees = Array.from(assigneeMap.values())
-        if (!existingByKey.assigned_to && t.assigned_to) {
-          existingByKey.assigned_to = t.assigned_to
-        }
-        // Also add this task's ID to taskMapById so we don't process it again
-        taskMapById.set(t.id, existingByKey)
-        // Don't add this task to taskMapByKey, we've merged it into existingByKey
-        continue
-      }
-      
-      // New unique task - add it to both maps (same object reference)
-      const taskCopy = { ...t }
-      taskMapById.set(t.id, taskCopy)
-      taskMapByKey.set(taskKey, taskCopy)
-    }
-    
-    // Use tasks from ID map (they're the source of truth)
-    // Use a Set to ensure we only get unique task objects (in case multiple IDs point to same object)
-    const uniqueTasks = new Set<Task>(taskMapById.values())
-    const deduplicatedTasks = Array.from(uniqueTasks)
-    
-    // Now categorize the deduplicated tasks
-    for (const t of deduplicatedTasks) {
       if (t.is_bllok) {
         blocked.push(t)
       } else if (t.is_r1) {
@@ -3331,6 +3169,32 @@ export default function DepartmentKanban() {
       toast.success("Project created")
     } finally {
       setCreatingProject(false)
+    }
+  }
+
+  const deleteProject = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId)
+    const projectLabel = project?.title || project?.name || "this project"
+    if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
+
+    setDeletingProjectId(projectId)
+    try {
+      const res = await apiFetch(`/projects/${projectId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete project"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      toast.success("Project deleted")
+    } finally {
+      setDeletingProjectId((prev) => (prev === projectId ? null : prev))
     }
   }
 
@@ -3919,7 +3783,18 @@ export default function DepartmentKanban() {
             {activeTab === "projects" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
+                    {user?.role === "ADMIN" && (
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={showTemplates}
+                          onCheckedChange={(checked) => setShowTemplates(checked === true)}
+                        />
+                        <span className="text-muted-foreground">Show Templates</span>
+                      </label>
+                    )}
+                  </div>
                   {canManage && (
                     <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                       <DialogTrigger asChild><Button className="rounded-xl bg-slate-900 text-white hover:bg-slate-800">+ New Project</Button></DialogTrigger>
@@ -4110,6 +3985,21 @@ export default function DepartmentKanban() {
                               </Badge>
                             </div>
                             <div className="text-right flex-shrink-0">
+                              {canDeleteProjects ? (
+                                <button
+                                  type="button"
+                                  className="mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-rose-200 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                                  disabled={deletingProjectId === project.id}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    void deleteProject(project.id)
+                                  }}
+                                  title="Delete project"
+                                >
+                                  {deletingProjectId === project.id ? "…" : "×"}
+                                </button>
+                              ) : null}
                               <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Tasks</div>
                               <div className="text-lg font-semibold text-slate-900 dark:text-white">{tasks.length}</div>
                             </div>
@@ -4730,7 +4620,8 @@ export default function DepartmentKanban() {
                         <div className="space-y-2">
                           {todayNoProjectTasks.map((task) => {
                             const typeLabel = noProjectTypeLabel(task)
-                            const isCompleted = task.completed_at != null || task.status === "DONE"
+                            const statusValue = taskStatusValue(task)
+                            const isCompleted = statusValue === "DONE"
                             // Collect all assignees: from assigned_to and assignees array
                             const assigneeIds = new Set<string>()
                             if (task.assigned_to) {
@@ -4766,11 +4657,9 @@ export default function DepartmentKanban() {
                                     <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                       {task.title}
                                     </div>
-                                    {isCompleted && (
-                                      <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
-                                        Done
-                                      </Badge>
-                                    )}
+                                    <Badge className={`border text-xs ${statusBadgeClasses(statusValue)}`}>
+                                      {reportStatusLabel(statusValue)}
+                                    </Badge>
                                   </div>
                                   <div className="flex items-center gap-1">
                                     {Array.from(assigneeIds).map((userId) => {
@@ -5359,11 +5248,13 @@ export default function DepartmentKanban() {
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
                         {row.items.map((t) => {
-                          const isCompleted = t.completed_at != null || t.status === "DONE"
+                          const statusValue = taskStatusValue(t)
+                          const isCompleted = statusValue === "DONE"
                           return (
                           <Link
                             key={t.id}
-                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(returnToTasks)}`}
+                            id={`task-${t.id}`}
+                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
                             className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
                               isCompleted 
                                 ? "border-green-500 bg-green-50/30 opacity-75" 
@@ -5380,11 +5271,9 @@ export default function DepartmentKanban() {
                                 <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                   {t.title}
                                 </div>
-                                {isCompleted && (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">
-                                    Done
-                                  </Badge>
-                                )}
+                                <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
+                                  {reportStatusLabel(statusValue)}
+                                </Badge>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
@@ -5891,20 +5780,35 @@ export default function DepartmentKanban() {
                     <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Internal Notes</h2>
                     <p className="text-sm text-slate-500">Peer-to-peer notes between colleagues.</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={showDoneInternalNotes}
-                        onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
-                      />
-                      <span>Show Done</span>
-                    </label>
-                    <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
-                    </DialogTrigger>
-                    <DialogContent className="rounded-2xl sm:max-w-xl">
+                <div className="flex items-center gap-3">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={showDoneInternalNotes}
+                      onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
+                    />
+                    <span>Show Done</span>
+                  </label>
+                  {viewMode === "department" ? (
+                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl text-sm">
+                        <SelectValue placeholder="All users" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All users</SelectItem>
+                        {departmentUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.username || "-"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
+                  </DialogTrigger>
+                  <DialogContent className="rounded-2xl sm:max-w-xl">
                       <DialogHeader>
                         <DialogTitle>Create Internal Note</DialogTitle>
                       </DialogHeader>
@@ -6076,6 +5980,7 @@ export default function DepartmentKanban() {
                               if (isAdminOrManager) return group.notes.map((n) => n.id)
                               return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
                             })()
+                            const canUpdateDone = noteIdsForAction.length > 0
 
                               return (
                                 <tr
@@ -6099,21 +6004,23 @@ export default function DepartmentKanban() {
                                   <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
                                     <div className="flex items-center justify-center gap-2">
                                       {!groupIsDone ? (
+                                        canUpdateDone ? (
                                         <Button
                                           variant="outline"
                                           size="sm"
                                           className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                                          disabled={noteIdsForAction.length === 0 || noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                          disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
                                           onClick={() => void updateInternalNoteDone(noteIdsForAction, true)}
                                         >
                                           <Check className="h-3.5 w-3.5 mr-1" />
                                           Mark as done
                                         </Button>
+                                        ) : null
                                       ) : (
                                         <div className="flex items-center gap-1">
                                           <span className="text-xs text-emerald-700">Done</span>
                                           <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                          {noteIdsForAction.length ? (
+                                          {canUpdateDone ? (
                                             <Button
                                               variant="outline"
                                               size="icon"

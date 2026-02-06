@@ -7264,11 +7264,7 @@ export default function PcmProjectPage() {
                     <div className="col-span-1">
                       <Select value={controlAssignee} onValueChange={setControlAssignee}>
                         <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-">
-                            {controlAssignee === "__unassigned__" 
-                              ? "-" 
-                              : memberLabel(controlAssignee)}
-                          </SelectValue>
+                          <SelectValue placeholder="-" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
@@ -7329,11 +7325,7 @@ export default function PcmProjectPage() {
                     <div className="col-span-1">
                       <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
                         <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-">
-                            {controlKoUserId === "__unassigned__" 
-                              ? "-" 
-                              : memberLabel(controlKoUserId)}
-                          </SelectValue>
+                          <SelectValue placeholder="-" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__unassigned__">-</SelectItem>
@@ -7648,11 +7640,7 @@ export default function PcmProjectPage() {
                             {isEditing ? (
                               <Select value={editingTaskKoUserId} onValueChange={setEditingTaskKoUserId}>
                                 <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="-">
-                                    {editingTaskKoUserId === "__unassigned__" 
-                                      ? "-" 
-                                      : memberLabel(editingTaskKoUserId)}
-                                  </SelectValue>
+                                  <SelectValue placeholder="-" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__unassigned__">-</SelectItem>
