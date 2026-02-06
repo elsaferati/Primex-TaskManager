@@ -19,6 +19,7 @@ from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project import Project
+from app.models.task import Task
 from app.models.user import User
 from app.models.enums import ChecklistItemType
 from app.schemas.checklist_item import (
@@ -687,6 +688,21 @@ async def create_checklist_item(
             ).scalar_one_or_none()
             if project and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
+        if checklist.task_id is not None:
+            task = (
+                await db.execute(select(Task).where(Task.id == checklist.task_id))
+            ).scalar_one_or_none()
+            if task is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+            if task.project_id is None:
+                if user.role not in ("ADMIN", "MANAGER"):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            else:
+                task_project = (
+                    await db.execute(select(Project).where(Project.id == task.project_id))
+                ).scalar_one_or_none()
+                if task_project and task_project.department_id is not None:
+                    ensure_department_access(user, task_project.department_id)
 
     if checklist is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Checklist resolution failed")
@@ -883,6 +899,21 @@ async def update_checklist_item(
             ).scalar_one_or_none()
             if project and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
+        if checklist and checklist.task_id is not None:
+            task = (
+                await db.execute(select(Task).where(Task.id == checklist.task_id))
+            ).scalar_one_or_none()
+            if task is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+            if task.project_id is None:
+                if user.role not in ("ADMIN", "MANAGER"):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            else:
+                task_project = (
+                    await db.execute(select(Project).where(Project.id == task.project_id))
+                ).scalar_one_or_none()
+                if task_project and task_project.department_id is not None:
+                    ensure_department_access(user, task_project.department_id)
 
     # Update fields
     if payload.item_type is not None:
@@ -1001,8 +1032,6 @@ async def delete_checklist_item(
     item = (await db.execute(select(ChecklistItem).where(ChecklistItem.id == item_id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
-    ensure_manager_or_admin(user)
-
     if item.checklist_id is not None:
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
@@ -1016,6 +1045,24 @@ async def delete_checklist_item(
             ).scalar_one_or_none()
             if project and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
+            ensure_manager_or_admin(user)
+        if checklist and checklist.task_id is not None:
+            task = (
+                await db.execute(select(Task).where(Task.id == checklist.task_id))
+            ).scalar_one_or_none()
+            if task is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+            if task.project_id is None:
+                if user.role not in ("ADMIN", "MANAGER"):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            else:
+                task_project = (
+                    await db.execute(select(Project).where(Project.id == task.project_id))
+                ).scalar_one_or_none()
+                if task_project and task_project.department_id is not None:
+                    ensure_department_access(user, task_project.department_id)
+    else:
+        ensure_manager_or_admin(user)
 
     deleted_checklist_id = item.checklist_id
     deleted_position = item.position

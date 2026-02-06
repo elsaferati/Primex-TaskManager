@@ -154,14 +154,132 @@ export default function CommonViewPage() {
     const d = fromISODate(s)
     return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
   }
-  const formatTime = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  const formatTime = (d: Date) =>
+    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+  const parseTimeValue = (value: string) => {
+    const match = /^(\d{2}):(\d{2})$/.exec(value)
+    if (!match) return null
+    const hours = Number(match[1])
+    const minutes = Number(match[2])
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+    return { hours, minutes }
+  }
+  const toMeetingTimeValue = (value?: string | null) => {
+    if (!value) return ""
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+    return date.toISOString().slice(11, 16)
+  }
+  const formatTimeLabel = (value?: string) => {
+    if (!value) return ""
+    const normalized = value.trim()
+    if (!normalized || normalized.toLowerCase() === "tbd") return normalized
+    if (/am|pm/i.test(normalized)) return normalized
+    if (normalized.includes("-")) {
+      const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
+      const startLabel = formatTimeLabel(startRaw)
+      const endLabel = formatTimeLabel(endRaw)
+      if (startLabel && endLabel) return `${startLabel} - ${endLabel}`
+      return normalized
+    }
+    const parsed = parseTimeValue(normalized)
+    if (!parsed) return normalized
+    const temp = new Date()
+    temp.setHours(parsed.hours, parsed.minutes, 0, 0)
+    return formatTime(temp)
+  }
+  const computeNextOccurrenceDate = (params: {
+    recurrenceType: "weekly" | "monthly" | "yearly"
+    daysOfWeek: number[]
+    daysOfMonth: number[]
+    timeValue: string
+    monthOfYear?: number
+  }) => {
+    const parsedTime = parseTimeValue(params.timeValue)
+    if (!parsedTime) return null
+    const now = new Date()
+    const { hours, minutes } = parsedTime
+
+    if (params.recurrenceType === "weekly") {
+      if (!params.daysOfWeek.length) return null
+      const daySet = new Set(params.daysOfWeek.map((d) => (d + 1) % 7))
+      for (let offset = 0; offset < 14; offset++) {
+        const candidate = new Date(now)
+        candidate.setDate(now.getDate() + offset)
+        candidate.setHours(hours, minutes, 0, 0)
+        if (!daySet.has(candidate.getDay())) continue
+        if (offset === 0 && candidate.getTime() < now.getTime()) continue
+        return candidate
+      }
+      return null
+    }
+
+    if (params.recurrenceType === "monthly") {
+      if (!params.daysOfMonth.length) return null
+      const sortedDays = [...new Set(params.daysOfMonth)].sort((a, b) => a - b)
+      for (let monthOffset = 0; monthOffset < 12; monthOffset++) {
+        const base = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+        const year = base.getFullYear()
+        const month = base.getMonth()
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+        for (const day of sortedDays) {
+          if (day < 1 || day > daysInMonth) continue
+          if (monthOffset === 0 && day < now.getDate()) continue
+          const candidate = new Date(year, month, day, hours, minutes, 0, 0)
+          if (monthOffset === 0 && day === now.getDate() && candidate.getTime() < now.getTime()) {
+            continue
+          }
+          return candidate
+        }
+      }
+    }
+
+    if (params.recurrenceType === "yearly") {
+      const day = params.daysOfMonth[0]
+      const month = params.monthOfYear ?? 0
+      if (!day || month < 0 || month > 11) return null
+      const makeCandidate = (year: number) => {
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+        if (day < 1 || day > daysInMonth) return null
+        return new Date(year, month, day, hours, minutes, 0, 0)
+      }
+      const current = makeCandidate(now.getFullYear())
+      if (current && current.getTime() >= now.getTime()) return current
+      return makeCandidate(now.getFullYear() + 1)
+    }
+
+    return null
+  }
+  const computeNextMeetingOccurrence = (meeting: Meeting) => {
+    const recurrenceType = meeting.recurrence_type
+    if (!recurrenceType || recurrenceType === "none") return null
+    const timeValue = toMeetingTimeValue(meeting.starts_at)
+    if (!timeValue) return null
+    return computeNextOccurrenceDate({
+      recurrenceType: recurrenceType as "weekly" | "monthly" | "yearly",
+      daysOfWeek: meeting.recurrence_days_of_week || [],
+      daysOfMonth: meeting.recurrence_days_of_month || [],
+      timeValue,
+      monthOfYear: meeting.starts_at ? new Date(meeting.starts_at).getMonth() : undefined,
+    })
+  }
+  const resolveExternalMeetingDate = (meeting: Meeting) => {
+    const next = computeNextMeetingOccurrence(meeting)
+    if (next) return next
+    if (!meeting.starts_at) return null
+    const date = new Date(meeting.starts_at)
+    if (Number.isNaN(date.getTime())) return null
+    return date
+  }
   const formatExternalMeetingWhen = (meeting: Meeting) => {
-    const source = meeting.starts_at || meeting.created_at
+    const resolvedDate = resolveExternalMeetingDate(meeting)
+    const source = resolvedDate ? resolvedDate.toISOString() : meeting.created_at
     if (!source) return "Date TBD"
-    const date = new Date(source)
+    const date = resolvedDate ?? new Date(source)
     if (Number.isNaN(date.getTime())) return "Date TBD"
     const dateLabel = formatDateHuman(toISODate(date))
-    const timeLabel = meeting.starts_at ? formatTime(date) : "TBD"
+    const timeLabel = resolvedDate ? formatTime(date) : meeting.starts_at ? formatTime(date) : "TBD"
     return `${dateLabel} ${timeLabel}`
   }
   const alWeekdayShort = (d: Date) => {
@@ -221,13 +339,27 @@ export default function CommonViewPage() {
   const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
   const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
   const [externalMeetingStartsAt, setExternalMeetingStartsAt] = React.useState("")
+  const [externalMeetingStartTime, setExternalMeetingStartTime] = React.useState("")
+  const [externalMeetingRecurrenceType, setExternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
+  const [externalMeetingRecurrenceDaysOfWeek, setExternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [externalMeetingRecurrenceDaysOfMonth, setExternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [externalMeetingRecurrenceMonth, setExternalMeetingRecurrenceMonth] = React.useState("1")
+  const [externalMeetingRecurrenceDay, setExternalMeetingRecurrenceDay] = React.useState("1")
   const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
+  const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
   const [editingExternalMeetingTitle, setEditingExternalMeetingTitle] = React.useState("")
   const [editingExternalMeetingPlatform, setEditingExternalMeetingPlatform] = React.useState("")
   const [editingExternalMeetingStartsAt, setEditingExternalMeetingStartsAt] = React.useState("")
+  const [editingExternalMeetingStartTime, setEditingExternalMeetingStartTime] = React.useState("")
+  const [editingExternalMeetingRecurrenceType, setEditingExternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
+  const [editingExternalMeetingRecurrenceDaysOfWeek, setEditingExternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [editingExternalMeetingRecurrenceDaysOfMonth, setEditingExternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [editingExternalMeetingRecurrenceMonth, setEditingExternalMeetingRecurrenceMonth] = React.useState("1")
+  const [editingExternalMeetingRecurrenceDay, setEditingExternalMeetingRecurrenceDay] = React.useState("1")
   const [editingExternalMeetingDepartmentId, setEditingExternalMeetingDepartmentId] = React.useState("")
+  const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
   const [externalMeetingChecklist, setExternalMeetingChecklist] = React.useState<MeetingChecklist | null>(null)
@@ -1185,11 +1317,10 @@ export default function CommonViewPage() {
           const meetings = (await meetingsRes.json()) as Meeting[]
           if (mounted) setExternalMeetings(meetings)
             for (const meeting of meetings) {
-              const startsAt = meeting.starts_at ? new Date(meeting.starts_at) : null
-              const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null
+              const resolvedDate = resolveExternalMeetingDate(meeting)
               const createdAt = new Date(meeting.created_at)
               const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
-              const dateSource = validStartsAt ?? validCreatedAt
+              const dateSource = resolvedDate ?? validCreatedAt
               if (!dateSource) continue
 
               const ownerUser = meeting.created_by
@@ -1200,7 +1331,7 @@ export default function CommonViewPage() {
               allData.external.push({
                 title: meeting.title || "External meeting",
                 date: toISODate(dateSource),
-                time: validStartsAt ? formatTime(validStartsAt) : "TBD",
+                time: resolvedDate ? formatTime(resolvedDate) : "TBD",
                 platform: meeting.platform?.trim() || "TBD",
                 owner: ownerName,
               })
@@ -1247,7 +1378,65 @@ export default function CommonViewPage() {
     const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date))
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date))
     const personal = commonData.personal.filter((x) => inSelectedDates(x.date))
-    const external = commonData.external.filter((x) => inSelectedDates(x.date))
+    const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
+    const getMeetingOwnerName = (meeting: Meeting) => {
+      const ownerUser = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
+      return ownerUser?.full_name || ownerUser?.username || "Unknown"
+    }
+    const getMeetingTimeLabel = (meeting: Meeting, date: Date | null) => {
+      if (!meeting.starts_at) return "TBD"
+      if (date) return formatTime(date)
+      const timeValue = toMeetingTimeValue(meeting.starts_at)
+      return timeValue || "TBD"
+    }
+    const meetingOccursOnDate = (meeting: Meeting, dateStr: string) => {
+      const date = fromISODate(dateStr)
+      if (Number.isNaN(date.getTime())) return false
+      if (meeting.recurrence_type === "weekly") {
+        const dayIndex = (date.getDay() + 6) % 7
+        return (meeting.recurrence_days_of_week || []).includes(dayIndex)
+      }
+      if (meeting.recurrence_type === "monthly") {
+        return (meeting.recurrence_days_of_month || []).includes(date.getDate())
+      }
+      if (meeting.recurrence_type === "yearly") {
+        const month = meeting.starts_at ? new Date(meeting.starts_at).getMonth() + 1 : null
+        const day = meeting.recurrence_days_of_month?.[0] || (meeting.starts_at ? new Date(meeting.starts_at).getDate() : null)
+        if (!month || !day) return false
+        return date.getMonth() + 1 === month && date.getDate() === day
+      }
+      return false
+    }
+    const external: ExternalItem[] = []
+    for (const meeting of externalMeetings) {
+      const ownerName = getMeetingOwnerName(meeting)
+      const platform = meeting.platform?.trim() || "TBD"
+      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
+        const timeLabel = getMeetingTimeLabel(meeting, null)
+        for (const dateStr of datesToUse) {
+          if (!meetingOccursOnDate(meeting, dateStr)) continue
+          external.push({
+            title: meeting.title || "External meeting",
+            date: dateStr,
+            time: timeLabel,
+            platform,
+            owner: ownerName,
+          })
+        }
+      } else {
+        const resolvedDate = resolveExternalMeetingDate(meeting)
+        if (!resolvedDate) continue
+        const dateStr = toISODate(resolvedDate)
+        if (!inSelectedDates(dateStr)) continue
+        external.push({
+          title: meeting.title || "External meeting",
+          date: dateStr,
+          time: getMeetingTimeLabel(meeting, resolvedDate),
+          platform,
+          owner: ownerName,
+        })
+      }
+    }
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date))
     const problems = commonData.problems.filter((x) => inSelectedDates(x.date))
     const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date))
@@ -1256,7 +1445,7 @@ export default function CommonViewPage() {
     )
 
     return { late, absent, leave, blocked, oneH, personal, external, r1, problems, feedback, priority }
-  }, [commonData, selectedDates])
+  }, [commonData, selectedDates, externalMeetings, users, weekISOs])
 
   // Common people for priority (from users)
   const commonPeople = React.useMemo(() => {
@@ -1560,11 +1749,62 @@ export default function CommonViewPage() {
     }
     setCreatingExternalMeeting(true)
     try {
-      const startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
+      let startsAt: string | null = null
+      if (externalMeetingRecurrenceType === "none") {
+        startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
+      } else {
+        if (!externalMeetingStartTime) {
+          alert("Time is required for recurring meetings.")
+          return
+        }
+        if (externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (externalMeetingRecurrenceType === "monthly" && externalMeetingRecurrenceDaysOfMonth.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (externalMeetingRecurrenceType === "yearly") {
+          if (!externalMeetingRecurrenceMonth || !externalMeetingRecurrenceDay) {
+            alert("Select month and date.")
+            return
+          }
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: externalMeetingRecurrenceType,
+          daysOfWeek: externalMeetingRecurrenceDaysOfWeek,
+          daysOfMonth:
+            externalMeetingRecurrenceType === "yearly"
+              ? [Number(externalMeetingRecurrenceDay)]
+              : externalMeetingRecurrenceDaysOfMonth,
+          timeValue: externalMeetingStartTime,
+          monthOfYear:
+            externalMeetingRecurrenceType === "yearly"
+              ? Math.max(0, Math.min(11, Number(externalMeetingRecurrenceMonth) - 1))
+              : undefined,
+        })
+        if (!next) {
+          alert("Failed to compute next occurrence.")
+          return
+        }
+        startsAt = next.toISOString()
+      }
       const payload = {
         title: externalMeetingTitle.trim(),
         platform: externalMeetingPlatform.trim() || null,
         starts_at: startsAt,
+        recurrence_type: externalMeetingRecurrenceType === "none" ? null : externalMeetingRecurrenceType,
+        recurrence_days_of_week:
+          externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length > 0
+            ? externalMeetingRecurrenceDaysOfWeek
+            : null,
+        recurrence_days_of_month:
+          externalMeetingRecurrenceType === "monthly" && externalMeetingRecurrenceDaysOfMonth.length > 0
+            ? externalMeetingRecurrenceDaysOfMonth
+            : externalMeetingRecurrenceType === "yearly" && externalMeetingRecurrenceDay
+              ? [Number(externalMeetingRecurrenceDay)]
+              : null,
         department_id: departmentId,
         project_id: null,
       }
@@ -1598,6 +1838,12 @@ export default function CommonViewPage() {
       setExternalMeetingTitle("")
       setExternalMeetingPlatform("")
       setExternalMeetingStartsAt("")
+      setExternalMeetingStartTime("")
+      setExternalMeetingRecurrenceType("none")
+      setExternalMeetingRecurrenceDaysOfWeek([])
+      setExternalMeetingRecurrenceDaysOfMonth([])
+      setExternalMeetingRecurrenceMonth("1")
+      setExternalMeetingRecurrenceDay("1")
       // Reset checklist after successful creation
       if (externalMeetingChecklist?.items) {
         const resetMap = new Map<string, boolean>()
@@ -1614,6 +1860,12 @@ export default function CommonViewPage() {
     externalMeetingTitle,
     externalMeetingPlatform,
     externalMeetingStartsAt,
+    externalMeetingStartTime,
+    externalMeetingRecurrenceType,
+    externalMeetingRecurrenceDaysOfWeek,
+    externalMeetingRecurrenceDaysOfMonth,
+    externalMeetingRecurrenceMonth,
+    externalMeetingRecurrenceDay,
     externalMeetingDepartmentId,
     user?.department_id,
     user?.email,
@@ -1643,9 +1895,26 @@ export default function CommonViewPage() {
         .toISOString()
         .slice(0, 16)
       setEditingExternalMeetingStartsAt(localDateTime)
+      setEditingExternalMeetingStartTime(toMeetingTimeValue(meeting.starts_at))
     } else {
       setEditingExternalMeetingStartsAt("")
+      setEditingExternalMeetingStartTime("")
     }
+    setEditingExternalMeetingRecurrenceType(
+      (meeting.recurrence_type as "none" | "weekly" | "monthly" | "yearly") || "none"
+    )
+    setEditingExternalMeetingRecurrenceDaysOfWeek(meeting.recurrence_days_of_week || [])
+    setEditingExternalMeetingRecurrenceDaysOfMonth(meeting.recurrence_days_of_month || [])
+    if (meeting.starts_at) {
+      const startDate = new Date(meeting.starts_at)
+      if (!Number.isNaN(startDate.getTime())) {
+        setEditingExternalMeetingRecurrenceMonth(String(startDate.getMonth() + 1))
+        setEditingExternalMeetingRecurrenceDay(String(startDate.getDate()))
+      }
+    }
+    setShowEditWeekendDays(
+      (meeting.recurrence_days_of_week || []).some((day) => day >= 5)
+    )
     setEditingExternalMeetingDepartmentId(meeting.department_id || "")
   }, [canEditExternalMeeting])
 
@@ -1654,20 +1923,78 @@ export default function CommonViewPage() {
     setEditingExternalMeetingTitle("")
     setEditingExternalMeetingPlatform("")
     setEditingExternalMeetingStartsAt("")
+    setEditingExternalMeetingStartTime("")
+    setEditingExternalMeetingRecurrenceType("none")
+    setEditingExternalMeetingRecurrenceDaysOfWeek([])
+    setEditingExternalMeetingRecurrenceDaysOfMonth([])
+    setEditingExternalMeetingRecurrenceMonth("1")
+    setEditingExternalMeetingRecurrenceDay("1")
     setEditingExternalMeetingDepartmentId("")
+    setShowEditWeekendDays(false)
   }, [])
 
   const saveExternalMeeting = React.useCallback(async () => {
     if (!editingExternalMeetingId || !editingExternalMeetingTitle.trim()) return
     setUpdatingExternalMeeting(true)
     try {
-      const startsAt = editingExternalMeetingStartsAt
-        ? new Date(editingExternalMeetingStartsAt).toISOString()
-        : null
+      let startsAt: string | null = null
+      if (editingExternalMeetingRecurrenceType === "none") {
+        startsAt = editingExternalMeetingStartsAt
+          ? new Date(editingExternalMeetingStartsAt).toISOString()
+          : null
+      } else {
+        if (!editingExternalMeetingStartTime) {
+          alert("Time is required for recurring meetings.")
+          return
+        }
+        if (editingExternalMeetingRecurrenceType === "weekly" && editingExternalMeetingRecurrenceDaysOfWeek.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (editingExternalMeetingRecurrenceType === "monthly" && editingExternalMeetingRecurrenceDaysOfMonth.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (editingExternalMeetingRecurrenceType === "yearly") {
+          if (!editingExternalMeetingRecurrenceMonth || !editingExternalMeetingRecurrenceDay) {
+            alert("Select month and date.")
+            return
+          }
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: editingExternalMeetingRecurrenceType,
+          daysOfWeek: editingExternalMeetingRecurrenceDaysOfWeek,
+          daysOfMonth:
+            editingExternalMeetingRecurrenceType === "yearly"
+              ? [Number(editingExternalMeetingRecurrenceDay)]
+              : editingExternalMeetingRecurrenceDaysOfMonth,
+          timeValue: editingExternalMeetingStartTime,
+          monthOfYear:
+            editingExternalMeetingRecurrenceType === "yearly"
+              ? Math.max(0, Math.min(11, Number(editingExternalMeetingRecurrenceMonth) - 1))
+              : undefined,
+        })
+        if (!next) {
+          alert("Failed to compute next occurrence.")
+          return
+        }
+        startsAt = next.toISOString()
+      }
       const payload = {
         title: editingExternalMeetingTitle.trim(),
         platform: editingExternalMeetingPlatform.trim() || null,
         starts_at: startsAt,
+        recurrence_type: editingExternalMeetingRecurrenceType === "none" ? null : editingExternalMeetingRecurrenceType,
+        recurrence_days_of_week:
+          editingExternalMeetingRecurrenceType === "weekly" && editingExternalMeetingRecurrenceDaysOfWeek.length > 0
+            ? editingExternalMeetingRecurrenceDaysOfWeek
+            : null,
+        recurrence_days_of_month:
+          editingExternalMeetingRecurrenceType === "monthly" && editingExternalMeetingRecurrenceDaysOfMonth.length > 0
+            ? editingExternalMeetingRecurrenceDaysOfMonth
+            : editingExternalMeetingRecurrenceType === "yearly" && editingExternalMeetingRecurrenceDay
+              ? [Number(editingExternalMeetingRecurrenceDay)]
+              : null,
         department_id: editingExternalMeetingDepartmentId || null,
       }
       const res = await apiFetch(`/meetings/${editingExternalMeetingId}`, {
@@ -1706,6 +2033,12 @@ export default function CommonViewPage() {
     editingExternalMeetingTitle,
     editingExternalMeetingPlatform,
     editingExternalMeetingStartsAt,
+    editingExternalMeetingStartTime,
+    editingExternalMeetingRecurrenceType,
+    editingExternalMeetingRecurrenceDaysOfWeek,
+    editingExternalMeetingRecurrenceDaysOfMonth,
+    editingExternalMeetingRecurrenceMonth,
+    editingExternalMeetingRecurrenceDay,
     editingExternalMeetingDepartmentId,
     commonDepartmentId,
     apiFetch,
@@ -1805,7 +2138,7 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent personal",
     }))
     const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
-      title: `${x.title} ${x.time}`.trim(),
+      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)} - ${x.platform}`,
       accentClass: "swimlane-accent external",
@@ -4399,13 +4732,154 @@ export default function CommonViewPage() {
                     value={externalMeetingPlatform}
                     onChange={(e) => setExternalMeetingPlatform(e.target.value)}
                   />
-                  <input
-                    className="input"
-                    type="datetime-local"
-                    value={externalMeetingStartsAt}
-                    onChange={(e) => setExternalMeetingStartsAt(e.target.value)}
-                  />
+                  {externalMeetingRecurrenceType === "none" ? (
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      value={externalMeetingStartsAt}
+                      onChange={(e) => setExternalMeetingStartsAt(e.target.value)}
+                    />
+                  ) : (
+                    <input
+                      className="input"
+                      type="time"
+                      value={externalMeetingStartTime}
+                      onChange={(e) => setExternalMeetingStartTime(e.target.value)}
+                    />
+                  )}
                 </div>
+                <div className="external-meeting-row">
+                  <select
+                    className="input"
+                    value={externalMeetingRecurrenceType}
+                    onChange={(e) => setExternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                  >
+                    <option value="none">One time</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                    <option value="yearly">Every year</option>
+                  </select>
+                </div>
+                {externalMeetingRecurrenceType === "weekly" ? (
+                  <>
+                    <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>
+                      <button
+                        className="btn-surface"
+                        type="button"
+                        onClick={() => setShowWeekendDays((prev) => !prev)}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          backgroundColor: showWeekendDays ? "#1d4ed8" : "#eef2ff",
+                          borderColor: "#3b82f6",
+                          color: showWeekendDays ? "#ffffff" : "#1d4ed8",
+                        }}
+                      >
+                        {showWeekendDays ? "Hide weekend days" : "Show weekend days"}
+                      </button>
+                    </div>
+                    <div className="external-meeting-row" style={{ flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                        .map((day, idx) => ({ day, idx }))
+                        .filter(({ idx }) => showWeekendDays || idx < 5)
+                        .map(({ day, idx }) => (
+                          <label key={day} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                            <input
+                              type="checkbox"
+                              checked={externalMeetingRecurrenceDaysOfWeek.includes(idx)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setExternalMeetingRecurrenceDaysOfWeek((prev) => [...prev, idx])
+                                } else {
+                                  setExternalMeetingRecurrenceDaysOfWeek((prev) => prev.filter((d) => d !== idx))
+                                }
+                              }}
+                            />
+                            {day}
+                          </label>
+                        ))}
+                    </div>
+                  </>
+                ) : null}
+                {externalMeetingRecurrenceType === "monthly" ? (
+                  <div
+                    className="external-meeting-row"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                      gap: "6px",
+                    }}
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                      <label
+                        key={day}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "12px",
+                          padding: "4px 6px",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          backgroundColor: externalMeetingRecurrenceDaysOfMonth.includes(day) ? "#eef2ff" : "#ffffff",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={externalMeetingRecurrenceDaysOfMonth.includes(day)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setExternalMeetingRecurrenceDaysOfMonth((prev) => [...prev, day])
+                            } else {
+                              setExternalMeetingRecurrenceDaysOfMonth((prev) => prev.filter((d) => d !== day))
+                            }
+                          }}
+                        />
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{day}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                {externalMeetingRecurrenceType === "yearly" ? (
+                  <div className="external-meeting-row" style={{ gap: "8px" }}>
+                    <select
+                      className="input"
+                      value={externalMeetingRecurrenceMonth}
+                      onChange={(e) => setExternalMeetingRecurrenceMonth(e.target.value)}
+                    >
+                      {[
+                        "January",
+                        "February",
+                        "March",
+                        "April",
+                        "May",
+                        "June",
+                        "July",
+                        "August",
+                        "September",
+                        "October",
+                        "November",
+                        "December",
+                      ].map((label, idx) => (
+                        <option key={label} value={String(idx + 1)}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      value={externalMeetingRecurrenceDay}
+                      onChange={(e) => setExternalMeetingRecurrenceDay(e.target.value)}
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                        <option key={day} value={String(day)}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 <div className="external-meeting-row">
                   <select
                     className="input"
@@ -4418,13 +4892,15 @@ export default function CommonViewPage() {
                     </option>
                     {departments.map((dep) => (
                       <option key={dep.id} value={dep.id}>
-                        {dep.name}
+                        {dep.name === "Project Content Manager" ? "Product Content" : dep.name}
                       </option>
                     ))}
                   </select>
                 </div>
                 {!canSelectExternalDepartment && externalMeetingDepartment ? (
-                  <div className="external-meeting-hint">Department: {externalMeetingDepartment.name}</div>
+                  <div className="external-meeting-hint">
+                    Department: {externalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : externalMeetingDepartment.name}
+                  </div>
                 ) : null}
                 <div style={{ marginTop: "16px" }}>
                   <button
@@ -4629,7 +5105,16 @@ export default function CommonViewPage() {
                     type="button"
                     disabled={!canCreateExternalMeeting || creatingExternalMeeting}
                     onClick={() => void submitExternalMeeting()}
-                    style={{ width: "100%" }}
+                    style={{
+                      width: "100%",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      padding: "8px 12px",
+                      backgroundColor: "#2563eb",
+                      borderColor: "#1d4ed8",
+                      boxShadow: "0 6px 14px rgba(37, 99, 235, 0.25)",
+                      color: "#ffffff",
+                    }}
                   >
                     {creatingExternalMeeting ? "Saving..." : "Add"}
                   </button>
@@ -4664,13 +5149,154 @@ export default function CommonViewPage() {
                                 value={editingExternalMeetingPlatform}
                                 onChange={(e) => setEditingExternalMeetingPlatform(e.target.value)}
                               />
-                              <input
-                                className="input"
-                                type="datetime-local"
-                                value={editingExternalMeetingStartsAt}
-                                onChange={(e) => setEditingExternalMeetingStartsAt(e.target.value)}
-                              />
+                              {editingExternalMeetingRecurrenceType === "none" ? (
+                                <input
+                                  className="input"
+                                  type="datetime-local"
+                                  value={editingExternalMeetingStartsAt}
+                                  onChange={(e) => setEditingExternalMeetingStartsAt(e.target.value)}
+                                />
+                              ) : (
+                                <input
+                                  className="input"
+                                  type="time"
+                                  value={editingExternalMeetingStartTime}
+                                  onChange={(e) => setEditingExternalMeetingStartTime(e.target.value)}
+                                />
+                              )}
                             </div>
+                            <div className="external-meeting-row">
+                              <select
+                                className="input"
+                                value={editingExternalMeetingRecurrenceType}
+                                onChange={(e) => setEditingExternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                              >
+                                <option value="none">One time</option>
+                                <option value="weekly">Every week</option>
+                                <option value="monthly">Every month</option>
+                                <option value="yearly">Every year</option>
+                              </select>
+                            </div>
+                            {editingExternalMeetingRecurrenceType === "weekly" ? (
+                              <>
+                                <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => setShowEditWeekendDays((prev) => !prev)}
+                                    style={{
+                                      padding: "4px 10px",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      backgroundColor: showEditWeekendDays ? "#1d4ed8" : "#eef2ff",
+                                      borderColor: "#3b82f6",
+                                      color: showEditWeekendDays ? "#ffffff" : "#1d4ed8",
+                                    }}
+                                  >
+                                    {showEditWeekendDays ? "Hide weekend days" : "Show weekend days"}
+                                  </button>
+                                </div>
+                                <div className="external-meeting-row" style={{ flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                                    .map((day, idx) => ({ day, idx }))
+                                    .filter(({ idx }) => showEditWeekendDays || idx < 5)
+                                    .map(({ day, idx }) => (
+                                      <label key={day} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={editingExternalMeetingRecurrenceDaysOfWeek.includes(idx)}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setEditingExternalMeetingRecurrenceDaysOfWeek((prev) => [...prev, idx])
+                                            } else {
+                                              setEditingExternalMeetingRecurrenceDaysOfWeek((prev) => prev.filter((d) => d !== idx))
+                                            }
+                                          }}
+                                        />
+                                        {day}
+                                      </label>
+                                    ))}
+                                </div>
+                              </>
+                            ) : null}
+                            {editingExternalMeetingRecurrenceType === "monthly" ? (
+                              <div
+                                className="external-meeting-row"
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                                  gap: "6px",
+                                }}
+                              >
+                                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                  <label
+                                    key={day}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      fontSize: "12px",
+                                      padding: "4px 6px",
+                                      border: "1px solid #e2e8f0",
+                                      borderRadius: "8px",
+                                      backgroundColor: editingExternalMeetingRecurrenceDaysOfMonth.includes(day) ? "#eef2ff" : "#ffffff",
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={editingExternalMeetingRecurrenceDaysOfMonth.includes(day)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setEditingExternalMeetingRecurrenceDaysOfMonth((prev) => [...prev, day])
+                                        } else {
+                                          setEditingExternalMeetingRecurrenceDaysOfMonth((prev) => prev.filter((d) => d !== day))
+                                        }
+                                      }}
+                                    />
+                                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{day}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+                            {editingExternalMeetingRecurrenceType === "yearly" ? (
+                              <div className="external-meeting-row" style={{ gap: "8px" }}>
+                                <select
+                                  className="input"
+                                  value={editingExternalMeetingRecurrenceMonth}
+                                  onChange={(e) => setEditingExternalMeetingRecurrenceMonth(e.target.value)}
+                                >
+                                  {[
+                                    "January",
+                                    "February",
+                                    "March",
+                                    "April",
+                                    "May",
+                                    "June",
+                                    "July",
+                                    "August",
+                                    "September",
+                                    "October",
+                                    "November",
+                                    "December",
+                                  ].map((label, idx) => (
+                                    <option key={label} value={String(idx + 1)}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <select
+                                  className="input"
+                                  value={editingExternalMeetingRecurrenceDay}
+                                  onChange={(e) => setEditingExternalMeetingRecurrenceDay(e.target.value)}
+                                >
+                                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                    <option key={day} value={String(day)}>
+                                      {day}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : null}
                             <div className="external-meeting-row">
                               <select
                                 className="input"
@@ -4971,7 +5597,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(`${e.title} ${e.time}`.trim())}</span>
+                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>

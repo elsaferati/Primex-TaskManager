@@ -563,6 +563,7 @@ export default function DevelopmentProjectPage() {
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
+
   const submitCreateTask = async () => {
     if (!project) return
     if (!newTitle.trim()) {
