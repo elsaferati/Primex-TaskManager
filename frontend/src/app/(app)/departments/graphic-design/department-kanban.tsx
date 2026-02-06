@@ -1260,7 +1260,10 @@ export default function DepartmentKanban() {
   )
   const visibleInternalNotes = React.useMemo(() => {
     const base = isMineView && user?.id ? internalNotes.filter((n) => n.to_user_id === user.id) : internalNotes
-    const filteredByUser = selectedUserId === "__all__" ? base : base.filter((n) => n.to_user_id === selectedUserId)
+    const filteredByUser =
+      !isMineView && selectedUserId !== "__all__"
+        ? base.filter((n) => n.to_user_id === selectedUserId)
+        : base
     if (showDoneInternalNotes) return filteredByUser
     return filteredByUser.filter((n) => !n.is_done)
   }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
@@ -1298,7 +1301,7 @@ export default function DepartmentKanban() {
     if (isMineView && user?.id) {
       grouped = grouped.filter((group) => group.toUserIds.includes(user.id))
     }
-    if (selectedUserId !== "__all__") {
+    if (!isMineView && selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
     if (!showDoneInternalNotes) {
@@ -5709,20 +5712,35 @@ export default function DepartmentKanban() {
                     <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Internal Notes</h2>
                     <p className="text-sm text-slate-500">Peer-to-peer notes between colleagues.</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={showDoneInternalNotes}
-                        onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
-                      />
-                      <span>Show Done</span>
-                    </label>
-                    <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
-                    </DialogTrigger>
-                    <DialogContent className="rounded-2xl sm:max-w-xl">
+                <div className="flex items-center gap-3">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={showDoneInternalNotes}
+                      onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
+                    />
+                    <span>Show Done</span>
+                  </label>
+                  {viewMode === "department" ? (
+                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                      <SelectTrigger className="h-9 w-48 border-slate-200 focus:border-slate-400 rounded-xl text-sm">
+                        <SelectValue placeholder="All users" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All users</SelectItem>
+                        {departmentUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.username || "-"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="rounded-xl bg-slate-900 text-white">Create Internal Note</Button>
+                  </DialogTrigger>
+                  <DialogContent className="rounded-2xl sm:max-w-xl">
                       <DialogHeader>
                         <DialogTitle>Create Internal Note</DialogTitle>
                       </DialogHeader>
