@@ -1462,10 +1462,14 @@ export default function DepartmentKanban() {
       next = next.filter((p) => p.is_template)
     }
     if (viewMode === "mine" && user?.id) {
-      next = next.filter((p) => p.manager_id === user.id)
+      next = next.filter((p) => {
+        if (p.manager_id === user.id) return true
+        const members = projectMembers[p.id] || []
+        return members.some((m) => m.id === user.id)
+      })
     }
     return next
-  }, [projects, showTemplates, user?.id, viewMode])
+  }, [projects, projectMembers, showTemplates, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(
     () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
