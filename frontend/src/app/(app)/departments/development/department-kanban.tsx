@@ -911,6 +911,9 @@ export default function DepartmentKanban() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
+  const [projectMetaLookup, setProjectMetaLookup] = React.useState<
+    Map<string, { title: string; department_id?: string | null }>
+  >(new Map())
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const printContainerRef = React.useRef<HTMLDivElement | null>(null)
@@ -1726,6 +1729,44 @@ export default function DepartmentKanban() {
     isTaskAssignedToUser,
     isTaskOverlappingWeek,
   ])
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const missingIds = new Set<string>()
+      for (const task of todayProjectTasks) {
+        if (!task.project_id) continue
+        const projectId = String(task.project_id)
+        if (projects.some((p) => p.id === projectId)) continue
+        if (projectMetaLookup.has(projectId)) continue
+        missingIds.add(projectId)
+      }
+      if (!missingIds.size) return
+
+      const results = await Promise.all(
+        Array.from(missingIds).map(async (id) => {
+          const res = await apiFetch(`/projects/${encodeURIComponent(id)}`)
+          if (!res.ok) return null
+          const data = (await res.json()) as { id?: string; title?: string | null; name?: string | null; department_id?: string | null }
+          const title = data.title || data.name
+          if (!data.id || !title) return null
+          return { id: data.id, title, department_id: data.department_id ?? null }
+        })
+      )
+      if (cancelled) return
+      setProjectMetaLookup((prev) => {
+        const next = new Map(prev)
+        for (const item of results) {
+          if (!item) continue
+          next.set(item.id, { title: item.title, department_id: item.department_id })
+        }
+        return next
+      })
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, projects, projectMetaLookup, todayProjectTasks])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const matchesRange =
@@ -2741,13 +2782,26 @@ export default function DepartmentKanban() {
     }
     return Array.from(map.entries()).map(([projectId, tasks]) => {
       const project = projects.find((p) => p.id === projectId) || null
+      const department = project?.department_id
+        ? departments.find((d) => d.id === project.department_id) || null
+        : null
+      const meta = project ? null : (projectMetaLookup.get(projectId) || null)
+      const projectTitle = project?.title || project?.name || meta?.title || "Project"
+      const projectDepartmentId = project?.department_id || meta?.department_id || null
+      const projectDepartment = projectDepartmentId
+        ? departments.find((d) => d.id === projectDepartmentId) || null
+        : null
+      const name =
+        projectDepartment && department?.id && projectDepartment.id !== department.id
+          ? `${projectTitle} — ${projectDepartment.name}`
+          : projectTitle
       return {
         id: projectId,
-        name: project?.title || project?.name || "Project",
+        name,
         tasks,
       }
     })
-  }, [todayProjectTasks, projects])
+  }, [todayProjectTasks, projects, projectMetaLookup, departments, department?.id])
 
   const counts = React.useMemo(
     () => ({
