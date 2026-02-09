@@ -220,6 +220,7 @@ export default function DesignProjectPage() {
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
+  const [newStartDate, setNewStartDate] = React.useState("")
   const [creating, setCreating] = React.useState(false)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
@@ -396,6 +397,7 @@ export default function DesignProjectPage() {
         status: newStatus,
         priority: newPriority,
         phase: newTaskPhase || activePhase,
+        start_date: newStartDate || null,
         due_date: newDueDate || null,
       }
       const res = await apiFetch("/tasks", {
@@ -415,7 +417,16 @@ export default function DesignProjectPage() {
         return
       }
       const created = (await res.json()) as Task
-      setTasks((prev) => [created, ...prev])
+      if (newAssignees.length > 1) {
+        const refresh = await apiFetch(`/tasks?project_id=${project.id}&include_done=true`)
+        if (refresh.ok) {
+          setTasks((await refresh.json()) as Task[])
+        } else {
+          setTasks((prev) => [created, ...prev])
+        }
+      } else {
+        setTasks((prev) => [created, ...prev])
+      }
       setCreateOpen(false)
       setNewTitle("")
       setNewDescription("")
@@ -424,6 +435,7 @@ export default function DesignProjectPage() {
       setNewAssignees([])
       setNewTaskPhase("")
       setNewDueDate("")
+      setNewStartDate("")
       toast.success("Task created")
     } finally {
       setCreating(false)
@@ -1701,14 +1713,24 @@ export default function DesignProjectPage() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                    <div>
-                      <Label>Due Date <span className="text-red-500">*</span></Label>
-                      <Input
-                        type="date"
-                        value={newDueDate}
-                        onChange={(e) => setNewDueDate(e.target.value)}
-                        required
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Start Date</Label>
+                        <Input
+                          type="date"
+                          value={newStartDate}
+                          onChange={(e) => setNewStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Due Date <span className="text-red-500">*</span></Label>
+                        <Input
+                          type="date"
+                          value={newDueDate}
+                          onChange={(e) => setNewDueDate(e.target.value)}
+                          required
+                        />
+                      </div>
                     </div>
                     <Button 
                       onClick={() => void submitCreateTask()} 
