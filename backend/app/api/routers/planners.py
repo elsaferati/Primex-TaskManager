@@ -16,13 +16,15 @@ except ImportError:
         ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
+from app.models.common_entry import CommonEntry
+from app.models.enums import CommonCategory, ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
@@ -33,6 +35,7 @@ from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
@@ -56,6 +59,25 @@ from app.schemas.planner import (
 from app.schemas.project import ProjectOut
 from app.schemas.task import TaskAssigneeOut, TaskOut
 from app.schemas.weekly_plan import WeeklyPlanCreate, WeeklyPlanOut, WeeklyPlanUpdate
+from app.schemas.weekly_planner_snapshot import (
+    WeeklySnapshotCompareAssigneeGroupOut,
+    WeeklySnapshotCompareSummaryOut,
+    WeeklySnapshotCompareTaskOut,
+    WeeklySnapshotCompareOut,
+    WeeklySnapshotCreateRequest,
+    WeeklySnapshotLatestOut,
+    WeeklySnapshotOut,
+    WeeklySnapshotOverviewOut,
+    WeeklySnapshotOverviewWeekOut,
+    WeeklySnapshotPlanVsActualOut,
+    WeeklySnapshotSaveMode,
+    WeeklySnapshotSaveRequest,
+    WeeklySnapshotSaveResponse,
+    WeeklySnapshotTaskAssigneeOut,
+    WeeklySnapshotTaskOccurrenceOut,
+    WeeklySnapshotType,
+    WeeklySnapshotVersionOut,
+)
 
 
 router = APIRouter()
@@ -316,6 +338,664 @@ def _get_next_5_working_days(start_date: date) -> list[date]:
             working_days.append(current)
         current += timedelta(days=1)
     return working_days
+
+
+def _safe_iso_date(value: str | None, fallback: date) -> date:
+    if not value:
+        return fallback
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return fallback
+
+
+def _parse_annual_leave_for_snapshot(
+    entry: CommonEntry,
+) -> tuple[date, date, bool, str | None, str | None, str | None]:
+    note = entry.description or ""
+    base_date = entry.entry_date or entry.created_at.date()
+    start_date = base_date
+    end_date = base_date
+    full_day = True
+    start_time: str | None = None
+    end_time: str | None = None
+
+    date_range_match = re.search(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", note, re.I)
+    if date_range_match:
+        start_date = _safe_iso_date(date_range_match.group(1), start_date)
+        end_date = _safe_iso_date(date_range_match.group(2), end_date)
+        note = re.sub(
+            r"Date range:\s*\d{4}-\d{2}-\d{2}\s+to\s+\d{4}-\d{2}-\d{2}",
+            "",
+            note,
+            flags=re.I,
+        ).strip()
+    else:
+        date_match = re.search(r"Date:\s*(\d{4}-\d{2}-\d{2})", note, re.I)
+        if date_match:
+            parsed = _safe_iso_date(date_match.group(1), start_date)
+            start_date = parsed
+            end_date = parsed
+            note = re.sub(r"Date:\s*\d{4}-\d{2}-\d{2}", "", note, flags=re.I).strip()
+        else:
+            date_matches = re.findall(r"\d{4}-\d{2}-\d{2}", note)
+            if date_matches:
+                start_date = _safe_iso_date(date_matches[0], start_date)
+                end_date = _safe_iso_date(date_matches[1] if len(date_matches) > 1 else date_matches[0], end_date)
+
+    if re.search(r"\(Full day\)", note, re.I):
+        full_day = True
+        note = re.sub(r"\(Full day\)", "", note, flags=re.I).strip()
+    else:
+        time_match = re.search(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)", note)
+        if time_match:
+            full_day = False
+            start_time = time_match.group(1)
+            end_time = time_match.group(2)
+            note = re.sub(r"\(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\)", "", note).strip()
+
+    cleaned_note = note.strip() if note.strip() else None
+    return start_date, end_date, full_day, start_time, end_time, cleaned_note
+
+
+async def _load_pv_fest_blocks_for_snapshot(
+    *,
+    db: AsyncSession,
+    department_id: uuid.UUID,
+    week_start: date,
+    week_end: date,
+) -> list[dict]:
+    users_in_department = (
+        await db.execute(select(User.id).where(User.department_id == department_id, User.is_active == True))
+    ).scalars().all()
+    if not users_in_department:
+        return []
+
+    entries_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave).where(
+        (CommonEntry.assigned_to_user_id.in_(users_in_department))
+        | (
+            (CommonEntry.assigned_to_user_id.is_(None))
+            & (CommonEntry.created_by_user_id.in_(users_in_department))
+        )
+    )
+    entries = (await db.execute(entries_stmt.order_by(CommonEntry.created_at.desc()))).scalars().all()
+
+    blocks: list[dict] = []
+    for entry in entries:
+        entry_user_id = entry.assigned_to_user_id or entry.created_by_user_id
+        start_date, end_date, full_day, start_time, end_time, note = _parse_annual_leave_for_snapshot(entry)
+        if end_date < week_start or start_date > week_end:
+            continue
+        blocks.append(
+            {
+                "entry_id": entry.id,
+                "user_id": entry_user_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "full_day": full_day,
+                "start_time": start_time,
+                "end_time": end_time,
+                "note": note,
+            }
+        )
+    return blocks
+
+
+def _snapshot_type_for_mode(mode: WeeklySnapshotSaveMode) -> WeeklySnapshotType:
+    if mode == WeeklySnapshotSaveMode.THIS_WEEK_FINAL:
+        return WeeklySnapshotType.FINAL
+    return WeeklySnapshotType.PLANNED
+
+
+def _snapshot_week_start_for_mode(mode: WeeklySnapshotSaveMode, today: date) -> date:
+    if mode == WeeklySnapshotSaveMode.THIS_WEEK_FINAL:
+        return _week_start(today)
+    return _week_start(today + timedelta(days=7))
+
+
+def _snapshot_version_out(
+    snapshot: WeeklyPlannerSnapshot,
+    *,
+    is_official: bool = False,
+) -> WeeklySnapshotVersionOut:
+    return WeeklySnapshotVersionOut(
+        id=snapshot.id,
+        department_id=snapshot.department_id,
+        week_start_date=snapshot.week_start_date,
+        week_end_date=snapshot.week_end_date,
+        snapshot_type=WeeklySnapshotType(snapshot.snapshot_type),
+        created_by=snapshot.created_by,
+        created_at=snapshot.created_at,
+        is_official=is_official,
+    )
+
+
+def _snapshot_out(
+    snapshot: WeeklyPlannerSnapshot,
+    *,
+    is_official: bool = False,
+) -> WeeklySnapshotOut:
+    return WeeklySnapshotOut(
+        id=snapshot.id,
+        department_id=snapshot.department_id,
+        week_start_date=snapshot.week_start_date,
+        week_end_date=snapshot.week_end_date,
+        snapshot_type=WeeklySnapshotType(snapshot.snapshot_type),
+        created_by=snapshot.created_by,
+        created_at=snapshot.created_at,
+        is_official=is_official,
+        payload=snapshot.payload,
+    )
+
+
+NO_PLAN_SNAPSHOT_MESSAGE = (
+    "No plan snapshot found for this week. Please create the weekly plan on Friday (Next Week) first."
+)
+
+
+def _normalize_task_status(value: str | None) -> str:
+    if not value:
+        return "TODO"
+    normalized = value.strip().upper().replace(" ", "_")
+    if normalized == "TO_DO":
+        return "TODO"
+    if normalized == "INPROGRESS":
+        return "IN_PROGRESS"
+    return normalized
+
+
+def _status_rank(value: str | None) -> int:
+    normalized = _normalize_task_status(value)
+    if normalized == "DONE":
+        return 3
+    if normalized == "IN_PROGRESS":
+        return 2
+    if normalized == "TODO":
+        return 1
+    return 0
+
+
+def _pick_stronger_status(current: str | None, candidate: str | None) -> str | None:
+    if candidate is None:
+        return current
+    if current is None:
+        return _normalize_task_status(candidate)
+    return (
+        _normalize_task_status(candidate)
+        if _status_rank(candidate) >= _status_rank(current)
+        else _normalize_task_status(current)
+    )
+
+
+def _parse_uuid_value(value: str | uuid.UUID | None) -> uuid.UUID | None:
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_date_value(value: str | date | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(value[:10])
+    except Exception:
+        return None
+
+
+def _parse_iso_datetime_value(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        normalized = value.replace("Z", "+00:00") if isinstance(value, str) else str(value)
+        return datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+
+
+def _entry_is_completed(
+    *,
+    status: str | None,
+    daily_status: str | None,
+    completed_at: datetime | None,
+) -> bool:
+    if completed_at is not None:
+        return True
+    if _normalize_task_status(status) == "DONE":
+        return True
+    if _normalize_task_status(daily_status) == "DONE":
+        return True
+    return False
+
+
+def _build_task_fallback_key(
+    *,
+    title: str,
+    source_type: str,
+    project_id: uuid.UUID | None,
+    finish_period: str | None,
+) -> str:
+    normalized_title = " ".join((title or "").strip().lower().split())
+    normalized_source = (source_type or "").strip().lower()
+    normalized_period = (finish_period or "").strip().upper()
+    return f"{normalized_source}|{project_id or ''}|{normalized_period}|{normalized_title}"
+
+
+def _task_ids_from_department_payload(department_payload: dict | None) -> set[uuid.UUID]:
+    if not department_payload:
+        return set()
+
+    task_ids: set[uuid.UUID] = set()
+    for day in department_payload.get("days") or []:
+        for user_day in day.get("users") or []:
+            for bucket_name in ("am_projects", "pm_projects"):
+                for project in user_day.get(bucket_name) or []:
+                    for task in project.get("tasks") or []:
+                        task_id = _parse_uuid_value(task.get("task_id"))
+                        if task_id is not None:
+                            task_ids.add(task_id)
+            for bucket_name in ("am_system_tasks", "pm_system_tasks", "am_fast_tasks", "pm_fast_tasks"):
+                for task in user_day.get(bucket_name) or []:
+                    task_id = _parse_uuid_value(task.get("task_id"))
+                    if task_id is not None:
+                        task_ids.add(task_id)
+    return task_ids
+
+
+def _normalize_task_items_payload(task_items: list[dict] | None) -> list[dict]:
+    if not task_items:
+        return []
+
+    normalized_items: list[dict] = []
+    for item in task_items:
+        task_id = _parse_uuid_value(item.get("task_id"))
+        project_id = _parse_uuid_value(item.get("project_id"))
+        completed_at = _parse_iso_datetime_value(item.get("completed_at"))
+        assignees_raw = item.get("assignees") or []
+        assignees = [
+            {
+                "assignee_id": _parse_uuid_value(assignee.get("assignee_id")),
+                "assignee_name": (assignee.get("assignee_name") or "").strip() or "Unassigned",
+            }
+            for assignee in assignees_raw
+        ]
+        occurrences_raw = item.get("occurrences") or []
+        occurrences = [
+            {
+                "day": _parse_iso_date_value(occurrence.get("day")),
+                "time_slot": occurrence.get("time_slot"),
+                "assignee_id": _parse_uuid_value(occurrence.get("assignee_id")),
+                "assignee_name": occurrence.get("assignee_name"),
+            }
+            for occurrence in occurrences_raw
+        ]
+        status = _normalize_task_status(item.get("status"))
+        daily_status = _normalize_task_status(item.get("daily_status")) if item.get("daily_status") else None
+        normalized_items.append(
+            {
+                "match_key": item.get("match_key")
+                or (f"id:{task_id}" if task_id is not None else f"fallback:{item.get('fallback_key') or ''}"),
+                "task_id": task_id,
+                "fallback_key": item.get("fallback_key"),
+                "title": (item.get("title") or "").strip() or "(Untitled task)",
+                "project_id": project_id,
+                "project_title": item.get("project_title"),
+                "source_type": item.get("source_type") or "project",
+                "status": status,
+                "daily_status": daily_status,
+                "completed_at": completed_at,
+                "is_completed": bool(item.get("is_completed"))
+                or _entry_is_completed(status=status, daily_status=daily_status, completed_at=completed_at),
+                "finish_period": item.get("finish_period"),
+                "priority": item.get("priority"),
+                "tags": sorted(set(item.get("tags") or [])),
+                "assignees": assignees,
+                "occurrences": occurrences,
+            }
+        )
+    return normalized_items
+
+
+def _flatten_weekly_department_tasks(
+    department_payload: dict | None,
+    *,
+    task_priority_map: dict[uuid.UUID, str] | None = None,
+) -> list[dict]:
+    if not department_payload:
+        return []
+
+    priorities = task_priority_map or {}
+    index: dict[str, dict] = {}
+
+    def ensure_row(
+        *,
+        task_id: uuid.UUID | None,
+        title: str,
+        source_type: str,
+        project_id: uuid.UUID | None,
+        project_title: str | None,
+        finish_period: str | None,
+        fallback_key: str,
+    ) -> dict:
+        match_key = f"id:{task_id}" if task_id is not None else f"fallback:{fallback_key}"
+        if match_key not in index:
+            index[match_key] = {
+                "match_key": match_key,
+                "task_id": task_id,
+                "fallback_key": None if task_id is not None else fallback_key,
+                "title": title,
+                "project_id": project_id,
+                "project_title": project_title,
+                "source_type": source_type,
+                "status": None,
+                "daily_status": None,
+                "completed_at": None,
+                "is_completed": False,
+                "finish_period": finish_period,
+                "priority": priorities.get(task_id) if task_id is not None else None,
+                "_tags": set(),
+                "_assignees": {},
+                "_occurrence_keys": set(),
+                "occurrences": [],
+            }
+        row = index[match_key]
+        if not row.get("title") and title:
+            row["title"] = title
+        if not row.get("project_title") and project_title:
+            row["project_title"] = project_title
+        if not row.get("finish_period") and finish_period:
+            row["finish_period"] = finish_period
+        if task_id is not None and row.get("priority") is None:
+            row["priority"] = priorities.get(task_id)
+        return row
+
+    def add_task_entry(
+        *,
+        task_entry: dict,
+        source_type: str,
+        project_id: str | None,
+        project_title: str | None,
+        day_iso: str | date | None,
+        slot: str,
+        user_id: str | uuid.UUID | None,
+        user_name: str | None,
+    ) -> None:
+        task_id = _parse_uuid_value(task_entry.get("task_id"))
+        project_uuid = _parse_uuid_value(project_id)
+        title = (task_entry.get("task_title") or task_entry.get("title") or "").strip() or "(Untitled task)"
+        finish_period = task_entry.get("finish_period")
+        fallback_key = _build_task_fallback_key(
+            title=title,
+            source_type=source_type,
+            project_id=project_uuid,
+            finish_period=finish_period,
+        )
+        row = ensure_row(
+            task_id=task_id,
+            title=title,
+            source_type=source_type,
+            project_id=project_uuid,
+            project_title=project_title,
+            finish_period=finish_period,
+            fallback_key=fallback_key,
+        )
+
+        status = _normalize_task_status(task_entry.get("status"))
+        daily_status_value = task_entry.get("daily_status")
+        daily_status = (
+            _normalize_task_status(daily_status_value) if daily_status_value is not None else None
+        )
+        completed_at = _parse_iso_datetime_value(task_entry.get("completed_at"))
+
+        row["status"] = _pick_stronger_status(row.get("status"), status)
+        row["daily_status"] = _pick_stronger_status(row.get("daily_status"), daily_status)
+        if row.get("completed_at") is None and completed_at is not None:
+            row["completed_at"] = completed_at
+        row["is_completed"] = bool(row.get("is_completed")) or _entry_is_completed(
+            status=status,
+            daily_status=daily_status,
+            completed_at=completed_at,
+        )
+
+        if task_entry.get("is_bllok"):
+            row["_tags"].add("BLL")
+        if task_entry.get("is_r1"):
+            row["_tags"].add("R1")
+        if task_entry.get("is_1h_report"):
+            row["_tags"].add("1H")
+        if task_entry.get("is_personal"):
+            row["_tags"].add("P:")
+        if task_entry.get("ga_note_origin_id"):
+            row["_tags"].add("GA")
+        if task_entry.get("fast_task_type"):
+            row["_tags"].add(str(task_entry.get("fast_task_type")).strip().upper())
+
+        assignee_uuid = _parse_uuid_value(user_id)
+        assignee_name = (user_name or "").strip() or "Unassigned"
+        assignee_key = str(assignee_uuid) if assignee_uuid is not None else f"name:{assignee_name.lower()}"
+        row["_assignees"][assignee_key] = {
+            "assignee_id": assignee_uuid,
+            "assignee_name": assignee_name,
+        }
+
+        day_value = _parse_iso_date_value(day_iso)
+        occurrence_key = f"{day_value}|{slot}|{assignee_key}"
+        if occurrence_key not in row["_occurrence_keys"]:
+            row["_occurrence_keys"].add(occurrence_key)
+            row["occurrences"].append(
+                {
+                    "day": day_value,
+                    "time_slot": slot,
+                    "assignee_id": assignee_uuid,
+                    "assignee_name": assignee_name,
+                }
+            )
+
+    for day in department_payload.get("days") or []:
+        day_date = day.get("date")
+        for user_day in day.get("users") or []:
+            user_id = user_day.get("user_id")
+            user_name = user_day.get("user_name")
+            for slot_key, slot_label in (("am", "AM"), ("pm", "PM")):
+                project_bucket = user_day.get(f"{slot_key}_projects") or []
+                for project in project_bucket:
+                    project_id = project.get("project_id")
+                    project_title = project.get("project_title")
+                    for task in project.get("tasks") or []:
+                        add_task_entry(
+                            task_entry=task,
+                            source_type="project",
+                            project_id=project_id,
+                            project_title=project_title,
+                            day_iso=day_date,
+                            slot=slot_label,
+                            user_id=user_id,
+                            user_name=user_name,
+                        )
+                for source_type, task_bucket_name in (
+                    ("system", f"{slot_key}_system_tasks"),
+                    ("fast", f"{slot_key}_fast_tasks"),
+                ):
+                    for task in user_day.get(task_bucket_name) or []:
+                        add_task_entry(
+                            task_entry=task,
+                            source_type=source_type,
+                            project_id=None,
+                            project_title=None,
+                            day_iso=day_date,
+                            slot=slot_label,
+                            user_id=user_id,
+                            user_name=user_name,
+                        )
+
+    rows: list[dict] = []
+    for row in index.values():
+        assignees = sorted(
+            row["_assignees"].values(),
+            key=lambda assignee: (
+                1 if assignee["assignee_id"] is None else 0,
+                (assignee["assignee_name"] or "").lower(),
+            ),
+        )
+        occurrences = sorted(
+            row["occurrences"],
+            key=lambda occurrence: (
+                occurrence.get("day") or date.min,
+                occurrence.get("time_slot") or "",
+                occurrence.get("assignee_name") or "",
+            ),
+        )
+        rows.append(
+            {
+                "match_key": row["match_key"],
+                "task_id": row["task_id"],
+                "fallback_key": row["fallback_key"],
+                "title": row["title"],
+                "project_id": row["project_id"],
+                "project_title": row["project_title"],
+                "source_type": row["source_type"],
+                "status": row["status"],
+                "daily_status": row["daily_status"],
+                "completed_at": row["completed_at"],
+                "is_completed": bool(row["is_completed"]),
+                "finish_period": row["finish_period"],
+                "priority": row["priority"],
+                "tags": sorted(row["_tags"]),
+                "assignees": assignees,
+                "occurrences": occurrences,
+            }
+        )
+
+    rows.sort(key=lambda task: (task.get("title") or "").lower())
+    return rows
+
+
+async def _load_task_priority_map(
+    db: AsyncSession,
+    task_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, str]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Task.id, Task.priority).where(Task.id.in_(list(task_ids)))
+        )
+    ).all()
+    return {task_id: priority for task_id, priority in rows if priority is not None}
+
+
+def _to_compare_task_out(task: dict) -> WeeklySnapshotCompareTaskOut:
+    assignees = [
+        WeeklySnapshotTaskAssigneeOut(
+            assignee_id=assignee.get("assignee_id"),
+            assignee_name=assignee.get("assignee_name") or "Unassigned",
+        )
+        for assignee in (task.get("assignees") or [])
+    ]
+    occurrences = [
+        WeeklySnapshotTaskOccurrenceOut(
+            day=occurrence.get("day"),
+            time_slot=occurrence.get("time_slot"),
+            assignee_id=occurrence.get("assignee_id"),
+            assignee_name=occurrence.get("assignee_name"),
+        )
+        for occurrence in (task.get("occurrences") or [])
+    ]
+    return WeeklySnapshotCompareTaskOut(
+        match_key=task.get("match_key") or "",
+        task_id=task.get("task_id"),
+        fallback_key=task.get("fallback_key"),
+        title=task.get("title") or "(Untitled task)",
+        project_id=task.get("project_id"),
+        project_title=task.get("project_title"),
+        source_type=task.get("source_type") or "project",
+        status=task.get("status"),
+        daily_status=task.get("daily_status"),
+        completed_at=task.get("completed_at"),
+        is_completed=bool(task.get("is_completed")),
+        finish_period=task.get("finish_period"),
+        priority=task.get("priority"),
+        tags=task.get("tags") or [],
+        assignees=assignees,
+        occurrences=occurrences,
+    )
+
+
+def _group_compare_tasks_by_assignee(
+    *,
+    completed: list[WeeklySnapshotCompareTaskOut],
+    not_completed: list[WeeklySnapshotCompareTaskOut],
+    added_during_week: list[WeeklySnapshotCompareTaskOut],
+    removed_or_canceled: list[WeeklySnapshotCompareTaskOut],
+) -> list[WeeklySnapshotCompareAssigneeGroupOut]:
+    groups: dict[str, dict] = {}
+
+    def ensure_group(assignee: WeeklySnapshotTaskAssigneeOut | None) -> dict:
+        assignee_id = assignee.assignee_id if assignee else None
+        assignee_name = (assignee.assignee_name if assignee else None) or "Unassigned"
+        key = str(assignee_id) if assignee_id is not None else f"name:{assignee_name.lower()}"
+        if key not in groups:
+            groups[key] = {
+                "assignee_id": assignee_id,
+                "assignee_name": assignee_name,
+                "completed": [],
+                "not_completed": [],
+                "added_during_week": [],
+                "removed_or_canceled": [],
+                "_completed_keys": set(),
+                "_not_completed_keys": set(),
+                "_added_keys": set(),
+                "_removed_keys": set(),
+            }
+        return groups[key]
+
+    def add_category(category: str, tasks: list[WeeklySnapshotCompareTaskOut], key_name: str) -> None:
+        for task in tasks:
+            assignees = task.assignees or [WeeklySnapshotTaskAssigneeOut(assignee_name="Unassigned")]
+            for assignee in assignees:
+                group = ensure_group(assignee)
+                if task.match_key in group[key_name]:
+                    continue
+                group[key_name].add(task.match_key)
+                group[category].append(task)
+
+    add_category("completed", completed, "_completed_keys")
+    add_category("not_completed", not_completed, "_not_completed_keys")
+    add_category("added_during_week", added_during_week, "_added_keys")
+    add_category("removed_or_canceled", removed_or_canceled, "_removed_keys")
+
+    grouped_rows = []
+    for group in groups.values():
+        group["completed"].sort(key=lambda task: task.title.lower())
+        group["not_completed"].sort(key=lambda task: task.title.lower())
+        group["added_during_week"].sort(key=lambda task: task.title.lower())
+        group["removed_or_canceled"].sort(key=lambda task: task.title.lower())
+        grouped_rows.append(
+            WeeklySnapshotCompareAssigneeGroupOut(
+                assignee_id=group["assignee_id"],
+                assignee_name=group["assignee_name"],
+                completed=group["completed"],
+                not_completed=group["not_completed"],
+                added_during_week=group["added_during_week"],
+                removed_or_canceled=group["removed_or_canceled"],
+            )
+        )
+
+    grouped_rows.sort(
+        key=lambda group: (
+            1 if group.assignee_id is None else 0,
+            group.assignee_name.lower(),
+        )
+    )
+    return grouped_rows
 
 
 @router.get("/weekly", response_model=WeeklyPlannerResponse)
@@ -1690,6 +2370,468 @@ async def weekly_table_planner(
         departments=departments_data,
         saved_plan_id=saved_plan_id,
     )
+
+
+async def _build_weekly_snapshot_payload(
+    *,
+    db: AsyncSession,
+    user: User,
+    department_id: uuid.UUID,
+    week_start_date: date,
+) -> tuple[date, date, dict]:
+    weekly_table = await weekly_table_planner(
+        week_start=week_start_date,
+        department_id=department_id,
+        is_this_week=False,
+        db=db,
+        user=user,
+    )
+    weekly_table_json = jsonable_encoder(weekly_table)
+    department_rows = weekly_table_json.get("departments") or []
+    department_payload = department_rows[0] if department_rows else None
+    task_ids_for_snapshot = _task_ids_from_department_payload(department_payload)
+    task_priority_map = await _load_task_priority_map(db, task_ids_for_snapshot)
+    task_items = _flatten_weekly_department_tasks(
+        department_payload,
+        task_priority_map=task_priority_map,
+    )
+
+    legend_entries = await get_weekly_planner_legend(
+        department_id=department_id,
+        week_start=week_start_date,
+        db=db,
+        user=user,
+    )
+    legend_payload = [entry.model_dump(mode="json") for entry in legend_entries]
+
+    week_start = weekly_table.week_start
+    week_end = weekly_table.week_end
+    pv_fest_blocks = await _load_pv_fest_blocks_for_snapshot(
+        db=db,
+        department_id=department_id,
+        week_start=week_start,
+        week_end=week_end,
+    )
+
+    payload = jsonable_encoder(
+        {
+            "week_start": week_start,
+            "week_end": week_end,
+            "department_filter": {
+                "department_id": department_id,
+                "label": (department_payload or {}).get("department_name") if department_payload else "All Departments",
+            },
+            "department": department_payload,
+            "task_items": task_items,
+            "legend_entries": legend_payload,
+            "pv_fest_blocks": pv_fest_blocks,
+            "snapshot_created_by": user.id,
+            "snapshot_created_at": datetime.now(timezone.utc),
+        }
+    )
+    return week_start, week_end, payload
+
+
+async def _create_and_store_weekly_snapshot(
+    *,
+    db: AsyncSession,
+    user: User,
+    department_id: uuid.UUID,
+    week_start_date: date,
+    snapshot_type: WeeklySnapshotType,
+) -> WeeklySnapshotSaveResponse:
+    week_start, week_end, snapshot_payload = await _build_weekly_snapshot_payload(
+        db=db,
+        user=user,
+        department_id=department_id,
+        week_start_date=week_start_date,
+    )
+    snapshot = WeeklyPlannerSnapshot(
+        department_id=department_id,
+        week_start_date=week_start,
+        week_end_date=week_end,
+        snapshot_type=snapshot_type.value,
+        payload=snapshot_payload,
+        created_by=user.id,
+    )
+    db.add(snapshot)
+    await db.commit()
+    await db.refresh(snapshot)
+
+    versions = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == week_start,
+                WeeklyPlannerSnapshot.snapshot_type == snapshot_type.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+        )
+    ).scalars().all()
+    official_snapshot = versions[0]
+
+    return WeeklySnapshotSaveResponse(
+        snapshot=_snapshot_version_out(snapshot, is_official=snapshot.id == official_snapshot.id),
+        version_count=len(versions),
+        official_snapshot_id=official_snapshot.id,
+    )
+
+
+@router.post("/weekly-snapshots/create", response_model=WeeklySnapshotSaveResponse)
+async def create_weekly_snapshot_for_week(
+    payload: WeeklySnapshotCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotSaveResponse:
+    ensure_manager_or_admin(user)
+    ensure_department_access(user, payload.department_id)
+
+    dept = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
+    if dept is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    target_week_start = _week_start(payload.week_start)
+    return await _create_and_store_weekly_snapshot(
+        db=db,
+        user=user,
+        department_id=payload.department_id,
+        week_start_date=target_week_start,
+        snapshot_type=payload.snapshot_type,
+    )
+
+
+@router.post("/weekly-snapshots/save", response_model=WeeklySnapshotSaveResponse)
+async def save_weekly_snapshot(
+    payload: WeeklySnapshotSaveRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotSaveResponse:
+    ensure_manager_or_admin(user)
+    ensure_department_access(user, payload.department_id)
+
+    dept = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
+    if dept is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    today = datetime.now(timezone.utc).date()
+    target_week_start = _snapshot_week_start_for_mode(payload.mode, today)
+    snapshot_type = _snapshot_type_for_mode(payload.mode)
+    return await _create_and_store_weekly_snapshot(
+        db=db,
+        user=user,
+        department_id=payload.department_id,
+        week_start_date=target_week_start,
+        snapshot_type=snapshot_type,
+    )
+
+
+@router.get("/weekly-snapshots/overview", response_model=WeeklySnapshotOverviewOut)
+async def weekly_snapshot_overview(
+    department_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotOverviewOut:
+    ensure_department_access(user, department_id)
+
+    today = datetime.now(timezone.utc).date()
+    this_week_start = _week_start(today)
+    week_starts = [
+        this_week_start - timedelta(days=14),
+        this_week_start - timedelta(days=7),
+        this_week_start,
+    ]
+    labels = {
+        week_starts[0]: "last_last_week",
+        week_starts[1]: "last_week",
+        week_starts[2]: "this_week",
+    }
+
+    snapshots = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date.in_(week_starts),
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+        )
+    ).scalars().all()
+
+    grouped: dict[date, dict[str, list[WeeklyPlannerSnapshot]]] = {
+        week_start: {
+            WeeklySnapshotType.PLANNED.value: [],
+            WeeklySnapshotType.FINAL.value: [],
+        }
+        for week_start in week_starts
+    }
+    for snapshot in snapshots:
+        if snapshot.week_start_date not in grouped:
+            continue
+        grouped[snapshot.week_start_date].setdefault(snapshot.snapshot_type, []).append(snapshot)
+
+    weeks: list[WeeklySnapshotOverviewWeekOut] = []
+    for week_start in week_starts:
+        planned_versions = grouped[week_start][WeeklySnapshotType.PLANNED.value]
+        final_versions = grouped[week_start][WeeklySnapshotType.FINAL.value]
+        week_end = _get_next_5_working_days(week_start)[-1]
+        weeks.append(
+            WeeklySnapshotOverviewWeekOut(
+                week_start=week_start,
+                week_end=week_end,
+                label=labels[week_start],
+                planned_official_id=planned_versions[0].id if planned_versions else None,
+                planned_versions=len(planned_versions),
+                final_official_id=final_versions[0].id if final_versions else None,
+                final_versions=len(final_versions),
+            )
+        )
+
+    return WeeklySnapshotOverviewOut(weeks=weeks)
+
+
+@router.get("/weekly-snapshots/latest", response_model=WeeklySnapshotLatestOut)
+async def get_latest_weekly_snapshot_for_week(
+    department_id: uuid.UUID,
+    week_start: date,
+    snapshot_type: WeeklySnapshotType = WeeklySnapshotType.PLANNED,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotLatestOut:
+    ensure_department_access(user, department_id)
+    normalized_week_start = _week_start(week_start)
+    week_end = _get_next_5_working_days(normalized_week_start)[-1]
+
+    latest_snapshot = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+                WeeklyPlannerSnapshot.snapshot_type == snapshot_type.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if latest_snapshot is None:
+        return WeeklySnapshotLatestOut(
+            week_start=normalized_week_start,
+            week_end=week_end,
+            department_id=department_id,
+            snapshot_type=snapshot_type,
+            snapshot=None,
+            message=NO_PLAN_SNAPSHOT_MESSAGE if snapshot_type == WeeklySnapshotType.PLANNED else None,
+        )
+
+    return WeeklySnapshotLatestOut(
+        week_start=normalized_week_start,
+        week_end=latest_snapshot.week_end_date or week_end,
+        department_id=department_id,
+        snapshot_type=snapshot_type,
+        snapshot=_snapshot_out(latest_snapshot, is_official=True),
+    )
+
+
+@router.get("/weekly-snapshots/plan-vs-actual", response_model=WeeklySnapshotPlanVsActualOut)
+async def weekly_plan_vs_actual_compare(
+    department_id: uuid.UUID,
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotPlanVsActualOut:
+    ensure_department_access(user, department_id)
+
+    normalized_week_start = _week_start(week_start)
+    week_end = _get_next_5_working_days(normalized_week_start)[-1]
+
+    department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+    department_name = department.name if department is not None else None
+
+    latest_planned_snapshot = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+                WeeklyPlannerSnapshot.snapshot_type == WeeklySnapshotType.PLANNED.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if latest_planned_snapshot is None:
+        return WeeklySnapshotPlanVsActualOut(
+            week_start=normalized_week_start,
+            week_end=week_end,
+            department_id=department_id,
+            department_name=department_name,
+            message=NO_PLAN_SNAPSHOT_MESSAGE,
+            summary=WeeklySnapshotCompareSummaryOut(),
+        )
+
+    snapshot_payload = latest_planned_snapshot.payload or {}
+    snapshot_task_items = _normalize_task_items_payload(snapshot_payload.get("task_items"))
+    if not snapshot_task_items:
+        snapshot_department_payload = snapshot_payload.get("department")
+        snapshot_task_items = _flatten_weekly_department_tasks(snapshot_department_payload)
+    snapshot_tasks_by_key = {
+        task["match_key"]: task
+        for task in snapshot_task_items
+    }
+
+    current_weekly_table = await weekly_table_planner(
+        week_start=normalized_week_start,
+        department_id=department_id,
+        is_this_week=False,
+        db=db,
+        user=user,
+    )
+    current_table_json = jsonable_encoder(current_weekly_table)
+    current_departments = current_table_json.get("departments") or []
+    current_department_payload = current_departments[0] if current_departments else None
+    current_task_ids = _task_ids_from_department_payload(current_department_payload)
+    current_task_priorities = await _load_task_priority_map(db, current_task_ids)
+    current_task_items = _flatten_weekly_department_tasks(
+        current_department_payload,
+        task_priority_map=current_task_priorities,
+    )
+    current_tasks_by_key = {
+        task["match_key"]: task
+        for task in current_task_items
+    }
+
+    completed_raw: list[dict] = []
+    not_completed_raw: list[dict] = []
+    added_raw: list[dict] = []
+    removed_raw: list[dict] = []
+
+    for match_key, planned_task in snapshot_tasks_by_key.items():
+        current_task = current_tasks_by_key.get(match_key)
+        if current_task is None:
+            removed_raw.append(planned_task)
+            continue
+        if current_task.get("is_completed"):
+            completed_raw.append(current_task)
+        else:
+            not_completed_raw.append(current_task)
+
+    for match_key, current_task in current_tasks_by_key.items():
+        if match_key not in snapshot_tasks_by_key:
+            added_raw.append(current_task)
+
+    completed = [_to_compare_task_out(task) for task in completed_raw]
+    not_completed = [_to_compare_task_out(task) for task in not_completed_raw]
+    added_during_week = [_to_compare_task_out(task) for task in added_raw]
+    removed_or_canceled = [_to_compare_task_out(task) for task in removed_raw]
+
+    completed.sort(key=lambda task: task.title.lower())
+    not_completed.sort(key=lambda task: task.title.lower())
+    added_during_week.sort(key=lambda task: task.title.lower())
+    removed_or_canceled.sort(key=lambda task: task.title.lower())
+
+    summary = WeeklySnapshotCompareSummaryOut(
+        total_planned=len(snapshot_tasks_by_key),
+        completed=len(completed),
+        not_completed=len(not_completed),
+        added_during_week=len(added_during_week),
+        removed_or_canceled=len(removed_or_canceled),
+    )
+
+    by_assignee = _group_compare_tasks_by_assignee(
+        completed=completed,
+        not_completed=not_completed,
+        added_during_week=added_during_week,
+        removed_or_canceled=removed_or_canceled,
+    )
+
+    return WeeklySnapshotPlanVsActualOut(
+        week_start=normalized_week_start,
+        week_end=week_end,
+        department_id=department_id,
+        department_name=department_name,
+        snapshot_id=latest_planned_snapshot.id,
+        snapshot_created_at=latest_planned_snapshot.created_at,
+        snapshot_created_by=latest_planned_snapshot.created_by,
+        summary=summary,
+        completed=completed,
+        not_completed=not_completed,
+        added_during_week=added_during_week,
+        removed_or_canceled=removed_or_canceled,
+        by_assignee=by_assignee,
+    )
+
+
+@router.get("/weekly-snapshots/compare", response_model=WeeklySnapshotCompareOut)
+async def weekly_snapshot_compare(
+    department_id: uuid.UUID,
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotCompareOut:
+    ensure_department_access(user, department_id)
+
+    normalized_week_start = _week_start(week_start)
+    week_end = _get_next_5_working_days(normalized_week_start)[-1]
+    rows = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+        )
+    ).scalars().all()
+
+    planned_rows = [row for row in rows if row.snapshot_type == WeeklySnapshotType.PLANNED.value]
+    final_rows = [row for row in rows if row.snapshot_type == WeeklySnapshotType.FINAL.value]
+
+    planned_versions = [
+        _snapshot_version_out(row, is_official=index == 0) for index, row in enumerate(planned_rows)
+    ]
+    final_versions = [
+        _snapshot_version_out(row, is_official=index == 0) for index, row in enumerate(final_rows)
+    ]
+
+    return WeeklySnapshotCompareOut(
+        week_start=normalized_week_start,
+        week_end=week_end,
+        planned_official=_snapshot_out(planned_rows[0], is_official=True) if planned_rows else None,
+        final_official=_snapshot_out(final_rows[0], is_official=True) if final_rows else None,
+        planned_versions=planned_versions,
+        final_versions=final_versions,
+    )
+
+
+@router.get("/weekly-snapshots/{snapshot_id}", response_model=WeeklySnapshotOut)
+async def get_weekly_snapshot(
+    snapshot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotOut:
+    snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == snapshot_id))
+    ).scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
+
+    ensure_department_access(user, snapshot.department_id)
+    official = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot.id)
+            .where(
+                WeeklyPlannerSnapshot.department_id == snapshot.department_id,
+                WeeklyPlannerSnapshot.week_start_date == snapshot.week_start_date,
+                WeeklyPlannerSnapshot.snapshot_type == snapshot.snapshot_type,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _snapshot_out(snapshot, is_official=official == snapshot.id)
 
 
 # Development department legend questions configuration

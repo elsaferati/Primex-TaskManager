@@ -35,6 +35,7 @@ from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
+from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 
 __all__ = [
@@ -76,5 +77,6 @@ __all__ = [
     "TaskTemplateRun",
     "User",
     "WeeklyPlan",
+    "WeeklyPlannerSnapshot",
     "WeeklyPlannerLegendEntry",
 ]

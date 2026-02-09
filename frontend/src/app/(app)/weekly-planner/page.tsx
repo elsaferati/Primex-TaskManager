@@ -32,6 +32,7 @@ import {
   getLegendLabelDisplay,
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
+import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -119,6 +120,71 @@ type WeeklyPrintUser = {
   user_name: string
 }
 
+type PlanVsActualTaskAssignee = {
+  assignee_id: string | null
+  assignee_name: string
+}
+
+type PlanVsActualTaskOccurrence = {
+  day: string | null
+  time_slot: string | null
+  assignee_id: string | null
+  assignee_name: string | null
+}
+
+type PlanVsActualTask = {
+  match_key: string
+  task_id: string | null
+  fallback_key: string | null
+  title: string
+  project_id: string | null
+  project_title: string | null
+  source_type: string
+  status: string | null
+  daily_status: string | null
+  completed_at: string | null
+  is_completed: boolean
+  finish_period: string | null
+  priority: string | null
+  tags: string[]
+  assignees: PlanVsActualTaskAssignee[]
+  occurrences: PlanVsActualTaskOccurrence[]
+}
+
+type PlanVsActualSummary = {
+  total_planned: number
+  completed: number
+  not_completed: number
+  added_during_week: number
+  removed_or_canceled: number
+}
+
+type PlanVsActualAssigneeGroup = {
+  assignee_id: string | null
+  assignee_name: string
+  completed: PlanVsActualTask[]
+  not_completed: PlanVsActualTask[]
+  added_during_week: PlanVsActualTask[]
+  removed_or_canceled: PlanVsActualTask[]
+}
+
+type PlanVsActualResponse = {
+  week_start: string
+  week_end: string
+  department_id: string
+  department_name: string | null
+  snapshot_id: string | null
+  snapshot_created_at: string | null
+  snapshot_created_by: string | null
+  message: string | null
+  summary: PlanVsActualSummary
+  completed: PlanVsActualTask[]
+  not_completed: PlanVsActualTask[]
+  added_during_week: PlanVsActualTask[]
+  removed_or_canceled: PlanVsActualTask[]
+  by_assignee: PlanVsActualAssigneeGroup[]
+}
+
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -158,11 +224,17 @@ export default function WeeklyPlannerPage() {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
+  const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
   const [isThisWeek, setIsThisWeek] = React.useState(false)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
 
   const [isExporting, setIsExporting] = React.useState(false)
+  const [savingSnapshotMode, setSavingSnapshotMode] = React.useState<"THIS_WEEK_FINAL" | "NEXT_WEEK_PLANNED" | null>(null)
+  const [planVsActualOpen, setPlanVsActualOpen] = React.useState(false)
+  const [isLoadingPlanVsActual, setIsLoadingPlanVsActual] = React.useState(false)
+  const [planVsActualError, setPlanVsActualError] = React.useState<string | null>(null)
+  const [planVsActual, setPlanVsActual] = React.useState<PlanVsActualResponse | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
@@ -176,6 +248,7 @@ export default function WeeklyPlannerPage() {
   const [manualTaskProjectId, setManualTaskProjectId] = React.useState("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
   const canDeleteProjects = user?.role === "ADMIN"
+  const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   // Drag-to-scroll refs and state
   const scrollContainerRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
@@ -467,8 +540,9 @@ export default function WeeklyPlannerPage() {
   }, [apiFetch, departmentId, isThisWeek])
 
   React.useEffect(() => {
+    if (viewMode !== "current") return
     void loadPlanner()
-  }, [loadPlanner])
+  }, [loadPlanner, viewMode])
 
   React.useEffect(() => {
     if (!manualTaskOpen) {
@@ -1905,6 +1979,153 @@ export default function WeeklyPlannerPage() {
     }
   }
 
+  const saveWeeklySnapshot = async (mode: "THIS_WEEK_FINAL" | "NEXT_WEEK_PLANNED") => {
+    if (!canSaveSnapshots) return
+    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) {
+      toast.error("Select a specific department before saving snapshots.")
+      return
+    }
+    if (savingSnapshotMode) return
+
+    setSavingSnapshotMode(mode)
+    try {
+      const res = await apiFetch("/planners/weekly-snapshots/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          department_id: departmentId,
+          mode,
+        }),
+      })
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to save snapshot")
+        toast.error(message || "Failed to save snapshot")
+        return
+      }
+      const payload = await res.json()
+      const weekStart = payload?.snapshot?.week_start_date
+      const weekEnd = payload?.snapshot?.week_end_date
+      const versionCount = payload?.version_count
+      const typeLabel = mode === "THIS_WEEK_FINAL" ? "This Week (Final)" : "Next Week (Planned)"
+      if (weekStart && weekEnd) {
+        toast.success(
+          `Saved ${typeLabel}: ${formatDate(weekStart)} - ${formatDate(weekEnd)} (versions: ${versionCount ?? 1})`
+        )
+      } else {
+        toast.success(`Saved ${typeLabel}`)
+      }
+    } catch (error) {
+      console.error("Failed to save weekly snapshot", error)
+      toast.error("Failed to save snapshot")
+    } finally {
+      setSavingSnapshotMode(null)
+    }
+  }
+
+  const openPlanVsActualCompare = async () => {
+    if (!data) return
+    if (!isThisWeek) {
+      toast.error('Switch Week to "This Week" to compare against last Friday plan.')
+      return
+    }
+    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) {
+      toast.error("Select a specific department before comparing plan vs actual.")
+      return
+    }
+
+    setPlanVsActualOpen(true)
+    setIsLoadingPlanVsActual(true)
+    setPlanVsActualError(null)
+    setPlanVsActual(null)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("department_id", departmentId)
+      qs.set("week_start", data.week_start)
+      const res = await apiFetch(`/planners/weekly-snapshots/plan-vs-actual?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to compare plan vs actual")
+        throw new Error(message || "Failed to compare plan vs actual")
+      }
+      const payload = (await res.json()) as PlanVsActualResponse
+      setPlanVsActual(payload)
+    } catch (err) {
+      setPlanVsActualError(err instanceof Error ? err.message : "Failed to compare plan vs actual")
+      setPlanVsActual(null)
+    } finally {
+      setIsLoadingPlanVsActual(false)
+    }
+  }
+
+  const formatPlannerStatusLabel = (value?: string | null) => {
+    const normalized = (value || "TODO")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "_")
+    if (normalized === "IN_PROGRESS") return "In Progress"
+    if (normalized === "DONE") return "Done"
+    return "To Do"
+  }
+
+  const renderPlanVsActualTaskList = React.useCallback((tasks: PlanVsActualTask[]) => {
+    if (!tasks.length) {
+      return <div className="text-xs text-muted-foreground">-</div>
+    }
+    return (
+      <div className="space-y-2">
+        {tasks.map((task) => {
+          const statusValue = task.daily_status || task.status || "TODO"
+          const assigneeLabel = task.assignees.map((assignee) => assignee.assignee_name).join(", ")
+          const occurrencePreview = task.occurrences
+            .slice(0, 2)
+            .map((occurrence) => {
+              const dateLabel = occurrence.day ? formatDate(occurrence.day) : "-"
+              return `${dateLabel} ${occurrence.time_slot || ""}`.trim()
+            })
+            .join(", ")
+          return (
+            <div key={task.match_key} className="rounded border p-2">
+              <div className="flex items-start justify-between gap-2">
+                {task.task_id ? (
+                  <Link href={`/tasks/${task.task_id}`} className="font-medium hover:underline">
+                    {task.title}
+                  </Link>
+                ) : (
+                  <div className="font-medium">{task.title}</div>
+                )}
+                <span
+                  className={[
+                    "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold",
+                    getStatusCardClasses(statusValue),
+                  ].join(" ")}
+                >
+                  {formatPlannerStatusLabel(statusValue)}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {task.project_title ? `Project: ${task.project_title}` : `Type: ${task.source_type}`}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Assignee: {assigneeLabel || "Unassigned"}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Slots: {occurrencePreview || "-"}
+              </div>
+              {task.tags.length > 0 ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {task.tags.map((tag) => (
+                    <span key={`${task.match_key}-${tag}`} className="rounded border px-1.5 py-0.5 text-[10px]">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }, [getStatusCardClasses])
+
   return (
     <div className="space-y-4">
       <style dangerouslySetInnerHTML={{
@@ -1917,8 +2138,35 @@ export default function WeeklyPlannerPage() {
       `}} />
       <div className="flex items-center justify-between">
         <div className="text-lg font-semibold">Weekly Planner</div>
-        {data && (
+        {viewMode === "current" && data && (
           <div className="flex items-center gap-2">
+            {canSaveSnapshots ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => void saveWeeklySnapshot("THIS_WEEK_FINAL")}
+                  disabled={savingSnapshotMode !== null}
+                >
+                  {savingSnapshotMode === "THIS_WEEK_FINAL" ? "Saving..." : "Save This Week (Final)"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void saveWeeklySnapshot("NEXT_WEEK_PLANNED")}
+                  disabled={savingSnapshotMode !== null}
+                >
+                  {savingSnapshotMode === "NEXT_WEEK_PLANNED" ? "Saving..." : "Save Next Week (Planned)"}
+                </Button>
+              </>
+            ) : null}
+            {isThisWeek ? (
+              <Button
+                variant="outline"
+                onClick={() => void openPlanVsActualCompare()}
+                disabled={isLoadingPlanVsActual}
+              >
+                {isLoadingPlanVsActual ? "Comparing..." : "Compare with Last Friday Plan"}
+              </Button>
+            ) : null}
             <Button variant="outline" onClick={() => setManualTaskOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add Task
@@ -1935,7 +2183,20 @@ export default function WeeklyPlannerPage() {
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="space-y-2">
+          <Label>View</Label>
+          <Select value={viewMode} onValueChange={(value) => setViewMode(value as "current" | "snapshots")}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="current">Current Weekly Plan</SelectItem>
+              <SelectItem value="snapshots">Saved Weekly Snapshots</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {viewMode === "current" ? (
         <div className="space-y-2">
           <Label>Week</Label>
           <Select value={isThisWeek ? "this" : "next"} onValueChange={(v) => setIsThisWeek(v === "this")}>
@@ -1948,6 +2209,7 @@ export default function WeeklyPlannerPage() {
             </SelectContent>
           </Select>
         </div>
+        ) : null}
         {user?.role !== "STAFF" ? (
           <div className="space-y-2">
             <Label>Department</Label>
@@ -1966,14 +2228,14 @@ export default function WeeklyPlannerPage() {
             </Select>
           </div>
         ) : null}
-        {data && (
+        {viewMode === "current" && data ? (
           <div className="space-y-2">
             <Label>Week Range</Label>
             <div className="text-sm text-muted-foreground pt-2">
               {formatDate(data.week_start)} - {formatDate(data.week_end)}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       <Dialog open={manualTaskOpen} onOpenChange={setManualTaskOpen}>
@@ -2272,7 +2534,107 @@ export default function WeeklyPlannerPage() {
         </DialogContent>
       </Dialog>
 
-      {error ? (
+      <Dialog open={planVsActualOpen} onOpenChange={setPlanVsActualOpen}>
+        <DialogContent className="sm:max-w-[1000px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Plan vs Actual Weekly Comparison</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {isLoadingPlanVsActual ? (
+              <div className="text-sm text-muted-foreground">Comparing plan vs actual...</div>
+            ) : null}
+            {planVsActualError ? (
+              <div className="text-sm text-destructive">{planVsActualError}</div>
+            ) : null}
+            {planVsActual ? (
+              <>
+                <div className="text-sm text-muted-foreground">
+                  Week: {formatDate(planVsActual.week_start)} - {formatDate(planVsActual.week_end)}
+                </div>
+                {planVsActual.snapshot_created_at ? (
+                  <div className="text-xs text-muted-foreground">
+                    Snapshot created: {new Date(planVsActual.snapshot_created_at).toLocaleString()}
+                  </div>
+                ) : null}
+                {planVsActual.message ? (
+                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    {planVsActual.message}
+                  </div>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-5">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Total Planned</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-xl font-semibold">{planVsActual.summary.total_planned}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Completed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-xl font-semibold">{planVsActual.summary.completed}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Not Completed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-xl font-semibold">{planVsActual.summary.not_completed}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Added During Week</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-xl font-semibold">{planVsActual.summary.added_during_week}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Removed / Canceled</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-xl font-semibold">{planVsActual.summary.removed_or_canceled}</CardContent>
+                  </Card>
+                </div>
+
+                {planVsActual.by_assignee.length > 0 ? (
+                  <div className="space-y-3">
+                    {planVsActual.by_assignee.map((group) => (
+                      <Card key={group.assignee_id || `unassigned-${group.assignee_name}`}>
+                        <CardHeader>
+                          <CardTitle className="text-base">{group.assignee_name}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <div className="text-sm font-semibold">Completed ({group.completed.length})</div>
+                            {renderPlanVsActualTaskList(group.completed)}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="text-sm font-semibold">Not Completed ({group.not_completed.length})</div>
+                            {renderPlanVsActualTaskList(group.not_completed)}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="text-sm font-semibold">Added During Week ({group.added_during_week.length})</div>
+                            {renderPlanVsActualTaskList(group.added_during_week)}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="text-sm font-semibold">Removed / Canceled ({group.removed_or_canceled.length})</div>
+                            {renderPlanVsActualTaskList(group.removed_or_canceled)}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {viewMode === "snapshots" ? (
+        <WeeklyPlannerSnapshotsView
+          departmentId={departmentId}
+          allDepartmentsValue={ALL_DEPARTMENTS_VALUE}
+        />
+      ) : error ? (
         <div className="text-center py-8 text-destructive">
           <p>{error}</p>
         </div>
