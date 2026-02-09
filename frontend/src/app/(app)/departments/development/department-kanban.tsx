@@ -394,21 +394,21 @@ function findPreviousOccurrenceDate(t: SystemTaskTemplate, fromDate: Date) {
 function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
   const today = new Date(fromDate)
   today.setHours(0, 0, 0, 0)
-  
+
   if (t.frequency === "DAILY") {
     return today
   }
-  
+
   if (t.frequency === "WEEKLY") {
     const days = t.days_of_week && t.days_of_week.length
       ? t.days_of_week
       : t.day_of_week != null
         ? [t.day_of_week]
         : [0] // Monday by default
-    
+
     const currentDayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
     const sortedDays = [...days].sort((a, b) => a - b)
-    
+
     // Find next day in this week
     for (const dayIdx of sortedDays) {
       if (dayIdx >= currentDayIdx) {
@@ -417,14 +417,14 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
         return nextDate
       }
     }
-    
+
     // If no day found this week, use first day of next week
     const nextDate = new Date(today)
     const daysUntilNextWeek = 7 - currentDayIdx + sortedDays[0]
     nextDate.setDate(today.getDate() + daysUntilNextWeek)
     return nextDate
   }
-  
+
   if (t.frequency === "MONTHLY") {
     const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
     if (current && current >= today) {
@@ -433,7 +433,7 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
     const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
     return next || today
   }
-  
+
   if (t.frequency === "YEARLY") {
     if (t.day_of_month === 0) {
       const current = getYearEndDate(today.getFullYear())
@@ -458,12 +458,12 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
     }
     return getScheduledDateForMonth(t, today.getFullYear() + 1, targetMonth) || today
   }
-  
+
   if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
     const interval = t.frequency === "3_MONTHS" ? 3 : 6
     let checkMonth = today.getMonth()
     let checkYear = today.getFullYear()
-    
+
     // Check up to 2 years ahead
     for (let i = 0; i < 24; i++) {
       const monthValue = checkMonth + 1
@@ -480,7 +480,7 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
       }
     }
   }
-  
+
   return today
 }
 
@@ -1114,7 +1114,7 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
           setUsers(allUsers)
         }
-        
+
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
@@ -1345,7 +1345,7 @@ export default function DepartmentKanban() {
         if (cancelled) return
         setInternalMeetingChecklistId(selected.id)
         let items = selected.items || []
-        
+
         // Delete only the test item "dssdgsdg" if it exists
         const itemsToDelete = ["dssdgsdg"]
         const deletePromises: Promise<Response>[] = []
@@ -1363,7 +1363,7 @@ export default function DepartmentKanban() {
             items = (await reloadRes.json()) as ChecklistItem[]
           }
         }
-        
+
         const existingKeys = new Set(
           items.map((item) => `${item.day || ""}|${(item.title || "").trim().toLowerCase()}`)
         )
@@ -1527,19 +1527,19 @@ export default function DepartmentKanban() {
   const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
   const visibleNoProjectTasks = React.useMemo(() => {
     const filtered = noProjectTasks.filter(isNoProjectTask)
-    
+
     // Deduplicate only exact duplicates by ID.
     // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
     // so we must NOT merge by title/properties. Otherwise users can end up opening/editing
     // someone else's copy from "My view" / "All users" lists.
     const taskMapById = new Map<string, Task>()
-    
+
     for (const t of filtered) {
       const existingById = taskMapById.get(t.id)
       if (existingById) {
         // Merge assignees if task already exists with same ID
         const assigneeMap = new Map<string, TaskAssignee>()
-        
+
         // Add existing assignees
         if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
           const user = userMap.get(existingById.assigned_to)!
@@ -1554,7 +1554,7 @@ export default function DepartmentKanban() {
         existingById.assignees?.forEach(a => {
           if (a.id) assigneeMap.set(a.id, a)
         })
-        
+
         // Add new task's assignees
         if (t.assigned_to && userMap.has(t.assigned_to)) {
           const user = userMap.get(t.assigned_to)!
@@ -1569,7 +1569,7 @@ export default function DepartmentKanban() {
         t.assignees?.forEach(a => {
           if (a.id) assigneeMap.set(a.id, a)
         })
-        
+
         // Update existing task with merged assignees
         existingById.assignees = Array.from(assigneeMap.values())
         if (!existingById.assigned_to && t.assigned_to) {
@@ -1577,11 +1577,11 @@ export default function DepartmentKanban() {
         }
         continue
       }
-      
+
       const taskCopy = { ...t }
       taskMapById.set(t.id, taskCopy)
     }
-    
+
     return Array.from(taskMapById.values())
   }, [noProjectTasks, userMap])
   const visibleGaNotes = React.useMemo(
@@ -1651,10 +1651,10 @@ export default function DepartmentKanban() {
     () => {
       const depTasks = department
         ? systemTasks.filter((t) => {
-            if (t.department_id === department.id) return true
-            if (t.department_ids?.includes(department.id)) return true
-            return false
-          })
+          if (t.department_id === department.id) return true
+          if (t.department_ids?.includes(department.id)) return true
+          return false
+        })
         : []
       if (!isMineView || !user?.id) return depTasks
       return depTasks.filter((t) => {
@@ -1677,31 +1677,31 @@ export default function DepartmentKanban() {
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
-      
+
       // If in "my view", also include overdue system tasks where next occurrence has passed
       if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
         const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
         const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
-        
+
         const overdueTasks = visibleSystemTemplates.filter((t) => {
           const templateId = t.template_id || t.id
           // Skip if already in today's tasks
           if (todayTaskIds.has(templateId)) return false
           // Only include if it's in overdue list
           if (!overdueTaskIds.has(templateId)) return false
-          
+
           // Check if next occurrence date has passed
           const nextOccurrence = getNextOccurrenceDate(t, todayDate)
           const nextOccurrenceKey = dayKey(nextOccurrence)
           const todayKey = dayKey(todayDate)
-          
+
           // Only show if next occurrence is in the past (overdue)
           return nextOccurrenceKey < todayKey
         })
-        
+
         return [...todayTasks, ...overdueTasks]
       }
-      
+
       return todayTasks
     },
     [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
@@ -1781,7 +1781,18 @@ export default function DepartmentKanban() {
   )
   const dailyReportFastTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+
     return visibleNoProjectTasks.filter((task) => {
+      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+        return false
+      }
+
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
@@ -1797,47 +1808,58 @@ export default function DepartmentKanban() {
       if (!baseDate) return false
       return dayKey(baseDate) <= todayKey
     })
-  }, [todayDate, visibleNoProjectTasks])
+  }, [todayDate, visibleNoProjectTasks, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
   const dailyReportProjectTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+
     return projectTasks.filter((task) => {
+      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+        return false
+      }
+
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      
+
       // Show completed tasks if completed today
       if (completedToday) return true
       // Don't show tasks completed on other days
       if (completedDate && !completedToday) return false
-      
+
       // Show project tasks from start_date through due_date (and after for late)
       const startDate = task.start_date ? toDate(task.start_date) : null
       const dueDate = task.due_date ? toDate(task.due_date) : null
       const createdDate = task.created_at ? toDate(task.created_at) : null
-      
+
       // If we have both start and due dates, show if today is on/after start
       if (startDate && dueDate) {
         const startKey = dayKey(startDate)
         return todayKey >= startKey
       }
-      
+
       // If only due date, show if due today or before
       if (dueDate) {
         const dueKey = dayKey(dueDate)
         return todayKey >= dueKey
       }
-      
+
       // If only start date, show if started today or before
       if (startDate) {
         const startKey = dayKey(startDate)
         return todayKey >= startKey
       }
-      
+
       // Fallback to created_at if no dates
       if (!createdDate) return false
       const createdKey = dayKey(createdDate)
       return createdKey <= todayKey
     })
-  }, [projectTasks, todayDate])
+  }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -1980,7 +2002,7 @@ export default function DepartmentKanban() {
             ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
             : tmpl?.alignment_roles?.length
               ? tmpl.alignment_roles.join(", ")
-            : "-"
+              : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
@@ -2015,7 +2037,7 @@ export default function DepartmentKanban() {
             ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
             : tmpl.alignment_roles?.length
               ? tmpl.alignment_roles.join(", ")
-            : "-"
+              : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
@@ -2197,7 +2219,7 @@ export default function DepartmentKanban() {
               ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
               : tmpl?.alignment_roles?.length
                 ? tmpl.alignment_roles.join(", ")
-              : "-"
+                : "-"
             : "-",
           kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
           tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
@@ -2770,7 +2792,11 @@ export default function DepartmentKanban() {
         return
       }
       const targetUserId =
-        viewMode === "department" ? (selectedUserId !== "__all__" ? selectedUserId : null) : user?.id
+        viewMode === "department"
+          ? selectedUserId !== "__all__"
+            ? selectedUserId
+            : user?.id
+          : user?.id
       if (!department?.id || !targetUserId) {
         setDailyReport(null)
         return
@@ -2930,7 +2956,7 @@ export default function DepartmentKanban() {
       }, 0)
       return
     }
-    
+
     if (showAllTodayPrint && loadingAllUsersDailyReports) {
       setPendingPrint(true)
       return
@@ -3287,7 +3313,7 @@ export default function DepartmentKanban() {
             : task
         })
       )
-      
+
       // Reload system tasks
       const sysRes = await apiFetch(
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
@@ -3295,7 +3321,7 @@ export default function DepartmentKanban() {
       if (sysRes.ok) {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }
-      
+
       setCloseTaskDialogOpen(false)
       setTaskToCloseId(null)
       setTaskToCloseTemplate(null)
@@ -3575,7 +3601,7 @@ export default function DepartmentKanban() {
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         status: projectStatus,
       }
-      
+
       // Add due_date if provided
       if (projectDueDate.trim()) {
         const normalized = normalizeDueDateInput(projectDueDate.trim())
@@ -3604,7 +3630,7 @@ export default function DepartmentKanban() {
         return
       }
       const created = (await res.json()) as Project
-      
+
       // Add project members if any were selected
       if (projectMemberIds.length > 0) {
         try {
@@ -3627,7 +3653,7 @@ export default function DepartmentKanban() {
           console.error("Error adding project members:", error)
         }
       }
-      
+
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       setProjectTitle("")
@@ -3793,22 +3819,22 @@ export default function DepartmentKanban() {
       }
       const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
-        const payload = {
-          title: noProjectTitle.trim(),
-          description: noProjectDescription.trim() || null,
-          project_id: null,
-          department_id: department.id,
-          status: "TODO",
-          priority: "NORMAL",
-          finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
-          is_bllok: noProjectType === "blocked",
-          is_1h_report: noProjectType === "hourly",
-          is_r1: noProjectType === "r1",
-          is_personal: noProjectType === "personal",
-          ga_note_origin_id: gaNoteId,
-          start_date: startDate,
-          due_date: dueDate,
-        }
+      const payload = {
+        title: noProjectTitle.trim(),
+        description: noProjectDescription.trim() || null,
+        project_id: null,
+        department_id: department.id,
+        status: "TODO",
+        priority: "NORMAL",
+        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
+        is_bllok: noProjectType === "blocked",
+        is_1h_report: noProjectType === "hourly",
+        is_r1: noProjectType === "r1",
+        is_personal: noProjectType === "personal",
+        ga_note_origin_id: gaNoteId,
+        start_date: startDate,
+        due_date: dueDate,
+      }
       // Create one task with multiple assignees instead of multiple tasks
       const assigneeIds = noProjectAssignees.length > 0 ? noProjectAssignees : null
       const res = await apiFetch("/tasks", {
@@ -4806,9 +4832,9 @@ export default function DepartmentKanban() {
       </div>
       <div className="px-4 sm:px-6 pb-4 sm:pb-6 print:hidden">
         {activeTab === "projects" ? (
-            <div className="mb-4 sm:mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
+          <div className="mb-4 sm:mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
@@ -4909,14 +4935,14 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Due Date</Label>
-                          <Input
-                            type="date"
-                            value={projectDueDate}
-                            onChange={(e) => setProjectDueDate(e.target.value)}
-                            placeholder="Select due date"
-                            className="border-slate-200 focus:border-slate-400 rounded-xl"
-                          />
-                        </div>
+                        <Input
+                          type="date"
+                          value={projectDueDate}
+                          onChange={(e) => setProjectDueDate(e.target.value)}
+                          placeholder="Select due date"
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
+                        />
+                      </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
@@ -4929,9 +4955,9 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
-              </div>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
         {activeTab === "projects" ? (
           <div className="space-y-4 sm:space-y-6">
@@ -4952,13 +4978,13 @@ export default function DepartmentKanban() {
                 const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
                 const isClosed = phase.toUpperCase() === "CLOSED"
-                
+
                 // Count tasks for this project
                 const taskCount = departmentTasks.filter(t => t.project_id === project.id).length
-                
+
                 // Count GA notes for this project
                 const gaNoteCount = gaNotes.filter(n => n.project_id === project.id).length
-                
+
                 // Format deadline
                 const formatDeadline = (dateStr?: string | null) => {
                   if (!dateStr) return "-"
@@ -4966,7 +4992,7 @@ export default function DepartmentKanban() {
                   if (Number.isNaN(date.getTime())) return "-"
                   return date.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" })
                 }
-                
+
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
                     <Card className={`bg-white border rounded-lg p-2.5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1"}`}>
@@ -5008,14 +5034,14 @@ export default function DepartmentKanban() {
                           ) : null}
                         </div>
                       </div>
-                      
+
                       {/* Current Phase */}
                       <div className="mb-2">
                         <Badge className={`text-xs whitespace-nowrap px-2 py-0.5 ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-blue-100 text-blue-700 border border-blue-200"}`}>
                           {PHASE_LABELS[phase] || "Meetings"}
                         </Badge>
                       </div>
-                      
+
                       {/* Stats Grid: Tasks, GA Notes, Deadline */}
                       <div className="grid grid-cols-3 gap-1.5 mb-2">
                         <div className="text-center p-1.5 bg-slate-50 dark:bg-slate-800 rounded-md">
@@ -5031,7 +5057,7 @@ export default function DepartmentKanban() {
                           <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 leading-tight">{formatDeadline(project.due_date)}</div>
                         </div>
                       </div>
-                      
+
                       {/* Members */}
                       <div className="mb-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Members</div>
@@ -5058,7 +5084,7 @@ export default function DepartmentKanban() {
                           )}
                         </div>
                       </div>
-                      
+
                       {/* View Details Link */}
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
                         <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 group-hover:underline">
@@ -5125,30 +5151,30 @@ export default function DepartmentKanban() {
                     </Button>
                   </>
                 ) : null}
-                  {viewMode === "mine" ? (
-                    <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                      <Button
-                        variant="outline"
-                        className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                        onClick={() =>
-                          setShowDailyUserReport((prev) => {
-                            const next = !prev
-                            if (next) setPrintRange("today")
-                            return next
-                          })
-                        }
-                      >
-                        {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
-                      </Button>
-                      <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                      <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                        <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                          <SelectValue placeholder="Today" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="today">Today</SelectItem>
-                        </SelectContent>
-                      </Select>
+                {viewMode === "mine" ? (
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                      onClick={() =>
+                        setShowDailyUserReport((prev) => {
+                          const next = !prev
+                          if (next) setPrintRange("today")
+                          return next
+                        })
+                      }
+                    >
+                      {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
+                    </Button>
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                    <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                      <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                        <SelectValue placeholder="Today" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="today">Today</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -5199,9 +5225,8 @@ export default function DepartmentKanban() {
                 </div>
                 <div
                   ref={dailyReportScrollRef}
-                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
-                    isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
-                  }`}
+                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                    }`}
                   onMouseDown={handleDailyReportMouseDown}
                   onMouseMove={handleDailyReportMouseMove}
                   onMouseUp={handleDailyReportMouseEnd}
@@ -5393,70 +5418,70 @@ export default function DepartmentKanban() {
             ) : null}
 
             {viewMode === "department" ? (
-            <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    Shows overdue items for the selected user (not for “All users”).
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      Shows overdue items for the selected user (not for “All users”).
+                    </div>
                   </div>
+                  {loadingDailyReport ? (
+                    <div className="text-xs text-slate-500">Loading…</div>
+                  ) : null}
                 </div>
-                {loadingDailyReport ? (
-                  <div className="text-xs text-slate-500">Loading…</div>
-                ) : null}
-              </div>
-              {selectedUserId === "__all__" ? (
-                <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
-              ) : dailyReport ? (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
-                    {dailyReport.tasks_overdue.length ? (
-                      <div className="mt-2 space-y-2">
-                        {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
-                          <div key={item.task.id} className="flex items-start justify-between gap-2">
-                            <div className="text-sm text-slate-800">{item.task.title}</div>
-                            <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                              late {item.late_days ?? 0}d
+                {selectedUserId === "__all__" ? (
+                  <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
+                ) : dailyReport ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
+                      {dailyReport.tasks_overdue.length ? (
+                        <div className="mt-2 space-y-2">
+                          {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
+                            <div key={item.task.id} className="flex items-start justify-between gap-2">
+                              <div className="text-sm text-slate-800">{item.task.title}</div>
+                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                late {item.late_days ?? 0}d
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                        {dailyReport.tasks_overdue.length > 8 ? (
-                          <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
-                    )}
+                          ))}
+                          {dailyReport.tasks_overdue.length > 8 ? (
+                            <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
+                      {dailyReport.system_overdue.length ? (
+                        <div className="mt-2 space-y-2">
+                          {dailyReport.system_overdue.slice(0, 8).map((occ) => (
+                            <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
+                              <div className="text-sm text-slate-800">
+                                {occ.title}{" "}
+                                <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
+                              </div>
+                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                late {occ.late_days ?? 0}d
+                              </div>
+                            </div>
+                          ))}
+                          {dailyReport.system_overdue.length > 8 ? (
+                            <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
+                      )}
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
-                    {dailyReport.system_overdue.length ? (
-                      <div className="mt-2 space-y-2">
-                        {dailyReport.system_overdue.slice(0, 8).map((occ) => (
-                          <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
-                            <div className="text-sm text-slate-800">
-                              {occ.title}{" "}
-                              <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
-                            </div>
-                            <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                              late {occ.late_days ?? 0}d
-                            </div>
-                          </div>
-                        ))}
-                        {dailyReport.system_overdue.length > 8 ? (
-                          <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-3 text-sm text-slate-500">No report available.</div>
-              )}
-            </Card>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No report available.</div>
+                )}
+              </Card>
             ) : null}
             <div className="space-y-4">
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
@@ -5536,23 +5561,23 @@ export default function DepartmentKanban() {
                       {todayOpenNotes.map((note) => {
                         const priorityValue = normalizePriority(note.priority)
                         return (
-                        <div
-                          key={note.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {note.note_type || "GA"}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
-                            <div className="font-medium">{note.content}</div>
+                          <div
+                            key={note.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                {note.note_type || "GA"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                              <div className="font-medium">{note.content}</div>
+                            </div>
                           </div>
-                        </div>
                         )
                       })}
                     </div>
@@ -5644,11 +5669,10 @@ export default function DepartmentKanban() {
                           <Link
                             key={task.id}
                             href={`/tasks/${task.id}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
-                              isCompleted 
-                                ? "border-green-500 bg-green-50/30 opacity-75" 
-                                : "border-blue-500 bg-white"
-                            }`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                              ? "border-green-500 bg-green-50/30 opacity-75"
+                              : "border-blue-500 bg-white"
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -5684,7 +5708,7 @@ export default function DepartmentKanban() {
                                 {Array.from(assigneeIds).map((userId) => {
                                   const userFromMap = userMap.get(userId)
                                   const assigneeFromArray = task.assignees?.find(a => a.id === userId)
-                                  const label = userFromMap 
+                                  const label = userFromMap
                                     ? assigneeLabel(userFromMap)
                                     : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
                                   return (
@@ -5723,21 +5747,21 @@ export default function DepartmentKanban() {
                       {todaySystemTasks.map((task) => {
                         const priorityValue = normalizePriority(task.priority)
                         return (
-                        <div
-                          key={task.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="font-medium text-slate-800">{task.title}</div>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
+                          <div
+                            key={task.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
                           </div>
-                          <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
-                        </div>
                         )
                       })}
                     </div>
@@ -5970,7 +5994,7 @@ export default function DepartmentKanban() {
                                 : department
                                   ? formatDepartmentName(department.name)
                                   : "-"
-                          const ownerLabel = assigneeSummary(template.assignees) || 
+                          const ownerLabel = assigneeSummary(template.assignees) ||
                             (template.default_assignee_id ? users.find((u) => u.id === template.default_assignee_id)?.full_name || users.find((u) => u.id === template.default_assignee_id)?.username || "-" : "-")
                           const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
                           const statusValue = template.status || "TODO"
@@ -6063,25 +6087,25 @@ export default function DepartmentKanban() {
         {/* Dialog for closing task with optional comment */}
         <Dialog open={closeTaskDialogOpen} onOpenChange={setCloseTaskDialogOpen}>
           <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Close System Task</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="close-task-comment">
-              Employee Comment
-            </Label>
-            <Textarea
-              id="close-task-comment"
-              value={closeTaskComment}
-              onChange={(e) => setCloseTaskComment(e.target.value)}
-              placeholder="Describe what was done in this task..."
-              className="min-h-[120px]"
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
+            <DialogHeader>
+              <DialogTitle>Close System Task</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="close-task-comment">
+                  Employee Comment
+                </Label>
+                <Textarea
+                  id="close-task-comment"
+                  value={closeTaskComment}
+                  onChange={(e) => setCloseTaskComment(e.target.value)}
+                  placeholder="Describe what was done in this task..."
+                  className="min-h-[120px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setCloseTaskDialogOpen(false)
                     setTaskToCloseId(null)
@@ -6090,14 +6114,14 @@ export default function DepartmentKanban() {
                   disabled={closingTask}
                 >
                   Cancel
-            </Button>
-            <Button
-              onClick={() => void confirmCloseTask()}
-              disabled={closingTask || !closeTaskComment.trim()}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {closingTask ? "Closing..." : "Close Task"}
-            </Button>
+                </Button>
+                <Button
+                  onClick={() => void confirmCloseTask()}
+                  disabled={closingTask || !closeTaskComment.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {closingTask ? "Closing..." : "Close Task"}
+                </Button>
               </div>
             </div>
           </DialogContent>
@@ -6151,67 +6175,67 @@ export default function DepartmentKanban() {
                         <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label className="text-slate-700">Assign to</Label>
-                            <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
-                              <DialogTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
-                                >
-                                  {noProjectAssigneeLabel}
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Assign to</Label>
+                          <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
+                            <DialogTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                              >
+                                {noProjectAssigneeLabel}
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-md z-[110]">
+                              <DialogHeader>
+                                <DialogTitle>Select Assignees</DialogTitle>
+                              </DialogHeader>
+                              <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                {users.length ? (
+                                  users.map((u) => {
+                                    const isSelected = noProjectAssignees.includes(u.id)
+                                    return (
+                                      <div
+                                        key={u.id}
+                                        className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
+                                          } else {
+                                            setNoProjectAssignees((prev) => [...prev, u.id])
+                                          }
+                                        }}
+                                      >
+                                        <Checkbox checked={isSelected} />
+                                        <Label className="cursor-pointer flex-1">
+                                          {u.full_name || u.username || "-"}
+                                        </Label>
+                                      </div>
+                                    )
+                                  })
+                                ) : (
+                                  <div className="text-sm text-slate-600">No users available.</div>
+                                )}
+                              </div>
+                              <div className="mt-4 flex justify-end gap-2">
+                                <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
+                                  Clear
                                 </Button>
-                              </DialogTrigger>
-                              <DialogContent className="sm:max-w-md z-[110]">
-                                <DialogHeader>
-                                  <DialogTitle>Select Assignees</DialogTitle>
-                                </DialogHeader>
-                                <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
-                                  {users.length ? (
-                                    users.map((u) => {
-                                      const isSelected = noProjectAssignees.includes(u.id)
-                                      return (
-                                        <div
-                                          key={u.id}
-                                          className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
-                                          onClick={() => {
-                                            if (isSelected) {
-                                              setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
-                                            } else {
-                                              setNoProjectAssignees((prev) => [...prev, u.id])
-                                            }
-                                          }}
-                                        >
-                                          <Checkbox checked={isSelected} />
-                                          <Label className="cursor-pointer flex-1">
-                                            {u.full_name || u.username || "-"}
-                                          </Label>
-                                        </div>
-                                      )
-                                    })
-                                  ) : (
-                                    <div className="text-sm text-slate-600">No users available.</div>
-                                  )}
-                                </div>
-                                <div className="mt-4 flex justify-end gap-2">
-                                  <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
-                                    Clear
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => setNoProjectAssignees(users.map((u) => u.id))}
-                                    disabled={!users.length}
-                                  >
-                                    All users
-                                  </Button>
-                                  <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
-                                    Done
-                                  </Button>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          </div>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setNoProjectAssignees(users.map((u) => u.id))}
+                                  disabled={!users.length}
+                                >
+                                  All users
+                                </Button>
+                                <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
+                                  Done
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
                         <div className="space-y-2">
                           <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
@@ -6432,117 +6456,116 @@ export default function DepartmentKanban() {
                           const statusValue = taskStatusValue(t)
                           const isCompleted = statusValue === "DONE"
                           return (
-                          <Link
-                            key={t.id}
-                            id={`task-${t.id}`}
-                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
-                              isCompleted 
-                                ? "border-green-500 bg-green-50/30 opacity-75" 
+                            <Link
+                              key={t.id}
+                              id={`task-${t.id}`}
+                              href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
+                              className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                                ? "border-green-500 bg-green-50/30 opacity-75"
                                 : `${row.borderClass} bg-white`
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
-                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
-                                    GA
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                                    <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                      GA
+                                    </Badge>
+                                  )}
+                                  <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                    {t.title}
+                                  </div>
+                                  <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
+                                    {reportStatusLabel(statusValue)}
                                   </Badge>
-                                )}
-                                <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                  {t.title}
+                                  {isHighPriority && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[11px] bg-red-100 text-red-700 border-red-200"
+                                    >
+                                      {taskPriority}
+                                    </Badge>
+                                  )}
                                 </div>
-                                <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
-                                  {reportStatusLabel(statusValue)}
-                                </Badge>
-                                {isHighPriority && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[11px] bg-red-100 text-red-700 border-red-200"
-                                  >
-                                    {taskPriority}
+                                <div className="flex items-center gap-2">
+                                  <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                    {row.itemBadge}
                                   </Badge>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
-                                  {row.itemBadge}
-                                </Badge>
-                                {(() => {
-                                  // Collect all assignees: from assigned_to and assignees array
-                                  const assigneeIds = new Set<string>()
-                                  if (t.assigned_to) {
-                                    assigneeIds.add(t.assigned_to)
-                                  }
-                                  if (t.assignees) {
-                                    for (const assignee of t.assignees) {
-                                      if (assignee.id) {
-                                        assigneeIds.add(assignee.id)
+                                  {(() => {
+                                    // Collect all assignees: from assigned_to and assignees array
+                                    const assigneeIds = new Set<string>()
+                                    if (t.assigned_to) {
+                                      assigneeIds.add(t.assigned_to)
+                                    }
+                                    if (t.assignees) {
+                                      for (const assignee of t.assignees) {
+                                        if (assignee.id) {
+                                          assigneeIds.add(assignee.id)
+                                        }
                                       }
                                     }
-                                  }
-                                  
-                                  // Render all assignee initials
-                                  const assigneeChips = Array.from(assigneeIds).map((userId) => {
-                                    // Try to get user from userMap first, then from assignees array
-                                    const userFromMap = userMap.get(userId)
-                                    const assigneeFromArray = t.assignees?.find(a => a.id === userId)
-                                    // Get label from userMap or assignees array
-                                    const label = userFromMap 
-                                      ? assigneeLabel(userFromMap)
-                                      : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
-                                    return (
-                                      <div
-                                        key={userId}
-                                        className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
-                                        title={label}
+
+                                    // Render all assignee initials
+                                    const assigneeChips = Array.from(assigneeIds).map((userId) => {
+                                      // Try to get user from userMap first, then from assignees array
+                                      const userFromMap = userMap.get(userId)
+                                      const assigneeFromArray = t.assignees?.find(a => a.id === userId)
+                                      // Get label from userMap or assignees array
+                                      const label = userFromMap
+                                        ? assigneeLabel(userFromMap)
+                                        : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+                                      return (
+                                        <div
+                                          key={userId}
+                                          className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                          title={label}
+                                        >
+                                          {initials(label)}
+                                        </div>
+                                      )
+                                    })
+
+                                    return assigneeChips.length > 0 ? assigneeChips : null
+                                  })()}
+                                  {canDeleteNoProject ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                        title="Edit"
+                                        aria-label={`Edit ${t.title}`}
+                                        onClick={(event) => {
+                                          event.preventDefault()
+                                          event.stopPropagation()
+                                          startEditTask(t)
+                                        }}
                                       >
-                                        {initials(label)}
-                                      </div>
-                                    )
-                                  })
-                                  
-                                  return assigneeChips.length > 0 ? assigneeChips : null
-                                })()}
-                                {canDeleteNoProject ? (
-                                  <>
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                      title="Edit"
-                                      aria-label={`Edit ${t.title}`}
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        startEditTask(t)
-                                      }}
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      disabled={deletingNoProjectTaskId === t.id}
-                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                      title="Delete"
-                                      aria-label={`Delete ${t.title}`}
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        void deleteNoProjectTask(t.id)
-                                      }}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </>
-                                ) : null}
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        disabled={deletingNoProjectTaskId === t.id}
+                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                        title="Delete"
+                                        aria-label={`Delete ${t.title}`}
+                                        onClick={(event) => {
+                                          event.preventDefault()
+                                          event.stopPropagation()
+                                          void deleteNoProjectTask(t.id)
+                                        }}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </>
+                                  ) : null}
+                                </div>
                               </div>
-                            </div>
-                            {t.description ? (
-                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
-                            ) : null}
-                          </Link>
+                              {t.description ? (
+                                <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                              ) : null}
+                            </Link>
                           )
                         })}
                       </div>
@@ -6896,13 +6919,13 @@ export default function DepartmentKanban() {
                           const linkedAssignees = linkedTask?.assignees && linkedTask.assignees.length > 0
                             ? linkedTask.assignees
                             : (() => {
-                                const assignedId = linkedTask?.assigned_to || null
-                                if (!assignedId) return []
-                                const assignedUser = userMap.get(assignedId)
-                                return assignedUser
-                                  ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }]
-                                  : []
-                              })()
+                              const assignedId = linkedTask?.assigned_to || null
+                              if (!assignedId) return []
+                              const assignedUser = userMap.get(assignedId)
+                              return assignedUser
+                                ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }]
+                                : []
+                            })()
                           // Use the current department if the note's department_id matches, otherwise show nothing
                           const noteDepartment = note.department_id === department?.id ? department : null
 
@@ -7400,41 +7423,41 @@ export default function DepartmentKanban() {
                         const noteIdsForEdit = canEditNote ? group.notes.map((n) => n.id) : []
                         const canUpdateDone = noteIdsForAction.length > 0
 
-                          return (
-                            <tr
-                              key={note.id}
-                              className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
-                            >
-                              <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
-                              <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
-                                <div className="flex flex-col gap-1">
-                                  <span className={`text-sm font-semibold ${groupIsDone ? "line-through text-slate-500" : ""}`}>{note.title}</span>
-                                </div>
-                              </td>
-                              <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
-                                <span className="text-sm">{note.description || "-"}</span>
-                              </td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{departmentLabel}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{projectLabel}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{formatDate(note.created_at)}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
-                              <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
-                                <div className="flex items-center justify-center gap-2">
-                                  {canEditNote ? (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-7 w-7 border-slate-200 text-slate-500 hover:border-sky-200 hover:text-sky-700"
-                                      title="Edit"
-                                      aria-label={`Edit ${note.title}`}
-                                      onClick={() => startEditInternalNote(note, group.toUserIds, noteIdsForEdit)}
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                  ) : null}
-                                  {!groupIsDone ? (
-                                    canUpdateDone ? (
+                        return (
+                          <tr
+                            key={note.id}
+                            className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
+                          >
+                            <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
+                            <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                              <div className="flex flex-col gap-1">
+                                <span className={`text-sm font-semibold ${groupIsDone ? "line-through text-slate-500" : ""}`}>{note.title}</span>
+                              </div>
+                            </td>
+                            <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                              <span className="text-sm">{note.description || "-"}</span>
+                            </td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{departmentLabel}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{projectLabel}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{formatDate(note.created_at)}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
+                            <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
+                              <div className="flex items-center justify-center gap-2">
+                                {canEditNote ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 border-slate-200 text-slate-500 hover:border-sky-200 hover:text-sky-700"
+                                    title="Edit"
+                                    aria-label={`Edit ${note.title}`}
+                                    onClick={() => startEditInternalNote(note, group.toUserIds, noteIdsForEdit)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                                {!groupIsDone ? (
+                                  canUpdateDone ? (
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -7445,42 +7468,42 @@ export default function DepartmentKanban() {
                                       <Check className="h-3.5 w-3.5 mr-1" />
                                       Mark as done
                                     </Button>
-                                    ) : null
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs text-emerald-700">Done</span>
-                                      <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                      {canUpdateDone ? (
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="h-7 w-7 border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600"
-                                          title="Undo"
-                                          aria-label={`Undo done for ${note.title}`}
-                                          disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
-                                          onClick={() => void updateInternalNoteDone(noteIdsForAction, false)}
-                                        >
-                                          <RotateCcw className="h-3.5 w-3.5" />
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  )}
-                                  {canDeleteNote ? (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                      title="Delete"
-                                      aria-label={`Delete ${note.title}`}
-                                      onClick={() => void deleteInternalNote(noteIdsForAction)}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          )
+                                  ) : null
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-emerald-700">Done</span>
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                    {canUpdateDone ? (
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-7 border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600"
+                                        title="Undo"
+                                        aria-label={`Undo done for ${note.title}`}
+                                        disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                        onClick={() => void updateInternalNoteDone(noteIdsForAction, false)}
+                                      >
+                                        <RotateCcw className="h-3.5 w-3.5" />
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                )}
+                                {canDeleteNote ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${note.title}`}
+                                    onClick={() => void deleteInternalNote(noteIdsForAction)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        )
                       })
                     ) : (
                       <tr>
@@ -7623,7 +7646,7 @@ export default function DepartmentKanban() {
                                         <Dialog open={showEditParticipantDialog} onOpenChange={setShowEditParticipantDialog}>
                                           <DialogTrigger asChild>
                                             <Button variant="outline" className="w-full justify-between">
-                                              {editMeetingParticipantIds.length > 0 
+                                              {editMeetingParticipantIds.length > 0
                                                 ? `${editMeetingParticipantIds.length} participant${editMeetingParticipantIds.length > 1 ? 's' : ''} selected`
                                                 : "Select participants"}
                                             </Button>
@@ -7673,17 +7696,17 @@ export default function DepartmentKanban() {
                                           </SelectContent>
                                         </Select>
                                         <div className="flex gap-2">
-                                          <Button 
-                                            variant="outline" 
-                                            onClick={cancelEditMeeting} 
+                                          <Button
+                                            variant="outline"
+                                            onClick={cancelEditMeeting}
                                             className="flex-1"
                                             type="button"
                                             disabled={savingMeeting}
                                           >
                                             Cancel
                                           </Button>
-                                          <Button 
-                                            onClick={() => void saveMeeting(meeting.id)} 
+                                          <Button
+                                            onClick={() => void saveMeeting(meeting.id)}
                                             className="flex-1"
                                             type="button"
                                             disabled={!editMeetingTitle.trim() || savingMeeting}
@@ -7722,8 +7745,8 @@ export default function DepartmentKanban() {
                                         {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
                                           ? `W: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
                                           : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
-                                          ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
-                                          : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
+                                            ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
+                                            : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
                                       </span>
                                     ) : (
                                       <span className="text-slate-400 text-sm">-</span>
@@ -7892,7 +7915,7 @@ export default function DepartmentKanban() {
                             <Dialog open={showParticipantDialog} onOpenChange={setShowParticipantDialog}>
                               <DialogTrigger asChild>
                                 <Button variant="outline" className="w-full justify-between">
-                                  {meetingParticipantIds.length > 0 
+                                  {meetingParticipantIds.length > 0
                                     ? `${meetingParticipantIds.length} participant${meetingParticipantIds.length > 1 ? 's' : ''} selected`
                                     : "Select participants"}
                                 </Button>
@@ -7942,16 +7965,16 @@ export default function DepartmentKanban() {
                               </SelectContent>
                             </Select>
                             <div className="flex gap-2">
-                              <Button 
-                                disabled={!meetingTitle.trim() || creatingMeeting} 
+                              <Button
+                                disabled={!meetingTitle.trim() || creatingMeeting}
                                 onClick={() => void submitMeeting()}
                                 className="flex-1"
                                 type="button"
                               >
                                 {creatingMeeting ? "Saving..." : "Add"}
                               </Button>
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 onClick={() => {
                                   setShowAddMeetingForm(false)
                                   setMeetingTitle("")
@@ -8093,8 +8116,8 @@ export default function DepartmentKanban() {
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
-                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3") 
-                          ? (item.title || "").toUpperCase() 
+                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3")
+                          ? (item.title || "").toUpperCase()
                           : (item.title || "")
                         return (
                           <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
@@ -8119,18 +8142,18 @@ export default function DepartmentKanban() {
                               <div className="flex items-center gap-2">
                                 {isEditing ? (
                                   <>
-                                    <Button 
-                                      size="sm" 
-                                      variant="outline" 
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
                                       onClick={() => void saveInternalMeetingItem()}
                                       type="button"
                                       disabled={!editingInternalMeetingItem.trim() || savingInternalMeetingItem}
                                     >
                                       {savingInternalMeetingItem ? "Saving..." : "Save"}
                                     </Button>
-                                    <Button 
-                                      size="sm" 
-                                      variant="ghost" 
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
                                       onClick={cancelEditInternalMeetingItem}
                                       type="button"
                                       disabled={savingInternalMeetingItem}
@@ -8297,7 +8320,7 @@ export default function DepartmentKanban() {
                   userName: string
                   userInitials: string
                 }> = []
-                
+
                 for (const member of allTodayPrintBaseUsers) {
                   const userReport = allUsersDailyReports.get(member.id)
                   if (!userReport) continue
@@ -8309,7 +8332,7 @@ export default function DepartmentKanban() {
                     allRows.push({ ...row, userName, userInitials })
                   }
                 }
-                
+
                 // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
                 allRows.sort((a, b) => {
                   // First sort by typeLabel (LL)
@@ -8323,7 +8346,7 @@ export default function DepartmentKanban() {
                   // Finally by tyo (T/Y/O)
                   return a.tyo.localeCompare(b.tyo)
                 })
-                
+
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
