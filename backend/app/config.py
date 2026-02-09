@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = (
         "http://localhost:3000,http://127.0.0.1:3000,"
         "http://192.168.15.118:3000,http://192.168.15.117:3000,"
-        "https://primeflow.primexeu.com,http://localhost:3000"
+        "https://primeflow.primexeu.com,https://www.primeflow.primexeu.com"
     )
 
     # Microsoft Teams/Graph API Configuration
