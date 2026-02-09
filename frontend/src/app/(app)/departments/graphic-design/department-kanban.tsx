@@ -3283,7 +3283,6 @@ export default function DepartmentKanban() {
       setNoProjectAssignees([])
       setNoProjectStartDate("")
       setNoProjectDueDate("")
-      toast.success("Task created")
     } finally {
       setCreatingNoProject(false)
     }
