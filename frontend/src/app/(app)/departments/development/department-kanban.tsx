@@ -5391,7 +5391,9 @@ export default function DepartmentKanban() {
                                     )}
                                   </div>
                                   <div className="mt-1 text-xs text-slate-600">
-                                    {assigneeList.join(", ")}
+                                    <span className="font-medium text-slate-700">{group.name}</span>
+                                    {assigneeList.length ? <span className="text-slate-400"> • </span> : null}
+                                    {assigneeList.length ? <span>{assigneeList.join(", ")}</span> : null}
                                   </div>
                                 </Link>
                               )
