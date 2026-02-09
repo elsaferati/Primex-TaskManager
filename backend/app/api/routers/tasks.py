@@ -405,7 +405,27 @@ async def get_task(
         and getattr(user.department, "code", "") is not None
         and user.department.code.upper() == "GA"
     )
-    if not ga_manager_cross:
+    can_view = False
+    if task.project_id is None and task.dependency_task_id is None and task.system_template_origin_id is None:
+        can_view = True
+    if ga_manager_cross:
+        can_view = True
+    if task.created_by and task.created_by == user.id:
+        can_view = True
+    if task.assigned_to and task.assigned_to == user.id:
+        can_view = True
+    if not can_view:
+        assigned_row = (
+            await db.execute(
+                select(TaskAssignee)
+                .where(TaskAssignee.task_id == task.id)
+                .where(TaskAssignee.user_id == user.id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if assigned_row is not None:
+            can_view = True
+    if not can_view:
         ensure_department_access(user, task.department_id)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
@@ -444,6 +464,14 @@ async def create_task(
 ) -> TaskOut:
     # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
     department_id = payload.department_id
+    dependency_task_id = payload.dependency_task_id
+    is_fast = is_fast_task_fields(
+        title=payload.title,
+        project_id=payload.project_id,
+        dependency_task_id=dependency_task_id,
+        system_template_origin_id=None,
+        ga_note_origin_id=payload.ga_note_origin_id,
+    )
     project = None
     if payload.project_id is not None:
         project = await _project_for_id(db, payload.project_id)
@@ -458,10 +486,9 @@ async def create_task(
             and getattr(user.department, "code", "") is not None
             and user.department.code.upper() == "GA"
         )
-        if not ga_manager_cross:
+        if not ga_manager_cross and not is_fast:
             ensure_department_access(user, department_id)
 
-    dependency_task_id = payload.dependency_task_id
     if dependency_task_id is not None:
         if payload.project_id is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dependency requires a project")
@@ -512,6 +539,10 @@ async def create_task(
             if not allow_cross_department and assignee.department_id != department_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
 
+    assignee_dept_map: dict[uuid.UUID, uuid.UUID | None] = {
+        user.id: user.department_id for user in assignee_users
+    }
+
     status_value = payload.status or TaskStatus.TODO
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
@@ -534,14 +565,6 @@ async def create_task(
     start_date_value = payload.start_date or datetime.now(timezone.utc)
     due_date_value = payload.due_date
 
-    is_fast = is_fast_task_fields(
-        title=payload.title,
-        project_id=payload.project_id,
-        dependency_task_id=dependency_task_id,
-        system_template_origin_id=None,
-        ga_note_origin_id=payload.ga_note_origin_id,
-    )
-
     # Standalone task multi-assignee: create per-user copies tied by fast_task_group_id.
     if is_fast and assignee_ids is not None and len(assignee_ids) > 1:
         fast_task_group_id = uuid.uuid4()
@@ -555,13 +578,14 @@ async def create_task(
             ordered_assignee_ids.insert(0, payload.assigned_to)  # type: ignore[arg-type]
 
         for assignee_id in ordered_assignee_ids:
+            task_department_id = assignee_dept_map.get(assignee_id) or department_id
             t = Task(
                 title=payload.title,
                 description=payload.description,
                 internal_notes=payload.internal_notes,
                 project_id=payload.project_id,
                 dependency_task_id=dependency_task_id,
-                department_id=department_id,
+                department_id=task_department_id,
                 assigned_to=assignee_id,
                 created_by=user.id,
                 ga_note_origin_id=payload.ga_note_origin_id,
@@ -637,14 +661,19 @@ async def create_task(
 
     fast_task_group_id = uuid.uuid4() if is_fast else None
 
+    assigned_to_value = assignee_ids[0] if assignee_ids else None
+    task_department_id = department_id
+    if is_fast and assigned_to_value is not None:
+        task_department_id = assignee_dept_map.get(assigned_to_value) or department_id
+
     task = Task(
         title=payload.title,
         description=payload.description,
         internal_notes=payload.internal_notes,
         project_id=payload.project_id,
         dependency_task_id=dependency_task_id,
-        department_id=department_id,
-        assigned_to=assignee_ids[0] if assignee_ids else None,
+        department_id=task_department_id,
+        assigned_to=assigned_to_value,
         created_by=user.id,
         ga_note_origin_id=payload.ga_note_origin_id,
         fast_task_group_id=fast_task_group_id,

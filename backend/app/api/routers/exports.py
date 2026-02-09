@@ -2694,12 +2694,11 @@ async def export_ga_notes_xlsx(
     from app.models.enums import GaNoteStatus
     
     # Build query
-    cutoff = datetime.utcnow() - timedelta(days=7)
-    closed_cutoff = datetime.utcnow() - timedelta(days=5)
-    
-    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
-    
-    # Exclude closed notes that are older than 5 days
+    closed_cutoff = datetime.utcnow() - timedelta(days=30)
+
+    stmt = select(GaNote).order_by(GaNote.created_at.desc())
+
+    # Include all open notes; include closed notes only if recently closed
     stmt = stmt.where(
         or_(
             GaNote.status != GaNoteStatus.CLOSED,

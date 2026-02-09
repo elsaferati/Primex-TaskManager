@@ -329,10 +329,8 @@ async def daily_ga_table(
         if planned_start <= day <= planned_end and task.project_id is not None:
             project_ids.add(task.project_id)
 
-    cutoff = datetime.utcnow() - timedelta(days=7)
-    closed_cutoff = datetime.utcnow() - timedelta(days=5)
+    closed_cutoff = datetime.utcnow() - timedelta(days=30)
     base_filters = [
-        GaNote.created_at >= cutoff,
         or_(
             GaNote.status != GaNoteStatus.CLOSED,
             GaNote.completed_at.is_(None),
