@@ -17,6 +17,7 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin, en
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
+from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
@@ -507,6 +508,21 @@ async def create_task(
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
+        if ga_note.project_id is not None:
+            ga_project = (
+                await db.execute(select(Project).where(Project.id == ga_note.project_id))
+            ).scalar_one_or_none()
+            if ga_project is not None and ga_project.department_id is not None:
+                ga_project_department = (
+                    await db.execute(select(Department).where(Department.id == ga_project.department_id))
+                ).scalar_one_or_none()
+                if ga_project_department is not None:
+                    code = (ga_project_department.code or "").upper()
+                    if code in ("PCM", "GDS"):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Tasks for PCM/GDS projects must be created manually",
+                        )
         # Allow cross-department task creation from GA notes - removed department mismatch check
         # if ga_note.department_id is not None and ga_note.department_id != department_id:
         #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")

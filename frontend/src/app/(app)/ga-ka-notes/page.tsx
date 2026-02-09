@@ -238,7 +238,13 @@ export default function GaKaNotesPage() {
       const data = (await res.json()) as Task[]
       const userMapById = new Map(users.map((u) => [u.id, u]))
 
-      const map = new Map<string, { assignees: TaskAssignee[]; description: string | null; taskId: string | null }>()
+      const map = new Map<string, {
+        assignees: TaskAssignee[]
+        description: string | null
+        taskId: string | null
+        taskDepartmentId: string | null
+        taskProjectId: string | null
+      }>()
       for (const t of data) {
         if (!t.ga_note_origin_id) continue
         let assignees: TaskAssignee[] = []
@@ -264,6 +270,8 @@ export default function GaKaNotesPage() {
           assignees,
           description: t.description ?? null,
           taskId: t.id,
+          taskDepartmentId: t.department_id ?? null,
+          taskProjectId: t.project_id ?? null,
         })
       }
       setNoteTaskInfo(map)
@@ -1076,6 +1084,14 @@ export default function GaKaNotesPage() {
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
+                    const taskDepartment = taskInfo?.taskDepartmentId
+                      ? departmentMap.get(taskInfo.taskDepartmentId)
+                      : null
+                    const taskProject = taskInfo?.taskProjectId
+                      ? projectMap.get(taskInfo.taskProjectId)
+                      : null
+                    const displayDepartment = noteDepartment || taskDepartment
+                    const displayProject = noteProject || taskProject
                     const assignees = taskInfo?.assignees ?? []
 
                     // Only show department if:
@@ -1084,7 +1100,7 @@ export default function GaKaNotesPage() {
                     // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
                     const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
                     const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
-                    const shouldShowDepartment = noteDepartment && (noteProject || isFilteredView || isExplicitDepartment)
+                    const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
 
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
@@ -1147,16 +1163,16 @@ export default function GaKaNotesPage() {
                           )}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          {shouldShowDepartment && noteDepartment ? (
+                          {shouldShowDepartment && displayDepartment ? (
                             <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
-                              {abbreviateDepartmentName(noteDepartment.name)}
+                              {abbreviateDepartmentName(displayDepartment.name)}
                             </Badge>
                           ) : null}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          {noteProject ? (
+                          {displayProject ? (
                             <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
-                              {noteProject.title || noteProject.name || "Project"}
+                              {displayProject.title || displayProject.name || "Project"}
                             </Badge>
                           ) : null}
                         </td>

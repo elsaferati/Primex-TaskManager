@@ -247,6 +247,12 @@ function formatDate(value?: string | null) {
   return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
 }
 
+function todayInputValue() {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
+  return local.toISOString().slice(0, 10)
+}
+
 function getInitials(label: string) {
   const trimmed = label.trim()
   if (!trimmed) return "?"
@@ -269,6 +275,19 @@ const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
   NORMAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
   HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
+
+type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "GA"
+const GA_NOTE_TASK_TYPE_OPTIONS_PROJECT: Array<{ value: GaNoteTaskType; label: string }> = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+]
+const GA_NOTE_TASK_TYPE_OPTIONS_FAST: Array<{ value: GaNoteTaskType; label: string }> = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "BLLOK", label: "BLLOK" },
+  { value: "1H", label: "1H" },
+  { value: "R1", label: "R1" },
+  { value: "GA", label: "GA" },
+]
 
 function formatDayLabel(date: Date) {
   const today = new Date()
@@ -1039,7 +1058,9 @@ export default function DepartmentKanban() {
   const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
   const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
   const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
-  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<GaNoteTaskType>("NORMAL")
+  const [gaNoteTaskHasProject, setGaNoteTaskHasProject] = React.useState(false)
+  const [gaNoteTaskStartDate, setGaNoteTaskStartDate] = React.useState(todayInputValue())
   const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
   const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -1184,6 +1205,15 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
   }, [projectMembers])
+
+  React.useEffect(() => {
+    if (gaNoteTaskHasProject && gaNoteTaskPriority !== "NORMAL" && gaNoteTaskPriority !== "HIGH") {
+      setGaNoteTaskPriority("NORMAL")
+    }
+    if (!gaNoteTaskHasProject && gaNoteTaskPriority === "HIGH") {
+      setGaNoteTaskPriority("NORMAL")
+    }
+  }, [gaNoteTaskHasProject, gaNoteTaskPriority])
 
   React.useEffect(() => {
     const handleBeforePrint = () => {
@@ -4204,6 +4234,7 @@ export default function DepartmentKanban() {
       const created = (await res.json()) as GaNote
       setGaNotes((prev) => [created, ...prev])
       if (gaNoteCreateTask) {
+        const startDateValue = gaNoteTaskStartDate ? new Date(gaNoteTaskStartDate).toISOString() : null
         const taskPayload = {
           title: gaNoteTaskDefaultTitle(newGaNote),
           description: newGaNote.trim(),
@@ -4213,6 +4244,7 @@ export default function DepartmentKanban() {
           status: "TODO",
           priority: newGaNotePriority === "__none__" ? "NORMAL" : newGaNotePriority,
           ga_note_origin_id: created.id,
+          start_date: startDateValue,
           finish_period:
             gaNoteCreateTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteCreateTaskFinishPeriod,
         }
@@ -4366,7 +4398,13 @@ export default function DepartmentKanban() {
     }
     setCreatingGaNoteTask(true)
     try {
+      const startDateValue = gaNoteTaskStartDate ? new Date(gaNoteTaskStartDate).toISOString() : null
       const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
+      const isProjectLinked = gaNoteTaskHasProject
+      const priorityValue: TaskPriority = isProjectLinked && gaNoteTaskPriority === "HIGH" ? "HIGH" : "NORMAL"
+      const isBllok = !isProjectLinked && gaNoteTaskPriority === "BLLOK"
+      const is1hReport = !isProjectLinked && gaNoteTaskPriority === "1H"
+      const isR1 = !isProjectLinked && gaNoteTaskPriority === "R1"
       const taskPayload = {
         title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(note.content || ""),
         description: gaNoteTaskDescription.trim() || null,
@@ -4374,10 +4412,15 @@ export default function DepartmentKanban() {
         department_id: department.id,
         assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
         status: "TODO",
-        priority: gaNoteTaskPriority,
+        priority: priorityValue,
         ga_note_origin_id: note.id,
+        start_date: startDateValue,
         due_date: dueDateValue,
         finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
+        is_bllok: isBllok,
+        is_1h_report: is1hReport,
+        is_r1: isR1,
+        is_personal: false,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -4406,6 +4449,7 @@ export default function DepartmentKanban() {
       setGaNoteTaskTitle("")
       setGaNoteTaskDescription("")
       setGaNoteTaskPriority("NORMAL")
+      setGaNoteTaskStartDate(todayInputValue())
       setGaNoteTaskDueDate("")
       setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -6521,7 +6565,11 @@ export default function DepartmentKanban() {
             <Dialog
               open={Boolean(gaNoteTaskOpenId)}
               onOpenChange={(open) => {
-                if (!open) setGaNoteTaskOpenId(null)
+                if (!open) {
+                  setGaNoteTaskOpenId(null)
+                  setGaNoteTaskStartDate(todayInputValue())
+                  setGaNoteTaskHasProject(false)
+                }
               }}
             >
               <DialogContent className="sm:max-w-md">
@@ -6544,16 +6592,19 @@ export default function DepartmentKanban() {
                       rows={4}
                     />
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
+                      <Label>Type</Label>
+                      <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as GaNoteTaskType)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Priority" />
+                          <SelectValue placeholder="Type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="NORMAL">Normal</SelectItem>
-                          <SelectItem value="HIGH">High</SelectItem>
+                          {(gaNoteTaskHasProject ? GA_NOTE_TASK_TYPE_OPTIONS_PROJECT : GA_NOTE_TASK_TYPE_OPTIONS_FAST).map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -6577,6 +6628,14 @@ export default function DepartmentKanban() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Start date</Label>
+                      <Input
+                        type="date"
+                        value={gaNoteTaskStartDate}
+                        onChange={(e) => setGaNoteTaskStartDate(normalizeDueDateInput(e.target.value))}
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>Due date</Label>
@@ -6623,6 +6682,7 @@ export default function DepartmentKanban() {
                       <th className="w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
@@ -6652,6 +6712,11 @@ export default function DepartmentKanban() {
                         .map((note, idx) => {
                           const author = users.find((u) => u.id === note.created_by) || null
                           const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+                          const projectDepartment = project?.department_id
+                            ? departments.find((d) => d.id === project.department_id) || null
+                            : null
+                          const projectDepartmentCode = projectDepartment?.code?.toUpperCase() || ""
+                          const isManualOnlyProject = projectDepartmentCode === "PCM" || projectDepartmentCode === "GDS"
                           const linkedTask = gaNoteTaskMap.get(note.id) || null
                           const creatorLabel = author?.full_name || author?.username || "Unknown user"
                           const creatorInitials = getInitials(creatorLabel)
@@ -6661,6 +6726,16 @@ export default function DepartmentKanban() {
                               : creatorInitials === "KA"
                                 ? "bg-blue-100 text-blue-800 border border-blue-200"
                                 : "bg-slate-200 text-slate-700"
+                          const linkedAssignees = linkedTask?.assignees && linkedTask.assignees.length > 0
+                            ? linkedTask.assignees
+                            : (() => {
+                                const assignedId = linkedTask?.assigned_to || null
+                                if (!assignedId) return []
+                                const assignedUser = userMap.get(assignedId)
+                                return assignedUser
+                                  ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }]
+                                  : []
+                              })()
                           // Use the current department if the note's department_id matches, otherwise show nothing
                           const noteDepartment = note.department_id === department?.id ? department : null
 
@@ -6690,6 +6765,33 @@ export default function DepartmentKanban() {
                                   </div>
                                 </div>
                               </td>
+                              <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                {linkedAssignees.length === 0 ? (
+                                  <span className="text-xs text-slate-500">-</span>
+                                ) : (
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {linkedAssignees.map((assignee, assigneeIdx) => {
+                                      const assigneeLabel = assignee.full_name || assignee.username || assignee.email || "Unknown"
+                                      const assigneeInitials = getInitials(assigneeLabel)
+                                      const assigneeBadgeClasses =
+                                        assigneeInitials === "GA"
+                                          ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                          : assigneeInitials === "KA"
+                                            ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                            : "bg-slate-200 text-slate-700"
+                                      return (
+                                        <div
+                                          key={assignee.id || assigneeIdx}
+                                          className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${assigneeBadgeClasses}`}
+                                          title={assigneeLabel}
+                                        >
+                                          {assigneeInitials}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </td>
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                                 {noteDepartment ? (
                                   <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
@@ -6710,6 +6812,10 @@ export default function DepartmentKanban() {
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
                                       Task Created
                                     </Badge>
+                                  ) : isManualOnlyProject ? (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
+                                      Manual only
+                                    </Badge>
                                   ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
                                     <Button
                                       variant="outline"
@@ -6719,7 +6825,9 @@ export default function DepartmentKanban() {
                                         setGaNoteTaskOpenId(note.id)
                                         setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
                                         setGaNoteTaskDescription(note.content || "")
-                                        setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                        setGaNoteTaskPriority("NORMAL")
+                                        setGaNoteTaskHasProject(Boolean(note.project_id))
+                                        setGaNoteTaskStartDate(todayInputValue())
                                         setGaNoteTaskDueDate("")
                                         setGaNoteTaskAssigneeId("__unassigned__")
                                         setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
