@@ -1055,7 +1055,7 @@ export default function DepartmentKanban() {
   >(FINISH_PERIOD_NONE_VALUE)
   const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
   const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
-  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
+  const [gaNoteTaskAssigneeIds, setGaNoteTaskAssigneeIds] = React.useState<string[]>([])
   const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
   const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
   const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<GaNoteTaskType>("NORMAL")
@@ -1105,16 +1105,10 @@ export default function DepartmentKanban() {
           setUsers(allUsers)
         }
         
-        // Create a set of user IDs that belong to this department
-        const departmentUserIds = new Set(
-          allUsers.filter((u) => u.department_id === dep.id).map((u) => u.id)
-        )
-
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
-          // Remove department_id filter to get all tasks, then filter client-side
-          apiFetch(`/tasks?include_done=true`),
+          apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
@@ -1123,23 +1117,8 @@ export default function DepartmentKanban() {
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
-          // Filter tasks: include if task belongs to this department OR any assignee belongs to this department
-          const nonSystemTasks = taskRows.filter((t) => {
-            // Exclude system tasks
-            if (t.system_template_origin_id) return false
-            // Include if task belongs to this department
-            if (t.department_id === dep.id) return true
-            // Include if primary assignee belongs to this department
-            if (t.assigned_to && departmentUserIds.has(t.assigned_to)) return true
-            // Include if any assignee in the assignees array belongs to this department
-            // Check both string and direct ID matching
-            if (t.assignees?.some((a) => {
-              const assigneeId = a.id
-              if (!assigneeId) return false
-              return departmentUserIds.has(assigneeId)
-            })) return true
-            return false
-          })
+          // Show all non-system tasks for this department.
+          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
           setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
@@ -1502,14 +1481,9 @@ export default function DepartmentKanban() {
     })
   }, [projects, projectMembers, user?.id, viewMode])
 
-  const visibleDepartmentTasks = React.useMemo(
-    () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
-    [departmentTasks, isMineView, isTaskAssignedToUser, user?.id]
-  )
+  const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
   const visibleNoProjectTasks = React.useMemo(() => {
-    const base =
-      isMineView && user?.id ? noProjectTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : noProjectTasks
-    const filtered = base.filter(isNoProjectTask)
+    const filtered = noProjectTasks.filter(isNoProjectTask)
     
     // Deduplicate only exact duplicates by ID.
     // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
@@ -1566,7 +1540,7 @@ export default function DepartmentKanban() {
     }
     
     return Array.from(taskMapById.values())
-  }, [noProjectTasks, isMineView, user?.id, userMap])
+  }, [noProjectTasks, userMap])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -3059,13 +3033,48 @@ export default function DepartmentKanban() {
 
   const gaNoteTaskMap = React.useMemo(() => {
     const map = new Map<string, Task>()
-    for (const task of departmentTasks) {
-      if (task.ga_note_origin_id) {
-        map.set(task.ga_note_origin_id, task)
+    const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
+      const result: TaskAssignee[] = []
+      const seen = new Set<string>()
+      const add = (assignee: TaskAssignee) => {
+        const key =
+          assignee.id ||
+          assignee.username ||
+          assignee.full_name ||
+          assignee.email ||
+          Math.random().toString()
+        if (seen.has(key)) return
+        seen.add(key)
+        result.push(assignee)
       }
+      base.forEach(add)
+      incoming.forEach(add)
+      return result
+    }
+    const buildAssignees = (task: Task) => {
+      let list: TaskAssignee[] = task.assignees ?? []
+      if (list.length === 0 && task.assigned_to) {
+        const fallback = userMap.get(task.assigned_to)
+        if (fallback) {
+          list = [{
+            id: fallback.id,
+            email: fallback.email ?? null,
+            username: fallback.username || null,
+            full_name: fallback.full_name || null,
+            department_id: fallback.department_id || null,
+          }]
+        }
+      }
+      return list
+    }
+    for (const task of departmentTasks) {
+      if (!task.ga_note_origin_id) continue
+      const existing = map.get(task.ga_note_origin_id)
+      const mergedAssignees = mergeAssignees(existing?.assignees ?? [], buildAssignees(task))
+      map.set(task.ga_note_origin_id, { ...task, assignees: mergedAssignees })
     }
     return map
-  }, [departmentTasks])
+  }, [departmentTasks, userMap])
 
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
@@ -4414,7 +4423,8 @@ export default function DepartmentKanban() {
         description: gaNoteTaskDescription.trim() || null,
         project_id: note.project_id ?? null,
         department_id: department.id,
-        assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+        assigned_to: gaNoteTaskAssigneeIds[0] ?? null,
+        assignees: gaNoteTaskAssigneeIds,
         status: "TODO",
         priority: priorityValue,
         ga_note_origin_id: note.id,
@@ -4449,7 +4459,7 @@ export default function DepartmentKanban() {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
-      setGaNoteTaskAssigneeId("__unassigned__")
+      setGaNoteTaskAssigneeIds([])
       setGaNoteTaskTitle("")
       setGaNoteTaskDescription("")
       setGaNoteTaskPriority("NORMAL")
@@ -6573,6 +6583,7 @@ export default function DepartmentKanban() {
                   setGaNoteTaskOpenId(null)
                   setGaNoteTaskStartDate(todayInputValue())
                   setGaNoteTaskHasProject(false)
+                  setGaNoteTaskAssigneeIds([])
                 }
               }}
             >
@@ -6652,19 +6663,55 @@ export default function DepartmentKanban() {
                   </div>
                   <div className="space-y-2">
                     <Label>Assign to</Label>
-                    <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                        {departmentUsers.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            {member.full_name || member.username}
+                    <div className="rounded-md border bg-white p-2">
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {gaNoteTaskAssigneeIds.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">No assignees selected.</span>
+                        ) : (
+                          gaNoteTaskAssigneeIds.map((id) => {
+                            const person = departmentUsers.find((member) => member.id === id)
+                            const label = person?.full_name || person?.username || id
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                                onClick={() =>
+                                  setGaNoteTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
+                                }
+                              >
+                                {label}
+                                <span className="text-slate-500">×</span>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                      <Select
+                        value="__picker__"
+                        onValueChange={(value) => {
+                          if (value === "__picker__") return
+                          setGaNoteTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                        }}
+                        disabled={departmentUsers.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Add assignee" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__picker__" disabled>
+                            Add assignee
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                          {departmentUsers
+                            .filter((member) => member.id && !gaNoteTaskAssigneeIds.includes(member.id))
+                            .map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.full_name || member.username}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
@@ -6833,7 +6880,7 @@ export default function DepartmentKanban() {
                                         setGaNoteTaskHasProject(Boolean(note.project_id))
                                         setGaNoteTaskStartDate(todayInputValue())
                                         setGaNoteTaskDueDate("")
-                                        setGaNoteTaskAssigneeId("__unassigned__")
+                                        setGaNoteTaskAssigneeIds([])
                                         setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                                       }}
                                     >
