@@ -565,6 +565,257 @@ async def create_task(
     start_date_value = payload.start_date or datetime.now(timezone.utc)
     due_date_value = payload.due_date
 
+    # Development project multi-assignee: create per-assignee copies.
+    if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
+        project_department = None
+        if project.department_id is not None:
+            project_department = (
+                await db.execute(select(Department).where(Department.id == project.department_id))
+            ).scalar_one_or_none()
+        is_development = False
+        if project_department is not None:
+            dept_name = (project_department.name or "").strip().upper()
+            dept_code = (project_department.code or "").strip().upper()
+            if dept_name == "DEVELOPMENT" or dept_code == "DEV":
+                is_development = True
+
+        if is_development:
+            created_tasks: list[Task] = []
+            created_notifications: list[Notification] = []
+
+            ordered_assignee_ids = list(assignee_ids)
+            if payload.assigned_to in ordered_assignee_ids:
+                ordered_assignee_ids.remove(payload.assigned_to)  # type: ignore[arg-type]
+                ordered_assignee_ids.insert(0, payload.assigned_to)  # type: ignore[arg-type]
+
+            for assignee_id in ordered_assignee_ids:
+                task_department_id = assignee_dept_map.get(assignee_id) or project.department_id
+                t = Task(
+                    title=payload.title,
+                    description=payload.description,
+                    internal_notes=payload.internal_notes,
+                    project_id=payload.project_id,
+                    dependency_task_id=dependency_task_id,
+                    department_id=task_department_id,
+                    assigned_to=assignee_id,
+                    created_by=user.id,
+                    ga_note_origin_id=payload.ga_note_origin_id,
+                    fast_task_group_id=None,
+                    status=status_value,
+                    priority=priority_value,
+                    finish_period=payload.finish_period,
+                    phase=phase_value,
+                    progress_percentage=payload.progress_percentage or 0,
+                    daily_products=payload.daily_products,
+                    start_date=start_date_value,
+                    due_date=due_date_value,
+                    completed_at=completed_at,
+                    is_bllok=payload.is_bllok or False,
+                    is_1h_report=payload.is_1h_report or False,
+                    is_r1=payload.is_r1 or False,
+                    is_personal=payload.is_personal or False,
+                )
+                db.add(t)
+                await db.flush()
+                await _replace_task_assignees(db, t, [assignee_id])
+
+                if payload.alignment_user_ids:
+                    seen_align: set[uuid.UUID] = set()
+                    ids = [uid for uid in payload.alignment_user_ids if not (uid in seen_align or seen_align.add(uid))]
+                    await db.execute(
+                        insert(TaskAlignmentUser),
+                        [{"task_id": t.id, "user_id": uid} for uid in ids],
+                    )
+
+                planned_day = _as_local_date(t.due_date)
+                if planned_day is not None:
+                    finish_period = (str(t.finish_period).strip().upper() if t.finish_period else "")
+                    if finish_period in ("AM", "PM"):
+                        slots_to_clear = {finish_period, "ALL"}
+                    else:
+                        slots_to_clear = {"AM", "PM", "ALL"}
+                    await db.execute(
+                        delete(ProjectPlannerExclusion).where(
+                            ProjectPlannerExclusion.project_id == t.project_id,
+                            ProjectPlannerExclusion.user_id == assignee_id,
+                            ProjectPlannerExclusion.day_date == planned_day,
+                            ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
+                        )
+                    )
+
+                created_tasks.append(t)
+                created_notifications.append(
+                    add_notification(
+                        db=db,
+                        user_id=assignee_id,
+                        type=NotificationType.assignment,
+                        title="Task assigned",
+                        body=t.title,
+                        data={"task_id": str(t.id)},
+                    )
+                )
+
+                add_audit_log(
+                    db=db,
+                    actor_user_id=user.id,
+                    entity_type="task",
+                    entity_id=t.id,
+                    action="created",
+                    before=None,
+                    after={
+                        "title": t.title,
+                        "status": _enum_value(t.status),
+                        "assigned_to": str(t.assigned_to) if t.assigned_to else None,
+                    },
+                )
+
+            await db.commit()
+
+            for n in created_notifications:
+                try:
+                    await publish_notification(user_id=n.user_id, notification=n)
+                except Exception:
+                    pass
+
+            first = created_tasks[0]
+            await db.refresh(first)
+            assignee_map = await _assignees_for_tasks(db, [first.id])
+            dto_assignees = assignee_map.get(first.id, [])
+            dto = _task_to_out(first, dto_assignees or [])
+            dto.alignment_user_ids = payload.alignment_user_ids
+            return dto
+
+    # MST Graphic Design cross-department project tasks: create per-assignee copies.
+    if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
+        title_upper = (project.title or "").upper().strip()
+        is_tt = title_upper == "TT" or title_upper.startswith("TT ") or title_upper.startswith("TT-")
+        is_mst = project.project_type == ProjectType.MST.value or ("MST" in title_upper)
+        if is_mst and not is_tt:
+            project_department = None
+            if project.department_id is not None:
+                project_department = (
+                    await db.execute(select(Department).where(Department.id == project.department_id))
+                ).scalar_one_or_none()
+            is_graphic_design = False
+            if project_department is not None:
+                dept_name = (project_department.name or "").strip().upper()
+                dept_code = (project_department.code or "").strip().upper()
+                if dept_name == "GRAPHIC DESIGN" or dept_code in ("GD", "GDS"):
+                    is_graphic_design = True
+
+            if is_graphic_design:
+                normalized_dept_ids: set[uuid.UUID | None] = set()
+                for assignee_id in assignee_ids:
+                    normalized_dept_ids.add(assignee_dept_map.get(assignee_id) or project.department_id)
+                unique_dept_ids = {dept_id for dept_id in normalized_dept_ids if dept_id is not None}
+
+                if len(unique_dept_ids) > 1:
+                    created_tasks: list[Task] = []
+                    created_notifications: list[Notification] = []
+
+                    ordered_assignee_ids = list(assignee_ids)
+                    if payload.assigned_to in ordered_assignee_ids:
+                        ordered_assignee_ids.remove(payload.assigned_to)  # type: ignore[arg-type]
+                        ordered_assignee_ids.insert(0, payload.assigned_to)  # type: ignore[arg-type]
+
+                    for assignee_id in ordered_assignee_ids:
+                        task_department_id = assignee_dept_map.get(assignee_id) or project.department_id
+                        t = Task(
+                            title=payload.title,
+                            description=payload.description,
+                            internal_notes=payload.internal_notes,
+                            project_id=payload.project_id,
+                            dependency_task_id=dependency_task_id,
+                            department_id=task_department_id,
+                            assigned_to=assignee_id,
+                            created_by=user.id,
+                            ga_note_origin_id=payload.ga_note_origin_id,
+                            fast_task_group_id=None,
+                            status=status_value,
+                            priority=priority_value,
+                            finish_period=payload.finish_period,
+                            phase=phase_value,
+                            progress_percentage=payload.progress_percentage or 0,
+                            daily_products=payload.daily_products,
+                            start_date=start_date_value,
+                            due_date=due_date_value,
+                            completed_at=completed_at,
+                            is_bllok=payload.is_bllok or False,
+                            is_1h_report=payload.is_1h_report or False,
+                            is_r1=payload.is_r1 or False,
+                            is_personal=payload.is_personal or False,
+                        )
+                        db.add(t)
+                        await db.flush()
+                        await _replace_task_assignees(db, t, [assignee_id])
+
+                        if payload.alignment_user_ids:
+                            seen_align: set[uuid.UUID] = set()
+                            ids = [uid for uid in payload.alignment_user_ids if not (uid in seen_align or seen_align.add(uid))]
+                            await db.execute(
+                                insert(TaskAlignmentUser),
+                                [{"task_id": t.id, "user_id": uid} for uid in ids],
+                            )
+
+                        # Clear weekly planner exclusions so the task is visible for this assignee.
+                        planned_day = _as_local_date(t.due_date)
+                        if planned_day is not None:
+                            finish_period = (str(t.finish_period).strip().upper() if t.finish_period else "")
+                            if finish_period in ("AM", "PM"):
+                                slots_to_clear = {finish_period, "ALL"}
+                            else:
+                                slots_to_clear = {"AM", "PM", "ALL"}
+                            await db.execute(
+                                delete(ProjectPlannerExclusion).where(
+                                    ProjectPlannerExclusion.project_id == t.project_id,
+                                    ProjectPlannerExclusion.user_id == assignee_id,
+                                    ProjectPlannerExclusion.day_date == planned_day,
+                                    ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
+                                )
+                            )
+
+                        created_tasks.append(t)
+                        created_notifications.append(
+                            add_notification(
+                                db=db,
+                                user_id=assignee_id,
+                                type=NotificationType.assignment,
+                                title="Task assigned",
+                                body=t.title,
+                                data={"task_id": str(t.id)},
+                            )
+                        )
+
+                        add_audit_log(
+                            db=db,
+                            actor_user_id=user.id,
+                            entity_type="task",
+                            entity_id=t.id,
+                            action="created",
+                            before=None,
+                            after={
+                                "title": t.title,
+                                "status": _enum_value(t.status),
+                                "assigned_to": str(t.assigned_to) if t.assigned_to else None,
+                            },
+                        )
+
+                    await db.commit()
+
+                    for n in created_notifications:
+                        try:
+                            await publish_notification(user_id=n.user_id, notification=n)
+                        except Exception:
+                            pass
+
+                    first = created_tasks[0]
+                    await db.refresh(first)
+                    assignee_map = await _assignees_for_tasks(db, [first.id])
+                    dto_assignees = assignee_map.get(first.id, [])
+                    dto = _task_to_out(first, dto_assignees or [])
+                    dto.alignment_user_ids = payload.alignment_user_ids
+                    return dto
+
     # GA note standalone multi-assignee: create per-user copies (no fast_task_group_id).
     if (
         payload.ga_note_origin_id is not None

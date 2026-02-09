@@ -610,7 +610,16 @@ export default function DevelopmentProjectPage() {
         return
       }
       const created = (await res.json()) as Task
-      setTasks((prev) => [created, ...prev])
+      if (newAssignees.length > 1) {
+        const refresh = await apiFetch(`/tasks?project_id=${project.id}&include_done=true`)
+        if (refresh.ok) {
+          setTasks((await refresh.json()) as Task[])
+        } else {
+          setTasks((prev) => [created, ...prev])
+        }
+      } else {
+        setTasks((prev) => [created, ...prev])
+      }
       setCreateOpen(false)
       setNewTitle("")
       setNewDescription("")
