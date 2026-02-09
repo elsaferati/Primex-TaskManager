@@ -135,7 +135,13 @@ export default function GaKaNotesPage() {
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<
-    Map<string, { assignees: TaskAssignee[]; description: string | null; taskId: string | null }>
+    Map<string, {
+      assignees: TaskAssignee[]
+      description: string | null
+      taskId: string | null
+      taskDepartmentId: string | null
+      taskProjectId: string | null
+    }>
   >(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
@@ -238,7 +244,31 @@ export default function GaKaNotesPage() {
       const data = (await res.json()) as Task[]
       const userMapById = new Map(users.map((u) => [u.id, u]))
 
-      const map = new Map<string, { assignees: TaskAssignee[]; description: string | null; taskId: string | null }>()
+      const map = new Map<string, {
+        assignees: TaskAssignee[]
+        description: string | null
+        taskId: string | null
+        taskDepartmentId: string | null
+        taskProjectId: string | null
+      }>()
+      const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
+        const result: TaskAssignee[] = []
+        const seen = new Set<string>()
+        const add = (assignee: TaskAssignee) => {
+          const key =
+            assignee.id ||
+            assignee.username ||
+            assignee.full_name ||
+            assignee.email ||
+            Math.random().toString()
+          if (seen.has(key)) return
+          seen.add(key)
+          result.push(assignee)
+        }
+        base.forEach(add)
+        incoming.forEach(add)
+        return result
+      }
       for (const t of data) {
         if (!t.ga_note_origin_id) continue
         let assignees: TaskAssignee[] = []
@@ -260,10 +290,13 @@ export default function GaKaNotesPage() {
             }]
           }
         }
+        const existing = map.get(t.ga_note_origin_id)
         map.set(t.ga_note_origin_id, {
-          assignees,
-          description: t.description ?? null,
-          taskId: t.id,
+          assignees: mergeAssignees(existing?.assignees ?? [], assignees),
+          description: existing?.description ?? t.description ?? null,
+          taskId: existing?.taskId ?? t.id,
+          taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
+          taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
         })
       }
       setNoteTaskInfo(map)
@@ -369,18 +402,53 @@ export default function GaKaNotesPage() {
             if (notesRes?.ok) {
               const tasksData = (await notesRes.json()) as Task[]
               const userMapById = new Map(users.map((u) => [u.id, u]))
-              const map = new Map<string, { assignees: UserLookup[]; description: string | null; taskId: string | null }>()
+              const map = new Map<string, {
+                assignees: TaskAssignee[]
+                description: string | null
+                taskId: string | null
+                taskDepartmentId: string | null
+                taskProjectId: string | null
+              }>()
+              const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
+                const result: TaskAssignee[] = []
+                const seen = new Set<string>()
+                const add = (assignee: TaskAssignee) => {
+                  const key =
+                    assignee.id ||
+                    assignee.username ||
+                    assignee.full_name ||
+                    assignee.email ||
+                    Math.random().toString()
+                  if (seen.has(key)) return
+                  seen.add(key)
+                  result.push(assignee)
+                }
+                base.forEach(add)
+                incoming.forEach(add)
+                return result
+              }
               for (const t of tasksData) {
                 if (!t.ga_note_origin_id) continue
-                let assignees: UserLookup[] = t.assignees ?? []
-                if ((!assignees || assignees.length === 0) && t.assigned_to) {
+                let assignees: TaskAssignee[] = t.assignees ?? []
+                if (assignees.length === 0 && t.assigned_to) {
                   const fallback = userMapById.get(t.assigned_to)
-                  if (fallback) assignees = [fallback]
+                  if (fallback) {
+                    assignees = [{
+                      id: fallback.id,
+                      email: fallback.email ?? null,
+                      username: fallback.username || null,
+                      full_name: fallback.full_name || null,
+                      department_id: fallback.department_id || null,
+                    }]
+                  }
                 }
+                const existing = map.get(t.ga_note_origin_id)
                 map.set(t.ga_note_origin_id, {
-                  assignees,
-                  description: t.description ?? null,
-                  taskId: t.id,
+                  assignees: mergeAssignees(existing?.assignees ?? [], assignees),
+                  description: existing?.description ?? t.description ?? null,
+                  taskId: existing?.taskId ?? t.id,
+                  taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
+                  taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
                 })
               }
               setNoteTaskInfo(map)
@@ -399,6 +467,10 @@ export default function GaKaNotesPage() {
   }
 
   const openTaskDialog = (note: GaNote) => {
+    if (note.project_id) {
+      toast.error("Tasks for project-linked notes must be created manually")
+      return
+    }
     const trimmed = note.content.trim()
     const defaultTitle = trimmed ? trimmed.split(/\r?\n/)[0].slice(0, 120) : "GA/KA note task"
     setTaskDialogNoteId(note.id)
@@ -423,6 +495,10 @@ export default function GaKaNotesPage() {
 
   const createTaskFromNote = async (note: GaNote) => {
     if (note.is_converted_to_task) return
+    if (note.project_id) {
+      toast.error("Tasks for project-linked notes must be created manually")
+      return
+    }
     if (!taskTitle.trim()) {
       toast.error("Task title is required")
       return
@@ -521,28 +597,38 @@ export default function GaKaNotesPage() {
         const next = new Map(prev)
         const userMapById = new Map(users.map((u) => [u.id, u]))
         let assignees: TaskAssignee[] = []
-        if (createdTask.assignees && createdTask.assignees.length > 0) {
-          // Use TaskAssignee directly from the API response
+        if (taskAssigneeIds.length > 0) {
+          assignees = taskAssigneeIds.map((id) => {
+            const user = userMapById.get(id)
+            return {
+              id,
+              email: user?.email ?? null,
+              username: user?.username || null,
+              full_name: user?.full_name || null,
+              department_id: user?.department_id || null,
+            }
+          })
+        } else if (createdTask.assignees && createdTask.assignees.length > 0) {
           assignees = createdTask.assignees
-        }
-        if (assignees.length === 0 && createdTask.assigned_to) {
-          // Fallback to assigned_to if no assignees in TaskAssignee table
+        } else if (createdTask.assigned_to) {
           const fallback = userMapById.get(createdTask.assigned_to)
           if (fallback) {
-            // Convert UserLookup to TaskAssignee format for consistency
             assignees = [{
               id: fallback.id,
-              email: null,
+              email: fallback.email ?? null,
               username: fallback.username || null,
               full_name: fallback.full_name || null,
               department_id: fallback.department_id || null,
             }]
           }
         }
+        const cleanedDescription = taskDescription.trim()
         next.set(note.id, {
           assignees,
-          description: createdTask.description ?? null,
+          description: (cleanedDescription || createdTask.description) ?? null,
           taskId: createdTask.id,
+          taskDepartmentId: createdTask.department_id ?? null,
+          taskProjectId: createdTask.project_id ?? null,
         })
         return next
       })
@@ -1080,6 +1166,14 @@ export default function GaKaNotesPage() {
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
+                    const taskDepartment = taskInfo?.taskDepartmentId
+                      ? departmentMap.get(taskInfo.taskDepartmentId)
+                      : null
+                    const taskProject = taskInfo?.taskProjectId
+                      ? projectMap.get(taskInfo.taskProjectId)
+                      : null
+                    const displayDepartment = noteDepartment || taskDepartment
+                    const displayProject = noteProject || taskProject
                     const assignees = taskInfo?.assignees ?? []
 
                     // Only show department if:
@@ -1088,7 +1182,7 @@ export default function GaKaNotesPage() {
                     // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
                     const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
                     const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
-                    const shouldShowDepartment = noteDepartment && (noteProject || isFilteredView || isExplicitDepartment)
+                    const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
 
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
@@ -1151,22 +1245,30 @@ export default function GaKaNotesPage() {
                           )}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          {shouldShowDepartment && noteDepartment ? (
+                          {shouldShowDepartment && displayDepartment ? (
                             <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
-                              {abbreviateDepartmentName(noteDepartment.name)}
+                              {abbreviateDepartmentName(displayDepartment.name)}
                             </Badge>
                           ) : null}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          {noteProject ? (
+                          {displayProject ? (
                             <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
-                              {noteProject.title || noteProject.name || "Project"}
+                              {displayProject.title || displayProject.name || "Project"}
                             </Badge>
                           ) : null}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
-                            {!note.is_converted_to_task ? (
+                            {note.is_converted_to_task ? (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
+                                Task Created
+                              </Badge>
+                            ) : note.project_id ? (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
+                                Manual only
+                              </Badge>
+                            ) : (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -1175,10 +1277,6 @@ export default function GaKaNotesPage() {
                               >
                                 Create Task
                               </Button>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
-                                Task Created
-                              </Badge>
                             )}
                           </div>
                         </td>

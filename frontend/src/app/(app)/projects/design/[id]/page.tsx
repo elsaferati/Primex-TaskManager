@@ -28,6 +28,12 @@ function toDateInput(value?: string | null) {
   return date.toISOString().slice(0, 10)
 }
 
+function todayInputValue() {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
+  return local.toISOString().slice(0, 10)
+}
+
 function formatDateDisplay(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
@@ -223,13 +229,6 @@ export default function DesignProjectPage() {
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [resettingPhase, setResettingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
-  const [creatingNoteTaskId, setCreatingNoteTaskId] = React.useState<string | null>(null)
-  const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
-  const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
-  const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
-  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
-  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
-  const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
   const [newGaNote, setNewGaNote] = React.useState("")
   const [newGaNoteType, setNewGaNoteType] = React.useState("GA")
   const [newGaNotePriority, setNewGaNotePriority] = React.useState<"__none__" | "NORMAL" | "HIGH">("__none__")
@@ -1742,7 +1741,14 @@ export default function DesignProjectPage() {
                   return (
                     <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
-                        <div className="font-medium">{task.title}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{task.title}</span>
+                          {task.ga_note_origin_id ? (
+                            <Badge variant="outline" className="bg-rose-100 text-rose-700 border-rose-200 text-[11px]">
+                              GA
+                            </Badge>
+                          ) : null}
+                        </div>
                         <div className="text-sm text-muted-foreground flex items-center gap-1 flex-wrap">
                           {assignees.length > 0 ? (
                             assignees.map((assignee, idx) => {
@@ -3184,87 +3190,6 @@ export default function DesignProjectPage() {
               <p className="text-muted-foreground">No GA/KA notes yet.</p>
             ) : (
               <div className="space-y-3">
-                <Dialog
-                  open={Boolean(gaNoteTaskOpenId)}
-                  onOpenChange={(open) => {
-                    if (!open) setGaNoteTaskOpenId(null)
-                  }}
-                >
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Create Task from Note</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-3">
-                      <div className="text-sm text-muted-foreground">
-                        This will create a task linked to the GA/KA note.
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Title</Label>
-                        <Input value={gaNoteTaskTitle} onChange={(e) => setGaNoteTaskTitle(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Description</Label>
-                        <Textarea
-                          value={gaNoteTaskDescription}
-                          onChange={(e) => setGaNoteTaskDescription(e.target.value)}
-                          rows={4}
-                        />
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Priority</Label>
-                          <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Priority" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="NORMAL">Normal</SelectItem>
-                              <SelectItem value="HIGH">High</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Due date</Label>
-                          <Input
-                            type="date"
-                            value={gaNoteTaskDueDate}
-                            onChange={(e) => setGaNoteTaskDueDate(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Assign to</Label>
-                        <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Unassigned" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            {assignableUsers.map((member) => (
-                              <SelectItem key={member.id} value={member.id}>
-                                {member.full_name || member.username || member.email}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
-                          Cancel
-                        </Button>
-                        <Button
-                          disabled={!gaNoteTaskTitle.trim() || creatingNoteTaskId === gaNoteTaskOpenId}
-                          onClick={() => {
-                            const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
-                            if (note) void createTaskFromNote(note)
-                          }}
-                        >
-                          {creatingNoteTaskId === gaNoteTaskOpenId ? "Creating..." : "Create Task"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
                 {gaNotes.map((note) => {
                   const creator = note.created_by ? userMap.get(note.created_by) : null
                   const linkedTask = tasks.find((task) => task.ga_note_origin_id === note.id)
@@ -3295,22 +3220,7 @@ export default function DesignProjectPage() {
                         <div className="flex items-center gap-2">
                           {linkedTask ? (
                             <Badge variant="outline" className="text-muted-foreground">Task Created</Badge>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setGaNoteTaskOpenId(note.id)
-                                setGaNoteTaskTitle(noteToTaskTitle(note.content, note.note_type))
-                                setGaNoteTaskDescription(note.content)
-                                setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
-                                setGaNoteTaskAssigneeId("__unassigned__")
-                                setGaNoteTaskDueDate("")
-                              }}
-                            >
-                              Create Task
-                            </Button>
-                          )}
+                          ) : null}
                           {note.status !== "CLOSED" && (
                             <Button variant="ghost" size="sm" onClick={() => void closeGaNote(note.id)}>
                               Close
