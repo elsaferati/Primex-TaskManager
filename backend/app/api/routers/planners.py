@@ -35,6 +35,7 @@ from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
+from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
 from app.schemas.planner import (
     MonthlyPlannerResponse,
@@ -58,48 +59,6 @@ from app.schemas.weekly_plan import WeeklyPlanCreate, WeeklyPlanOut, WeeklyPlanU
 
 
 router = APIRouter()
-
-# VS/VL template task titles (normalized)
-VS_VL_TEMPLATE_TITLES = {
-    "analizimi dhe identifikimi i kolonave",
-    "plotesimi i template-it te amazonit",
-    "kalkulimi i cmimeve",
-    "gjenerimi i fotove",
-    "kontrollimi i prod. egzsistuese dhe postimi ne amazon",
-    "ko1 e projektit vs",
-    "ko2 e projektit vs",
-    "dream robot vs",
-    "dream robot vl",
-    "kalkulimi i peshave",
-}
-
-
-def _normalize_title(title: str | None) -> str:
-    """Normalize task title for comparison."""
-    if not title:
-        return ""
-    return " ".join(title.strip().lower().split())
-
-
-def _is_vs_vl_task(task: Task) -> bool:
-    """Check if a task is a VS/VL template task by comparing normalized titles."""
-    normalized_title = _normalize_title(task.title)
-    return normalized_title in VS_VL_TEMPLATE_TITLES
-
-
-def _is_fast_task(task: Task) -> bool:
-    """Fast/ad-hoc tasks must be standalone (no project link) and not system/GA."""
-    if task.project_id is not None:
-        return False
-    if task.dependency_task_id is not None:
-        return False
-    if task.system_template_origin_id is not None:
-        return False
-    if task.ga_note_origin_id is not None:
-        return False
-    if _is_vs_vl_task(task):
-        return False
-    return True
 
 
 def _is_mst_or_tt_project(project: Project) -> bool:
@@ -553,7 +512,7 @@ async def weekly_planner(
     fast_tasks = [
         _task_to_out(t, assignee_map.get(t.id, []))
         for t in week_tasks
-        if _is_fast_task(t)
+        if is_fast_task_model(t)
     ]
 
     # Organize tasks by day for the days view
@@ -1047,7 +1006,7 @@ async def weekly_table_planner(
         # DEBUG: Log for LEA BLLOK TASK
         if task.title and "LEA BLLOK" in task.title.upper():
             logger = logging.getLogger(__name__)
-            is_fast = _is_fast_task(task)
+            is_fast = is_fast_task_model(task)
             logger.warning(
                 f"[TASK_ACTIVE_RANGE DEBUG] task_id={task.id}, title={task.title}: "
                 f"is_fast_task={is_fast}, "
@@ -1058,7 +1017,7 @@ async def weekly_table_planner(
         
         # For FAST TASKS, never adjust date range based on completed_at or status.
         # Always use the original start_date and due_date from _planned_range.
-        if not _is_fast_task(task) and task.completed_at:
+        if not is_fast_task_model(task) and task.completed_at:
             completed_date = _as_utc_date(task.completed_at)
             if completed_date is not None:
                 # Check if this is an MST/TT task
@@ -1536,7 +1495,7 @@ async def weekly_table_planner(
                     if task.system_template_origin_id is not None:
                         continue
                     # Fast tasks (standalone ad-hoc tasks only)
-                    elif _is_fast_task(task):
+                    elif is_fast_task_model(task):
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,

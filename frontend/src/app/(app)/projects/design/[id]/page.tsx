@@ -1071,6 +1071,10 @@ export default function DesignProjectPage() {
 
   const createTaskFromNote = async (note: GaNote) => {
     if (!project) return
+    if (!gaNoteTaskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
     setCreatingNoteTaskId(note.id)
     try {
       const res = await apiFetch("/tasks", {
@@ -1085,7 +1089,7 @@ export default function DesignProjectPage() {
           status: "TODO",
           priority: gaNoteTaskPriority || note.priority || "NORMAL",
           phase: project.current_phase || "PLANNING",
-          due_date: gaNoteTaskDueDate || null,
+          due_date: new Date(gaNoteTaskDueDate).toISOString(),
           ga_note_origin_id: note.id,
         }),
       })

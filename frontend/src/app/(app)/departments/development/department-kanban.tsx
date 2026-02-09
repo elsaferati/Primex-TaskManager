@@ -4364,6 +4364,10 @@ export default function DepartmentKanban() {
       toast.error("GA/KA note not found.")
       return
     }
+    if (!gaNoteTaskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
     setCreatingGaNoteTask(true)
     try {
       const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null

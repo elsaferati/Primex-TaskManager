@@ -44,7 +44,7 @@ def is_fast_task_fields(
     "Fast task" matches the planner's definition:
     - standalone (no project link, no dependency)
     - not a system task occurrence
-    - not a GA note task
+    - includes GA/KA note-origin tasks when standalone
     - excludes VS/VL template titles
     """
     if project_id is not None:
@@ -52,8 +52,6 @@ def is_fast_task_fields(
     if dependency_task_id is not None:
         return False
     if system_template_origin_id is not None:
-        return False
-    if ga_note_origin_id is not None:
         return False
     if is_vs_vl_task_title(title):
         return False
@@ -68,4 +66,3 @@ def is_fast_task(task) -> bool:
         system_template_origin_id=getattr(task, "system_template_origin_id", None),
         ga_note_origin_id=getattr(task, "ga_note_origin_id", None),
     )
-

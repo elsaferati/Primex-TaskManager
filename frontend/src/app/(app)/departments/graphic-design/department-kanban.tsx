@@ -3611,6 +3611,10 @@ export default function DepartmentKanban() {
     const note = gaNotes.find((n) => n.id === gaNoteTaskOpenId)
     if (!note) return
 
+    if (!gaNoteTaskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
     setCreatingGaNoteTask(true)
     try {
       const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
