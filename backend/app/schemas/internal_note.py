@@ -37,3 +37,22 @@ class InternalNoteDoneUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     is_done: bool = Field(alias="isDone")
+
+
+class InternalNoteUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str | None = None
+    description: str | None = None
+    project_id: uuid.UUID | None = Field(default=None, alias="projectId")
+
+
+class InternalNoteGroupUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    note_ids: list[uuid.UUID] = Field(alias="noteIds")
+    title: str
+    description: str | None = None
+    department_id: uuid.UUID = Field(alias="departmentId")
+    project_id: uuid.UUID | None = Field(default=None, alias="projectId")
+    to_user_ids: list[uuid.UUID] = Field(alias="toUserIds")

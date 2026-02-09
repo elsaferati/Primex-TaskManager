@@ -1074,6 +1074,16 @@ export default function DepartmentKanban() {
   const [internalNoteProjects, setInternalNoteProjects] = React.useState<Project[]>([])
   const [loadingInternalNoteProjects, setLoadingInternalNoteProjects] = React.useState(false)
   const [internalNoteToUserIds, setInternalNoteToUserIds] = React.useState<string[]>([])
+  const [editInternalNoteOpen, setEditInternalNoteOpen] = React.useState(false)
+  const [editingInternalNoteIds, setEditingInternalNoteIds] = React.useState<string[]>([])
+  const [savingInternalNoteEdit, setSavingInternalNoteEdit] = React.useState(false)
+  const [editInternalNoteTitle, setEditInternalNoteTitle] = React.useState("")
+  const [editInternalNoteDescription, setEditInternalNoteDescription] = React.useState("")
+  const [editInternalNoteDepartmentId, setEditInternalNoteDepartmentId] = React.useState("")
+  const [editInternalNoteProjectId, setEditInternalNoteProjectId] = React.useState("")
+  const [editInternalNoteProjects, setEditInternalNoteProjects] = React.useState<Project[]>([])
+  const [loadingEditInternalNoteProjects, setLoadingEditInternalNoteProjects] = React.useState(false)
+  const [editInternalNoteToUserIds, setEditInternalNoteToUserIds] = React.useState<string[]>([])
   const [showDoneInternalNotes, setShowDoneInternalNotes] = React.useState(false)
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
@@ -1166,7 +1176,9 @@ export default function DepartmentKanban() {
       try {
         const res = await apiFetch(`/projects?department_id=${internalNoteDepartmentId}`)
         if (!res.ok) {
-          console.error("Failed to load department projects:", res.status)
+          if (res.status !== 401 && res.status !== 403) {
+            console.error("Failed to load department projects:", res.status)
+          }
           setInternalNoteProjects([])
           return
         }
@@ -1180,6 +1192,37 @@ export default function DepartmentKanban() {
     }
     void loadProjects()
   }, [apiFetch, internalNoteDepartmentId])
+
+  React.useEffect(() => {
+    const loadProjects = async () => {
+      if (!editInternalNoteDepartmentId) {
+        setEditInternalNoteProjects([])
+        return
+      }
+      if (editInternalNoteDepartmentId === internalNoteDepartmentId) {
+        setEditInternalNoteProjects(internalNoteProjects)
+        return
+      }
+      setLoadingEditInternalNoteProjects(true)
+      try {
+        const res = await apiFetch(`/projects?department_id=${editInternalNoteDepartmentId}`)
+        if (!res.ok) {
+          if (res.status !== 401 && res.status !== 403) {
+            console.error("Failed to load department projects:", res.status)
+          }
+          setEditInternalNoteProjects([])
+          return
+        }
+        setEditInternalNoteProjects((await res.json()) as Project[])
+      } catch (error) {
+        console.error("Error loading department projects:", error)
+        setEditInternalNoteProjects([])
+      } finally {
+        setLoadingEditInternalNoteProjects(false)
+      }
+    }
+    void loadProjects()
+  }, [apiFetch, editInternalNoteDepartmentId, internalNoteDepartmentId, internalNoteProjects])
 
   React.useEffect(() => {
     projectMembersRef.current = projectMembers
@@ -4341,6 +4384,77 @@ export default function DepartmentKanban() {
     }
   }
 
+  const startEditInternalNote = (note: InternalNote, toUserIds: string[], noteIds: string[]) => {
+    setEditingInternalNoteIds(noteIds)
+    setEditInternalNoteTitle(note.title || "")
+    setEditInternalNoteDescription(note.description || "")
+    setEditInternalNoteDepartmentId((note.department_id || note.to_department_id || "") as string)
+    setEditInternalNoteProjectId(note.project_id || "")
+    setEditInternalNoteToUserIds(toUserIds)
+    setEditInternalNoteOpen(true)
+  }
+
+  const submitInternalNoteEdit = async () => {
+    if (!department?.id) return
+    if (editingInternalNoteIds.length === 0) return
+
+    const title = editInternalNoteTitle.trim()
+    const description = editInternalNoteDescription.trim()
+    if (!title || editInternalNoteToUserIds.length === 0 || !editInternalNoteDepartmentId) {
+      return
+    }
+
+    setSavingInternalNoteEdit(true)
+    try {
+      const res = await apiFetch("/internal-notes/group", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          noteIds: editingInternalNoteIds,
+          title,
+          description: description || null,
+          departmentId: editInternalNoteDepartmentId,
+          projectId: editInternalNoteProjectId || null,
+          toUserIds: editInternalNoteToUserIds,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update internal note"
+        try {
+          const data = (await res.json()) as { detail?: unknown }
+          const rawDetail = data?.detail
+          if (typeof rawDetail === "string") {
+            detail = rawDetail
+          } else if (Array.isArray(rawDetail)) {
+            detail =
+              rawDetail
+                .map((item) => {
+                  if (typeof item === "string") return item
+                  if (item && typeof item === "object" && "msg" in item) return String((item as { msg?: unknown }).msg)
+                  return "Invalid request"
+                })
+                .filter(Boolean)
+                .join(", ") || detail
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+
+      const refresh = await apiFetch(`/internal-notes?department_id=${department.id}`)
+      if (refresh.ok) {
+        setInternalNotes((await refresh.json()) as InternalNote[])
+      }
+      setEditInternalNoteOpen(false)
+      setEditingInternalNoteIds([])
+      toast.success("Internal note updated")
+    } finally {
+      setSavingInternalNoteEdit(false)
+    }
+  }
+
   const deleteInternalNote = async (noteIds: string[] | string) => {
     const ids = Array.isArray(noteIds) ? noteIds : [noteIds]
     if (!ids.length) return
@@ -7085,6 +7199,156 @@ export default function DepartmentKanban() {
                     </div>
                   </DialogContent>
                 </Dialog>
+
+                <Dialog
+                  open={editInternalNoteOpen}
+                  onOpenChange={(open) => {
+                    setEditInternalNoteOpen(open)
+                    if (!open) {
+                      setEditingInternalNoteIds([])
+                      setEditInternalNoteTitle("")
+                      setEditInternalNoteDescription("")
+                      setEditInternalNoteDepartmentId("")
+                      setEditInternalNoteProjectId("")
+                      setEditInternalNoteToUserIds([])
+                    }
+                  }}
+                >
+                  <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Edit Internal Note</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input
+                          value={editInternalNoteTitle}
+                          onChange={(e) => setEditInternalNoteTitle(e.target.value)}
+                          placeholder="Enter title"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          value={editInternalNoteDescription}
+                          onChange={(e) => setEditInternalNoteDescription(e.target.value)}
+                          placeholder="Enter description"
+                          rows={4}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select
+                          value={editInternalNoteDepartmentId}
+                          onValueChange={(value) => {
+                            setEditInternalNoteDepartmentId(value)
+                            setEditInternalNoteProjectId("")
+                            setEditInternalNoteToUserIds([])
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {departments.map((dep) => (
+                              <SelectItem key={dep.id} value={dep.id}>
+                                {dep.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Project</Label>
+                        <Select
+                          value={editInternalNoteProjectId}
+                          onValueChange={setEditInternalNoteProjectId}
+                          disabled={!editInternalNoteDepartmentId || loadingEditInternalNoteProjects}
+                        >
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                !editInternalNoteDepartmentId
+                                  ? "Select a department first"
+                                  : loadingEditInternalNoteProjects
+                                    ? "Loading projects..."
+                                    : "Select project"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {editInternalNoteProjects.map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                {project.title || project.name || "Untitled project"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>User (To)</Label>
+                        <div className="rounded-md border border-slate-200 p-2 max-h-56 overflow-y-auto space-y-2">
+                          {(() => {
+                            const eligibleUsers = editInternalNoteDepartmentId
+                              ? users.filter((u) => u.department_id === editInternalNoteDepartmentId)
+                              : users
+                            return (
+                              <>
+                                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                                  <Checkbox
+                                    checked={
+                                      eligibleUsers.length > 0 &&
+                                      eligibleUsers.every((u) => editInternalNoteToUserIds.includes(u.id))
+                                    }
+                                    onCheckedChange={(value) => {
+                                      const next = Boolean(value)
+                                      setEditInternalNoteToUserIds(next ? eligibleUsers.map((u) => u.id) : [])
+                                    }}
+                                  />
+                                  <span>Select all users</span>
+                                </label>
+                                {eligibleUsers.map((member) => {
+                                  const label = member.full_name || member.username || "-"
+                                  const checked = editInternalNoteToUserIds.includes(member.id)
+                                  return (
+                                    <label key={member.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(value) => {
+                                          const next = Boolean(value)
+                                          setEditInternalNoteToUserIds((prev) =>
+                                            next ? [...prev, member.id] : prev.filter((id) => id !== member.id)
+                                          )
+                                        }}
+                                      />
+                                      <span>{label}</span>
+                                    </label>
+                                  )
+                                })}
+                              </>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setEditInternalNoteOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={
+                            !editInternalNoteTitle.trim() ||
+                            editInternalNoteToUserIds.length === 0 ||
+                            !editInternalNoteDepartmentId ||
+                            savingInternalNoteEdit
+                          }
+                          onClick={() => void submitInternalNoteEdit()}
+                        >
+                          {savingInternalNoteEdit ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 
@@ -7101,7 +7365,7 @@ export default function DepartmentKanban() {
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DATE, TIME</th>
                       <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>FROM</th>
                       <th className="w-[160px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>TO</th>
-                      <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>ACTIONS</th>
+                      <th className="w-[160px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -7123,16 +7387,17 @@ export default function DepartmentKanban() {
                           projects.find((p) => p.id === note.project_id)?.title ||
                           projects.find((p) => p.id === note.project_id)?.name ||
                           "-"
+                        const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
                         const canDeleteNote =
-                          user?.role === "ADMIN" ||
-                          user?.role === "MANAGER" ||
+                          isAdminOrManager ||
                           (user?.id ? group.toUserIds.includes(user.id) : false)
+                        const canEditNote = isAdminOrManager || (user?.id ? note.from_user_id === user.id : false)
                         const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
                         const noteIdsForAction = (() => {
-                          const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
                           if (isAdminOrManager) return group.notes.map((n) => n.id)
                           return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
                         })()
+                        const noteIdsForEdit = canEditNote ? group.notes.map((n) => n.id) : []
                         const canUpdateDone = noteIdsForAction.length > 0
 
                           return (
@@ -7156,6 +7421,18 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
                               <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
                                 <div className="flex items-center justify-center gap-2">
+                                  {canEditNote ? (
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-7 w-7 border-slate-200 text-slate-500 hover:border-sky-200 hover:text-sky-700"
+                                      title="Edit"
+                                      aria-label={`Edit ${note.title}`}
+                                      onClick={() => startEditInternalNote(note, group.toUserIds, noteIdsForEdit)}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                  ) : null}
                                   {!groupIsDone ? (
                                     canUpdateDone ? (
                                     <Button
