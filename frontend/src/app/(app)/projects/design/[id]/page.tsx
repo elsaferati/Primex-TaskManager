@@ -1068,6 +1068,50 @@ export default function DesignProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
+  const createTaskFromNote = async (note: GaNote) => {
+    if (!project) return
+    if (!gaNoteTaskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
+    setCreatingNoteTaskId(note.id)
+    try {
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: gaNoteTaskTitle.trim() || noteToTaskTitle(note.content, note.note_type),
+          description: gaNoteTaskDescription.trim() || note.content,
+          project_id: project.id,
+          department_id: project.department_id,
+          assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+          status: "TODO",
+          priority: gaNoteTaskPriority || note.priority || "NORMAL",
+          phase: project.current_phase || "PLANNING",
+          due_date: new Date(gaNoteTaskDueDate).toISOString(),
+          ga_note_origin_id: note.id,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task from note"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as Task
+      setTasks((prev) => [created, ...prev])
+      setGaNoteTaskOpenId(null)
+      toast.success("Task created from note")
+    } finally {
+      setCreatingNoteTaskId(null)
+    }
+  }
+
   const startEditControlChecklistItem = (item: ChecklistItem) => {
     setControlChecklistEditingId(item.id)
     setControlChecklistEditingText(item.title || "")

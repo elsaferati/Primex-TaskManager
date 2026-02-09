@@ -529,6 +529,12 @@ async def create_task(
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
 
+        if payload.due_date is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Due date is required for GA/KA note tasks",
+            )
+
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
     # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
@@ -572,7 +578,10 @@ async def create_task(
     else:
         completed_at = None
 
-    # Fast task multi-assignee: create per-user copies tied by fast_task_group_id.
+    start_date_value = payload.start_date or datetime.now(timezone.utc)
+    due_date_value = payload.due_date
+
+    # Standalone task multi-assignee: create per-user copies tied by fast_task_group_id.
     if is_fast and assignee_ids is not None and len(assignee_ids) > 1:
         fast_task_group_id = uuid.uuid4()
         created_tasks: list[Task] = []
@@ -603,8 +612,8 @@ async def create_task(
                 phase=phase_value,
                 progress_percentage=payload.progress_percentage or 0,
                 daily_products=payload.daily_products,
-                start_date=payload.start_date or datetime.now(timezone.utc),
-                due_date=payload.due_date,
+                start_date=start_date_value,
+                due_date=due_date_value,
                 completed_at=completed_at,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
@@ -690,8 +699,8 @@ async def create_task(
         phase=phase_value,
         progress_percentage=payload.progress_percentage or 0,
         daily_products=payload.daily_products,
-        start_date=payload.start_date or datetime.now(timezone.utc),
-        due_date=payload.due_date,
+        start_date=start_date_value,
+        due_date=due_date_value,
         completed_at=completed_at,
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,

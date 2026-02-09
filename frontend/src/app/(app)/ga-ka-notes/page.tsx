@@ -445,6 +445,10 @@ export default function GaKaNotesPage() {
       toast.error("Select at least one department before creating a task")
       return
     }
+    if (!taskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
     const primaryDepartmentId = effectiveDepartments[0]
     setCreatingTask(true)
     try {
@@ -1296,12 +1300,12 @@ export default function GaKaNotesPage() {
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                 <div className="space-y-2">
+                <div className="space-y-2">
                   <Label>Start date (optional)</Label>
                   <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Due date (optional)</Label>
+                  <Label>Due date</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
                
