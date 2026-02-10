@@ -6770,7 +6770,7 @@ export default function PcmProjectPage() {
                       }}
                     >
                       <div className="min-w-[1200px]">
-                        <div className="grid grid-cols-15 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                        <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
                           <div className="col-span-1">NO</div>
                           <div className="col-span-2">PATH</div>
                           <div className="col-span-2">DETYRAT</div>
@@ -6782,7 +6782,7 @@ export default function PcmProjectPage() {
                           <div className="col-span-2">KOMENT</div>
                           <div className="col-span-1 text-right">ACTIONS</div>
                         </div>
-                        <div className="grid grid-cols-15 gap-3 py-3 text-sm items-center border-b">
+                        <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center border-b">
                           <div className="col-span-1 text-xs font-semibold text-slate-400">+</div>
                           <div className="col-span-2">
                             <Input
@@ -6841,6 +6841,7 @@ export default function PcmProjectPage() {
                         <div className="divide-y">
                           {mstChecklistRows.map((row, index) => {
                             const key = row.key
+                            const rowKey = row.item?.id ? String(row.item.id) : `${key}-${index}`
                             const isChecked = mstChecklistChecked[key] || false
                             const comment = mstChecklistComments[key] ?? row.item.comment ?? ""
                             const assignees = row.item.assignees || []
@@ -6858,7 +6859,7 @@ export default function PcmProjectPage() {
                             const isEditing = editingMstChecklistKey === key
 
                             return (
-                              <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
+                              <div key={rowKey} className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center">
                                 <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
                                 <div className="col-span-2" title={row.path}>
                                   {isEditing ? (
