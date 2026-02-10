@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Clock, Printer } from "lucide-react"
+import { Clock, Image as ImageIcon, Printer } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
-import type { Department, GaNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -55,6 +55,9 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
+const MAX_ATTACHMENT_FILES = 20
+const MAX_ATTACHMENT_MB = 25
+const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "DONE" | "UNKNOWN"
 
@@ -94,6 +97,17 @@ function formatDate(value?: string | null) {
   hours = hours ? hours : 12 // the hour '0' should be '12'
   const hoursStr = hours.toString().padStart(2, "0")
   return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes)) return "-"
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb.toFixed(1)} MB`
+  const gb = mb / 1024
+  return `${gb.toFixed(2)} GB`
 }
 
 function getInitials(label: string) {
@@ -142,6 +156,8 @@ export default function GaKaNotesPage() {
   const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
   const [posting, setPosting] = React.useState(false)
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([])
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
@@ -175,6 +191,8 @@ export default function GaKaNotesPage() {
   const [editContent, setEditContent] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
   const [savingEdit, setSavingEdit] = React.useState(false)
+  const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
+  const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
 
 
 
@@ -338,6 +356,106 @@ export default function GaKaNotesPage() {
 
 
 
+  const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(event.target.files || [])
+    if (incoming.length === 0) return
+
+    const combined = [...selectedFiles, ...incoming]
+    if (combined.length > MAX_ATTACHMENT_FILES) {
+      toast.error(`You can upload up to ${MAX_ATTACHMENT_FILES} files.`)
+    }
+
+    const limited = combined.slice(0, MAX_ATTACHMENT_FILES)
+    const filtered = limited.filter((file) => {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(`"${file.name}" exceeds ${MAX_ATTACHMENT_MB}MB.`)
+        return false
+      }
+      return true
+    })
+
+    setSelectedFiles(filtered)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+  }
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  const uploadNoteAttachments = async (noteId: string, files: File[]) => {
+    const buildFormData = (includeNoteId: boolean) => {
+      const formData = new FormData()
+      if (includeNoteId) {
+        formData.append("note_id", noteId)
+      }
+      files.forEach((file) => formData.append("files", file))
+      return formData
+    }
+
+    const encodedNoteId = encodeURIComponent(noteId)
+    let res = await apiFetch(`/ga-notes/${encodedNoteId}/attachments`, {
+      method: "POST",
+      body: buildFormData(false),
+    })
+
+    if (res?.status === 404) {
+      res = await apiFetch("/ga-notes/attachments", {
+        method: "POST",
+        body: buildFormData(true),
+      })
+    }
+
+    if (!res?.ok) {
+      const errorText = await res.text()
+      throw new Error(errorText || "upload_failed")
+    }
+    return (await res.json()) as GaNoteAttachment[]
+  }
+
+  const downloadAttachment = async (attachment: GaNoteAttachment) => {
+    try {
+      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      if (!res?.ok) {
+        toast.error("Failed to download file")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = attachment.original_filename || "download"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error("Failed to download file")
+    }
+  }
+
+  const openAttachmentPreview = async (attachment: GaNoteAttachment) => {
+    try {
+      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      if (!res?.ok) {
+        toast.error("Failed to open file")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const previewWindow = window.open(url, "_blank", "noopener,noreferrer")
+      if (!previewWindow) {
+        window.URL.revokeObjectURL(url)
+        toast.error("Popup blocked. Please allow popups to preview.")
+        return
+      }
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+    } catch {
+      toast.error("Failed to open file")
+    }
+  }
+
   const createNote = async () => {
     if (!content.trim()) {
       toast.error("Content is required")
@@ -389,6 +507,18 @@ export default function GaKaNotesPage() {
       const created = (await res.json()) as GaNote
       setNotes((prev) => [created, ...prev])
       setContent("")
+      if (selectedFiles.length > 0) {
+        try {
+          const attachments = await uploadNoteAttachments(created.id, selectedFiles)
+          setNotes((prev) =>
+            prev.map((note) => (note.id === created.id ? { ...note, attachments } : note))
+          )
+          setSelectedFiles([])
+        } catch (error) {
+          console.error("Attachment upload failed:", error)
+          toast.error("Note saved, attachments failed")
+        }
+      }
     } finally {
       setPosting(false)
     }
@@ -823,6 +953,23 @@ export default function GaKaNotesPage() {
     return sorted
   }, [notes, rangeFilter, statusFilter, noteTypeFilter, taskFilter])
 
+  const attachmentDialogItems = React.useMemo(() => {
+    if (!attachmentsDialogNoteId) return []
+    const note = visibleNotes.find((item) => item.id === attachmentsDialogNoteId)
+    if (!note) return []
+    return (note.attachments ?? []).map((attachment) => ({
+      noteId: note.id,
+      noteContent: note.content,
+      noteCreatedAt: note.created_at,
+      attachment,
+    }))
+  }, [attachmentsDialogNoteId, visibleNotes])
+
+  const openAttachmentsForNote = (noteId: string) => {
+    setAttachmentsDialogNoteId(noteId)
+    setAttachmentsDialogOpen(true)
+  }
+
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const projectMap = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
@@ -861,6 +1008,34 @@ export default function GaKaNotesPage() {
               autoFocus
             />
           </div>
+          <div className="space-y-2">
+            <Label>Attachments</Label>
+            <Input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelection}
+            />
+            {selectedFiles.length === 0 ? (
+              <div className="text-xs text-muted-foreground">
+                No files selected. Max {MAX_ATTACHMENT_FILES} files, {MAX_ATTACHMENT_MB}MB each.
+              </div>
+            ) : (
+              <div className="rounded-md border bg-slate-50 p-2 space-y-2">
+                {selectedFiles.map((file, idx) => (
+                  <div key={`${file.name}-${idx}`} className="flex items-center justify-between gap-2 text-xs">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-slate-700">{file.name}</span>
+                      <span className="text-slate-500">{formatFileSize(file.size)}</span>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => removeSelectedFile(idx)}>
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex justify-end">
             <Button onClick={() => void createNote()} disabled={posting}>
               {posting ? "Saving..." : "Save note"}
@@ -871,7 +1046,9 @@ export default function GaKaNotesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Notes</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm">Notes</CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -1211,6 +1388,7 @@ export default function GaKaNotesPage() {
                     const displayDepartment = noteDepartment || taskDepartment
                     const displayProject = noteProject || taskProject
                     const assignees = taskInfo?.assignees ?? []
+                    const attachments = note.attachments ?? []
                     const isClosed =
                       note.status === "CLOSED" ||
                       (note as { isClosed?: boolean }).isClosed === true ||
@@ -1245,7 +1423,21 @@ export default function GaKaNotesPage() {
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
                         <td className={`whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
-                            <span className="text-sm">{note.content}</span>
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-sm">{note.content}</span>
+                              {attachments.length > 0 ? (
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-7 w-7 shrink-0 sm:hidden"
+                                  title="Attachments"
+                                  aria-label="Attachments"
+                                  onClick={() => openAttachmentsForNote(note.id)}
+                                >
+                                  <ImageIcon className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                            </div>
                             <div className="flex items-center gap-2">
                               {note.priority ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}`}>
@@ -1263,7 +1455,39 @@ export default function GaKaNotesPage() {
                           </div>
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[320px] w-[320px] max-w-[320px]" style={{ verticalAlign: 'bottom' }}>
-                          {taskInfo?.description ? taskInfo.description : <span className="text-slate-400">-</span>}
+                          {taskInfo?.description || attachments.length > 0 ? (
+                            <div className="space-y-2">
+                              {taskInfo?.description ? (
+                                <div>{taskInfo.description}</div>
+                              ) : null}
+                              {attachments.length > 0 ? (
+                                <div className="space-y-1">
+                                  {attachments.map((attachment) => (
+                                    <div key={attachment.id} className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-medium text-slate-700">
+                                          {attachment.original_filename}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500">
+                                          {formatFileSize(attachment.size_bytes)}
+                                        </span>
+                                      </div>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-[10px]"
+                                        onClick={() => void downloadAttachment(attachment)}
+                                      >
+                                        Download
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
                         <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
@@ -1384,6 +1608,60 @@ export default function GaKaNotesPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={attachmentsDialogOpen} onOpenChange={setAttachmentsDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Attachments</DialogTitle>
+          </DialogHeader>
+          {attachmentDialogItems.length === 0 ? (
+            <div className="text-sm text-slate-500">No attachments in the current view.</div>
+          ) : (
+            <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+              {attachmentDialogItems.map((item) => {
+                const isImage = (item.attachment.content_type || "").startsWith("image/")
+                return (
+                  <div key={item.attachment.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-800 truncate">
+                          {item.attachment.original_filename}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {formatFileSize(item.attachment.size_bytes)} • {formatDate(item.noteCreatedAt)}
+                        </div>
+                        <div className="mt-2 text-xs text-slate-600 truncate">
+                          {item.noteContent}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isImage ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => void openAttachmentPreview(item.attachment)}
+                          >
+                            View
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => void downloadAttachment(item.attachment)}
+                        >
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
         <DialogContent className="sm:max-w-lg">

@@ -6794,17 +6794,17 @@ export default function DepartmentKanban() {
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>
+                      <col className="w-[32px]" />
+                      <col className="w-[40px]" />
                       <col className="w-[28px]" />
+                      <col className="w-[32px]" />
+                      <col className="w-[170px]" />
+                      <col className="w-[60px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[34px]" />
-                      <col className="w-[34px]" />
-                      <col className="w-[140px]" />
-                      <col className="w-[52px]" />
-                      <col className="w-[28px]" />
                       <col className="w-[50px]" />
-                      <col className="w-[34px]" />
-                      <col className="w-[120px]" />
-                      <col className="w-[44px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[90px]" />
+                      <col className="w-[40px]" />
                     </colgroup>
                     <thead>
                       <tr className="bg-slate-100">
@@ -6882,18 +6882,18 @@ export default function DepartmentKanban() {
             </>
           ) : printRange === "today" && showDailyUserReport ? (
             <>
-              <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+              <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                 <colgroup>
-                  <col className="w-[28px]" />
-                  <col className="w-[32px]" />
-                  <col className="w-[26px]" />
-                  <col className="w-[32px]" />
+                  <col className="w-[36px]" />
+                  <col className="w-[44px]" />
+                  <col className="w-[30px]" />
+                  <col className="w-[36px]" />
+                  <col className="w-[200px]" />
+                  <col className="w-[60px]" />
+                  <col className="w-[40px]" />
+                  <col className="w-[52px]" />
+                  <col className="w-[40px]" />
                   <col className="w-[140px]" />
-                  <col className="w-[50px]" />
-                  <col className="w-[28px]" />
-                  <col className="w-[46px]" />
-                  <col className="w-[32px]" />
-                  <col className="w-[130px]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-slate-100">
@@ -6918,8 +6918,8 @@ export default function DepartmentKanban() {
                       <tr key={`${row.typeLabel}-${row.title}-${index}`}>
                         <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                        <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
-                        <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top uppercase">
                           {row.typeLabel === "PRJK" && row.projectTitle ? (
                             <>
@@ -6937,19 +6937,15 @@ export default function DepartmentKanban() {
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                        <td className="border border-slate-900 px-2 py-2 align-top">{row.tyo}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">
-                          <input
-                            type="text"
-                            aria-label="Koment"
-                            className="h-4 w-full border-b border-slate-400 bg-transparent"
-                          />
+                          <div className="h-4 w-full border-b border-slate-400" />
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
                         No data available.
                       </td>
                     </tr>
@@ -7042,7 +7038,7 @@ export default function DepartmentKanban() {
             <span />
             <div className="print-page-count">1/{printTotalPages}</div>
             <div className="print-initials">
-              PUNOI: <span className="print-signature-line" />
+              PUNOI: {printInitials || "-"}
             </div>
           </div>
         </div>
@@ -7098,25 +7094,47 @@ export default function DepartmentKanban() {
           cursor: pointer;
         }
         @media print {
-          body {
+          * {
+            box-sizing: border-box;
+          }
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white;
           }
-          aside {
+          aside, header, nav {
             display: none !important;
           }
           @page {
-            margin: 0.36in 0.1in 0.51in 0.1in;
+            margin: 0.25in 0.1in 0.35in 0.1in;
+            size: landscape;
           }
           .print-page {
             position: relative;
+            padding: 0.1in !important;
+            margin: 0 !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
             padding-bottom: 0.6in;
+          }
+          .print-page-measure {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: calc(8.5in - 0.25in - 0.35in);
+            width: 1px;
+            visibility: hidden;
+            pointer-events: none;
           }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
             margin-top: 0.15in;
-            margin-bottom: 0.15in;
+            margin-bottom: 0.2in;
           }
           .print-title {
             font-size: 16px;
@@ -7137,14 +7155,23 @@ export default function DepartmentKanban() {
             display: grid;
             gap: 2px;
           }
-          .print-page-measure {
-            position: absolute;
-            top: 0;
+          .print-footer {
+            position: fixed;
+            bottom: 0.1in;
             left: 0;
-            height: calc(11in - 0.36in - 0.51in);
-            width: 1px;
-            visibility: hidden;
-            pointer-events: none;
+            right: 0;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            padding-left: 0.2in;
+            padding-right: 0.2in;
+            font-size: 10px;
+            color: #334155;
+          }
+          .print-page-count {
+            text-align: center;
+          }
+          .print-initials {
+            text-align: right;
           }
           .print-page-marker {
             position: absolute;
@@ -7155,34 +7182,6 @@ export default function DepartmentKanban() {
             color: #334155;
             z-index: 5;
             display: none;
-          }
-          .print-footer {
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0.1in;
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.1in;
-            padding-right: 0.1in;
-            font-size: 10px;
-            color: #334155;
-          }
-          .print-page-count {
-            grid-column: 2;
-            text-align: center;
-          }
-          .print-signature-line {
-            display: inline-block;
-            min-width: 1.2in;
-            border-bottom: 1px solid #334155;
-            height: 0.6em;
-            margin-left: 0.1in;
-            vertical-align: bottom;
-          }
-          .print-initials {
-            grid-column: 3;
-            text-align: right;
           }
           .weekly-report-table thead {
             display: table-header-group;
@@ -7227,16 +7226,33 @@ export default function DepartmentKanban() {
             border-width: 2px;
           }
           .daily-report-table thead th {
-            border-width: 2px;
-            border-color: #0f172a;
+            border: 2px solid #0f172a !important;
+            background-color: #f1f5f9 !important;
+            box-shadow: none !important;
+            position: static !important;
+            border-left: 2px solid #0f172a !important;
+            border-right: 2px solid #0f172a !important;
           }
           .daily-report-table thead tr {
-            border-top: 2px solid #0f172a;
-            border-bottom: 2px solid #0f172a;
+            border-top: 3px solid #0f172a !important;
+            border-bottom: 3px solid #0f172a !important;
+          }
+          .daily-report-table th,
+          .daily-report-table td {
+            border: 1px solid #0f172a !important;
+          }
+          .daily-report-table {
+            border-width: 2px;
+            border-color: #0f172a;
+            border-collapse: collapse !important;
+            border-spacing: 0 !important;
           }
           .weekly-report-table {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+          }
+          .print-nr-cell {
+            font-weight: 700;
           }
         }
       `}</style>

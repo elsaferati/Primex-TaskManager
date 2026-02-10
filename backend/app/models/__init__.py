@@ -8,6 +8,7 @@ from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.department import Department
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
+from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
 from app.models.meeting import Meeting
@@ -50,6 +51,7 @@ __all__ = [
     "Department",
     "FeedbackLog",
     "GaNote",
+    "GaNoteAttachment",
     "Holiday",
     "InternalNote",
     "Meeting",
