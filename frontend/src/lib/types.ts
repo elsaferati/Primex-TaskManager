@@ -288,6 +288,18 @@ export interface GaNote {
   department_id?: string | null
   created_at: string
   updated_at: string
+  attachments?: GaNoteAttachment[]
+}
+
+export interface GaNoteAttachment {
+  id: string
+  note_id: string
+  original_filename: string
+  stored_filename: string
+  content_type?: string | null
+  size_bytes: number
+  created_by?: string | null
+  created_at: string
 }
 
 export interface InternalNote {

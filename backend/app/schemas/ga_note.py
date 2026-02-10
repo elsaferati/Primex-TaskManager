@@ -5,6 +5,17 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+
+class GaNoteAttachmentOut(BaseModel):
+    id: uuid.UUID
+    note_id: uuid.UUID
+    original_filename: str
+    stored_filename: str
+    content_type: str | None = None
+    size_bytes: int
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+
 from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
 
 class GaNoteOut(BaseModel):
@@ -22,6 +33,7 @@ class GaNoteOut(BaseModel):
     department_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    attachments: list[GaNoteAttachmentOut] = []
 
 
 class GaNoteCreate(BaseModel):
