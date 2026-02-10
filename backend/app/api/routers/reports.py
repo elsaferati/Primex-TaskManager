@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -214,10 +214,25 @@ async def daily_report(
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
+    latest_occurrence = (
+        select(
+            SystemTaskOccurrence.template_id,
+            SystemTaskOccurrence.user_id,
+            func.max(SystemTaskOccurrence.occurrence_date).label("latest_date"),
+        )
+        .where(SystemTaskOccurrence.occurrence_date <= day)
+        .where(SystemTaskOccurrence.user_id == user_id)
+        .group_by(SystemTaskOccurrence.template_id)
+        .group_by(SystemTaskOccurrence.user_id)
+    ).subquery()
+
     occ_overdue_rows = (
         await db.execute(
             select(SystemTaskOccurrence, SystemTaskTemplate)
+            .join(latest_occurrence, SystemTaskOccurrence.template_id == latest_occurrence.c.template_id)
             .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskOccurrence.occurrence_date == latest_occurrence.c.latest_date)
+            .where(SystemTaskOccurrence.user_id == latest_occurrence.c.user_id)
             .where(SystemTaskOccurrence.user_id == user_id)
             .where(SystemTaskOccurrence.occurrence_date < day)
             .where(SystemTaskOccurrence.status == OPEN)
@@ -243,13 +258,8 @@ async def daily_report(
             )
         )
 
-    today_template_ids = {tmpl.id for _, tmpl in occ_today_rows}
-    seen_templates: set[uuid.UUID] = set()
     system_overdue: list[DailyReportSystemOccurrence] = []
     for occ, tmpl in occ_overdue_rows:
-        if tmpl.id in today_template_ids or tmpl.id in seen_templates:
-            continue
-        seen_templates.add(tmpl.id)
         late_days = (day - occ.occurrence_date).days
         system_overdue.append(
             DailyReportSystemOccurrence(
