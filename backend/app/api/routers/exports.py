@@ -487,6 +487,17 @@ def _format_system_status(status: str | None) -> str:
     return status
 
 
+def _normalize_report_status(status: str | None) -> str:
+    if not status:
+        return ""
+    normalized = status.strip().upper().replace(" ", "_")
+    if normalized == "TO_DO":
+        return "TODO"
+    if normalized == "INPROGRESS":
+        return "IN_PROGRESS"
+    return normalized
+
+
 def _format_alignment_time(value: time | None) -> str:
     if not value:
         return "-"
@@ -1543,6 +1554,12 @@ async def export_daily_report_xlsx(
     ws = wb.active
     ws.title = "Daily Report"
 
+    status_fills = {
+        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+    }
+
     title_row = 1
     dept_row = 2
     user_row = 3
@@ -1605,6 +1622,9 @@ async def export_daily_report_xlsx(
     for idx, row in enumerate(rows, start=1):
         row_values = row.copy()
         row_values[0] = idx
+        status_value = row_values[7] if len(row_values) > 7 else ""
+        status_key = _normalize_report_status(status_value)
+        status_fill = status_fills.get(status_key)
         for col_idx, value in enumerate(row_values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
             cell.alignment = Alignment(
@@ -1614,6 +1634,8 @@ async def export_daily_report_xlsx(
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
+            if status_fill and col_idx == 8:
+                cell.fill = status_fill
         data_row += 1
 
     ws.freeze_panes = ws["B6"]
