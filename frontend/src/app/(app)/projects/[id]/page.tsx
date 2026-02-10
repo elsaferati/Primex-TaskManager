@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ChevronDown, Eye } from "lucide-react"
+import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
@@ -87,6 +87,13 @@ const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const ALL_USERS_FILTER = "__all__"
+const ME_FILTER = "__me__"
+const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
+  TODO: "To Do",
+  IN_PROGRESS: "In Progress",
+  DONE: "Done",
+}
 
 const MEETING_FOCUS_POINTS = [
   "Confirm scope and goals with the client.",
@@ -151,6 +158,15 @@ function isOverdue(task: Task) {
   return Date.now() > due.getTime()
 }
 
+function matchesAssignee(task: Task, filterId: string, currentUserId?: string | null) {
+  if (filterId === ALL_USERS_FILTER) return true
+  const resolvedId = filterId === ME_FILTER ? currentUserId : filterId
+  if (!resolvedId) return true
+  if (task.assigned_to === resolvedId || task.assigned_to_user_id === resolvedId) return true
+  if (task.assignees?.some((assignee) => assignee.id === resolvedId)) return true
+  return false
+}
+
 function statusLabel(status?: string) {
   if (!status) return "-"
   return status
@@ -188,6 +204,14 @@ function formatDateTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function getTaskSortDate(task: Task): number | null {
+  const start = task.start_date ? new Date(task.start_date) : null
+  if (start && !Number.isNaN(start.getTime())) return start.getTime()
+  const created = task.created_at ? new Date(task.created_at) : null
+  if (created && !Number.isNaN(created.getTime())) return created.getTime()
+  return null
 }
 
 async function initializeMeetingChecklistItems(
@@ -353,6 +377,7 @@ export default function ProjectPage() {
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
+  const [taskAssigneeFilter, setTaskAssigneeFilter] = React.useState<string>(ME_FILTER)
   const [departmentUsers, setDepartmentUsers] = React.useState<User[]>([])
   const [allUsers, setAllUsers] = React.useState<User[]>([])
   const [projectDepartmentName, setProjectDepartmentName] = React.useState<string | null>(null)
@@ -536,6 +561,15 @@ export default function ProjectPage() {
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const [isEditingProjectTitle, setIsEditingProjectTitle] = React.useState(false)
+  const [projectTitleDraft, setProjectTitleDraft] = React.useState("")
+  const [savingProjectTitle, setSavingProjectTitle] = React.useState(false)
+
+  React.useEffect(() => {
+    if (taskAssigneeFilter === ME_FILTER && user?.id) {
+      setTaskAssigneeFilter(user.id)
+    }
+  }, [taskAssigneeFilter, user?.id])
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -543,6 +577,11 @@ export default function ProjectPage() {
       setEditProjectDueDate(toDateInput(project.due_date))
     }
   }, [editProjectDueDateOpen, project?.due_date])
+
+  React.useEffect(() => {
+    if (!project || isEditingProjectTitle) return
+    setProjectTitleDraft(project.title || project.name || "")
+  }, [project, isEditingProjectTitle])
 
   React.useEffect(() => {
     const load = async () => {
@@ -1002,6 +1041,53 @@ export default function ProjectPage() {
       toast.success("Description updated")
     } finally {
       setSavingDescription(false)
+    }
+  }
+
+  const startEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(true)
+  }
+
+  const cancelEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(false)
+  }
+
+  const saveProjectTitle = async () => {
+    if (!project) return
+    const nextTitle = projectTitleDraft.trim()
+    if (!nextTitle) {
+      toast.error("Title is required")
+      return
+    }
+    setSavingProjectTitle(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update project title"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setProjectTitleDraft(updated.title || updated.name || nextTitle)
+      setIsEditingProjectTitle(false)
+      toast.success("Project title updated")
+    } finally {
+      setSavingProjectTitle(false)
     }
   }
 
@@ -2147,6 +2233,7 @@ export default function ProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
+  const canEditProjectTitle = isAdmin || isManager
 
   const submitDevelopmentChecklistItem = async () => {
     if (!project) return
@@ -2499,6 +2586,74 @@ export default function ProjectPage() {
     () => checklistItems.filter((item) => item.path === activePhase),
     [activePhase, checklistItems]
   )
+  const userMap = new Map(
+    [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
+  )
+  const taskAssigneeOptions = React.useMemo(() => {
+    const map = new Map<string, string>()
+    const add = (id?: string | null, label?: string | null) => {
+      if (!id) return
+      if (!map.has(id)) map.set(id, label || id)
+    }
+
+    visibleTasks.forEach((task) => {
+      if (task.assigned_to) {
+        const label = userMap.get(task.assigned_to)?.full_name ||
+          userMap.get(task.assigned_to)?.username ||
+          userMap.get(task.assigned_to)?.email ||
+          task.assigned_to
+        add(task.assigned_to, label)
+      }
+      if (task.assigned_to_user_id) {
+        const label = userMap.get(task.assigned_to_user_id)?.full_name ||
+          userMap.get(task.assigned_to_user_id)?.username ||
+          userMap.get(task.assigned_to_user_id)?.email ||
+          task.assigned_to_user_id
+        add(task.assigned_to_user_id, label)
+      }
+      task.assignees?.forEach((assignee) => {
+        add(assignee.id, assignee.full_name || assignee.username || assignee.email || assignee.id)
+      })
+    })
+
+    let list = Array.from(map.entries()).map(([id, label]) => ({ id, label }))
+    list.sort((a, b) => a.label.localeCompare(b.label))
+
+    return list
+  }, [userMap, visibleTasks])
+  const filteredVisibleTasks = React.useMemo(() => {
+    const currentUserId = user?.id ?? null
+    return visibleTasks.filter((task) => matchesAssignee(task, taskAssigneeFilter, currentUserId))
+  }, [taskAssigneeFilter, user?.id, visibleTasks])
+  const tasksByStatus = React.useMemo(() => {
+    const buckets: Record<(typeof TASK_STATUSES)[number], Task[]> = {
+      TODO: [],
+      IN_PROGRESS: [],
+      DONE: [],
+    }
+    for (const task of filteredVisibleTasks) {
+      const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
+      if (statusValue === "IN_PROGRESS") {
+        buckets.IN_PROGRESS.push(task)
+      } else if (statusValue === "DONE") {
+        buckets.DONE.push(task)
+      } else {
+        buckets.TODO.push(task)
+      }
+    }
+    const sortNewestFirst = (a: Task, b: Task) => {
+      const aTime = getTaskSortDate(a)
+      const bTime = getTaskSortDate(b)
+      if (aTime == null && bTime == null) return 0
+      if (aTime == null) return 1
+      if (bTime == null) return -1
+      return bTime - aTime
+    }
+    buckets.TODO.sort(sortNewestFirst)
+    buckets.IN_PROGRESS.sort(sortNewestFirst)
+    buckets.DONE.sort(sortNewestFirst)
+    return buckets
+  }, [filteredVisibleTasks])
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -2506,6 +2661,59 @@ export default function ProjectPage() {
   const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
     ? `${baseTitle} - ${project.total_products}`
     : baseTitle
+
+  const renderProjectTitle = (titleClassName: string, inputClassName: string) => {
+    if (!canEditProjectTitle) {
+      return <div className={titleClassName}>{title}</div>
+    }
+    if (isEditingProjectTitle) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={projectTitleDraft}
+            onChange={(event) => setProjectTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void saveProjectTitle()
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                cancelEditProjectTitle()
+              }
+            }}
+            className={inputClassName}
+            autoFocus
+            aria-label="Project title"
+          />
+          <Button
+            size="sm"
+            onClick={() => void saveProjectTitle()}
+            disabled={savingProjectTitle || !projectTitleDraft.trim()}
+          >
+            Save
+          </Button>
+          <Button size="sm" variant="outline" onClick={cancelEditProjectTitle} disabled={savingProjectTitle}>
+            Cancel
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <div className={titleClassName}>{title}</div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2"
+          onClick={startEditProjectTitle}
+          aria-label="Edit project title"
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }
 
   if (project.current_phase === "CLOSED" && !showClosedDetails) {
     const totalTasks = tasks.length
@@ -2524,7 +2732,7 @@ export default function ProjectPage() {
                 &larr; Back to Projects
               </button>
               <div className="mt-3 flex items-center gap-3">
-                <div className="text-3xl font-semibold">{title}</div>
+                {renderProjectTitle("text-3xl font-semibold", "h-10 text-3xl font-semibold")}
                 <Badge variant="secondary">Closed</Badge>
               </div>
             </div>
@@ -2567,9 +2775,6 @@ export default function ProjectPage() {
   const phaseSteps: string[] = [...basePhaseSteps, "CLOSED"]
   const phaseIndex = phaseSteps.indexOf(phase)
   const canClosePhase = phaseIndex !== -1 && phaseIndex < phaseSteps.length - 1
-  const userMap = new Map(
-    [...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m])
-  )
   const savePrompt = async (type: "GA_PROMPT" | "ZHVILLIM_PROMPT") => {
     if (!project) return
     const isGa = type === "GA_PROMPT"
@@ -2643,7 +2848,7 @@ export default function ProjectPage() {
               &larr; Back to Projects
             </button>
             <div className="mt-3 flex items-center gap-3">
-              <div className="text-3xl font-semibold">{title}</div>
+              {renderProjectTitle("text-3xl font-semibold", "h-10 text-3xl font-semibold")}
               {canEditDueDate && (
                 <button
                   type="button"
@@ -3488,10 +3693,38 @@ export default function ProjectPage() {
               </DialogContent>
             </Dialog>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-xs text-slate-500">Assignee</Label>
+            <Select value={taskAssigneeFilter} onValueChange={setTaskAssigneeFilter}>
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_USERS_FILTER}>All users</SelectItem>
+                {taskAssigneeOptions.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <Card className="p-0">
-            <div className="divide-y">
-              {visibleTasks.length ? (
-                visibleTasks.map((task) => {
+            <div className="space-y-3 p-3">
+              {(["TODO", "IN_PROGRESS", "DONE"] as const).map((statusKey) => {
+                const sectionTasks = tasksByStatus[statusKey]
+                const statusLabelText = TASK_STATUS_LABELS[statusKey]
+                return (
+                  <div key={statusKey} className="rounded-xl border border-slate-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+                      <div className="text-xs font-semibold uppercase text-slate-600">{statusLabelText}</div>
+                      <Badge variant="secondary" className="text-xs">
+                        {sectionTasks.length}
+                      </Badge>
+                    </div>
+                    <div className="divide-y">
+                      {sectionTasks.length ? (
+                        sectionTasks.map((task) => {
                   // Get all assignees from the assignees array, fallback to assigned_to for backward compatibility
                   const assignees = task.assignees && task.assignees.length > 0
                     ? task.assignees
@@ -3504,6 +3737,12 @@ export default function ProjectPage() {
                   const overdue = isOverdue(task)
                   const taskPriority = (task.priority as "HIGH" | "NORMAL") || "NORMAL"
                   const isHighPriority = taskPriority === "HIGH"
+                  const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
+                  const statusRowClass = statusValue === "DONE"
+                    ? "border-green-200 border-l-green-500 bg-green-50/30 opacity-80"
+                    : statusValue === "IN_PROGRESS"
+                      ? "border-amber-200 border-l-amber-500"
+                      : "border-slate-200 border-l-slate-400"
                   const checklist = taskChecklists[task.id]
                   const checklistItems = checklist?.items
                     ? [...checklist.items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -3514,7 +3753,7 @@ export default function ProjectPage() {
                   return (
                     <div
                       key={task.id}
-                      className="px-6 py-4 text-sm"
+                      className={`px-6 py-4 text-sm border-l-4 ${statusRowClass}`}
                     >
                       <div className="grid grid-cols-5 gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
@@ -3670,10 +3909,14 @@ export default function ProjectPage() {
                       ) : null}
                     </div>
                   )
-                })
-              ) : (
-                <div className="px-6 py-6 text-sm text-muted-foreground">No tasks yet.</div>
-              )}
+                        })
+                      ) : (
+                        <div className="px-4 py-3 text-sm text-muted-foreground">No tasks.</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </Card>
         </div>

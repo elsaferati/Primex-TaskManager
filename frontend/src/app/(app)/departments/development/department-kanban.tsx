@@ -1585,8 +1585,12 @@ export default function DepartmentKanban() {
       taskMapById.set(t.id, taskCopy)
     }
 
-    return Array.from(taskMapById.values())
-  }, [noProjectTasks, userMap])
+    let deduped = Array.from(taskMapById.values())
+    if (isMineView && user?.id) {
+      deduped = deduped.filter((task) => isTaskAssignedToUser(task, user.id))
+    }
+    return deduped
+  }, [noProjectTasks, userMap, isMineView, user?.id, isTaskAssignedToUser])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -1673,10 +1677,13 @@ export default function DepartmentKanban() {
     [systemTasks, isMineView, user?.id, department]
   )
 
-  const projectTasks = React.useMemo(
-    () => visibleDepartmentTasks.filter((t) => t.project_id),
-    [visibleDepartmentTasks]
-  )
+  const projectTasks = React.useMemo(() => {
+    const tasks = visibleDepartmentTasks.filter((t) => t.project_id)
+    if (isMineView && user?.id) {
+      return tasks.filter((task) => isTaskAssignedToUser(task, user.id))
+    }
+    return tasks
+  }, [visibleDepartmentTasks, isMineView, user?.id, isTaskAssignedToUser])
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
