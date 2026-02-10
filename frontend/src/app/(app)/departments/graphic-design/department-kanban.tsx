@@ -1563,7 +1563,7 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveOnDate(task, todayDate)
+      return isTaskActiveForDate(task, todayDate)
     })
   }, [todayDate, visibleNoProjectTasks, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
@@ -1585,7 +1585,7 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveOnDate(task, todayDate)
+      return isTaskActiveForDate(task, todayDate)
     })
   }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
