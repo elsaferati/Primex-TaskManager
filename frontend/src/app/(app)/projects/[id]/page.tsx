@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ChevronDown, Eye } from "lucide-react"
+import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
@@ -561,6 +561,9 @@ export default function ProjectPage() {
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const [isEditingProjectTitle, setIsEditingProjectTitle] = React.useState(false)
+  const [projectTitleDraft, setProjectTitleDraft] = React.useState("")
+  const [savingProjectTitle, setSavingProjectTitle] = React.useState(false)
 
   React.useEffect(() => {
     if (taskAssigneeFilter === ME_FILTER && user?.id) {
@@ -574,6 +577,11 @@ export default function ProjectPage() {
       setEditProjectDueDate(toDateInput(project.due_date))
     }
   }, [editProjectDueDateOpen, project?.due_date])
+
+  React.useEffect(() => {
+    if (!project || isEditingProjectTitle) return
+    setProjectTitleDraft(project.title || project.name || "")
+  }, [project, isEditingProjectTitle])
 
   React.useEffect(() => {
     const load = async () => {
@@ -1033,6 +1041,53 @@ export default function ProjectPage() {
       toast.success("Description updated")
     } finally {
       setSavingDescription(false)
+    }
+  }
+
+  const startEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(true)
+  }
+
+  const cancelEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(false)
+  }
+
+  const saveProjectTitle = async () => {
+    if (!project) return
+    const nextTitle = projectTitleDraft.trim()
+    if (!nextTitle) {
+      toast.error("Title is required")
+      return
+    }
+    setSavingProjectTitle(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update project title"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setProjectTitleDraft(updated.title || updated.name || nextTitle)
+      setIsEditingProjectTitle(false)
+      toast.success("Project title updated")
+    } finally {
+      setSavingProjectTitle(false)
     }
   }
 
@@ -2178,6 +2233,7 @@ export default function ProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
+  const canEditProjectTitle = isAdmin || isManager
 
   const submitDevelopmentChecklistItem = async () => {
     if (!project) return
@@ -2606,6 +2662,59 @@ export default function ProjectPage() {
     ? `${baseTitle} - ${project.total_products}`
     : baseTitle
 
+  const renderProjectTitle = (titleClassName: string, inputClassName: string) => {
+    if (!canEditProjectTitle) {
+      return <div className={titleClassName}>{title}</div>
+    }
+    if (isEditingProjectTitle) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={projectTitleDraft}
+            onChange={(event) => setProjectTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void saveProjectTitle()
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                cancelEditProjectTitle()
+              }
+            }}
+            className={inputClassName}
+            autoFocus
+            aria-label="Project title"
+          />
+          <Button
+            size="sm"
+            onClick={() => void saveProjectTitle()}
+            disabled={savingProjectTitle || !projectTitleDraft.trim()}
+          >
+            Save
+          </Button>
+          <Button size="sm" variant="outline" onClick={cancelEditProjectTitle} disabled={savingProjectTitle}>
+            Cancel
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <div className={titleClassName}>{title}</div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2"
+          onClick={startEditProjectTitle}
+          aria-label="Edit project title"
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }
+
   if (project.current_phase === "CLOSED" && !showClosedDetails) {
     const totalTasks = tasks.length
     const doneTasks = tasks.filter((t) => t.status === "DONE").length
@@ -2623,7 +2732,7 @@ export default function ProjectPage() {
                 &larr; Back to Projects
               </button>
               <div className="mt-3 flex items-center gap-3">
-                <div className="text-3xl font-semibold">{title}</div>
+                {renderProjectTitle("text-3xl font-semibold", "h-10 text-3xl font-semibold")}
                 <Badge variant="secondary">Closed</Badge>
               </div>
             </div>
@@ -2739,7 +2848,7 @@ export default function ProjectPage() {
               &larr; Back to Projects
             </button>
             <div className="mt-3 flex items-center gap-3">
-              <div className="text-3xl font-semibold">{title}</div>
+              {renderProjectTitle("text-3xl font-semibold", "h-10 text-3xl font-semibold")}
               {canEditDueDate && (
                 <button
                   type="button"
