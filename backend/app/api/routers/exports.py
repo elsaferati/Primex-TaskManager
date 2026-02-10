@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -1282,27 +1282,33 @@ async def _daily_report_rows_for_user(
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
+    latest_occurrence = (
+        select(
+            SystemTaskOccurrence.template_id,
+            func.max(SystemTaskOccurrence.occurrence_date).label("latest_date"),
+        )
+        .where(SystemTaskOccurrence.user_id == user_id)
+        .where(SystemTaskOccurrence.occurrence_date <= day)
+        .group_by(SystemTaskOccurrence.template_id)
+    ).subquery()
+
     occ_overdue_rows = (
         await db.execute(
             select(SystemTaskOccurrence, SystemTaskTemplate)
+            .join(latest_occurrence, SystemTaskOccurrence.template_id == latest_occurrence.c.template_id)
             .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.user_id == user_id)
+            .where(SystemTaskOccurrence.occurrence_date == latest_occurrence.c.latest_date)
             .where(SystemTaskOccurrence.occurrence_date < day)
             .where(SystemTaskOccurrence.status == OPEN)
             .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
         )
     ).all()
 
-    today_template_ids = {tmpl.id for _, tmpl in occ_today_rows}
     overdue_rows: list[tuple[SystemTaskOccurrence, SystemTaskTemplate]] = []
-    seen_templates: set[uuid.UUID] = set()
     for occ, tmpl in occ_overdue_rows:
-        if tmpl.id in today_template_ids or tmpl.id in seen_templates:
-            continue
-        seen_templates.add(tmpl.id)
         overdue_rows.append((occ, tmpl))
 
-    template_ids = list({tmpl.id for _, tmpl in occ_today_rows} | set(seen_templates))
+    template_ids = list({tmpl.id for _, tmpl in occ_today_rows} | {tmpl.id for _, tmpl in overdue_rows})
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
     alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
     alignment_user_map: dict[uuid.UUID, str] = {}
