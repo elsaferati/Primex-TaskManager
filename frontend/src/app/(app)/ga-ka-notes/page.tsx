@@ -56,6 +56,32 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
 
+type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "DONE" | "UNKNOWN"
+
+function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
+  if (!value) return "UNKNOWN"
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
+  if (["todo", "to_do", "to-do", "to do"].includes(normalized)) return "TODO"
+  if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
+  if (["done"].includes(normalized)) return "DONE"
+  return "UNKNOWN"
+}
+
+function aggregateTaskStatus(statuses: Array<string | null | undefined>): NormalizedTaskStatus {
+  const normalized = statuses.map((status) => {
+    const value = normalizeTaskStatus(status)
+    return value === "UNKNOWN" ? "TODO" : value
+  })
+  if (normalized.length === 0) return "UNKNOWN"
+  const allDone = normalized.every((status) => status === "DONE")
+  if (allDone) return "DONE"
+  const anyInProgress = normalized.some((status) => status === "IN_PROGRESS")
+  if (anyInProgress) return "IN_PROGRESS"
+  const anyDone = normalized.some((status) => status === "DONE")
+  if (anyDone) return "IN_PROGRESS"
+  return "TODO"
+}
+
 function formatDate(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
@@ -141,6 +167,8 @@ export default function GaKaNotesPage() {
       taskId: string | null
       taskDepartmentId: string | null
       taskProjectId: string | null
+      taskStatus: string | null
+      taskStatuses: string[]
     }>
   >(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
@@ -250,6 +278,8 @@ export default function GaKaNotesPage() {
         taskId: string | null
         taskDepartmentId: string | null
         taskProjectId: string | null
+        taskStatus: string | null
+        taskStatuses: string[]
       }>()
       const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
         const result: TaskAssignee[] = []
@@ -297,6 +327,8 @@ export default function GaKaNotesPage() {
           taskId: existing?.taskId ?? t.id,
           taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
           taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
+          taskStatus: existing?.taskStatus ?? t.status ?? null,
+          taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
         })
       }
       setNoteTaskInfo(map)
@@ -408,6 +440,8 @@ export default function GaKaNotesPage() {
                 taskId: string | null
                 taskDepartmentId: string | null
                 taskProjectId: string | null
+                taskStatus: string | null
+                taskStatuses: string[]
               }>()
               const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
                 const result: TaskAssignee[] = []
@@ -449,6 +483,8 @@ export default function GaKaNotesPage() {
                   taskId: existing?.taskId ?? t.id,
                   taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
                   taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
+                  taskStatus: existing?.taskStatus ?? t.status ?? null,
+                  taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
                 })
               }
               setNoteTaskInfo(map)
@@ -1175,6 +1211,26 @@ export default function GaKaNotesPage() {
                     const displayDepartment = noteDepartment || taskDepartment
                     const displayProject = noteProject || taskProject
                     const assignees = taskInfo?.assignees ?? []
+                    const isClosed =
+                      note.status === "CLOSED" ||
+                      (note as { isClosed?: boolean }).isClosed === true ||
+                      (note as { closed?: boolean }).closed === true
+                    const aggregatedStatus =
+                      taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
+                        ? aggregateTaskStatus(taskInfo.taskStatuses)
+                        : normalizeTaskStatus(taskInfo?.taskStatus)
+                    const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
+                    const shenimiCellClass = isClosed
+                      ? "bg-slate-200 opacity-70"
+                      : hasTask
+                        ? aggregatedStatus === "TODO"
+                          ? "bg-pink-200"
+                          : aggregatedStatus === "IN_PROGRESS"
+                            ? "bg-amber-200"
+                            : aggregatedStatus === "DONE"
+                              ? "bg-emerald-200"
+                              : "bg-amber-50"
+                        : "bg-sky-200"
 
                     // Only show department if:
                     // 1. Note has a project (always show projects)
@@ -1187,13 +1243,18 @@ export default function GaKaNotesPage() {
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className="whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: 'bottom' }}>
+                        <td className={`whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <span className="text-sm">{note.content}</span>
                             <div className="flex items-center gap-2">
                               {note.priority ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}`}>
                                   {note.priority}
+                                </Badge>
+                              ) : null}
+                              {isClosed ? (
+                                <Badge className="text-[10px] px-1.5 py-0 bg-slate-300 text-slate-700 border border-slate-400">
+                                  Closed
                                 </Badge>
                               ) : null}
 
@@ -1303,7 +1364,10 @@ export default function GaKaNotesPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50"
+                              disabled={hasTask}
+                              aria-disabled={hasTask}
+                              title={hasTask ? "Edit disabled when task exists" : "Edit"}
+                              className={`h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 ${hasTask ? "opacity-50 cursor-not-allowed" : ""}`}
                               onClick={() => openEditNote(note)}
                             >
                               Edit

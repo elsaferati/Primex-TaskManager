@@ -306,10 +306,14 @@ export default function DesignProjectPage() {
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const [isEditingProjectTitle, setIsEditingProjectTitle] = React.useState(false)
+  const [projectTitleDraft, setProjectTitleDraft] = React.useState("")
+  const [savingProjectTitle, setSavingProjectTitle] = React.useState(false)
 
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
+  const canEditProjectTitle = isAdmin || isManager
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -317,6 +321,11 @@ export default function DesignProjectPage() {
       setEditProjectDueDate(toDateInput(project.due_date))
     }
   }, [editProjectDueDateOpen, project?.due_date])
+
+  React.useEffect(() => {
+    if (!project || isEditingProjectTitle) return
+    setProjectTitleDraft(project.title || project.name || "")
+  }, [project, isEditingProjectTitle])
 
   // Load project data
   React.useEffect(() => {
@@ -469,6 +478,53 @@ export default function DesignProjectPage() {
       toast.success("Description updated")
     } finally {
       setSavingDescription(false)
+    }
+  }
+
+  const startEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(true)
+  }
+
+  const cancelEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(false)
+  }
+
+  const saveProjectTitle = async () => {
+    if (!project) return
+    const nextTitle = projectTitleDraft.trim()
+    if (!nextTitle) {
+      toast.error("Title is required")
+      return
+    }
+    setSavingProjectTitle(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update project title"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setProjectTitleDraft(updated.title || updated.name || nextTitle)
+      setIsEditingProjectTitle(false)
+      toast.success("Project title updated")
+    } finally {
+      setSavingProjectTitle(false)
     }
   }
 
@@ -1443,6 +1499,53 @@ export default function DesignProjectPage() {
   const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
     ? `${baseTitle} - ${project.total_products}`
     : baseTitle
+
+  const renderProjectTitle = () => {
+    if (!canEditProjectTitle) {
+      return <div className="text-3xl font-semibold">{title}</div>
+    }
+    if (isEditingProjectTitle) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={projectTitleDraft}
+            onChange={(event) => setProjectTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void saveProjectTitle()
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                cancelEditProjectTitle()
+              }
+            }}
+            className="h-10 text-3xl font-semibold"
+            autoFocus
+            aria-label="Project title"
+          />
+          <Button
+            size="sm"
+            onClick={() => void saveProjectTitle()}
+            disabled={savingProjectTitle || !projectTitleDraft.trim()}
+          >
+            Save
+          </Button>
+          <Button size="sm" variant="outline" onClick={cancelEditProjectTitle} disabled={savingProjectTitle}>
+            Cancel
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <div className="text-3xl font-semibold">{title}</div>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={startEditProjectTitle}>
+          Edit
+        </Button>
+      </div>
+    )
+  }
   const phase = project.current_phase || "PLANNING"
   const phaseSequence = MST_PHASES
   const phaseLabels = MST_PHASE_LABELS
@@ -1459,7 +1562,7 @@ export default function DesignProjectPage() {
         <div>
           <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
           <div className="mt-3 flex items-center gap-3">
-            <div className="text-3xl font-semibold">{title}</div>
+            {renderProjectTitle()}
             {canEditDueDate && (
               <button
                 type="button"

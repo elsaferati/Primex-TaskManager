@@ -302,9 +302,13 @@ export default function DevelopmentProjectPage() {
   const [editProjectDueDateOpen, setEditProjectDueDateOpen] = React.useState(false)
   const [editProjectDueDate, setEditProjectDueDate] = React.useState("")
   const [savingProjectDueDate, setSavingProjectDueDate] = React.useState(false)
+  const [isEditingProjectTitle, setIsEditingProjectTitle] = React.useState(false)
+  const [projectTitleDraft, setProjectTitleDraft] = React.useState("")
+  const [savingProjectTitle, setSavingProjectTitle] = React.useState(false)
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
+  const canEditProjectTitle = isAdmin || isManager
 
   const loadDevelopmentChecklist = React.useCallback(
     async (targetProjectId?: string) => {
@@ -479,6 +483,11 @@ export default function DevelopmentProjectPage() {
       setEditProjectDueDate(project.due_date ? new Date(project.due_date).toISOString().slice(0, 10) : "")
     }
   }, [editProjectDueDateOpen, project?.due_date])
+
+  React.useEffect(() => {
+    if (!project || isEditingProjectTitle) return
+    setProjectTitleDraft(project.title || project.name || "")
+  }, [project, isEditingProjectTitle])
 
   React.useEffect(() => {
     const load = async () => {
@@ -806,6 +815,53 @@ export default function DevelopmentProjectPage() {
       toast.success("Description updated")
     } finally {
       setSavingDescription(false)
+    }
+  }
+
+  const startEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(true)
+  }
+
+  const cancelEditProjectTitle = () => {
+    if (!project) return
+    setProjectTitleDraft(project.title || project.name || "")
+    setIsEditingProjectTitle(false)
+  }
+
+  const saveProjectTitle = async () => {
+    if (!project) return
+    const nextTitle = projectTitleDraft.trim()
+    if (!nextTitle) {
+      toast.error("Title is required")
+      return
+    }
+    setSavingProjectTitle(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update project title"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      setProjectTitleDraft(updated.title || updated.name || nextTitle)
+      setIsEditingProjectTitle(false)
+      toast.success("Project title updated")
+    } finally {
+      setSavingProjectTitle(false)
     }
   }
 
@@ -1305,6 +1361,53 @@ export default function DevelopmentProjectPage() {
   const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
     ? `${baseTitle} - ${project.total_products}`
     : baseTitle
+
+  const renderProjectTitle = (titleClassName: string, inputClassName: string) => {
+    if (!canEditProjectTitle) {
+      return <h1 className={titleClassName}>{title}</h1>
+    }
+    if (isEditingProjectTitle) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={projectTitleDraft}
+            onChange={(event) => setProjectTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void saveProjectTitle()
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                cancelEditProjectTitle()
+              }
+            }}
+            className={inputClassName}
+            autoFocus
+            aria-label="Project title"
+          />
+          <Button
+            size="sm"
+            onClick={() => void saveProjectTitle()}
+            disabled={savingProjectTitle || !projectTitleDraft.trim()}
+          >
+            Save
+          </Button>
+          <Button size="sm" variant="outline" onClick={cancelEditProjectTitle} disabled={savingProjectTitle}>
+            Cancel
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <h1 className={titleClassName}>{title}</h1>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={startEditProjectTitle}>
+          Edit
+        </Button>
+      </div>
+    )
+  }
   const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phaseIndex !== -1 && phaseIndex < PHASES.length - 1 && phase !== "MBYLLUR"
@@ -1386,7 +1489,10 @@ export default function DevelopmentProjectPage() {
                 <span className="text-sky-500">←</span> Back to Projects
               </button>
               <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-bold text-slate-800 tracking-tight">{title}</h1>
+                {renderProjectTitle(
+                  "text-3xl font-bold text-slate-800 tracking-tight",
+                  "h-10 text-3xl font-bold text-slate-800 tracking-tight"
+                )}
                 <Badge className="bg-slate-100 text-slate-700 border-slate-200 px-3 py-1.5 text-sm font-medium rounded-lg">
                   Closed
                 </Badge>
@@ -1450,7 +1556,10 @@ export default function DevelopmentProjectPage() {
                     <span className="text-sky-500">←</span> Back to Projects
                   </button>
                   <div className="flex items-center gap-3 mb-4">
-                    <h1 className="text-4xl font-bold text-slate-800 tracking-tight">{title}</h1>
+                    {renderProjectTitle(
+                      "text-4xl font-bold text-slate-800 tracking-tight",
+                      "h-11 text-4xl font-bold text-slate-800 tracking-tight"
+                    )}
                     {canEditDueDate && (
                       <button
                         type="button"
