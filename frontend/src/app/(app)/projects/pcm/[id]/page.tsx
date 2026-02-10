@@ -97,7 +97,7 @@ async function initializeMstChecklistItems(
   // Also detect and remove duplicates
   const existingMap = new Map<string, ChecklistItem>()
   const duplicates: string[] = []
-  
+
   existingItems.forEach((item) => {
     let key: string
     if (item.path && item.title) {
@@ -108,7 +108,7 @@ async function initializeMstChecklistItems(
     } else {
       return // Skip items without title
     }
-    
+
     if (existingMap.has(key)) {
       // Found a duplicate - mark for deletion
       if (item.id) duplicates.push(item.id)
@@ -116,7 +116,7 @@ async function initializeMstChecklistItems(
       existingMap.set(key, item)
     }
   })
-  
+
   // Delete duplicates (admin/manager only)
   if (allowDelete) {
     for (const dupId of duplicates) {
@@ -148,9 +148,9 @@ async function initializeMstChecklistItems(
   // Create missing planning questions only when none exist yet (admin-managed afterwards).
   const planningItemsToCreate = shouldSeedPlanning
     ? MST_PLANNING_QUESTIONS.filter((question) => {
-        const key = `PLANNING|${question}`
-        return !existingMap.has(key)
-      })
+      const key = `PLANNING|${question}`
+      return !existingMap.has(key)
+    })
     : []
 
   // Combine all items to create
@@ -234,11 +234,11 @@ async function initializeVsVlPlanningItems(
   const vsVlItems = existingItems.filter(
     (item) => item.item_type === "CHECKBOX" && item.path === "VS_VL_PLANNING"
   )
-  
+
   // Track unique titles and duplicates
   const seenTitles = new Map<string, ChecklistItem>()
   const duplicates: string[] = []
-  
+
   for (const item of vsVlItems) {
     if (!item.title) continue
     if (seenTitles.has(item.title)) {
@@ -248,7 +248,7 @@ async function initializeVsVlPlanningItems(
       seenTitles.set(item.title, item)
     }
   }
-  
+
   // Delete duplicates (admin/manager only)
   if (allowDelete) {
     for (const dupId of duplicates) {
@@ -257,7 +257,7 @@ async function initializeVsVlPlanningItems(
       })
     }
   }
-  
+
   // Create missing items
   const itemsToCreate = VS_VL_ACCEPTANCE_QUESTIONS.filter((title) => !seenTitles.has(title))
   for (const [index, title] of itemsToCreate.entries()) {
@@ -1393,7 +1393,7 @@ export default function PcmProjectPage() {
       return item.item_type === "CHECKBOX" && item.path === FINALIZATION_PATH
     })
     setFinalizationItems(finalizationItemsFromDb)
-    
+
     if (finalizationItemsFromDb.length) {
       const finalizationData: Record<string, boolean> = {}
       finalizationItemsFromDb.forEach((item) => {
@@ -1767,7 +1767,7 @@ export default function PcmProjectPage() {
 
   React.useEffect(() => {
     if (!isVsVl || !project?.id) return
-    
+
     // Use project.start_date as the base date for calculating all task dates
     const baseDate = project.start_date
     if (!baseDate) return
@@ -2694,7 +2694,7 @@ export default function PcmProjectPage() {
       let total = ""
       let completed = ""
       let hasProductCounts = false
-      
+
       // For CONTROL phase tasks, try to get TOTAL from origin task's daily_products
       if (t.phase === "CONTROL") {
         const originTaskId = getOriginTaskId(t.internal_notes)
@@ -2706,7 +2706,7 @@ export default function PcmProjectPage() {
           }
         }
       }
-      
+
       if (t.internal_notes) {
         const totalMatch = t.internal_notes.match(/total_products[:=]\s*(\d+)/i)
         const completedMatch = t.internal_notes.match(/completed_products[:=]\s*(\d+)/i)
@@ -2929,8 +2929,8 @@ export default function PcmProjectPage() {
 
           const totals = parseTaskTotals(task.internal_notes)
           // Use PRODUCT task's daily_products as TOTAL for CONTROL task
-          const totalValue = task.daily_products !== null && task.daily_products !== undefined 
-            ? task.daily_products 
+          const totalValue = task.daily_products !== null && task.daily_products !== undefined
+            ? task.daily_products
             : (totals.total || 0)
           const res = await apiFetch("/tasks", {
             method: "POST",
@@ -3230,7 +3230,7 @@ export default function PcmProjectPage() {
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       return updated
     }
-    
+
     const queueDescriptionSave = (taskId: string, description: string) => {
       const timers = vsVlDescriptionTimersRef.current
       if (timers[taskId]) {
@@ -3339,7 +3339,7 @@ export default function PcmProjectPage() {
       setVsVlAcceptanceChecks((prev) => ({ ...prev, [item.title || ""]: nextChecked }))
       setVsVlPlanningItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
       setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
-      
+
       try {
         const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
@@ -3371,7 +3371,7 @@ export default function PcmProjectPage() {
         const position = vsVlPlanningItems.length > 0
           ? Math.max(...vsVlPlanningItems.map((item) => item.position ?? 0)) + 1
           : 1
-        
+
         const res = await apiFetch("/checklist-items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3453,7 +3453,7 @@ export default function PcmProjectPage() {
     const deleteVsVlPlanningItem = async (itemId: string) => {
       const item = vsVlPlanningItems.find((i) => i.id === itemId)
       if (!item) return
-      
+
       const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
       if (!res.ok) {
         toast.error("Failed to delete checklist item")
@@ -3480,58 +3480,58 @@ export default function PcmProjectPage() {
                 &larr; Back to Projects
               </button>
               <div className="flex items-center gap-3">
-              {!project?.is_template ? (
-                project?.start_date ? (
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-slate-500">
-                      Started: {new Date(project.start_date).toLocaleDateString()}
+                {!project?.is_template ? (
+                  project?.start_date ? (
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-slate-500">
+                        Started: {new Date(project.start_date).toLocaleDateString()}
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs h-6 w-6 p-0"
+                          onClick={() => setEditStartDateDialogOpen(true)}
+                          title="Edit start date (Admin only)"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
-                    {isAdmin && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-xs h-6 w-6 p-0"
-                        onClick={() => setEditStartDateDialogOpen(true)}
-                        title="Edit start date (Admin only)"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() => setStartDateDialogOpen(true)}
-                  >
-                    Start Project
-                  </Button>
-                )
-              ) : null}
-              {user?.role === "ADMIN" && (
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <Checkbox
-                    checked={project?.is_template ?? false}
-                    onCheckedChange={() => void toggleTemplate()}
-                  />
-                  <span className="text-muted-foreground">Template</span>
-                </label>
-              )}
-              <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-                VS/VL
-              </Badge>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => setStartDateDialogOpen(true)}
+                    >
+                      Start Project
+                    </Button>
+                  )
+                ) : null}
+                {user?.role === "ADMIN" && (
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={project?.is_template ?? false}
+                      onCheckedChange={() => void toggleTemplate()}
+                    />
+                    <span className="text-muted-foreground">Template</span>
+                  </label>
+                )}
+                <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
+                  VS/VL
+                </Badge>
               </div>
             </div>
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <span className="text-3xl font-semibold">{title}</span>
-                  {canEditDueDate && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
+                {canEditDueDate && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
                       console.log("Set due date clicked", { project: project?.id, due_date: project?.due_date, isAdmin })
                       const currentDueDate = project.due_date ? toDateInput(project.due_date) : ""
                       console.log("Setting due date to:", currentDueDate)
@@ -3548,1589 +3548,1585 @@ export default function PcmProjectPage() {
                     {project.due_date ? `Due: ${formatDateDisplay(project.due_date)}` : "Set due date"}
                   </button>
                 )}
-                  {!canEditDueDate && project.due_date && (
-                    <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
-                  )}
+                {!canEditDueDate && project.due_date && (
+                  <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
+                )}
                 {project?.is_template && (
                   <Badge variant="secondary" className="text-amber-700 border-amber-300 bg-amber-50">Template</Badge>
                 )}
               </div>
-            <div className="text-sm text-muted-foreground">
-              {VS_VL_PHASES.map((p, idx) => (
-                <span key={p}>
-                  <button
-                    type="button"
-                    onClick={() => setVsVlPhase(p)}
-                    className={p === vsVlPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
-                  >
-                    {VS_VL_PHASE_LABELS[p]}
-                  </button>
-                  {idx < VS_VL_PHASES.length - 1 ? " -> " : ""}
-                </span>
-              ))}
+              <div className="text-sm text-muted-foreground">
+                {VS_VL_PHASES.map((p, idx) => (
+                  <span key={p}>
+                    <button
+                      type="button"
+                      onClick={() => setVsVlPhase(p)}
+                      className={p === vsVlPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
+                    >
+                      {VS_VL_PHASE_LABELS[p]}
+                    </button>
+                    {idx < VS_VL_PHASES.length - 1 ? " -> " : ""}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="border-b flex gap-6">
-          {vsVlTabs.map((tab) => {
-            const isActive = vsVlTab === tab.id
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setVsVlTab(tab.id as typeof vsVlTab)}
-                className={[
-                  "relative pb-3 text-sm font-medium",
-                  tab.id === "ga" ? "ml-auto" : "",
-                  isActive ? "text-blue-600" : "text-muted-foreground",
-                ].join(" ")}
-              >
-                {tab.label}
-                {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-              </button>
-            )
-          })}
-        </div>
-
-        {vsVlTab === "ga" ? (
-          renderGaNotes()
-        ) : vsVlTab === "workflow" ? (
-          <VsWorkflow projectId={projectId} apiFetch={apiFetch} phase={vsVlPhase} />
-        ) : vsVlTab === "checklists" ? (
-          <Card>
-            <div className="p-4 space-y-4">
-              {/* Sub-tabs for Amazon and Images checklists (Images only in AMAZON phase) */}
-              {vsVlPhase === "AMAZON" && (
-                <div className="border-b flex items-center justify-between gap-4">
-                  <div className="flex gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setVsVlChecklistTab("amazon")}
-                      className={[
-                        "relative pb-2 text-sm font-medium",
-                        vsVlChecklistTab === "amazon" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                      ].join(" ")}
-                    >
-                      Amazon Checklist
-                      {vsVlChecklistTab === "amazon" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVsVlChecklistTab("images")}
-                      className={[
-                        "relative pb-2 text-sm font-medium",
-                        vsVlChecklistTab === "images" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                      ].join(" ")}
-                    >
-                      Images Checklist
-                      {vsVlChecklistTab === "images" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                    </button>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      void exportVsVlChecklist(
-                        vsVlChecklistTab === "amazon" ? vsVlAmazonChecklistItems : vsVlImagesChecklistItems,
-                        vsVlChecklistTab === "amazon" ? VS_VL_AMAZON_CHECKLIST_PATH : VS_VL_IMAGES_CHECKLIST_PATH,
-                        vsVlChecklistTab === "amazon" ? "amazon" : "images",
-                        vsVlChecklistTab === "amazon" ? "Amazon Checklist" : "Images Checklist"
-                      )
-                    }
-                    disabled={
-                      exportingVsVlChecklist ||
-                      (vsVlChecklistTab === "amazon"
-                        ? vsVlAmazonChecklistItems.length === 0
-                        : vsVlImagesChecklistItems.length === 0)
-                    }
-                    className="h-8 rounded-xl border-slate-200 text-xs"
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
-                  </Button>
-                </div>
-              )}
-
-              {/* Sub-tabs for Dreamrobot phase checklists */}
-              {vsVlPhase === "DREAMROBOT" && (
-                <div className="border-b flex items-end justify-between gap-4">
-                  <div className="flex gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setVsVlDreamrobotChecklistTab("vs")}
-                      className={[
-                        "relative pb-2 text-sm font-medium",
-                        vsVlDreamrobotChecklistTab === "vs" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                      ].join(" ")}
-                    >
-                      VS Dreamrobot Checklist
-                      {vsVlDreamrobotChecklistTab === "vs" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVsVlDreamrobotChecklistTab("vl")}
-                      className={[
-                        "relative pb-2 text-sm font-medium",
-                        vsVlDreamrobotChecklistTab === "vl" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
-                      ].join(" ")}
-                    >
-                      VL Dreamrobot Checklist
-                      {vsVlDreamrobotChecklistTab === "vl" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-                    </button>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      void exportVsVlChecklist(
-                        vsVlDreamrobotChecklistTab === "vs"
-                          ? vsVlDreamrobotVsChecklistItems
-                          : vsVlDreamrobotVlChecklistItems,
-                        vsVlDreamrobotChecklistTab === "vs"
-                          ? VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
-                          : VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
-                        vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl",
-                        vsVlDreamrobotChecklistTab === "vs"
-                          ? "VS Dreamrobot Checklist"
-                          : "VL Dreamrobot Checklist"
-                      )
-                    }
-                    disabled={
-                      exportingVsVlChecklist ||
-                      (vsVlDreamrobotChecklistTab === "vs"
-                        ? vsVlDreamrobotVsChecklistItems.length === 0
-                        : vsVlDreamrobotVlChecklistItems.length === 0)
-                    }
-                    className="h-8 rounded-xl border-slate-200 text-xs"
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
-                  </Button>
-                </div>
-              )}
-
-              {vsVlPhase === "DREAMROBOT" ? (
-                vsVlDreamrobotChecklistTab === "vs" ? (
-                  <div className="space-y-4">
-                    {/* VS Dreamrobot Checklist Table */}
-                    <div className="border border-slate-200 rounded-lg overflow-hidden">
-                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
-                        <div>NO</div>
-                        <div>TASK</div>
-                        <div>COMMENT</div>
-                        <div>CHECK</div>
-                        <div>TIME</div>
-                        <div>KOMENT</div>
-                        <div className="text-right">ACTIONS</div>
-                      </div>
-                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
-                        <div className="text-slate-400">+</div>
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.task}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
-                            placeholder="Task"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.comment}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
-                            placeholder="Comment"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div className="flex items-center justify-center" />
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.time}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
-                            placeholder="Time"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div />
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VS_CHECKLIST_PATH)}
-                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
-                            className="h-7 text-xs"
-                          >
-                            {savingVsVlChecklist ? "..." : "Add"}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="divide-y max-h-[500px] overflow-y-auto">
-                        {vsVlDreamrobotVsChecklistItems
-                          .slice()
-                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                          .map((item, index) => {
-                            const isEditing = editingVsVlChecklistId === item.id
-                            const checked = item.is_checked ?? false
-                            const commentValue =
-                              vsVlAmazonCommentEdits[item.id] !== undefined
-                                ? vsVlAmazonCommentEdits[item.id]
-                                : item.comment ?? ""
-                            return (
-                              <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
-                                <div className="text-slate-500 pt-1">{index + 1}</div>
-                                <div className="font-medium whitespace-pre-wrap">
-                                  {isEditing ? (
-                                    <Textarea
-                                      value={editingVsVlChecklistRow.task}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
-                                      className="text-xs min-h-[60px]"
-                                    />
-                                  ) : (
-                                    item.title || "-"
-                                  )}
-                                </div>
-                                <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
-                                  {isEditing ? (
-                                    <Textarea
-                                      value={editingVsVlChecklistRow.comment}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
-                                      className="text-xs min-h-[60px]"
-                                    />
-                                  ) : (
-                                    item.description || "-"
-                                  )}
-                                </div>
-                                <div className="flex items-center justify-center">
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
-                                  />
-                                </div>
-                                <div className="text-slate-500">
-                                  {isEditing ? (
-                                    <Input
-                                      value={editingVsVlChecklistRow.time}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
-                                      className="h-7 text-xs"
-                                    />
-                                  ) : (
-                                    item.keyword || "-"
-                                  )}
-                                </div>
-                                <div>
-                                  <Input
-                                    value={commentValue}
-                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
-                                    placeholder="Koment"
-                                    className="h-7 text-xs"
-                                  />
-                                </div>
-                                <div className="flex gap-1 justify-end">
-                                  {isEditing ? (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => void saveEditVsVlChecklistRow(item)}
-                                        disabled={savingVsVlChecklist}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        Save
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={cancelEditVsVlChecklistRow}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => startEditVsVlChecklistRow(item)}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
-                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        {vsVlDreamrobotVsChecklistItems.length === 0 && (
-                          <div className="px-3 py-6 text-center text-sm text-slate-400">
-                            No checklist items yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* VL Dreamrobot Checklist Table */}
-                    <div className="border border-slate-200 rounded-lg overflow-hidden">
-                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
-                        <div>NO</div>
-                        <div>TASK</div>
-                        <div>COMMENT</div>
-                        <div>CHECK</div>
-                        <div>TIME</div>
-                        <div>KOMENT</div>
-                        <div className="text-right">ACTIONS</div>
-                      </div>
-                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
-                        <div className="text-slate-400">+</div>
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.task}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
-                            placeholder="Task"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.comment}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
-                            placeholder="Comment"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div className="flex items-center justify-center" />
-                        <div>
-                          <Input
-                            value={newVsVlDreamrobotRow.time}
-                            onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
-                            placeholder="Time"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div />
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VL_CHECKLIST_PATH)}
-                            disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
-                            className="h-7 text-xs"
-                          >
-                            {savingVsVlChecklist ? "..." : "Add"}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="divide-y max-h-[500px] overflow-y-auto">
-                        {vsVlDreamrobotVlChecklistItems
-                          .slice()
-                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                          .map((item, index) => {
-                            const isEditing = editingVsVlChecklistId === item.id
-                            const checked = item.is_checked ?? false
-                            const commentValue =
-                              vsVlAmazonCommentEdits[item.id] !== undefined
-                                ? vsVlAmazonCommentEdits[item.id]
-                                : item.comment ?? ""
-                            return (
-                              <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
-                                <div className="text-slate-500 pt-1">{index + 1}</div>
-                                <div className="font-medium whitespace-pre-wrap">
-                                  {isEditing ? (
-                                    <Textarea
-                                      value={editingVsVlChecklistRow.task}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
-                                      className="text-xs min-h-[60px]"
-                                    />
-                                  ) : (
-                                    item.title || "-"
-                                  )}
-                                </div>
-                                <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
-                                  {isEditing ? (
-                                    <Textarea
-                                      value={editingVsVlChecklistRow.comment}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
-                                      className="text-xs min-h-[60px]"
-                                    />
-                                  ) : (
-                                    item.description || "-"
-                                  )}
-                                </div>
-                                <div className="flex items-center justify-center">
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
-                                  />
-                                </div>
-                                <div className="text-slate-500">
-                                  {isEditing ? (
-                                    <Input
-                                      value={editingVsVlChecklistRow.time}
-                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
-                                      className="h-7 text-xs"
-                                    />
-                                  ) : (
-                                    item.keyword || "-"
-                                  )}
-                                </div>
-                                <div>
-                                  <Input
-                                    value={commentValue}
-                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
-                                    placeholder="Koment"
-                                    className="h-7 text-xs"
-                                  />
-                                </div>
-                                <div className="flex gap-1 justify-end">
-                                  {isEditing ? (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => void saveEditVsVlChecklistRow(item)}
-                                        disabled={savingVsVlChecklist}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        Save
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={cancelEditVsVlChecklistRow}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => startEditVsVlChecklistRow(item)}
-                                        className="h-6 px-2 text-[10px]"
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
-                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        {vsVlDreamrobotVlChecklistItems.length === 0 && (
-                          <div className="px-3 py-6 text-center text-sm text-slate-400">
-                            No checklist items yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              ) : (vsVlChecklistTab === "amazon" || vsVlPhase === "CHECK") ? (
-                <div className="space-y-4">
-                  {vsVlPhase === "CHECK" && (
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          void exportVsVlChecklist(
-                            vsVlAmazonChecklistItems,
-                            VS_VL_AMAZON_CHECKLIST_PATH,
-                            "amazon",
-                            "Amazon Checklist"
-                          )
-                        }
-                        disabled={exportingVsVlChecklist || vsVlAmazonChecklistItems.length === 0}
-                        className="h-8 rounded-xl border-slate-200 text-xs"
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
-                      </Button>
-                    </div>
-                  )}
-                  {/* Warning notes */}
-                  <div className="text-sm text-red-600 space-y-1">
-                    {VS_VL_AMAZON_CHECKLIST_NOTES.map((note, idx) => (
-                      <div key={idx}>!!! {note}</div>
-                    ))}
-                  </div>
-
-                  {/* Amazon Checklist Table */}
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60`}>
-                      <div>NO</div>
-                      <div>TASK</div>
-                      <div>COMMENT</div>
-                      <div>CHECK</div>
-                      <div>TIME</div>
-                      <div>KOMENT</div>
-                      {showVsVlKo2 ? <div>KO2</div> : null}
-                      <div className="text-right">ACTIONS</div>
-                    </div>
-                    {/* Add new row */}
-                    <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30`}>
-                      <div className="text-slate-400">+</div>
-                      <div>
-                        <Input
-                          value={newVsVlAmazonRow.task}
-                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, task: e.target.value }))}
-                          placeholder="Task"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <Input
-                          value={newVsVlAmazonRow.comment}
-                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, comment: e.target.value }))}
-                          placeholder="Comment"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div />
-                      <div>
-                        <Input
-                          value={newVsVlAmazonRow.time}
-                          onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, time: e.target.value }))}
-                          placeholder="Time"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="flex items-center justify-center" />
-                      {showVsVlKo2 ? (
-                        <div>
-                          <Checkbox
-                            checked={newVsVlAmazonRow.ko2}
-                            onCheckedChange={(next) =>
-                              setNewVsVlAmazonRow((prev) => ({ ...prev, ko2: Boolean(next) }))
-                            }
-                          />
-                        </div>
-                      ) : null}
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void addVsVlAmazonChecklistRow()}
-                          disabled={savingVsVlChecklist || !newVsVlAmazonRow.task.trim()}
-                          className="h-7 text-xs"
-                        >
-                          {savingVsVlChecklist ? "..." : "Add"}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="divide-y max-h-[500px] overflow-y-auto">
-                      {vsVlAmazonChecklistItems
-                        .slice()
-                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                        .map((item, index) => {
-                          const isEditing = editingVsVlChecklistId === item.id
-                          const checked = item.is_checked ?? false
-                          const ko2Checked = item.time === "1" || item.time === "true"
-                          const commentValue =
-                            vsVlAmazonCommentEdits[item.id] !== undefined
-                              ? vsVlAmazonCommentEdits[item.id]
-                              : item.comment ?? ""
-                          return (
-                            <div key={item.id} className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50`}>
-                              <div className="text-slate-500 pt-1">{index + 1}</div>
-                              <div className="font-medium">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.task}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.title || "-"
-                                )}
-                              </div>
-                              <div className="text-slate-600 text-[11px]">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.comment}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.description || "-"
-                                )}
-                              </div>
-                              <div className="flex items-center justify-center">
-                                <Checkbox
-                                  checked={checked}
-                                  onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
-                                />
-                              </div>
-                              <div className="text-slate-500">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.time}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.keyword || "-"
-                                )}
-                              </div>
-                              <div>
-                                <Input
-                                  value={commentValue}
-                                  onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
-                                  placeholder="Koment"
-                                  className="h-7 text-xs"
-                                />
-                              </div>
-                              {showVsVlKo2 ? (
-                                <div className="flex items-center justify-center">
-                                  <Checkbox
-                                    checked={ko2Checked}
-                                    onCheckedChange={(next) =>
-                                      void toggleVsVlAmazonKo2(item, Boolean(next))
-                                    }
-                                  />
-                                </div>
-                              ) : null}
-                              <div className="flex gap-1 justify-end">
-                                {isEditing ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => void saveEditVsVlChecklistRow(item)}
-                                      disabled={savingVsVlChecklist}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      Save
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={cancelEditVsVlChecklistRow}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      Cancel
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => startEditVsVlChecklistRow(item)}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => void deleteVsVlChecklistRow(item.id)}
-                                      className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      {vsVlAmazonChecklistItems.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-slate-400">
-                          No checklist items yet. Add one above.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Images Checklist Table */}
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
-                      <div>NO</div>
-                      <div>TASK</div>
-                      <div>COMMENT</div>
-                      <div>CHECK</div>
-                      <div>TIME</div>
-                      <div>KOMENT</div>
-                      <div className="text-right">ACTIONS</div>
-                    </div>
-                    {/* Add new row */}
-                    <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
-                      <div className="text-slate-400">+</div>
-                      <div>
-                        <Input
-                          value={newVsVlImagesRow.task}
-                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, task: e.target.value }))}
-                          placeholder="Task"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <Input
-                          value={newVsVlImagesRow.comment}
-                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, comment: e.target.value }))}
-                          placeholder="Comment"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="flex items-center justify-center" />
-                      <div>
-                        <Input
-                          value={newVsVlImagesRow.time}
-                          onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, time: e.target.value }))}
-                          placeholder="Time"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div />
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void addVsVlImagesChecklistRow()}
-                          disabled={savingVsVlChecklist || !newVsVlImagesRow.task.trim()}
-                          className="h-7 text-xs"
-                        >
-                          {savingVsVlChecklist ? "..." : "Add"}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="divide-y max-h-[500px] overflow-y-auto">
-                      {vsVlImagesChecklistItems
-                        .slice()
-                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                        .map((item, index) => {
-                          const isEditing = editingVsVlChecklistId === item.id
-                          const checked = item.is_checked ?? false
-                          const commentValue =
-                            vsVlAmazonCommentEdits[item.id] !== undefined
-                              ? vsVlAmazonCommentEdits[item.id]
-                              : item.comment ?? ""
-                          return (
-                            <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
-                              <div className="text-slate-500 pt-1">{index + 1}</div>
-                              <div className="font-medium">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.task}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.title || "-"
-                                )}
-                              </div>
-                              <div className="text-slate-600 text-[11px]">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.comment}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.description || "-"
-                                )}
-                              </div>
-                              <div className="flex items-center justify-center">
-                                <Checkbox
-                                  checked={checked}
-                                  onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
-                                />
-                              </div>
-                              <div className="text-slate-500">
-                                {isEditing ? (
-                                  <Input
-                                    value={editingVsVlChecklistRow.time}
-                                    onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
-                                    className="h-7 text-xs"
-                                  />
-                                ) : (
-                                  item.keyword || "-"
-                                )}
-                              </div>
-                              <div>
-                                <Input
-                                  value={commentValue}
-                                  onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
-                                  placeholder="Koment"
-                                  className="h-7 text-xs"
-                                />
-                              </div>
-                              <div className="flex gap-1 justify-end">
-                                {isEditing ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => void saveEditVsVlChecklistRow(item)}
-                                      disabled={savingVsVlChecklist}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      Save
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={cancelEditVsVlChecklistRow}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      Cancel
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => startEditVsVlChecklistRow(item)}
-                                      className="h-6 px-2 text-[10px]"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => void deleteVsVlChecklistRow(item.id)}
-                                      className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      {vsVlImagesChecklistItems.length === 0 && (
-                        <div className="px-3 py-6 text-center text-sm text-slate-400">
-                          No checklist items yet. Add one above.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        ) : vsVlPhase === "PLANNING" ? (
-
-          <Card>
-            <div className="p-4 space-y-4">
-              <div className="text-lg font-semibold">Planning</div>
-              
-              {/* Add new item */}
-              <div className="flex items-center gap-2 mb-4">
-                <Input
-                  placeholder="Add checklist item..."
-                  value={newVsVlPlanningText}
-                  onChange={(e) => setNewVsVlPlanningText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !savingVsVlPlanning) {
-                      void addVsVlPlanningItem()
-                    }
-                  }}
-                  className="flex-1"
-                />
-                <Button
-                  onClick={() => void addVsVlPlanningItem()}
-                  disabled={!newVsVlPlanningText.trim() || savingVsVlPlanning}
-                  size="sm"
+          <div className="border-b flex gap-6">
+            {vsVlTabs.map((tab) => {
+              const isActive = vsVlTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setVsVlTab(tab.id as typeof vsVlTab)}
+                  className={[
+                    "relative pb-3 text-sm font-medium",
+                    tab.id === "ga" ? "ml-auto" : "",
+                    isActive ? "text-blue-600" : "text-muted-foreground",
+                  ].join(" ")}
                 >
-                  {savingVsVlPlanning ? "Adding..." : "Add"}
-                </Button>
-              </div>
+                  {tab.label}
+                  {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                </button>
+              )
+            })}
+          </div>
 
-              <div className="grid gap-3">
-                {vsVlPlanningItems
-                  .slice()
-                  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                  .map((item, index) => {
-                    const isEditing = editingVsVlPlanningId === item.id
-                    return (
-                      <div key={item.id} className="flex items-center gap-3 group">
-                        <span className="text-xs font-semibold text-slate-400">{index + 1}.</span>
-                        <Checkbox
-                          checked={Boolean(vsVlAcceptanceChecks[item.title || ""])}
-                          onCheckedChange={(checked) =>
-                            void toggleVsVlAcceptanceById(item.id, Boolean(checked))
-                          }
-                          className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                        />
-                        <div className="flex-1">
-                          {isEditing ? (
-                            <Input
-                              value={editingVsVlPlanningText}
-                              onChange={(e) => setEditingVsVlPlanningText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && !savingVsVlPlanning) {
-                                  void saveVsVlPlanningItem()
-                                } else if (e.key === "Escape") {
-                                  cancelEditVsVlPlanningItem()
-                                }
-                              }}
-                              className="border-blue-500"
-                              autoFocus
-                            />
-                          ) : (
-                            <span className="text-sm font-semibold uppercase tracking-wide">{item.title}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {isEditing ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void saveVsVlPlanningItem()}
-                                disabled={savingVsVlPlanning}
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={cancelEditVsVlPlanningItem}
-                              >
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => startEditVsVlPlanningItem(item.id)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void deleteVsVlPlanningItem(item.id)}
-                                className="text-red-600 hover:text-red-700"
-                              >
-                                Delete
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                {vsVlPlanningItems.length === 0 && (
-                  <div className="text-sm text-muted-foreground text-center py-8">
-                    No checklist items yet. Add one above.
+          {vsVlTab === "ga" ? (
+            renderGaNotes()
+          ) : vsVlTab === "workflow" ? (
+            <VsWorkflow projectId={projectId} apiFetch={apiFetch} phase={vsVlPhase} />
+          ) : vsVlTab === "checklists" ? (
+            <Card>
+              <div className="p-4 space-y-4">
+                {/* Sub-tabs for Amazon and Images checklists (Images only in AMAZON phase) */}
+                {vsVlPhase === "AMAZON" && (
+                  <div className="border-b flex items-center justify-between gap-4">
+                    <div className="flex gap-4">
+                      <button
+                        type="button"
+                        onClick={() => setVsVlChecklistTab("amazon")}
+                        className={[
+                          "relative pb-2 text-sm font-medium",
+                          vsVlChecklistTab === "amazon" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                        ].join(" ")}
+                      >
+                        Amazon Checklist
+                        {vsVlChecklistTab === "amazon" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVsVlChecklistTab("images")}
+                        className={[
+                          "relative pb-2 text-sm font-medium",
+                          vsVlChecklistTab === "images" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                        ].join(" ")}
+                      >
+                        Images Checklist
+                        {vsVlChecklistTab === "images" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void exportVsVlChecklist(
+                          vsVlChecklistTab === "amazon" ? vsVlAmazonChecklistItems : vsVlImagesChecklistItems,
+                          vsVlChecklistTab === "amazon" ? VS_VL_AMAZON_CHECKLIST_PATH : VS_VL_IMAGES_CHECKLIST_PATH,
+                          vsVlChecklistTab === "amazon" ? "amazon" : "images",
+                          vsVlChecklistTab === "amazon" ? "Amazon Checklist" : "Images Checklist"
+                        )
+                      }
+                      disabled={
+                        exportingVsVlChecklist ||
+                        (vsVlChecklistTab === "amazon"
+                          ? vsVlAmazonChecklistItems.length === 0
+                          : vsVlImagesChecklistItems.length === 0)
+                      }
+                      className="h-8 rounded-xl border-slate-200 text-xs"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                    </Button>
                   </div>
                 )}
-              </div>
-            </div>
-          </Card>
-        ) : (
-                    <Card className="border-0 shadow-sm">
-            <div className="p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-base font-semibold">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
-                    {VS_VL_PHASE_LABELS[vsVlPhase]}
-                  </Badge>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => setShowVsVlAddTask((prev) => !prev)}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Add task
-                  </Button>
-                </div>
-              </div>
-              
-              {/* Compact Add Task Form */}
-              {showVsVlAddTask && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={vsVlTaskTitle}
-                    onChange={(e) => setVsVlTaskTitle(e.target.value)}
-                    placeholder="Task title..."
-                    className="h-8 text-sm flex-1 min-w-[200px]"
-                  />
-                  <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
-                    <SelectTrigger className="h-8 w-[100px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="NORMAL">NORMAL</SelectItem>
-                      <SelectItem value="HIGH">I LARTE</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
-                    <SelectTrigger className="h-8 w-[100px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TASK_STATUSES.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {statusLabel(status)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    size="sm"
-                    className="h-8 px-3 text-xs"
-                    disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
-                    onClick={async () => {
-                      if (!project || !vsVlTaskTitle.trim()) return
-                      setCreatingVsVlTask(true)
-                      try {
-                        const meta: VsVlTaskMeta = {
-                          vs_vl_phase: vsVlPhase,
-                          checklist: vsVlTaskChecklist.trim() || undefined,
-                          comment: vsVlTaskComment.trim() || undefined,
-                        }
-                        const res = await apiFetch("/tasks", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            title: vsVlTaskTitle.trim(),
-                            description: vsVlTaskDetail.trim() || null,
-                            project_id: project.id,
-                            department_id: project.department_id,
-                            assignees: vsVlTaskAssignees,
-                            dependency_task_id:
-                              vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
-                            status: vsVlTaskStatus || "TODO",
-                            priority: vsVlTaskPriority,
-                            phase: vsVlPhase,
-                            due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
-                            internal_notes: serializeVsVlMeta(meta),
-                          }),
-                        })
-                        if (!res?.ok) {
-                          toast.error("Failed to add task")
-                          return
-                        }
-                        const created = (await res.json()) as Task
-                        setTasks((prev) => [...prev, created])
-                        setVsVlTaskTitle("")
-                        setVsVlTaskDetail("")
-                        setVsVlTaskDate("")
-                        setVsVlTaskPriority("NORMAL")
-                        setVsVlTaskStatus("TODO")
-                        setVsVlTaskAssignees([])
-                        setVsVlTaskDependencyId("__none__")
-                        setVsVlTaskChecklist("")
-                        setVsVlTaskComment("")
-                        setShowVsVlAddTask(false)
-                        toast.success("Task added")
-                      } finally {
-                        setCreatingVsVlTask(false)
-                      }
-                    }}
-                  >
-                    {creatingVsVlTask ? "..." : "Add"}
-                  </Button>
-                </div>
-                <Textarea
-                  value={vsVlTaskDetail}
-                  onChange={(e) => setVsVlTaskDetail(e.target.value)}
-                  placeholder="Description..."
-                  rows={2}
-                  className="text-xs border-slate-300 bg-white resize-none"
-                />
-              </div>
-              )}
-              
-              <div className="space-y-2">
-                {orderedVsVlTasks.length ? (
-                  orderedVsVlTasks.map((task, index) => {
-                    const meta = parseVsVlMeta(task.internal_notes)
-                    const titleKey = normalizeTaskTitle(task.title)
-                    const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
-                    const dependencyId = isBaseTask
-                      ? null
-                      : task.dependency_task_id || meta?.dependency_task_id || null
-                    const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
-                    const dependencyTask = dependencyId ? tasks.find((t) => t.id === dependencyId) : null
-                    
-                    // Calculate lock status based on unlock_after_days from PROJECT start date
-                    let isTimeLocked = false
-                    let daysRemaining = 0
-                    let unlockDateDisplay: Date | null = null
-                    
-                    // Helper to add business days (skip weekends)
-                    const addBusinessDays = (start: Date, days: number): Date => {
-                      const result = new Date(start)
-                      let addedDays = 0
-                      while (addedDays < days) {
-                        result.setDate(result.getDate() + 1)
-                        const dayOfWeek = result.getDay()
-                        // Skip Saturday (6) and Sunday (0)
-                        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                          addedDays++
-                        }
-                      }
-                      // If result lands on weekend, move to Monday
-                      while (result.getDay() === 0 || result.getDay() === 6) {
-                        result.setDate(result.getDate() + 1)
-                      }
-                      return result
-                    }
-                    
-                    // Time-based lock: task unlocks X business days after project start
-                    if (meta?.unlock_after_days !== undefined && meta.unlock_after_days > 0 && project) {
-                      const projectStart = new Date(project.start_date || project.created_at || Date.now())
-                      const unlockDate = addBusinessDays(projectStart, meta.unlock_after_days)
-                      unlockDateDisplay = unlockDate
-                      const now = new Date()
-                      // Reset time to start of day for comparison
-                      now.setHours(0, 0, 0, 0)
-                      unlockDate.setHours(0, 0, 0, 0)
-                      isTimeLocked = now < unlockDate
-                      if (isTimeLocked) {
-                        // Calculate business days remaining
-                        let remaining = 0
-                        const temp = new Date(now)
-                        while (temp < unlockDate) {
-                          temp.setDate(temp.getDate() + 1)
-                          if (temp.getDay() !== 0 && temp.getDay() !== 6) {
-                            remaining++
-                          }
-                        }
-                        daysRemaining = remaining
-                      }
-                    }
-                    
-                    // Dependency-based lock: locked until dependency is DONE
-                    const isDependencyNotDone = Boolean(dependencyId && dependencyStatus !== "DONE")
-                    
-                    // Combined lock: if has unlock_after_days, must ALSO have dependency done (if exists)
-                    // If no unlock_after_days, just check dependency
-                    const isLocked = isTimeLocked || isDependencyNotDone
-                    const selectedAssignees = taskAssigneeIds(task)
-                    const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
-                    const checklistValue = vsVlChecklistEdits[task.id] ?? meta?.checklist ?? ""
-                    const descriptionValue = vsVlDescriptionEdits[task.id] ?? task.description ?? ""
-                    const isEditing = Boolean(vsVlEditMode[task.id])
-                    return (
-                      <div 
-                        key={task.id} 
-                        className={`rounded-lg border bg-white transition-shadow hover:shadow-sm ${
-                          isLocked 
-                            ? "border-amber-200 bg-amber-50/20" 
-                            : "border-slate-300 shadow-[0_0_0_1px_#cbd5e1]"
-                        }`}
+
+                {/* Sub-tabs for Dreamrobot phase checklists */}
+                {vsVlPhase === "DREAMROBOT" && (
+                  <div className="border-b flex items-end justify-between gap-4">
+                    <div className="flex gap-4">
+                      <button
+                        type="button"
+                        onClick={() => setVsVlDreamrobotChecklistTab("vs")}
+                        className={[
+                          "relative pb-2 text-sm font-medium",
+                          vsVlDreamrobotChecklistTab === "vs" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                        ].join(" ")}
                       >
-                        {/* Main Row - Compact */}
-                        <div className="p-2.5 flex items-center gap-2">
-                          {isLocked && (
-                            <div 
-                              className="flex items-center gap-1 flex-shrink-0" 
-                              title={
-                                isTimeLocked && isDependencyNotDone
-                                  ? `Locked: ${daysRemaining}d remaining + waiting for "${dependencyTask?.title || 'dependency'}"`
-                                  : isTimeLocked
-                                    ? `Unlocks in ${daysRemaining} business day(s)`
-                                    : `Waiting for "${dependencyTask?.title || 'dependency'}" to complete`
-                              }
-                            >
-                              <Lock className="h-3.5 w-3.5 text-amber-600" />
-                              {daysRemaining > 0 && (
-                                <span className="text-xs text-amber-600 font-medium">{daysRemaining}d</span>
-                              )}
-                              {!isTimeLocked && isDependencyNotDone && (
-                                <span className="text-xs text-amber-600">dep</span>
-                              )}
-                            </div>
-                          )}
-                          <span className="text-xs font-semibold text-slate-400 flex-shrink-0">{index + 1}.</span>
-                          <div className="flex-1 min-w-0">
+                        VS Dreamrobot Checklist
+                        {vsVlDreamrobotChecklistTab === "vs" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVsVlDreamrobotChecklistTab("vl")}
+                        className={[
+                          "relative pb-2 text-sm font-medium",
+                          vsVlDreamrobotChecklistTab === "vl" ? "text-blue-600" : "text-muted-foreground hover:text-foreground",
+                        ].join(" ")}
+                      >
+                        VL Dreamrobot Checklist
+                        {vsVlDreamrobotChecklistTab === "vl" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void exportVsVlChecklist(
+                          vsVlDreamrobotChecklistTab === "vs"
+                            ? vsVlDreamrobotVsChecklistItems
+                            : vsVlDreamrobotVlChecklistItems,
+                          vsVlDreamrobotChecklistTab === "vs"
+                            ? VS_VL_DREAMROBOT_VS_CHECKLIST_PATH
+                            : VS_VL_DREAMROBOT_VL_CHECKLIST_PATH,
+                          vsVlDreamrobotChecklistTab === "vs" ? "dreamrobot_vs" : "dreamrobot_vl",
+                          vsVlDreamrobotChecklistTab === "vs"
+                            ? "VS Dreamrobot Checklist"
+                            : "VL Dreamrobot Checklist"
+                        )
+                      }
+                      disabled={
+                        exportingVsVlChecklist ||
+                        (vsVlDreamrobotChecklistTab === "vs"
+                          ? vsVlDreamrobotVsChecklistItems.length === 0
+                          : vsVlDreamrobotVlChecklistItems.length === 0)
+                      }
+                      className="h-8 rounded-xl border-slate-200 text-xs"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                    </Button>
+                  </div>
+                )}
+
+                {vsVlPhase === "DREAMROBOT" ? (
+                  vsVlDreamrobotChecklistTab === "vs" ? (
+                    <div className="space-y-4">
+                      {/* VS Dreamrobot Checklist Table */}
+                      <div className="border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                          <div>NO</div>
+                          <div>TASK</div>
+                          <div>COMMENT</div>
+                          <div>CHECK</div>
+                          <div>TIME</div>
+                          <div>KOMENT</div>
+                          <div className="text-right">ACTIONS</div>
+                        </div>
+                        <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                          <div className="text-slate-400">+</div>
+                          <div>
                             <Input
-                              key={`title-${task.id}-${task.updated_at}`}
-                              defaultValue={task.title}
-                              onBlur={(e) => {
-                                const nextValue = e.target.value.trim()
-                                if (!nextValue || nextValue === task.title) return
-                                void patchTask(task.id, { title: nextValue }, "Failed to update title")
-                              }}
-                              className={`h-auto text-sm font-semibold px-0 border-0 bg-transparent focus-visible:ring-1 focus-visible:ring-slate-300 ${
-                                !isEditing ? (isLocked ? "text-slate-600" : "text-slate-900 font-bold") : "text-slate-900"
-                              }`}
-                              readOnly={!isEditing}
-                              disabled={isLocked || !isEditing}
+                              value={newVsVlDreamrobotRow.task}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                              placeholder="Task"
+                              className="h-7 text-xs"
                             />
                           </div>
-                          <Select
-                            value={(task.priority || "NORMAL").toUpperCase()}
-                            onValueChange={(value) => {
-                              if (isLocked || !isEditing) return
-                              const nextPriority = (value || "NORMAL").toUpperCase()
-                              if (nextPriority === (task.priority || "NORMAL").toUpperCase()) return
-                              void patchTask(task.id, { priority: nextPriority }, "Failed to update priority")
-                            }}
-                            disabled={isLocked || !isEditing}
-                          >
-                          <SelectTrigger
-                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
-                              task.priority === "HIGH"
-                                ? "bg-rose-50 text-rose-700 border-rose-200"
-                                : "bg-slate-50 text-slate-700 border-slate-200"
-                            }`}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                            <SelectContent>
-                              {TASK_PRIORITIES.map((priority) => (
-                                <SelectItem key={priority} value={priority}>
-                                  {vsVlPriorityLabel(priority)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Select
-                            value={task.status || "TODO"}
-                            onValueChange={(value) => {
-                              if (isLocked || !isEditing) return
-                              void patchTask(task.id, { status: value }, "Failed to update status")
-                            }}
-                            disabled={isLocked || !isEditing}
-                          >
-                          <SelectTrigger
-                            className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
-                              task.status === "DONE"
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : task.status === "IN_PROGRESS"
-                                  ? "bg-amber-50 text-amber-700 border-amber-200"
-                                  : "bg-slate-50 text-slate-700 border-slate-200"
-                            }`}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                            <SelectContent>
-                              {TASK_STATUSES.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {statusLabel(status)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {task.due_date && (
-                            <div className="flex items-center gap-0.5 text-[10px] text-slate-500 flex-shrink-0" title="Due date">
-                              <Calendar className="h-3 w-3" />
-                              <span>{formatDateDisplay(task.due_date)}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {selectedAssignees.slice(0, 3).map((id, idx) => {
-                              const user = userMap.get(id)
-                              const label = user?.full_name || user?.username || user?.email || "-"
-                              const colorClass = [
-                                "bg-blue-500 text-white",
-                                "bg-emerald-500 text-white",
-                                "bg-amber-500 text-white",
-                                "bg-rose-500 text-white",
-                                "bg-purple-500 text-white",
-                              ][idx % 5]
+                          <div>
+                            <Input
+                              value={newVsVlDreamrobotRow.comment}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                              placeholder="Comment"
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                          <div className="flex items-center justify-center" />
+                          <div>
+                            <Input
+                              value={newVsVlDreamrobotRow.time}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                              placeholder="Time"
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                          <div />
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VS_CHECKLIST_PATH)}
+                              disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                              className="h-7 text-xs"
+                            >
+                              {savingVsVlChecklist ? "..." : "Add"}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="divide-y max-h-[500px] overflow-y-auto">
+                          {vsVlDreamrobotVsChecklistItems
+                            .slice()
+                            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                            .map((item, index) => {
+                              const isEditing = editingVsVlChecklistId === item.id
+                              const checked = item.is_checked ?? false
+                              const commentValue =
+                                vsVlAmazonCommentEdits[item.id] !== undefined
+                                  ? vsVlAmazonCommentEdits[item.id]
+                                  : item.comment ?? ""
                               return (
-                                <div
-                                  key={id}
-                                  className={`h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-semibold ring-1 ring-slate-200 ${colorClass}`}
-                                  title={label}
-                                >
-                                  {initials(label)}
+                                <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                                  <div className="text-slate-500 pt-1">{index + 1}</div>
+                                  <div className="font-medium whitespace-pre-wrap">
+                                    {isEditing ? (
+                                      <Textarea
+                                        value={editingVsVlChecklistRow.task}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                        className="text-xs min-h-[60px]"
+                                      />
+                                    ) : (
+                                      item.title || "-"
+                                    )}
+                                  </div>
+                                  <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
+                                    {isEditing ? (
+                                      <Textarea
+                                        value={editingVsVlChecklistRow.comment}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                        className="text-xs min-h-[60px]"
+                                      />
+                                    ) : (
+                                      item.description || "-"
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-center">
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                    />
+                                  </div>
+                                  <div className="text-slate-500">
+                                    {isEditing ? (
+                                      <Input
+                                        value={editingVsVlChecklistRow.time}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                        className="h-7 text-xs"
+                                      />
+                                    ) : (
+                                      item.keyword || "-"
+                                    )}
+                                  </div>
+                                  <div>
+                                    <Input
+                                      value={commentValue}
+                                      onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                      onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                      placeholder="Koment"
+                                      className="h-7 text-xs"
+                                    />
+                                  </div>
+                                  <div className="flex gap-1 justify-end">
+                                    {isEditing ? (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => void saveEditVsVlChecklistRow(item)}
+                                          disabled={savingVsVlChecklist}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          Save
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={cancelEditVsVlChecklistRow}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => startEditVsVlChecklistRow(item)}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                          className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               )
                             })}
-                            {selectedAssignees.length > 3 && (
-                              <span className="text-[10px] text-slate-500">+{selectedAssignees.length - 3}</span>
-                            )}
-                            {selectedAssignees.length === 0 && (
-                              <div className="h-6 w-6 rounded-full bg-slate-200 flex items-center justify-center" title="Unassigned">
-                                <Users className="h-3 w-3 text-slate-400" />
-                              </div>
-                            )}
+                          {vsVlDreamrobotVsChecklistItems.length === 0 && (
+                            <div className="px-3 py-6 text-center text-sm text-slate-400">
+                              No checklist items yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* VL Dreamrobot Checklist Table */}
+                      <div className="border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                          <div>NO</div>
+                          <div>TASK</div>
+                          <div>COMMENT</div>
+                          <div>CHECK</div>
+                          <div>TIME</div>
+                          <div>KOMENT</div>
+                          <div className="text-right">ACTIONS</div>
+                        </div>
+                        <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                          <div className="text-slate-400">+</div>
+                          <div>
+                            <Input
+                              value={newVsVlDreamrobotRow.task}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, task: e.target.value }))}
+                              placeholder="Task"
+                              className="h-7 text-xs"
+                            />
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 flex-shrink-0"
-                            onClick={() =>
-                              setVsVlEditMode((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
-                            }
-                            aria-label={isEditing ? "Done editing" : "Edit task"}
-                            title={isEditing ? "Done" : "Edit"}
-                          >
-                            {isEditing ? (
-                              <Check className="h-3 w-3 text-emerald-600" />
-                            ) : (
-                              <Pencil className="h-3 w-3 text-slate-600" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-red-600 hover:bg-red-50 flex-shrink-0"
-                            onClick={async () => {
-                              const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                              if (!res?.ok) {
-                                if (res?.status == 405) {
-                                  toast.error("Delete endpoint not active. Restart backend.")
-                                } else {
-                                  toast.error("Failed to delete task")
-                                }
-                                return
+                          <div>
+                            <Input
+                              value={newVsVlDreamrobotRow.comment}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, comment: e.target.value }))}
+                              placeholder="Comment"
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                          <div className="flex items-center justify-center" />
+                          <div>
+                            <Input
+                              value={newVsVlDreamrobotRow.time}
+                              onChange={(e) => setNewVsVlDreamrobotRow((prev) => ({ ...prev, time: e.target.value }))}
+                              placeholder="Time"
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                          <div />
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void addVsVlDreamrobotChecklistRow(VS_VL_DREAMROBOT_VL_CHECKLIST_PATH)}
+                              disabled={savingVsVlChecklist || !newVsVlDreamrobotRow.task.trim()}
+                              className="h-7 text-xs"
+                            >
+                              {savingVsVlChecklist ? "..." : "Add"}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="divide-y max-h-[500px] overflow-y-auto">
+                          {vsVlDreamrobotVlChecklistItems
+                            .slice()
+                            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                            .map((item, index) => {
+                              const isEditing = editingVsVlChecklistId === item.id
+                              const checked = item.is_checked ?? false
+                              const commentValue =
+                                vsVlAmazonCommentEdits[item.id] !== undefined
+                                  ? vsVlAmazonCommentEdits[item.id]
+                                  : item.comment ?? ""
+                              return (
+                                <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                                  <div className="text-slate-500 pt-1">{index + 1}</div>
+                                  <div className="font-medium whitespace-pre-wrap">
+                                    {isEditing ? (
+                                      <Textarea
+                                        value={editingVsVlChecklistRow.task}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                        className="text-xs min-h-[60px]"
+                                      />
+                                    ) : (
+                                      item.title || "-"
+                                    )}
+                                  </div>
+                                  <div className="text-slate-600 text-[11px] whitespace-pre-wrap">
+                                    {isEditing ? (
+                                      <Textarea
+                                        value={editingVsVlChecklistRow.comment}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                        className="text-xs min-h-[60px]"
+                                      />
+                                    ) : (
+                                      item.description || "-"
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-center">
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                    />
+                                  </div>
+                                  <div className="text-slate-500">
+                                    {isEditing ? (
+                                      <Input
+                                        value={editingVsVlChecklistRow.time}
+                                        onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                        className="h-7 text-xs"
+                                      />
+                                    ) : (
+                                      item.keyword || "-"
+                                    )}
+                                  </div>
+                                  <div>
+                                    <Input
+                                      value={commentValue}
+                                      onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                      onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                      placeholder="Koment"
+                                      className="h-7 text-xs"
+                                    />
+                                  </div>
+                                  <div className="flex gap-1 justify-end">
+                                    {isEditing ? (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => void saveEditVsVlChecklistRow(item)}
+                                          disabled={savingVsVlChecklist}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          Save
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={cancelEditVsVlChecklistRow}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => startEditVsVlChecklistRow(item)}
+                                          className="h-6 px-2 text-[10px]"
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                          className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          {vsVlDreamrobotVlChecklistItems.length === 0 && (
+                            <div className="px-3 py-6 text-center text-sm text-slate-400">
+                              No checklist items yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ) : (vsVlChecklistTab === "amazon" || vsVlPhase === "CHECK") ? (
+                  <div className="space-y-4">
+                    {vsVlPhase === "CHECK" && (
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            void exportVsVlChecklist(
+                              vsVlAmazonChecklistItems,
+                              VS_VL_AMAZON_CHECKLIST_PATH,
+                              "amazon",
+                              "Amazon Checklist"
+                            )
+                          }
+                          disabled={exportingVsVlChecklist || vsVlAmazonChecklistItems.length === 0}
+                          className="h-8 rounded-xl border-slate-200 text-xs"
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          {exportingVsVlChecklist ? "Exporting..." : "Export Excel"}
+                        </Button>
+                      </div>
+                    )}
+                    {/* Warning notes */}
+                    <div className="text-sm text-red-600 space-y-1">
+                      {VS_VL_AMAZON_CHECKLIST_NOTES.map((note, idx) => (
+                        <div key={idx}>!!! {note}</div>
+                      ))}
+                    </div>
+
+                    {/* Amazon Checklist Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60`}>
+                        <div>NO</div>
+                        <div>TASK</div>
+                        <div>COMMENT</div>
+                        <div>CHECK</div>
+                        <div>TIME</div>
+                        <div>KOMENT</div>
+                        {showVsVlKo2 ? <div>KO2</div> : null}
+                        <div className="text-right">ACTIONS</div>
+                      </div>
+                      {/* Add new row */}
+                      <div className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30`}>
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlAmazonRow.task}
+                            onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlAmazonRow.comment}
+                            onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div>
+                          <Input
+                            value={newVsVlAmazonRow.time}
+                            onChange={(e) => setNewVsVlAmazonRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        {showVsVlKo2 ? (
+                          <div>
+                            <Checkbox
+                              checked={newVsVlAmazonRow.ko2}
+                              onCheckedChange={(next) =>
+                                setNewVsVlAmazonRow((prev) => ({ ...prev, ko2: Boolean(next) }))
                               }
-                              setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                              toast.success("Task deleted")
-                            }}
-                            aria-label="Delete task"
-                            title="Delete"
+                            />
+                          </div>
+                        ) : null}
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlAmazonChecklistRow()}
+                            disabled={savingVsVlChecklist || !newVsVlAmazonRow.task.trim()}
+                            className="h-7 text-xs"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            {savingVsVlChecklist ? "..." : "Add"}
                           </Button>
                         </div>
-
-                        {/* Expandable Details - Only when editing */}
-                        {isEditing && (
-                          <div className="border-t border-slate-100 p-2.5 space-y-2 bg-slate-50/30">
-                            <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
-                              <div>
-                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Description</Label>
-                                <Textarea
-                                  value={descriptionValue}
-                                  onChange={(e) => {
-                                    const newValue = e.target.value
-                                    setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: newValue }))
-                                    queueDescriptionSave(task.id, newValue)
-                                  }}
-                                  rows={2}
-                                  className="text-xs border-slate-300 bg-white resize-none h-auto"
-                                  placeholder="Description..."
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <div>
-                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Due date</Label>
-                                  <Input
-                                    value={toDateInput(task.due_date)}
-                                    onChange={(e) => {
-                                      if (isLocked) return
-                                      const nextValue = normalizeDueDateInput(e.target.value)
-                                      const dueDate = nextValue ? new Date(nextValue).toISOString() : null
-                                      void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
-                                    }}
-                                    type="date"
-                                    className="h-7 text-xs border-slate-300 bg-white"
-                                    disabled={isLocked}
+                      </div>
+                      <div className="divide-y max-h-[500px] overflow-y-auto">
+                        {vsVlAmazonChecklistItems
+                          .slice()
+                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                          .map((item, index) => {
+                            const isEditing = editingVsVlChecklistId === item.id
+                            const checked = item.is_checked ?? false
+                            const ko2Checked = item.time === "1" || item.time === "true"
+                            const commentValue =
+                              vsVlAmazonCommentEdits[item.id] !== undefined
+                                ? vsVlAmazonCommentEdits[item.id]
+                                : item.comment ?? ""
+                            return (
+                              <div key={item.id} className={`grid ${vsVlChecklistGridCols} gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50`}>
+                                <div className="text-slate-500 pt-1">{index + 1}</div>
+                                <div className="font-medium">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.task}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.title || "-"
+                                  )}
+                                </div>
+                                <div className="text-slate-600 text-[11px]">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.comment}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.description || "-"
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-center">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
                                   />
                                 </div>
-                                <div>
-                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Dependency</Label>
-                                  <Select
-                                    value={
-                                      isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
-                                    }
-                                    onValueChange={(value) => {
-                                      void patchTask(
-                                        task.id,
-                                        { dependency_task_id: value === "__none__" ? null : value },
-                                        "Failed to update dependency"
-                                      )
-                                    }}
-                                    disabled={isBaseTask}
-                                  >
-                                    <SelectTrigger className="h-7 text-xs border-slate-300 bg-white">
-                                      <SelectValue placeholder="-" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__none__">-</SelectItem>
-                                      {dependencyOptions
-                                        .filter((opt) => opt.id !== task.id)
-                                        .map((opt) => (
-                                          <SelectItem key={opt.id} value={opt.id}>
-                                            {opt.title}
-                                          </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                  </Select>
+                                <div className="text-slate-500">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.time}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.keyword || "-"
+                                  )}
                                 </div>
                                 <div>
-                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Unlock on day</Label>
                                   <Input
-                                    type="number"
-                                    min={0}
-                                    placeholder="0"
-                                    defaultValue={meta?.unlock_after_days || ""}
-                                    className="h-7 text-xs border-slate-300 bg-white w-20"
-                                    disabled={isBaseTask}
-                                    onBlur={(e) => {
-                                      const value = parseInt(e.target.value, 10)
-                                      const newValue = isNaN(value) || value <= 0 ? undefined : value
-                                      if (newValue === meta?.unlock_after_days) return
-                                      void updateVsVlMeta(task, { unlock_after_days: newValue })
-                                    }}
+                                    value={commentValue}
+                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                    placeholder="Koment"
+                                    className="h-7 text-xs"
                                   />
                                 </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <Label className="text-[10px] font-medium text-slate-700">Assignees</Label>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-[10px] h-5 px-2"
-                                onClick={() =>
-                                  setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
-                                }
-                              >
-                                {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
-                              </Button>
-                            </div>
-                            {vsVlAssigneeOpen[task.id] && (
-                              <div className="rounded border border-slate-200 bg-white p-1.5 space-y-1 max-h-32 overflow-y-auto">
-                                {assignableUsers.length ? (
-                                  assignableUsers.map((u) => {
-                                    const checked = selectedAssignees.includes(u.id)
-                                    return (
-                                      <label
-                                        key={u.id}
-                                        className="flex items-center gap-1.5 p-1 rounded hover:bg-slate-50 transition-colors cursor-pointer"
+                                {showVsVlKo2 ? (
+                                  <div className="flex items-center justify-center">
+                                    <Checkbox
+                                      checked={ko2Checked}
+                                      onCheckedChange={(next) =>
+                                        void toggleVsVlAmazonKo2(item, Boolean(next))
+                                      }
+                                    />
+                                  </div>
+                                ) : null}
+                                <div className="flex gap-1 justify-end">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void saveEditVsVlChecklistRow(item)}
+                                        disabled={savingVsVlChecklist}
+                                        className="h-6 px-2 text-[10px]"
                                       >
-                                        <Checkbox
-                                          checked={checked}
-                                          onCheckedChange={() => {
-                                            const nextIds = checked
-                                              ? selectedAssignees.filter((id) => id !== u.id)
-                                              : [...selectedAssignees, u.id]
-                                            void patchTask(task.id, { assignees: nextIds }, "Failed to update assignees")
-                                          }}
-                                          className="h-3.5 w-3.5"
-                                        />
-                                        <span className="text-[10px] text-slate-700 flex-1">
-                                          {u.full_name || u.username || u.email}
-                                        </span>
-                                      </label>
-                                    )
-                                  })
-                                ) : (
-                                  <div className="text-[10px] text-slate-400 text-center py-1">No users available</div>
-                                )}
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={cancelEditVsVlChecklistRow}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => startEditVsVlChecklistRow(item)}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
-                            )}
-                            <div className="grid gap-2 md:grid-cols-2">
-                              <div>
-                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Comment</Label>
-                                <Textarea
-                                  value={commentValue}
-                                  onChange={(e) => {
-                                    const nextValue = e.target.value
-                                    setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                    if (isLocked) return
-                                    const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
-                                    queueVsVlMetaSave(task, {
-                                      comment: nextValue.trim() || undefined,
-                                      checklist: checklist || undefined,
-                                    })
-                                  }}
-                                  onBlur={async (e) => {
-                                    if (isLocked) return
-                                    const nextValue = e.target.value.trim()
-                                    const currentValue = meta?.comment || ""
-                                    if (nextValue === currentValue) return
-                                    const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
-                                    const updated = await updateVsVlMeta(task, {
-                                      comment: nextValue || undefined,
-                                      checklist: checklist || undefined,
-                                    })
-                                    if (updated) {
-                                      setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                    }
-                                  }}
-                                  placeholder="Koment..."
-                                  rows={2}
-                                  className="text-xs border-slate-300 bg-white resize-none"
-                                />
-                              </div>
-                              <div>
-                                <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Checklist</Label>
-                                <Textarea
-                                  value={checklistValue}
-                                  onChange={(e) => {
-                                    const nextValue = e.target.value
-                                    setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                    if (isLocked) return
-                                    const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
-                                    queueVsVlMetaSave(task, {
-                                      checklist: nextValue.trim() || undefined,
-                                      comment: comment || undefined,
-                                    })
-                                  }}
-                                  onBlur={async (e) => {
-                                    if (isLocked) return
-                                    const nextValue = e.target.value.trim()
-                                    const currentValue = meta?.checklist || ""
-                                    if (nextValue === currentValue) return
-                                    const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
-                                    const updated = await updateVsVlMeta(task, {
-                                      checklist: nextValue || undefined,
-                                      comment: comment || undefined,
-                                    })
-                                    if (updated) {
-                                      setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
-                                    }
-                                  }}
-                                  placeholder="Checklist..."
-                                  rows={2}
-                                  className="text-xs border-slate-300 bg-white resize-none"
-                                />
-                              </div>
-                            </div>
+                            )
+                          })}
+                        {vsVlAmazonChecklistItems.length === 0 && (
+                          <div className="px-3 py-6 text-center text-sm text-slate-400">
+                            No checklist items yet. Add one above.
                           </div>
                         )}
                       </div>
-                    )
-                  })
+                    </div>
+                  </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    No tasks yet.
+                  <div className="space-y-4">
+                    {/* Images Checklist Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500 border-b bg-slate-50/60">
+                        <div>NO</div>
+                        <div>TASK</div>
+                        <div>COMMENT</div>
+                        <div>CHECK</div>
+                        <div>TIME</div>
+                        <div>KOMENT</div>
+                        <div className="text-right">ACTIONS</div>
+                      </div>
+                      {/* Add new row */}
+                      <div className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-center border-b bg-slate-50/30">
+                        <div className="text-slate-400">+</div>
+                        <div>
+                          <Input
+                            value={newVsVlImagesRow.task}
+                            onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, task: e.target.value }))}
+                            placeholder="Task"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            value={newVsVlImagesRow.comment}
+                            onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, comment: e.target.value }))}
+                            placeholder="Comment"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center" />
+                        <div>
+                          <Input
+                            value={newVsVlImagesRow.time}
+                            onChange={(e) => setNewVsVlImagesRow((prev) => ({ ...prev, time: e.target.value }))}
+                            placeholder="Time"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void addVsVlImagesChecklistRow()}
+                            disabled={savingVsVlChecklist || !newVsVlImagesRow.task.trim()}
+                            className="h-7 text-xs"
+                          >
+                            {savingVsVlChecklist ? "..." : "Add"}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="divide-y max-h-[500px] overflow-y-auto">
+                        {vsVlImagesChecklistItems
+                          .slice()
+                          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                          .map((item, index) => {
+                            const isEditing = editingVsVlChecklistId === item.id
+                            const checked = item.is_checked ?? false
+                            const commentValue =
+                              vsVlAmazonCommentEdits[item.id] !== undefined
+                                ? vsVlAmazonCommentEdits[item.id]
+                                : item.comment ?? ""
+                            return (
+                              <div key={item.id} className="grid grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px] gap-2 px-3 py-2 text-xs items-start hover:bg-slate-50/50">
+                                <div className="text-slate-500 pt-1">{index + 1}</div>
+                                <div className="font-medium">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.task}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, task: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.title || "-"
+                                  )}
+                                </div>
+                                <div className="text-slate-600 text-[11px]">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.comment}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, comment: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.description || "-"
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-center">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => void toggleChecklistItem(item.id, Boolean(next))}
+                                  />
+                                </div>
+                                <div className="text-slate-500">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingVsVlChecklistRow.time}
+                                      onChange={(e) => setEditingVsVlChecklistRow((prev) => ({ ...prev, time: e.target.value }))}
+                                      className="h-7 text-xs"
+                                    />
+                                  ) : (
+                                    item.keyword || "-"
+                                  )}
+                                </div>
+                                <div>
+                                  <Input
+                                    value={commentValue}
+                                    onChange={(e) => setVsVlAmazonCommentEdits((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    onBlur={(e) => void saveVsVlAmazonComment(item, e.target.value)}
+                                    placeholder="Koment"
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                                <div className="flex gap-1 justify-end">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void saveEditVsVlChecklistRow(item)}
+                                        disabled={savingVsVlChecklist}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={cancelEditVsVlChecklistRow}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => startEditVsVlChecklistRow(item)}
+                                        className="h-6 px-2 text-[10px]"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => void deleteVsVlChecklistRow(item.id)}
+                                        className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        {vsVlImagesChecklistItems.length === 0 && (
+                          <div className="px-3 py-6 text-center text-sm text-slate-400">
+                            No checklist items yet. Add one above.
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          </Card>
-        )}
+            </Card>
+          ) : vsVlPhase === "PLANNING" ? (
+
+            <Card>
+              <div className="p-4 space-y-4">
+                <div className="text-lg font-semibold">Planning</div>
+
+                {/* Add new item */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Input
+                    placeholder="Add checklist item..."
+                    value={newVsVlPlanningText}
+                    onChange={(e) => setNewVsVlPlanningText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !savingVsVlPlanning) {
+                        void addVsVlPlanningItem()
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={() => void addVsVlPlanningItem()}
+                    disabled={!newVsVlPlanningText.trim() || savingVsVlPlanning}
+                    size="sm"
+                  >
+                    {savingVsVlPlanning ? "Adding..." : "Add"}
+                  </Button>
+                </div>
+
+                <div className="grid gap-3">
+                  {vsVlPlanningItems
+                    .slice()
+                    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                    .map((item, index) => {
+                      const isEditing = editingVsVlPlanningId === item.id
+                      return (
+                        <div key={item.id} className="flex items-center gap-3 group">
+                          <span className="text-xs font-semibold text-slate-400">{index + 1}.</span>
+                          <Checkbox
+                            checked={Boolean(vsVlAcceptanceChecks[item.title || ""])}
+                            onCheckedChange={(checked) =>
+                              void toggleVsVlAcceptanceById(item.id, Boolean(checked))
+                            }
+                            className="h-5 w-5 border-2 border-slate-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                          />
+                          <div className="flex-1">
+                            {isEditing ? (
+                              <Input
+                                value={editingVsVlPlanningText}
+                                onChange={(e) => setEditingVsVlPlanningText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !savingVsVlPlanning) {
+                                    void saveVsVlPlanningItem()
+                                  } else if (e.key === "Escape") {
+                                    cancelEditVsVlPlanningItem()
+                                  }
+                                }}
+                                className="border-blue-500"
+                                autoFocus
+                              />
+                            ) : (
+                              <span className="text-sm font-semibold uppercase tracking-wide">{item.title}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {isEditing ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void saveVsVlPlanningItem()}
+                                  disabled={savingVsVlPlanning}
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={cancelEditVsVlPlanningItem}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startEditVsVlPlanningItem(item.id)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => void deleteVsVlPlanningItem(item.id)}
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  Delete
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  {vsVlPlanningItems.length === 0 && (
+                    <div className="text-sm text-muted-foreground text-center py-8">
+                      No checklist items yet. Add one above.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <Card className="border-0 shadow-sm">
+              <div className="p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-base font-semibold">{VS_VL_PHASE_LABELS[vsVlPhase]} Tasks</div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs text-slate-600 border-slate-200 bg-white">
+                      {VS_VL_PHASE_LABELS[vsVlPhase]}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setShowVsVlAddTask((prev) => !prev)}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add task
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Compact Add Task Form */}
+                {showVsVlAddTask && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        value={vsVlTaskTitle}
+                        onChange={(e) => setVsVlTaskTitle(e.target.value)}
+                        placeholder="Task title..."
+                        className="h-8 text-sm flex-1 min-w-[200px]"
+                      />
+                      <Select value={vsVlTaskPriority} onValueChange={(v) => setVsVlTaskPriority(v as TaskPriority)}>
+                        <SelectTrigger className="h-8 w-[100px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NORMAL">NORMAL</SelectItem>
+                          <SelectItem value="HIGH">I LARTE</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={vsVlTaskStatus || "TODO"} onValueChange={(v) => setVsVlTaskStatus(v as Task["status"])}>
+                        <SelectTrigger className="h-8 w-[100px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TASK_STATUSES.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {statusLabel(status)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
+                        onClick={async () => {
+                          if (!project || !vsVlTaskTitle.trim()) return
+                          setCreatingVsVlTask(true)
+                          try {
+                            const meta: VsVlTaskMeta = {
+                              vs_vl_phase: vsVlPhase,
+                              checklist: vsVlTaskChecklist.trim() || undefined,
+                              comment: vsVlTaskComment.trim() || undefined,
+                            }
+                            const res = await apiFetch("/tasks", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                title: vsVlTaskTitle.trim(),
+                                description: vsVlTaskDetail.trim() || null,
+                                project_id: project.id,
+                                department_id: project.department_id,
+                                assignees: vsVlTaskAssignees,
+                                dependency_task_id:
+                                  vsVlTaskDependencyId === "__none__" ? null : vsVlTaskDependencyId,
+                                status: vsVlTaskStatus || "TODO",
+                                priority: vsVlTaskPriority,
+                                phase: vsVlPhase,
+                                due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
+                                internal_notes: serializeVsVlMeta(meta),
+                              }),
+                            })
+                            if (!res?.ok) {
+                              toast.error("Failed to add task")
+                              return
+                            }
+                            const created = (await res.json()) as Task
+                            setTasks((prev) => [...prev, created])
+                            setVsVlTaskTitle("")
+                            setVsVlTaskDetail("")
+                            setVsVlTaskDate("")
+                            setVsVlTaskPriority("NORMAL")
+                            setVsVlTaskStatus("TODO")
+                            setVsVlTaskAssignees([])
+                            setVsVlTaskDependencyId("__none__")
+                            setVsVlTaskChecklist("")
+                            setVsVlTaskComment("")
+                            setShowVsVlAddTask(false)
+                            toast.success("Task added")
+                          } finally {
+                            setCreatingVsVlTask(false)
+                          }
+                        }}
+                      >
+                        {creatingVsVlTask ? "..." : "Add"}
+                      </Button>
+                    </div>
+                    <Textarea
+                      value={vsVlTaskDetail}
+                      onChange={(e) => setVsVlTaskDetail(e.target.value)}
+                      placeholder="Description..."
+                      rows={2}
+                      className="text-xs border-slate-300 bg-white resize-none"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {orderedVsVlTasks.length ? (
+                    orderedVsVlTasks.map((task, index) => {
+                      const meta = parseVsVlMeta(task.internal_notes)
+                      const titleKey = normalizeTaskTitle(task.title)
+                      const isBaseTask = titleKey === VS_VL_TASK_TITLES.base
+                      const dependencyId = isBaseTask
+                        ? null
+                        : task.dependency_task_id || meta?.dependency_task_id || null
+                      const dependencyStatus = dependencyId ? taskStatusById.get(dependencyId) : null
+                      const dependencyTask = dependencyId ? tasks.find((t) => t.id === dependencyId) : null
+
+                      // Calculate lock status based on unlock_after_days from PROJECT start date
+                      let isTimeLocked = false
+                      let daysRemaining = 0
+                      let unlockDateDisplay: Date | null = null
+
+                      // Helper to add business days (skip weekends)
+                      const addBusinessDays = (start: Date, days: number): Date => {
+                        const result = new Date(start)
+                        let addedDays = 0
+                        while (addedDays < days) {
+                          result.setDate(result.getDate() + 1)
+                          const dayOfWeek = result.getDay()
+                          // Skip Saturday (6) and Sunday (0)
+                          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                            addedDays++
+                          }
+                        }
+                        // If result lands on weekend, move to Monday
+                        while (result.getDay() === 0 || result.getDay() === 6) {
+                          result.setDate(result.getDate() + 1)
+                        }
+                        return result
+                      }
+
+                      // Time-based lock: task unlocks X business days after project start
+                      if (meta?.unlock_after_days !== undefined && meta.unlock_after_days > 0 && project) {
+                        const projectStart = new Date(project.start_date || project.created_at || Date.now())
+                        const unlockDate = addBusinessDays(projectStart, meta.unlock_after_days)
+                        unlockDateDisplay = unlockDate
+                        const now = new Date()
+                        // Reset time to start of day for comparison
+                        now.setHours(0, 0, 0, 0)
+                        unlockDate.setHours(0, 0, 0, 0)
+                        isTimeLocked = now < unlockDate
+                        if (isTimeLocked) {
+                          // Calculate business days remaining
+                          let remaining = 0
+                          const temp = new Date(now)
+                          while (temp < unlockDate) {
+                            temp.setDate(temp.getDate() + 1)
+                            if (temp.getDay() !== 0 && temp.getDay() !== 6) {
+                              remaining++
+                            }
+                          }
+                          daysRemaining = remaining
+                        }
+                      }
+
+                      // Dependency-based lock: locked until dependency is DONE
+                      const isDependencyNotDone = Boolean(dependencyId && dependencyStatus !== "DONE")
+
+                      // Combined lock: if has unlock_after_days, must ALSO have dependency done (if exists)
+                      // If no unlock_after_days, just check dependency
+                      const isLocked = isTimeLocked || isDependencyNotDone
+                      const selectedAssignees = taskAssigneeIds(task)
+                      const commentValue = vsVlCommentEdits[task.id] ?? meta?.comment ?? ""
+                      const checklistValue = vsVlChecklistEdits[task.id] ?? meta?.checklist ?? ""
+                      const descriptionValue = vsVlDescriptionEdits[task.id] ?? task.description ?? ""
+                      const isEditing = Boolean(vsVlEditMode[task.id])
+                      return (
+                        <div
+                          key={task.id}
+                          className={`rounded-lg border bg-white transition-shadow hover:shadow-sm ${isLocked
+                              ? "border-amber-200 bg-amber-50/20"
+                              : "border-slate-300 shadow-[0_0_0_1px_#cbd5e1]"
+                            }`}
+                        >
+                          {/* Main Row - Compact */}
+                          <div className="p-2.5 flex items-center gap-2">
+                            {isLocked && (
+                              <div
+                                className="flex items-center gap-1 flex-shrink-0"
+                                title={
+                                  isTimeLocked && isDependencyNotDone
+                                    ? `Locked: ${daysRemaining}d remaining + waiting for "${dependencyTask?.title || 'dependency'}"`
+                                    : isTimeLocked
+                                      ? `Unlocks in ${daysRemaining} business day(s)`
+                                      : `Waiting for "${dependencyTask?.title || 'dependency'}" to complete`
+                                }
+                              >
+                                <Lock className="h-3.5 w-3.5 text-amber-600" />
+                                {daysRemaining > 0 && (
+                                  <span className="text-xs text-amber-600 font-medium">{daysRemaining}d</span>
+                                )}
+                                {!isTimeLocked && isDependencyNotDone && (
+                                  <span className="text-xs text-amber-600">dep</span>
+                                )}
+                              </div>
+                            )}
+                            <span className="text-xs font-semibold text-slate-400 flex-shrink-0">{index + 1}.</span>
+                            <div className="flex-1 min-w-0">
+                              <Input
+                                key={`title-${task.id}-${task.updated_at}`}
+                                defaultValue={task.title}
+                                onBlur={(e) => {
+                                  const nextValue = e.target.value.trim()
+                                  if (!nextValue || nextValue === task.title) return
+                                  void patchTask(task.id, { title: nextValue }, "Failed to update title")
+                                }}
+                                className={`h-auto text-sm font-semibold px-0 border-0 bg-transparent focus-visible:ring-1 focus-visible:ring-slate-300 ${!isEditing ? (isLocked ? "text-slate-600" : "text-slate-900 font-bold") : "text-slate-900"
+                                  }`}
+                                readOnly={!isEditing}
+                                disabled={isLocked || !isEditing}
+                              />
+                            </div>
+                            <Select
+                              value={(task.priority || "NORMAL").toUpperCase()}
+                              onValueChange={(value) => {
+                                if (isLocked || !isEditing) return
+                                const nextPriority = (value || "NORMAL").toUpperCase()
+                                if (nextPriority === (task.priority || "NORMAL").toUpperCase()) return
+                                void patchTask(task.id, { priority: nextPriority }, "Failed to update priority")
+                              }}
+                              disabled={isLocked || !isEditing}
+                            >
+                              <SelectTrigger
+                                className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${task.priority === "HIGH"
+                                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                                    : "bg-slate-50 text-slate-700 border-slate-200"
+                                  }`}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {TASK_PRIORITIES.map((priority) => (
+                                  <SelectItem key={priority} value={priority}>
+                                    {vsVlPriorityLabel(priority)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Select
+                              value={task.status || "TODO"}
+                              onValueChange={(value) => {
+                                if (isLocked || !isEditing) return
+                                void patchTask(task.id, { status: value }, "Failed to update status")
+                              }}
+                              disabled={isLocked || !isEditing}
+                            >
+                              <SelectTrigger
+                                className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${task.status === "DONE"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : task.status === "IN_PROGRESS"
+                                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                                      : "bg-slate-50 text-slate-700 border-slate-200"
+                                  }`}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {TASK_STATUSES.map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {statusLabel(status)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {task.due_date && (
+                              <div className="flex items-center gap-0.5 text-[10px] text-slate-500 flex-shrink-0" title="Due date">
+                                <Calendar className="h-3 w-3" />
+                                <span>{formatDateDisplay(task.due_date)}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {selectedAssignees.slice(0, 3).map((id, idx) => {
+                                const user = userMap.get(id)
+                                const label = user?.full_name || user?.username || user?.email || "-"
+                                const colorClass = [
+                                  "bg-blue-500 text-white",
+                                  "bg-emerald-500 text-white",
+                                  "bg-amber-500 text-white",
+                                  "bg-rose-500 text-white",
+                                  "bg-purple-500 text-white",
+                                ][idx % 5]
+                                return (
+                                  <div
+                                    key={id}
+                                    className={`h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-semibold ring-1 ring-slate-200 ${colorClass}`}
+                                    title={label}
+                                  >
+                                    {initials(label)}
+                                  </div>
+                                )
+                              })}
+                              {selectedAssignees.length > 3 && (
+                                <span className="text-[10px] text-slate-500">+{selectedAssignees.length - 3}</span>
+                              )}
+                              {selectedAssignees.length === 0 && (
+                                <div className="h-6 w-6 rounded-full bg-slate-200 flex items-center justify-center" title="Unassigned">
+                                  <Users className="h-3 w-3 text-slate-400" />
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 flex-shrink-0"
+                              onClick={() =>
+                                setVsVlEditMode((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
+                              }
+                              aria-label={isEditing ? "Done editing" : "Edit task"}
+                              title={isEditing ? "Done" : "Edit"}
+                            >
+                              {isEditing ? (
+                                <Check className="h-3 w-3 text-emerald-600" />
+                              ) : (
+                                <Pencil className="h-3 w-3 text-slate-600" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-red-600 hover:bg-red-50 flex-shrink-0"
+                              onClick={async () => {
+                                const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                if (!res?.ok) {
+                                  if (res?.status == 405) {
+                                    toast.error("Delete endpoint not active. Restart backend.")
+                                  } else {
+                                    toast.error("Failed to delete task")
+                                  }
+                                  return
+                                }
+                                setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                toast.success("Task deleted")
+                              }}
+                              aria-label="Delete task"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+
+                          {/* Expandable Details - Only when editing */}
+                          {isEditing && (
+                            <div className="border-t border-slate-100 p-2.5 space-y-2 bg-slate-50/30">
+                              <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Description</Label>
+                                  <Textarea
+                                    value={descriptionValue}
+                                    onChange={(e) => {
+                                      const newValue = e.target.value
+                                      setVsVlDescriptionEdits((prev) => ({ ...prev, [task.id]: newValue }))
+                                      queueDescriptionSave(task.id, newValue)
+                                    }}
+                                    rows={2}
+                                    className="text-xs border-slate-300 bg-white resize-none h-auto"
+                                    placeholder="Description..."
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <div>
+                                    <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Due date</Label>
+                                    <Input
+                                      value={toDateInput(task.due_date)}
+                                      onChange={(e) => {
+                                        if (isLocked) return
+                                        const nextValue = normalizeDueDateInput(e.target.value)
+                                        const dueDate = nextValue ? new Date(nextValue).toISOString() : null
+                                        void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
+                                      }}
+                                      type="date"
+                                      className="h-7 text-xs border-slate-300 bg-white"
+                                      disabled={isLocked}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Dependency</Label>
+                                    <Select
+                                      value={
+                                        isBaseTask ? "__none__" : task.dependency_task_id || meta?.dependency_task_id || "__none__"
+                                      }
+                                      onValueChange={(value) => {
+                                        void patchTask(
+                                          task.id,
+                                          { dependency_task_id: value === "__none__" ? null : value },
+                                          "Failed to update dependency"
+                                        )
+                                      }}
+                                      disabled={isBaseTask}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs border-slate-300 bg-white">
+                                        <SelectValue placeholder="-" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">-</SelectItem>
+                                        {dependencyOptions
+                                          .filter((opt) => opt.id !== task.id)
+                                          .map((opt) => (
+                                            <SelectItem key={opt.id} value={opt.id}>
+                                              {opt.title}
+                                            </SelectItem>
+                                          ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Unlock on day</Label>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      placeholder="0"
+                                      defaultValue={meta?.unlock_after_days || ""}
+                                      className="h-7 text-xs border-slate-300 bg-white w-20"
+                                      disabled={isBaseTask}
+                                      onBlur={(e) => {
+                                        const value = parseInt(e.target.value, 10)
+                                        const newValue = isNaN(value) || value <= 0 ? undefined : value
+                                        if (newValue === meta?.unlock_after_days) return
+                                        void updateVsVlMeta(task, { unlock_after_days: newValue })
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-[10px] font-medium text-slate-700">Assignees</Label>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-[10px] h-5 px-2"
+                                  onClick={() =>
+                                    setVsVlAssigneeOpen((prev) => ({ ...prev, [task.id]: !prev[task.id] }))
+                                  }
+                                >
+                                  {vsVlAssigneeOpen[task.id] ? "Hide" : "Manage"}
+                                </Button>
+                              </div>
+                              {vsVlAssigneeOpen[task.id] && (
+                                <div className="rounded border border-slate-200 bg-white p-1.5 space-y-1 max-h-32 overflow-y-auto">
+                                  {assignableUsers.length ? (
+                                    assignableUsers.map((u) => {
+                                      const checked = selectedAssignees.includes(u.id)
+                                      return (
+                                        <label
+                                          key={u.id}
+                                          className="flex items-center gap-1.5 p-1 rounded hover:bg-slate-50 transition-colors cursor-pointer"
+                                        >
+                                          <Checkbox
+                                            checked={checked}
+                                            onCheckedChange={() => {
+                                              const nextIds = checked
+                                                ? selectedAssignees.filter((id) => id !== u.id)
+                                                : [...selectedAssignees, u.id]
+                                              void patchTask(task.id, { assignees: nextIds }, "Failed to update assignees")
+                                            }}
+                                            className="h-3.5 w-3.5"
+                                          />
+                                          <span className="text-[10px] text-slate-700 flex-1">
+                                            {u.full_name || u.username || u.email}
+                                          </span>
+                                        </label>
+                                      )
+                                    })
+                                  ) : (
+                                    <div className="text-[10px] text-slate-400 text-center py-1">No users available</div>
+                                  )}
+                                </div>
+                              )}
+                              <div className="grid gap-2 md:grid-cols-2">
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Comment</Label>
+                                  <Textarea
+                                    value={commentValue}
+                                    onChange={(e) => {
+                                      const nextValue = e.target.value
+                                      setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                      if (isLocked) return
+                                      const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
+                                      queueVsVlMetaSave(task, {
+                                        comment: nextValue.trim() || undefined,
+                                        checklist: checklist || undefined,
+                                      })
+                                    }}
+                                    onBlur={async (e) => {
+                                      if (isLocked) return
+                                      const nextValue = e.target.value.trim()
+                                      const currentValue = meta?.comment || ""
+                                      if (nextValue === currentValue) return
+                                      const checklist = (vsVlChecklistEdits[task.id] ?? meta?.checklist ?? "").trim()
+                                      const updated = await updateVsVlMeta(task, {
+                                        comment: nextValue || undefined,
+                                        checklist: checklist || undefined,
+                                      })
+                                      if (updated) {
+                                        setVsVlCommentEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                      }
+                                    }}
+                                    placeholder="Koment..."
+                                    rows={2}
+                                    className="text-xs border-slate-300 bg-white resize-none"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-[10px] font-medium text-slate-600 mb-1 block">Checklist</Label>
+                                  <Textarea
+                                    value={checklistValue}
+                                    onChange={(e) => {
+                                      const nextValue = e.target.value
+                                      setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                      if (isLocked) return
+                                      const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
+                                      queueVsVlMetaSave(task, {
+                                        checklist: nextValue.trim() || undefined,
+                                        comment: comment || undefined,
+                                      })
+                                    }}
+                                    onBlur={async (e) => {
+                                      if (isLocked) return
+                                      const nextValue = e.target.value.trim()
+                                      const currentValue = meta?.checklist || ""
+                                      if (nextValue === currentValue) return
+                                      const comment = (vsVlCommentEdits[task.id] ?? meta?.comment ?? "").trim()
+                                      const updated = await updateVsVlMeta(task, {
+                                        checklist: nextValue || undefined,
+                                        comment: comment || undefined,
+                                      })
+                                      if (updated) {
+                                        setVsVlChecklistEdits((prev) => ({ ...prev, [task.id]: nextValue }))
+                                      }
+                                    }}
+                                    placeholder="Checklist..."
+                                    rows={2}
+                                    className="text-xs border-slate-300 bg-white resize-none"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                      No tasks yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}
@@ -5149,9 +5145,9 @@ export default function PcmProjectPage() {
       planningItems.find(
         (item) =>
           (item.description || "").trim().toLowerCase() ===
-            MST_PLANNING_QUESTIONS[1].trim().toLowerCase() ||
+          MST_PLANNING_QUESTIONS[1].trim().toLowerCase() ||
           (item.description || "").trim().toLowerCase() ===
-            MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase()
+          MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase()
       ) || planningItemsOrdered[1] || null
 
     const togglePlanning = async (item: ChecklistItem) => {
@@ -5565,7 +5561,7 @@ export default function PcmProjectPage() {
       setFinalizationChecks((prev) => ({ ...prev, [itemId]: nextChecked }))
       setFinalizationItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
       setChecklistItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, is_checked: nextChecked } : i)))
-      
+
       try {
         const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
@@ -5607,7 +5603,7 @@ export default function PcmProjectPage() {
           }
           nextPosition = parsed
         }
-        
+
         const res = await apiFetch("/checklist-items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -5718,7 +5714,7 @@ export default function PcmProjectPage() {
       const notes = latestTask.internal_notes || ""
       const totalMatch = notes.match(/total_products=(\d+)/)
       const completedMatch = notes.match(/completed_products=(\d+)/)
-      
+
       // Get TOTAL from origin task if CONTROL phase
       let totalValue = latestTask.daily_products?.toString() || totalMatch?.[1] || controlEdits[latestTask.id]?.total || "0"
       if (latestTask.phase === "CONTROL") {
@@ -5730,7 +5726,7 @@ export default function PcmProjectPage() {
           }
         }
       }
-      
+
       setEditingTaskTotal(totalValue)
       setEditingTaskCompleted(
         controlEdits[latestTask.id]?.completed || completedMatch?.[1] || "0"
@@ -5792,7 +5788,7 @@ export default function PcmProjectPage() {
           koUserId: editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId,
           productionDate,
         })
-        
+
         const res = await apiFetch(`/tasks/${editingTaskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -5854,7 +5850,7 @@ export default function PcmProjectPage() {
         const res = await apiFetch(`/tasks/${task.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             internal_notes: internalNotes,
             due_date: productionDate ? new Date(productionDate).toISOString() : null,
           }),
@@ -5913,1939 +5909,759 @@ export default function PcmProjectPage() {
                   <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
                 )}
               </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {MST_PHASES.map((p) => {
-                const isActive = p === mstPhase
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setMstPhase(p)}
-                    className={[
-                      "rounded-full border px-3 py-1 transition-colors",
-                      isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {MST_PHASE_LABELS[p]}
-                  </button>
-                )
-              })}
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {MST_PHASES.map((p) => {
+                  const isActive = p === mstPhase
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setMstPhase(p)}
+                      className={[
+                        "rounded-full border px-3 py-1 transition-colors",
+                        isActive ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {MST_PHASE_LABELS[p]}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {MST_PHASES.map((p, idx) => (
+                  <span key={p}>
+                    <button
+                      type="button"
+                      onClick={() => setMstPhase(p)}
+                      className={p === mstPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
+                    >
+                      {MST_PHASE_LABELS[p]}
+                    </button>
+                    {idx < MST_PHASES.length - 1 ? " -> " : ""}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="text-sm text-muted-foreground">
-              {MST_PHASES.map((p, idx) => (
-                <span key={p}>
-                  <button
-                    type="button"
-                    onClick={() => setMstPhase(p)}
-                    className={p === mstPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
-                  >
-                    {MST_PHASE_LABELS[p]}
-                  </button>
-                  {idx < MST_PHASES.length - 1 ? " -> " : ""}
-                </span>
-              ))}
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
+                {mstBadgeLabel(project)}
+              </Badge>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
-              {mstBadgeLabel(project)}
-            </Badge>
-          </div>
-        </div>
 
-        {mstPhase === "PLANNING" ? (
-          <>
-            <div className="border-b flex gap-6">
-              {[
-                { id: "description", label: "Description" },
-                { id: "ga", label: "Shenime GA/KA" },
-              ].map((tab) => {
-                const isActive = mstTab === tab.id
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setMstTab(tab.id as typeof mstTab)}
-                    className={[
-                      "relative pb-3 text-sm font-medium",
-                      tab.id === "ga" ? "ml-auto" : "",
-                      isActive ? "text-blue-600" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {tab.label}
-                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-                  </button>
-                )
-              })}
-            </div>
-            {mstTab === "ga" ? (
-              renderGaNotes()
-            ) : (
-              <Card>
-                <div className="p-4 space-y-4">
-                  <div className="text-lg font-semibold">Planifikimi</div>
-                  <div className="max-w-md">
-                    <Textarea
-                      placeholder="Shkruaj emrin e programit..."
-                      value={programName}
-                      onChange={(e) => {
-                        const newValue = e.target.value
-                        setProgramName(newValue)
-                        if (!programItem) return
-                        setPlanningComments((prev) => ({ ...prev, [programItem.id]: newValue }))
-                        setChecklistItems((prev) =>
-                          prev.map((entry) =>
-                            entry.id === programItem.id ? { ...entry, comment: newValue } : entry
+          {mstPhase === "PLANNING" ? (
+            <>
+              <div className="border-b flex gap-6">
+                {[
+                  { id: "description", label: "Description" },
+                  { id: "ga", label: "Shenime GA/KA" },
+                ].map((tab) => {
+                  const isActive = mstTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setMstTab(tab.id as typeof mstTab)}
+                      className={[
+                        "relative pb-3 text-sm font-medium",
+                        tab.id === "ga" ? "ml-auto" : "",
+                        isActive ? "text-blue-600" : "text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {tab.label}
+                      {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              {mstTab === "ga" ? (
+                renderGaNotes()
+              ) : (
+                <Card>
+                  <div className="p-4 space-y-4">
+                    <div className="text-lg font-semibold">Planifikimi</div>
+                    <div className="max-w-md">
+                      <Textarea
+                        placeholder="Shkruaj emrin e programit..."
+                        value={programName}
+                        onChange={(e) => {
+                          const newValue = e.target.value
+                          setProgramName(newValue)
+                          if (!programItem) return
+                          setPlanningComments((prev) => ({ ...prev, [programItem.id]: newValue }))
+                          setChecklistItems((prev) =>
+                            prev.map((entry) =>
+                              entry.id === programItem.id ? { ...entry, comment: newValue } : entry
+                            )
                           )
-                        )
-                        apiFetch(`/checklist-items/${programItem.id}`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ comment: newValue || null }),
-                        }).catch(() => {
-                          // Silently handle errors - update might still succeed
-                        })
-                      }}
-                      onBlur={async (e) => {
-                        if (!programItem) return
-                        const newValue = e.target.value
-                        try {
-                          await apiFetch(`/checklist-items/${programItem.id}`, {
+                          apiFetch(`/checklist-items/${programItem.id}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ comment: newValue || null }),
+                          }).catch(() => {
+                            // Silently handle errors - update might still succeed
                           })
-                        } catch {
-                          // Silently handle network errors - update might still succeed
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="grid gap-3">
-                    {planningTopItems.map((item, idx) => {
-                      const isEditing = editingPlanningItemId === item.id
-                      const itemNumber = planningIndexMap.get(item.id) ?? idx + 1
-                      return (
-                        <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3">
-                          <div className="col-span-1 text-right text-xs text-muted-foreground">
-                            {isEditing ? (
-                              <Input
-                                type="number"
-                                min={1}
-                                inputMode="numeric"
-                                value={editingPlanningItemNumber}
-                                onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
-                                className="h-8 w-14 text-right"
-                              />
-                            ) : (
-                              `${itemNumber}.`
-                            )}
-                          </div>
-                          <div className="col-span-1 flex justify-center">
-                            <Checkbox
-                              checked={Boolean(descriptionChecks[item.id])}
-                              onCheckedChange={() => togglePlanning(item)}
-                            />
-                          </div>
-                          <div className="col-span-6">
-                            {isEditing ? (
-                              <Input
-                                value={editingPlanningItemText}
-                                onChange={(e) => setEditingPlanningItemText(e.target.value)}
-                                className="w-full"
-                              />
-                            ) : (
-                              <span className="text-sm font-semibold uppercase tracking-wide">
-                                {item.title || "-"}
-                              </span>
-                            )}
-                          </div>
-                          <div className="col-span-2">
-                            {isAdmin ? (
-                              isEditing ? (
-                                <div className="flex flex-col items-start gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={!editingPlanningItemText.trim() || savingPlanningItem}
-                                    onClick={() => void savePlanningItem()}
-                                  >
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
-                                    Cancel
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-start gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
-                                    onClick={() => void deletePlanningItem(item)}
-                                  >
-                                    Delete
-                                  </Button>
-                                </div>
-                              )
-                            ) : null}
-                          </div>
-                          <div className="col-span-2" />
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
-                    <div className="col-span-1" />
-                    <div className="col-span-1" />
-                    <div className="col-span-6">Description/General Points</div>
-                    <div className="col-span-2 text-center">Actions</div>
-                    <div className="col-span-2 text-right">COMENT</div>
-                  </div>
-
-                  <div className="divide-y border rounded-lg">
-                    {planningOtherItems.map((item, idx) => {
-                      const comment = planningComments[item.id] || item.comment || ""
-                      const itemNumber = planningIndexMap.get(item.id) ?? (idx + 3)
-
-                      return (
-                        <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
-                          <div className="col-span-1 text-right text-xs text-muted-foreground">
-                            {editingPlanningItemId === item.id ? (
-                              <Input
-                                type="number"
-                                min={1}
-                                inputMode="numeric"
-                                value={editingPlanningItemNumber}
-                                onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
-                                className="h-8 w-14 text-right"
-                              />
-                            ) : (
-                              `${itemNumber}.`
-                            )}
-                          </div>
-                          <div className="col-span-1 flex justify-center">
-                            <Checkbox
-                              checked={Boolean(descriptionChecks[item.id])}
-                              onCheckedChange={() => togglePlanning(item)}
-                            />
-                          </div>
-                          <div className="col-span-6">
-                            {editingPlanningItemId === item.id ? (
-                              <Input
-                                value={editingPlanningItemText}
-                                onChange={(e) => setEditingPlanningItemText(e.target.value)}
-                                className="w-full"
-                              />
-                            ) : (
-                              <span className="text-sm">{item.title || "-"}</span>
-                            )}
-                          </div>
-                          <div className="col-span-2">
-                            {isAdmin ? (
-                              editingPlanningItemId === item.id ? (
-                                <div className="flex flex-col items-start gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={!editingPlanningItemText.trim() || savingPlanningItem}
-                                    onClick={() => void savePlanningItem()}
-                                  >
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
-                                    Cancel
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-start gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
-                                    onClick={() => void deletePlanningItem(item)}
-                                  >
-                                    Delete
-                                  </Button>
-                                </div>
-                              )
-                            ) : null}
-                          </div>
-                          <div className="col-span-2">
-                            <Input
-                              placeholder="Comment"
-                              value={comment}
-                              onChange={(e) => {
-                                const newComment = e.target.value
-                                setPlanningComments((prev) => ({ ...prev, [item.id]: newComment }))
-                                setChecklistItems((prev) =>
-                                  prev.map((entry) =>
-                                    entry.id === item.id ? { ...entry, comment: newComment } : entry
-                                  )
-                                )
-                                apiFetch(`/checklist-items/${item.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ comment: newComment || null }),
-                                }).catch(() => {
-                                  // Silently handle errors - update might still succeed
-                                })
-                              }}
-                              onBlur={async (e) => {
-                                const newComment = e.target.value
-                                try {
-                                  await apiFetch(`/checklist-items/${item.id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ comment: newComment || null }),
-                                  })
-                                } catch {
-                                  // Silently handle network errors - update might still succeed
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {isAdmin ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input
-                        type="number"
-                        min={1}
-                        inputMode="numeric"
-                        value={newPlanningItemNumber}
-                        onChange={(e) => setNewPlanningItemNumber(e.target.value)}
-                        placeholder="No."
-                        className="w-24"
-                      />
-                      <Input
-                        value={newPlanningItemText}
-                        onChange={(e) => setNewPlanningItemText(e.target.value)}
-                        placeholder="Add planning checklist item..."
-                        className="flex-1 min-w-[220px]"
-                      />
-                      <Button
-                        variant="outline"
-                        disabled={!newPlanningItemText.trim() || addingPlanningItem}
-                        onClick={() => void addPlanningItem()}
-                      >
-                        {addingPlanningItem ? "Adding..." : "Add"}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              </Card>
-            )}
-          </>
-        ) : mstPhase === "PRODUCT" ? (
-          <>
-            <div className="border-b flex gap-6">
-              {[
-                { id: "tasks", label: "Tasks (Detyrat)" },
-                { id: "checklists", label: "Checklists" },
-                { id: "members", label: "Members" },
-                { id: "ga", label: "Shenime GA/KA" },
-              ].map((tab) => {
-                const isActive = mstTab === tab.id
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setMstTab(tab.id as typeof mstTab)}
-                    className={[
-                      "relative pb-3 text-sm font-medium",
-                      isActive ? "text-blue-600" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {tab.label}
-                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-                  </button>
-                )
-              })}
-            </div>
-
-            {mstTab === "tasks" ? (
-              <Card className="border-0 shadow-sm">
-                <div className="p-6 space-y-4">
-                  <div className="text-lg font-semibold tracking-tight">Tasks</div>
-                  {/* Table header */}
-                  <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
-                    <div className="col-span-3">Task</div>
-                    <div className="col-span-1">Assigned</div>
-                    <div className="col-span-2">Due Date</div>
-                    <div className="col-span-1">Finish</div>
-                    <div className="col-span-1">Daily Products</div>
-                    <div className="col-span-2">Completed</div>
-                    <div className="col-span-1">Status</div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {/* Inline form row */}
-                  <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                    <div className="col-span-3">
-                      <input
-                        type="text"
-                        placeholder="Enter task name..."
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        value={newInlineTaskTitle}
-                        onChange={(e) => setNewInlineTaskTitle(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Select value={newInlineTaskAssignee} onValueChange={setNewInlineTaskAssignee}>
-                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">-</SelectItem>
-                          {assignableUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="date"
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        value={newInlineTaskDueDate}
-                        onChange={(e) => setNewInlineTaskDueDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Select
-                        value={newInlineTaskFinishPeriod}
-                        onValueChange={(value) =>
-                          setNewInlineTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                        }
-                      >
-                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="All day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                          {FINISH_PERIOD_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {value}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-1">
-                      <input
-                        type="number"
-                        placeholder="0"
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        value={newInlineTaskTotal}
-                        onChange={(e) => setNewInlineTaskTotal(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        placeholder="0"
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        value={newInlineTaskCompleted}
-                        onChange={(e) => setNewInlineTaskCompleted(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Button
-                        size="sm"
-                        className="rounded-full px-5 shadow-sm"
-                        onClick={async () => {
-                          if (!project || !newInlineTaskTitle.trim()) return
-                          setCreatingInlineTask(true)
+                        }}
+                        onBlur={async (e) => {
+                          if (!programItem) return
+                          const newValue = e.target.value
                           try {
-                            const res = await apiFetch("/tasks", {
-                              method: "POST",
+                            await apiFetch(`/checklist-items/${programItem.id}`, {
+                              method: "PATCH",
                               headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                title: newInlineTaskTitle.trim(),
-                                project_id: project.id,
-                                department_id: project.department_id,
-                                assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
-                                priority: "NORMAL",
-                                phase: "PRODUCT",
-                                due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
-                                finish_period:
-                                  newInlineTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE
-                                    ? null
-                                    : newInlineTaskFinishPeriod,
-                                daily_products: newInlineTaskTotal ? parseInt(newInlineTaskTotal, 10) : null,
-                                internal_notes: `completed_products=${newInlineTaskCompleted || 0}`,
-                              }),
+                              body: JSON.stringify({ comment: newValue || null }),
                             })
-                            if (!res?.ok) {
-                              toast.error("Failed to add task")
-                              return
-                            }
-                            const created = (await res.json()) as Task
-                            setTasks((prev) => [...prev, created])
-                            setNewInlineTaskTitle("")
-                            setNewInlineTaskAssignee("__unassigned__")
-                            setNewInlineTaskDueDate("")
-                            setNewInlineTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-                            setNewInlineTaskTotal("")
-                            setNewInlineTaskCompleted("")
-                            toast.success("Task added")
-                          } finally {
-                            setCreatingInlineTask(false)
+                          } catch {
+                            // Silently handle network errors - update might still succeed
                           }
                         }}
-                        disabled={creatingInlineTask || !newInlineTaskTitle.trim()}
-                      >
-                        {creatingInlineTask ? "..." : "Save"}
-                      </Button>
+                      />
                     </div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {/* Task rows */}
-                  <div className="divide-y divide-slate-100">
-                    {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
-                      const isEditing = editingTaskId === task.id
-                      const baseTotalVal =
-                        task.daily_products ?? (parseInt(controlEdits[task.id]?.total || "0", 10) || 0)
-                      const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
-                      const completedValue = isEditing
-                        ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
-                        : controlEdits[task.id]?.completed || "0"
-                      const completedNum = toNonNegativeInt(completedValue)
-                      const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
-                      return (
-                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-3 pr-2">
-                            {isEditing ? (
-                              <input
-                                type="text"
-                                value={editingTaskTitle}
-                                onChange={(e) => setEditingTaskTitle(e.target.value)}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
-                                autoFocus
-                              />
-                            ) : (
-                              <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2 min-w-0">
-                            {isEditing ? (
-                              <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
-                                <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">-</SelectItem>
-                                  {assignableUsers.map((u) => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.username || u.email}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
-                            )}
-                          </div>
-                          <div className="col-span-2 px-2">
-                            {isEditing ? (
-                              <input
-                                type="date"
-                                value={editingTaskDueDate}
-                                onChange={(e) => setEditingTaskDueDate(e.target.value)}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
-                              />
-                            ) : (
-                              <span className="text-slate-500">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "-"}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            {isEditing ? (
-                              <Select
-                                value={editingTaskFinishPeriod}
-                                onValueChange={(value) =>
-                                  setEditingTaskFinishPeriod(
-                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="All day" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                                  {FINISH_PERIOD_OPTIONS.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <span className="text-slate-500">{task.finish_period || "-"}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                value={editingTaskTotal}
-                                onChange={(e) => setEditingTaskTotal(e.target.value)}
-                                placeholder="0"
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
-                              />
-                            ) : (
-                              <span className="text-slate-500">
-                                {task.daily_products ?? controlEdits[task.id]?.total ?? "-"}
-                              </span>
-                            )}
-                          </div>
-                          <div className="col-span-2 px-2">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0"
-                                value={editingTaskCompleted}
-                                onChange={(e) => {
-                                  const rawValue = e.target.value
-                                  const completedNum = toNonNegativeInt(rawValue)
-                                  const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
-                                  const totalNum = toNonNegativeInt(totalValue)
-                                  // Cap completed at total
-                                  const cappedCompleted = Math.min(completedNum, totalNum)
-                                  const newCompleted = cappedCompleted.toString()
-                                  const newStatus = computeStatusFromCompleted(totalNum, cappedCompleted)
-                                  setEditingTaskCompleted(newCompleted)
-                                  setControlEdits((prev) => ({
-                                    ...prev,
-                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                  }))
-                                }}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
-                              />
-                            ) : (
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                  onClick={async () => {
-                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
-                                    const newCompleted = completedNum.toString()
-                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
-                                    setControlEdits((prev) => ({
-                                      ...prev,
-                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                    }))
-                                    const currentNotes = task.internal_notes || ""
-                                    const originTaskId = getOriginTaskId(currentNotes)
-                                    const koUserId = parseKoUserId(currentNotes)
-                                    const internalNotes = serializeInternalNotes({
-                                      originTaskId: originTaskId || undefined,
-                                      total: totalVal.toString(),
-                                      completed: newCompleted,
-                                      koUserId: koUserId || null,
-                                    })
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        internal_notes: internalNotes,
-                                      }),
-                                    })
-                                    if (!res?.ok) {
-                                      toast.error("Failed to update completed count")
-                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
-                                      setControlEdits((prev) => ({
-                                        ...prev,
-                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
-                                      }))
-                                      return
-                                    }
-                                    try {
-                                      const updated = (await res.json()) as Task
-                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                    } catch {
-                                      // ignore JSON parse errors
-                                    }
-                                  }}
-                                >
-                                  -
-                                </button>
-                                <div className="min-w-[32px] text-center text-sm text-slate-700">
-                                  {controlEdits[task.id]?.completed || "0"}
-                                </div>
-                                <button
-                                  type="button"
-                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                  onClick={async () => {
-                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const prevCompletedNum = toNonNegativeInt(prevCompleted)
-                                    // Cap completed at total - don't allow exceeding total
-                                    const completedNum = Math.min(prevCompletedNum + 1, totalVal)
-                                    if (completedNum === prevCompletedNum) {
-                                      // Already at max, don't update
-                                      return
-                                    }
-                                    const newCompleted = completedNum.toString()
-                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
-                                    setControlEdits((prev) => ({
-                                      ...prev,
-                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                    }))
-                                    const currentNotes = task.internal_notes || ""
-                                    const originTaskId = getOriginTaskId(currentNotes)
-                                    const koUserId = parseKoUserId(currentNotes)
-                                    const internalNotes = serializeInternalNotes({
-                                      originTaskId: originTaskId || undefined,
-                                      total: totalVal.toString(),
-                                      completed: newCompleted,
-                                      koUserId: koUserId || null,
-                                    })
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        internal_notes: internalNotes,
-                                      }),
-                                    })
-                                    if (!res?.ok) {
-                                      toast.error("Failed to update completed count")
-                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
-                                      setControlEdits((prev) => ({
-                                        ...prev,
-                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
-                                      }))
-                                      return
-                                    }
-                                    try {
-                                      const updated = (await res.json()) as Task
-                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                    } catch {
-                                      // ignore JSON parse errors
-                                    }
-                                  }}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            <Badge
-                              variant={autoStatus === "DONE" ? "default" : "outline"}
-                              className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
-                            >
-                              {statusLabel(autoStatus)}
-                            </Badge>
-                          </div>
-                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1">
-                            {isEditing ? (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 px-2 text-slate-400 hover:text-blue-600"
-                                  onClick={() => void saveTaskEdit()}
-                                  disabled={savingTaskEdit}
-                                >
-                                  {savingTaskEdit ? "Saving..." : "Save"}
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 px-2 text-slate-400 hover:text-slate-600"
-                                  onClick={cancelEditTask}
-                                >
-                                  Cancel
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                                  onClick={() => startEditTask(task)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                                  onClick={async () => {
-                                    const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                                    if (!res?.ok) {
-                                      if (res?.status == 405) {
-                                        toast.error("Delete endpoint not active. Restart backend.")
-                                      } else {
-                                        toast.error("Failed to delete task")
-                                      }
-                                      return
-                                    }
-                                    setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                                    toast.success("Task deleted")
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {tasks.length === 0 ? (
-                      <div className="py-8 text-center text-sm text-slate-400">
-                        No tasks yet. Add one above to get started.
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </Card>
-            ) : null}
-
-            {mstTab === "checklists" ? (
-              <Card>
-                <div className="p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-lg font-semibold">Checklists</div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void exportMstChecklist()}
-                      disabled={exportingMstChecklist || mstChecklistItems.length === 0}
-                      className="h-8 rounded-xl border-slate-200 text-xs"
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      {exportingMstChecklist ? "Exporting..." : "Export Excel"}
-                    </Button>
-                  </div>
-                  <div className="text-sm text-red-600 space-y-1">
-                    <div>!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER</div>
-                    <div>!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA</div>
-                    <div>!!! KRAHASO TE DHENAT QE DERGOHEN TE PLOTESUARA, A JANE NE PERPUTHSHMERI ME DROPDOWN DHE ME TE DHENAT QE NA I KANE DERGUAR NE PDF/EXCEL</div>
-                    <div>!!! BESONDERE MERKMALE - MAX 70 CHARACTERS</div>
-                    <div>!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)</div>
-                    <div>!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.</div>
-                  </div>
-                  <div
-                    ref={mstChecklistScrollRef}
-                    className="overflow-x-auto scrollbar-hide cursor-grab active:cursor-grabbing"
-                    style={{ WebkitOverflowScrolling: "touch" }}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return
-                      const target = event.target as HTMLElement
-                      if (target.closest("input, textarea, button, select, [role=\"checkbox\"]")) {
-                        return
-                      }
-                      const container = mstChecklistScrollRef.current
-                      if (!container) return
-                      mstChecklistDragRef.current.active = true
-                      mstChecklistDragRef.current.startX = event.pageX - container.offsetLeft
-                      mstChecklistDragRef.current.startScrollLeft = container.scrollLeft
-                    }}
-                    onMouseUp={() => {
-                      mstChecklistDragRef.current.active = false
-                    }}
-                    onMouseLeave={() => {
-                      mstChecklistDragRef.current.active = false
-                    }}
-                    onMouseMove={(event) => {
-                      if (!mstChecklistDragRef.current.active) return
-                      event.preventDefault()
-                      const container = mstChecklistScrollRef.current
-                      if (!container) return
-                      const x = event.pageX - container.offsetLeft
-                      const walk = (x - mstChecklistDragRef.current.startX) * 1.2
-                      container.scrollLeft = mstChecklistDragRef.current.startScrollLeft - walk
-                    }}
-                  >
-                    <div className="min-w-[1200px]">
-                      <div className="grid grid-cols-15 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
-                        <div className="col-span-1">NO</div>
-                        <div className="col-span-2">PATH</div>
-                        <div className="col-span-2">DETYRAT</div>
-                        <div className="col-span-2">KEYWORDS</div>
-                        <div className="col-span-2">PERSHKRIMI</div>
-                        <div className="col-span-1">KATEGORIA</div>
-                        <div className="col-span-1">CHECK</div>
-                        <div className="col-span-1">INCL</div>
-                        <div className="col-span-2">KOMENT</div>
-                        <div className="col-span-1 text-right">ACTIONS</div>
-                      </div>
-                      <div className="grid grid-cols-15 gap-3 py-3 text-sm items-center border-b">
-                        <div className="col-span-1 text-xs font-semibold text-slate-400">+</div>
-                        <div className="col-span-2">
-                          <Input
-                            value={newMstChecklistRow.path}
-                            onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
-                          placeholder="Path"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Input
-                          value={newMstChecklistRow.detyrat}
-                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
-                          placeholder="Detyrat"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Input
-                          value={newMstChecklistRow.keywords}
-                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
-                          placeholder="Keywords"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Input
-                          value={newMstChecklistRow.pershkrimi}
-                          onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
-                          placeholder="Pershkrimi"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                        <div className="col-span-1">
-                          <Input
-                            value={newMstChecklistRow.kategoria}
-                            onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
-                            placeholder="Kategoria"
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        <div className="col-span-1" />
-                        <div className="col-span-1" />
-                        <div className="col-span-2" />
-                        <div className="col-span-1 flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void addMstChecklistRow()}
-                          disabled={savingMstChecklistRow || !newMstChecklistRow.path.trim() || !newMstChecklistRow.detyrat.trim()}
-                        >
-                          {savingMstChecklistRow ? "Saving..." : "Add"}
-                        </Button>
-                      </div>
-                      </div>
-                      <div className="divide-y">
-                        {mstChecklistRows.map((row, index) => {
-                          const key = row.key
-                          const isChecked = mstChecklistChecked[key] || false
-                          const comment = mstChecklistComments[key] ?? row.item.comment ?? ""
-                          const assignees = row.item.assignees || []
-                          const assigneeInitials = assignees
-                            .map((a) => {
-                              const user = allUsers.find((u) => u.id === a.user_id)
-                              if (user?.full_name) {
-                                const names = user.full_name.split(" ")
-                                return names.map((n) => n[0]).join("").toUpperCase()
-                              }
-                              return user?.username?.substring(0, 2).toUpperCase() || ""
-                            })
-                            .filter(Boolean)
-                            .join(", ") || row.incl || "-"
-                          const isEditing = editingMstChecklistKey === key
-
-                          return (
-                            <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
-                              <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
-                              <div className="col-span-2" title={row.path}>
-                                {isEditing ? (
-                                  <Input
-                                    value={editingMstChecklistRow.path}
-                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
-                                    className="h-8 text-xs"
-                                  />
-                                ) : (
-                                  <div
-                                    className="flex items-start gap-1"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => {
-                                      if (row.path) {
-                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
-                                      }
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if ((event.key === "Enter" || event.key === " ") && row.path) {
-                                        setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
-                                      }
-                                    }}
-                                  >
-                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                      {row.path}
-                                    </span>
-                                    {row.path && row.path.length > 20 && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-5 w-5 shrink-0"
-                                        onClick={() => setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })}
-                                        title="View full text"
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="col-span-2 min-w-0 font-semibold" title={row.detyrat}>
-                                {isEditing ? (
-                                  <Input
-                                    value={editingMstChecklistRow.detyrat}
-                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
-                                    className="h-8 text-xs"
-                                  />
-                                ) : (
-                                  <div className="flex items-center gap-1 min-w-0">
-                                    <span className="flex-1 whitespace-normal break-words max-h-10 overflow-hidden text-ellipsis">
-                                      {row.detyrat}
-                                    </span>
-                                    {row.detyrat && row.detyrat.length > 20 && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-5 w-5 shrink-0"
-                                        onClick={() => setViewingChecklistField({ key, field: "detyrat", value: row.detyrat, label: "Task" })}
-                                        title="View full text"
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="col-span-2 min-w-0" title={row.keywords}>
-                                {isEditing ? (
-                                  <Input
-                                    value={editingMstChecklistRow.keywords}
-                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
-                                    className="h-8 text-xs"
-                                  />
-                                ) : (
-                                  <div
-                                    className="flex items-start gap-1 min-w-0"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => {
-                                      if (row.keywords) {
-                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
-                                      }
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if ((event.key === "Enter" || event.key === " ") && row.keywords) {
-                                        setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
-                                      }
-                                    }}
-                                  >
-                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                      {row.keywords}
-                                    </span>
-                                    {row.keywords && row.keywords.length > 20 && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-5 w-5 shrink-0"
-                                        onClick={() => setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })}
-                                        title="View full text"
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="col-span-2" title={row.pershkrimi}>
-                                {isEditing ? (
-                                  <Input
-                                    value={editingMstChecklistRow.pershkrimi}
-                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
-                                    className="h-8 text-xs"
-                                  />
-                                ) : (
-                                  <div
-                                    className="flex items-start gap-1"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => {
-                                      if (row.pershkrimi) {
-                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
-                                      }
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if ((event.key === "Enter" || event.key === " ") && row.pershkrimi) {
-                                        setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
-                                      }
-                                    }}
-                                  >
-                                    <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                      {row.pershkrimi}
-                                    </span>
-                                    {row.pershkrimi && row.pershkrimi.length > 20 && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-5 w-5 shrink-0"
-                                        onClick={() => setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })}
-                                        title="View full text"
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="col-span-1" title={row.kategoria}>
-                                {isEditing ? (
-                                  <Input
-                                    value={editingMstChecklistRow.kategoria}
-                                    onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
-                                    className="h-8 text-xs"
-                                  />
-                                ) : (
-                                  <div className="flex items-start gap-1">
-                                    <span className="flex-1 whitespace-normal break-words">{row.kategoria}</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="col-span-1 flex justify-center">
-                                <Checkbox
-                                  checked={isChecked}
-                                  onCheckedChange={() => toggleFinalChecklist(row.item)}
-                                />
-                              </div>
-                              <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
-                              <div className="col-span-2 pr-3">
-                                <Input
-                                  placeholder="Koment"
-                                  className="h-8 text-xs w-full"
-                                  value={comment}
-                                  onChange={(e) => {
-                                    const newComment = e.target.value
-                                    setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
-                                    queueMstCommentSave(row.item, newComment)
-                                  }}
-                                  onBlur={(e) => updateMstChecklistComment(row.item, e.target.value)}
-                                />
-                              </div>
-                              <div className="col-span-1 flex items-center justify-end gap-2">
-                                {isEditing ? (
-                                  <>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() => void saveMstChecklistRow(row)}
-                                      aria-label="Save checklist row"
-                                      title="Save"
-                                      disabled={savingMstChecklistRow}
-                                    >
-                                      <Check className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={cancelEditMstChecklistRow}
-                                      aria-label="Cancel editing"
-                                      title="Cancel"
-                                    >
-                                      <span className="text-xs">X</span>
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() => startEditMstChecklistRow(row)}
-                                      aria-label="Edit checklist row"
-                                      title="Edit"
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      className="text-red-600 border-red-200 hover:bg-red-50"
-                                      onClick={() => void deleteMstChecklistRow(row)}
-                                      aria-label="Delete checklist row"
-                                      title="Delete"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                        {!mstChecklistRows.length ? (
-                          <div className="py-8 text-center text-sm text-muted-foreground">
-                            No checklist rows yet. Add one above to get started.
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {/* View Full Text Modal */}
-                      <Dialog open={viewingChecklistField !== null} onOpenChange={(open) => !open && setViewingChecklistField(null)}>
-                        <DialogContent className="sm:max-w-2xl">
-                          <DialogHeader>
-                            <DialogTitle>{viewingChecklistField?.label || "Full Text"}</DialogTitle>
-                          </DialogHeader>
-                          <div className="mt-4">
-                            <div className="rounded-lg border bg-slate-50 p-4">
-                              <p className="whitespace-pre-wrap text-sm">{viewingChecklistField?.value || ""}</p>
-                            </div>
-                            <div className="mt-4 flex justify-end">
-                              <Button
-                                variant="outline"
-                                onClick={() => {
-                                  const value = viewingChecklistField?.value || ""
-                                  if (!value) return
-                                  void navigator.clipboard.writeText(value)
-                                  toast.success("Copied to clipboard")
-                                }}
-                              >
-                                Copy
-                              </Button>
-                            </div>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ) : null}
-
-            {mstTab === "members" ? (
-              <Card>
-                <div className="p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-lg font-semibold">Members</div>
-                    <div className="flex items-center gap-2">
-                      <Select value={newMemberId} onValueChange={setNewMemberId}>
-                        <SelectTrigger className="w-56">
-                          <SelectValue placeholder="Select member" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {departmentUsers
-                            .filter((u) => !members.some((m) => m.id === u.id))
-                            .map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || u.email}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        onClick={async () => {
-                          if (!project || !newMemberId) return
-                          setSavingMembers(true)
-                          try {
-                            const res = await apiFetch("/project-members", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ project_id: project.id, user_ids: [newMemberId] }),
-                            })
-                            if (!res?.ok) {
-                              toast.error("Failed to add member")
-                              return
-                            }
-                            const added = (await res.json()) as User[]
-                            const map = new Map(members.map((m) => [m.id, m]))
-                            added.forEach((u) => map.set(u.id, u))
-                            setMembers(Array.from(map.values()))
-                            setNewMemberId("")
-                            toast.success("Member added")
-                          } finally {
-                            setSavingMembers(false)
-                          }
-                        }}
-                        disabled={savingMembers || !newMemberId}
-                      >
-                        {savingMembers ? "Adding..." : "Add"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-6">
-                    {members.length ? (
-                      members.map((m, idx) => {
-                        const initialsText = initials(m.full_name || m.username || m.email || "-")
-                        const colors = ["bg-blue-100 text-blue-800", "bg-green-100 text-green-800", "bg-purple-100 text-purple-800", "bg-rose-100 text-rose-800", "bg-amber-100 text-amber-800"]
-                        const colorClass = colors[idx % colors.length]
+                    <div className="grid gap-3">
+                      {planningTopItems.map((item, idx) => {
+                        const isEditing = editingPlanningItemId === item.id
+                        const itemNumber = planningIndexMap.get(item.id) ?? idx + 1
                         return (
-                          <div key={m.id} className="flex flex-col items-center gap-2">
-                            <div className={`h-16 w-16 rounded-full flex items-center justify-center text-lg font-semibold ${colorClass}`}>
-                              {initialsText}
-                            </div>
-                            <div className="text-sm font-semibold">{m.full_name || m.username || m.email}</div>
-                          </div>
-                        )
-                      })
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No members added.</div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            ) : null}
-
-            {mstTab === "ga" ? renderGaNotes() : null}
-          </>
-        ) : mstPhase === "CONTROL" ? (
-          <>
-            <div className="border-b flex gap-6">
-              {[
-                { id: "tasks", label: "Tasks (Detyrat)" },
-                { id: "ga", label: "Shenime GA/KA" },
-              ].map((tab) => {
-                const isActive = mstTab === tab.id
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setMstTab(tab.id as typeof mstTab)}
-                    className={[
-                      "relative pb-3 text-sm font-medium",
-                      tab.id === "ga" ? "ml-auto" : "",
-                      isActive ? "text-blue-600" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {tab.label}
-                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-                  </button>
-                )
-              })}
-            </div>
-            {mstTab === "ga" ? (
-              renderGaNotes()
-            ) : (
-              <Card className="border-0 shadow-sm">
-                <div className="p-6 space-y-4">
-                  <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
-                  {/* Table header */}
-                  <div className="grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider pb-3">
-                    <div className="col-span-2">Task</div>
-                    <div className="col-span-1">Assigned</div>
-                    <div className="col-span-1">Date</div>
-                    <div className="col-span-1">Finish</div>
-                    <div className="col-span-2">Total</div>
-                    <div className="col-span-2">Completed</div>
-                    <div className="col-span-1">KO</div>
-                    <div className="col-span-1">Status</div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {/* Inline form row */}
-                  <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                    <div className="col-span-2">
-                      <input
-                        type="text"
-                        placeholder="Enter task name..."
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        value={controlTitle}
-                        onChange={(e) => setControlTitle(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Select value={controlAssignee} onValueChange={setControlAssignee}>
-                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-">
-                            {controlAssignee === "__unassigned__" 
-                              ? "-" 
-                              : memberLabel(controlAssignee)}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">-</SelectItem>
-                          {assignableUsers.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-1">
-                      <input
-                        type="date"
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
-                        value={controlProductionDate}
-                        onChange={(e) => setControlProductionDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Select
-                        value={controlFinishPeriod}
-                        onValueChange={(value) =>
-                          setControlFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                        }
-                      >
-                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="All day" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                          {FINISH_PERIOD_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {value}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        placeholder="0"
-                        value={controlTotal}
-                        onChange={(e) => setControlTotal(e.target.value)}
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        placeholder="0"
-                        value={controlCompleted}
-                        onChange={(e) => setControlCompleted(e.target.value)}
-                        className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
-                        <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                          <SelectValue placeholder="-">
-                            {controlKoUserId === "__unassigned__" 
-                              ? "-" 
-                              : memberLabel(controlKoUserId)}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__unassigned__">-</SelectItem>
-                          {members.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.full_name || u.username || u.email}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-1">
-                      <Button
-                        size="sm"
-                        className="rounded-full px-5 shadow-sm"
-                        onClick={async () => {
-                          if (!project || !controlTitle.trim()) return
-                          setCreatingControlTask(true)
-                          try {
-                            const res = await apiFetch("/tasks", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                title: controlTitle.trim(),
-                                project_id: project.id,
-                                department_id: project.department_id,
-                                assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                                priority: "NORMAL",
-                                phase: "CONTROL",
-                                finish_period:
-                                  controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
-                                due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
-                                internal_notes: serializeInternalNotes({
-                                  total: controlTotal || "0",
-                                  completed: controlCompleted || "0",
-                                  koUserId: controlKoUserId === "__unassigned__" ? null : controlKoUserId,
-                                  productionDate: controlProductionDate || null,
-                                }),
-                              }),
-                            })
-                            if (!res?.ok) {
-                              toast.error("Failed to add task")
-                              return
-                            }
-                            const created = (await res.json()) as Task
-                            setTasks((prev) => [...prev, created])
-                            setControlTitle("")
-                            setControlAssignee("__unassigned__")
-                            setControlKoUserId("__unassigned__")
-                            setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-                            setControlTotal("0")
-                            setControlCompleted("0")
-                            toast.success("Task added")
-                          } finally {
-                            setCreatingControlTask(false)
-                          }
-                        }}
-                        disabled={creatingControlTask || !controlTitle.trim()}
-                      >
-                        {creatingControlTask ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {/* Task rows */}
-                  <div className="divide-y divide-slate-100">
-                    {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
-                      const koUserId = parseKoUserId(task.internal_notes)
-                      const productionDate = parseProductionDate(task.internal_notes)
-                      const isEditing = editingTaskId === task.id
-                      
-                      // Get TOTAL from origin task's daily_products
-                      const originTaskId = getOriginTaskId(task.internal_notes)
-                      const originTask = originTaskId ? tasks.find((t) => t.id === originTaskId) : null
-                      const totalFromOrigin = originTask?.daily_products ?? null
-                      const baseTotalVal = totalFromOrigin !== null 
-                        ? totalFromOrigin 
-                        : toNonNegativeInt(controlEdits[task.id]?.total || "0")
-                      const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
-                      const completedValue = isEditing
-                        ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
-                        : controlEdits[task.id]?.completed || "0"
-                      const completedNum = toNonNegativeInt(completedValue)
-                      const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
-                      return (
-                        <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
-                          <div className="col-span-2 pr-2">
-                            {isEditing ? (
-                              <input
-                                type="text"
-                                value={editingTaskTitle}
-                                onChange={(e) => setEditingTaskTitle(e.target.value)}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm font-medium"
-                                autoFocus
-                              />
-                            ) : (
-                              <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2 min-w-0">
-                            {isEditing ? (
-                              <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
-                                <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue>
-                                    {editingTaskAssignee === "__unassigned__" 
-                                      ? "-" 
-                                      : memberLabel(editingTaskAssignee)}
-                                  </SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">-</SelectItem>
-                                  {assignableUsers.map((u) => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.username || u.email}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            {isEditing ? (
-                              <input
-                                type="date"
-                                value={editingTaskProductionDate}
-                                onChange={(e) => setEditingTaskProductionDate(e.target.value)}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
-                              />
-                            ) : (
-                              <span className="text-slate-500">{productionDate ? new Date(productionDate).toLocaleDateString() : "-"}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            {isEditing ? (
-                              <Select
-                                value={editingTaskFinishPeriod}
-                                onValueChange={(value) =>
-                                  setEditingTaskFinishPeriod(
-                                    value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="All day" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                                  {FINISH_PERIOD_OPTIONS.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <span className="text-slate-500">{task.finish_period || "-"}</span>
-                            )}
-                          </div>
-                          <div className="col-span-2 px-2">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                value={totalFromOrigin !== null ? totalFromOrigin.toString() : editingTaskTotal}
-                                onChange={(e) => setEditingTaskTotal(e.target.value)}
-                                placeholder="0"
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
-                                readOnly={totalFromOrigin !== null}
-                                title={totalFromOrigin !== null ? "TOTAL from PRODUCT phase (read-only)" : ""}
-                              />
-                            ) : (
-                              <span className="text-slate-500">{totalFromOrigin !== null ? totalFromOrigin.toString() : (controlEdits[task.id]?.total || "-")}</span>
-                            )}
-                          </div>
-                          <div className="col-span-2 px-2">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0"
-                                value={editingTaskCompleted}
-                                onChange={(e) => {
-                                  const rawValue = e.target.value
-                                  const completedNum = toNonNegativeInt(rawValue)
-                                  const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
-                                  const totalNum = toNonNegativeInt(totalValue)
-                                  const newCompleted = completedNum.toString()
-                                  const newStatus = computeStatusFromCompleted(totalNum, completedNum)
-                                  setEditingTaskCompleted(newCompleted)
-                                  setControlEdits((prev) => ({
-                                    ...prev,
-                                    [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                  }))
-                                }}
-                                className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
-                              />
-                            ) : (
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                  onClick={async () => {
-                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
-                                    const newCompleted = completedNum.toString()
-                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
-                                    setControlEdits((prev) => ({
-                                      ...prev,
-                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                    }))
-                                    const currentNotes = task.internal_notes || ""
-                                    const originTaskId = getOriginTaskId(currentNotes)
-                                    const koUserId = parseKoUserId(currentNotes)
-                                    const productionDate = parseProductionDate(currentNotes)
-                                    const internalNotes = serializeInternalNotes({
-                                      originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || totalVal.toString(),
-                                      completed: newCompleted,
-                                      koUserId: koUserId || null,
-                                      productionDate: productionDate || null,
-                                    })
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        internal_notes: internalNotes,
-                                        due_date: productionDate ? new Date(productionDate).toISOString() : null,
-                                      }),
-                                    })
-                                    if (!res?.ok) {
-                                      toast.error("Failed to update completed count")
-                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
-                                      setControlEdits((prev) => ({
-                                        ...prev,
-                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
-                                      }))
-                                      return
-                                    }
-                                    try {
-                                      const updated = (await res.json()) as Task
-                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                    } catch {
-                                      // ignore JSON parse errors
-                                    }
-                                  }}
-                                >
-                                  -
-                                </button>
-                                <div className="min-w-[32px] text-center text-sm text-slate-700">
-                                  {controlEdits[task.id]?.completed || "0"}
-                                </div>
-                                <button
-                                  type="button"
-                                  className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
-                                  onClick={async () => {
-                                    const prevCompleted = controlEdits[task.id]?.completed || "0"
-                                    const prevCompletedNum = toNonNegativeInt(prevCompleted)
-                                    // Cap completed at total - don't allow exceeding total
-                                    const completedNum = Math.min(prevCompletedNum + 1, totalVal)
-                                    if (completedNum === prevCompletedNum) {
-                                      // Already at max, don't update
-                                      return
-                                    }
-                                    const newCompleted = completedNum.toString()
-                                    const newStatus = computeStatusFromCompleted(totalVal, completedNum)
-                                    setControlEdits((prev) => ({
-                                      ...prev,
-                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
-                                    }))
-                                    const currentNotes = task.internal_notes || ""
-                                    const originTaskId = getOriginTaskId(currentNotes)
-                                    const koUserId = parseKoUserId(currentNotes)
-                                    const productionDate = parseProductionDate(currentNotes)
-                                    const internalNotes = serializeInternalNotes({
-                                      originTaskId: originTaskId || undefined,
-                                      total: controlEdits[task.id]?.total || totalVal.toString(),
-                                      completed: newCompleted,
-                                      koUserId: koUserId || null,
-                                      productionDate: productionDate || null,
-                                    })
-                                    const res = await apiFetch(`/tasks/${task.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        internal_notes: internalNotes,
-                                        due_date: productionDate ? new Date(productionDate).toISOString() : null,
-                                      }),
-                                    })
-                                    if (!res?.ok) {
-                                      toast.error("Failed to update completed count")
-                                      const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
-                                      setControlEdits((prev) => ({
-                                        ...prev,
-                                        [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
-                                      }))
-                                      return
-                                    }
-                                    try {
-                                      const updated = (await res.json()) as Task
-                                      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                                    } catch {
-                                      // ignore JSON parse errors
-                                    }
-                                  }}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            {isEditing ? (
-                              <Select value={editingTaskKoUserId} onValueChange={setEditingTaskKoUserId}>
-                                <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                  <SelectValue placeholder="-">
-                                    {editingTaskKoUserId === "__unassigned__" 
-                                      ? "-" 
-                                      : memberLabel(editingTaskKoUserId)}
-                                  </SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__unassigned__">-</SelectItem>
-                                  {members.map((u) => (
-                                    <SelectItem key={u.id} value={u.id}>
-                                      {u.full_name || u.username || u.email}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <span className="block truncate text-slate-500">{memberLabel(koUserId)}</span>
-                            )}
-                          </div>
-                          <div className="col-span-1 px-2">
-                            <Badge
-                              variant={autoStatus === "DONE" ? "default" : "outline"}
-                              className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
-                            >
-                              {statusLabel(autoStatus)}
-                            </Badge>
-                          </div>
-                          <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1 px-2">
-                            {isEditing ? (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 px-2 text-slate-400 hover:text-blue-600"
-                                  onClick={() => void saveTaskEdit()}
-                                  disabled={savingTaskEdit}
-                                >
-                                  {savingTaskEdit ? "Saving..." : "Save"}
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 px-2 text-slate-400 hover:text-slate-600"
-                                  onClick={cancelEditTask}
-                                >
-                                  Cancel
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                                  onClick={() => startEditTask(task)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                                  onClick={async () => {
-                                    const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
-                                    if (!res?.ok) {
-                                      if (res?.status == 405) {
-                                        toast.error("Delete endpoint not active. Restart backend.")
-                                      } else {
-                                        toast.error("Failed to delete task")
-                                      }
-                                      return
-                                    }
-                                    setTasks((prev) => prev.filter((t) => t.id !== task.id))
-                                    toast.success("Task deleted")
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {tasks.length === 0 ? (
-                      <div className="py-8 text-center text-sm text-slate-400">
-                        No tasks yet. Add one above to get started.
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </Card>
-            )}
-          </>
-        ) : mstPhase === "FINAL" ? (
-          <>
-            <div className="border-b flex gap-6">
-              {[
-                { id: "final", label: "Finalizimi" },
-                { id: "ga", label: "Shenime GA/KA" },
-              ].map((tab) => {
-                const isActive = mstTab === tab.id
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setMstTab(tab.id as typeof mstTab)}
-                    className={[
-                      "relative pb-3 text-sm font-medium",
-                      tab.id === "ga" ? "ml-auto" : "",
-                      isActive ? "text-blue-600" : "text-muted-foreground",
-                    ].join(" ")}
-                  >
-                    {tab.label}
-                    {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
-                  </button>
-                )
-              })}
-            </div>
-            {mstTab === "ga" ? (
-              renderGaNotes()
-            ) : (
-              <Card className="border-0 shadow-sm">
-                <div className="p-6 space-y-6">
-                  <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
-                  
-                  <div className="space-y-4">
-                    {finalizationItems
-                      .slice()
-                      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                      .map((item) => {
-                        const isEditing = editingFinalizationId === item.id
-                        const itemNumber = item.position ?? 0
-                        return (
-                          <div
-                            key={item.id}
-                            className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
-                          >
-                            <div className="w-10 text-right text-xs text-muted-foreground">
+                          <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3">
+                            <div className="col-span-1 text-right text-xs text-muted-foreground">
                               {isEditing ? (
                                 <Input
                                   type="number"
                                   min={1}
                                   inputMode="numeric"
-                                  value={editingFinalizationNumber}
-                                  onChange={(e) => setEditingFinalizationNumber(e.target.value)}
+                                  value={editingPlanningItemNumber}
+                                  onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
                                   className="h-8 w-14 text-right"
                                 />
                               ) : (
-                                itemNumber ? `${itemNumber}.` : "-"
+                                `${itemNumber}.`
                               )}
                             </div>
-                            <Checkbox
-                              id={item.id}
-                              checked={Boolean(finalizationChecks[item.id])}
-                              onCheckedChange={(checked) =>
-                                void toggleFinalizationChecklist(item.id, Boolean(checked))
-                              }
-                            />
-                            <div className="flex-1">
+                            <div className="col-span-1 flex justify-center">
+                              <Checkbox
+                                checked={Boolean(descriptionChecks[item.id])}
+                                onCheckedChange={() => togglePlanning(item)}
+                              />
+                            </div>
+                            <div className="col-span-6">
                               {isEditing ? (
                                 <Input
-                                  value={editingFinalizationText}
-                                  onChange={(e) => setEditingFinalizationText(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !savingFinalization) {
-                                      void saveFinalizationItem()
-                                    } else if (e.key === "Escape") {
-                                      cancelEditFinalizationItem()
-                                    }
-                                  }}
-                                  className="border-slate-200"
+                                  value={editingPlanningItemText}
+                                  onChange={(e) => setEditingPlanningItemText(e.target.value)}
+                                  className="w-full"
+                                />
+                              ) : (
+                                <span className="text-sm font-semibold uppercase tracking-wide">
+                                  {item.title || "-"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="col-span-2">
+                              {isAdmin ? (
+                                isEditing ? (
+                                  <div className="flex flex-col items-start gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!editingPlanningItemText.trim() || savingPlanningItem}
+                                      onClick={() => void savePlanningItem()}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-start gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => void deletePlanningItem(item)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                )
+                              ) : null}
+                            </div>
+                            <div className="col-span-2" />
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="grid grid-cols-12 items-center bg-slate-50 px-3 py-2 font-semibold text-xs uppercase text-slate-600 border">
+                      <div className="col-span-1" />
+                      <div className="col-span-1" />
+                      <div className="col-span-6">Description/General Points</div>
+                      <div className="col-span-2 text-center">Actions</div>
+                      <div className="col-span-2 text-right">COMENT</div>
+                    </div>
+
+                    <div className="divide-y border rounded-lg">
+                      {planningOtherItems.map((item, idx) => {
+                        const comment = planningComments[item.id] || item.comment || ""
+                        const itemNumber = planningIndexMap.get(item.id) ?? (idx + 3)
+
+                        return (
+                          <div key={item.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3">
+                            <div className="col-span-1 text-right text-xs text-muted-foreground">
+                              {editingPlanningItemId === item.id ? (
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  inputMode="numeric"
+                                  value={editingPlanningItemNumber}
+                                  onChange={(e) => setEditingPlanningItemNumber(e.target.value)}
+                                  className="h-8 w-14 text-right"
+                                />
+                              ) : (
+                                `${itemNumber}.`
+                              )}
+                            </div>
+                            <div className="col-span-1 flex justify-center">
+                              <Checkbox
+                                checked={Boolean(descriptionChecks[item.id])}
+                                onCheckedChange={() => togglePlanning(item)}
+                              />
+                            </div>
+                            <div className="col-span-6">
+                              {editingPlanningItemId === item.id ? (
+                                <Input
+                                  value={editingPlanningItemText}
+                                  onChange={(e) => setEditingPlanningItemText(e.target.value)}
+                                  className="w-full"
+                                />
+                              ) : (
+                                <span className="text-sm">{item.title || "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-2">
+                              {isAdmin ? (
+                                editingPlanningItemId === item.id ? (
+                                  <div className="flex flex-col items-start gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!editingPlanningItemText.trim() || savingPlanningItem}
+                                      onClick={() => void savePlanningItem()}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={cancelEditPlanningItem}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-start gap-2">
+                                    <Button size="sm" variant="outline" onClick={() => startEditPlanningItem(item)}>
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => void deletePlanningItem(item)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                )
+                              ) : null}
+                            </div>
+                            <div className="col-span-2">
+                              <Input
+                                placeholder="Comment"
+                                value={comment}
+                                onChange={(e) => {
+                                  const newComment = e.target.value
+                                  setPlanningComments((prev) => ({ ...prev, [item.id]: newComment }))
+                                  setChecklistItems((prev) =>
+                                    prev.map((entry) =>
+                                      entry.id === item.id ? { ...entry, comment: newComment } : entry
+                                    )
+                                  )
+                                  apiFetch(`/checklist-items/${item.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ comment: newComment || null }),
+                                  }).catch(() => {
+                                    // Silently handle errors - update might still succeed
+                                  })
+                                }}
+                                onBlur={async (e) => {
+                                  const newComment = e.target.value
+                                  try {
+                                    await apiFetch(`/checklist-items/${item.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ comment: newComment || null }),
+                                    })
+                                  } catch {
+                                    // Silently handle network errors - update might still succeed
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {isAdmin ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          inputMode="numeric"
+                          value={newPlanningItemNumber}
+                          onChange={(e) => setNewPlanningItemNumber(e.target.value)}
+                          placeholder="No."
+                          className="w-24"
+                        />
+                        <Input
+                          value={newPlanningItemText}
+                          onChange={(e) => setNewPlanningItemText(e.target.value)}
+                          placeholder="Add planning checklist item..."
+                          className="flex-1 min-w-[220px]"
+                        />
+                        <Button
+                          variant="outline"
+                          disabled={!newPlanningItemText.trim() || addingPlanningItem}
+                          onClick={() => void addPlanningItem()}
+                        >
+                          {addingPlanningItem ? "Adding..." : "Add"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : mstPhase === "PRODUCT" ? (
+            <>
+              <div className="border-b flex gap-6">
+                {[
+                  { id: "tasks", label: "Tasks (Detyrat)" },
+                  { id: "checklists", label: "Checklists" },
+                  { id: "members", label: "Members" },
+                  { id: "ga", label: "Shenime GA/KA" },
+                ].map((tab) => {
+                  const isActive = mstTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setMstTab(tab.id as typeof mstTab)}
+                      className={[
+                        "relative pb-3 text-sm font-medium",
+                        isActive ? "text-blue-600" : "text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {tab.label}
+                      {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {mstTab === "tasks" ? (
+                <Card className="border-0 shadow-sm">
+                  <div className="p-6 space-y-4">
+                    <div className="text-lg font-semibold tracking-tight">Tasks</div>
+                    {/* Table header */}
+                    <div className="sticky top-0 z-40 -mx-6 px-6 py-3 grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider bg-white border-b border-slate-100 shadow-sm">
+                      <div className="col-span-3">Task</div>
+                      <div className="col-span-1">Assigned</div>
+                      <div className="col-span-2">Due Date</div>
+                      <div className="col-span-1">Finish</div>
+                      <div className="col-span-1">Daily Products</div>
+                      <div className="col-span-2">Completed</div>
+                      <div className="col-span-1">Status</div>
+                      <div className="col-span-1"></div>
+                    </div>
+                    {/* Inline form row */}
+                    <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                      <div className="col-span-3">
+                        <input
+                          type="text"
+                          placeholder="Enter task name..."
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={newInlineTaskTitle}
+                          onChange={(e) => setNewInlineTaskTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Select value={newInlineTaskAssignee} onValueChange={setNewInlineTaskAssignee}>
+                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                            <SelectValue placeholder="-" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">-</SelectItem>
+                            {assignableUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || u.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="date"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={newInlineTaskDueDate}
+                          onChange={(e) => setNewInlineTaskDueDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Select
+                          value={newInlineTaskFinishPeriod}
+                          onValueChange={(value) =>
+                            setNewInlineTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                            <SelectValue placeholder="All day" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1">
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={newInlineTaskTotal}
+                          onChange={(e) => setNewInlineTaskTotal(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={newInlineTaskCompleted}
+                          onChange={(e) => setNewInlineTaskCompleted(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Button
+                          size="sm"
+                          className="rounded-full px-5 shadow-sm"
+                          onClick={async () => {
+                            if (!project || !newInlineTaskTitle.trim()) return
+                            setCreatingInlineTask(true)
+                            try {
+                              const res = await apiFetch("/tasks", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  title: newInlineTaskTitle.trim(),
+                                  project_id: project.id,
+                                  department_id: project.department_id,
+                                  assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
+                                  priority: "NORMAL",
+                                  phase: "PRODUCT",
+                                  due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
+                                  finish_period:
+                                    newInlineTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE
+                                      ? null
+                                      : newInlineTaskFinishPeriod,
+                                  daily_products: newInlineTaskTotal ? parseInt(newInlineTaskTotal, 10) : null,
+                                  internal_notes: `completed_products=${newInlineTaskCompleted || 0}`,
+                                }),
+                              })
+                              if (!res?.ok) {
+                                toast.error("Failed to add task")
+                                return
+                              }
+                              const created = (await res.json()) as Task
+                              setTasks((prev) => [...prev, created])
+                              setNewInlineTaskTitle("")
+                              setNewInlineTaskAssignee("__unassigned__")
+                              setNewInlineTaskDueDate("")
+                              setNewInlineTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                              setNewInlineTaskTotal("")
+                              setNewInlineTaskCompleted("")
+                              toast.success("Task added")
+                            } finally {
+                              setCreatingInlineTask(false)
+                            }
+                          }}
+                          disabled={creatingInlineTask || !newInlineTaskTitle.trim()}
+                        >
+                          {creatingInlineTask ? "..." : "Save"}
+                        </Button>
+                      </div>
+                      <div className="col-span-1"></div>
+                    </div>
+                    {/* Task rows */}
+                    <div className="divide-y divide-slate-100">
+                      {tasks.filter((task) => (task.phase ?? "PRODUCT") === "PRODUCT").map((task, index) => {
+                        const isEditing = editingTaskId === task.id
+                        const baseTotalVal =
+                          task.daily_products ?? (parseInt(controlEdits[task.id]?.total || "0", 10) || 0)
+                        const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
+                        const completedValue = isEditing
+                          ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
+                          : controlEdits[task.id]?.completed || "0"
+                        const completedNum = toNonNegativeInt(completedValue)
+                        const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
+                        return (
+                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                            <div className="col-span-3 pr-2">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editingTaskTitle}
+                                  onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
                                   autoFocus
                                 />
                               ) : (
-                                <label
-                                  htmlFor={item.id}
-                                  className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
-                                >
-                                  {item.title}
-                                </label>
+                                <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="col-span-1 px-2 min-w-0">
+                              {isEditing ? (
+                                <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
+                                  <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__unassigned__">-</SelectItem>
+                                    {assignableUsers.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>
+                                        {u.full_name || u.username || u.email}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
+                              )}
+                            </div>
+                            <div className="col-span-2 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editingTaskDueDate}
+                                  onChange={(e) => setEditingTaskDueDate(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                />
+                              ) : (
+                                <span className="text-slate-500">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <Select
+                                  value={editingTaskFinishPeriod}
+                                  onValueChange={(value) =>
+                                    setEditingTaskFinishPeriod(
+                                      value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                    <SelectValue placeholder="All day" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                    {FINISH_PERIOD_OPTIONS.map((value) => (
+                                      <SelectItem key={value} value={value}>
+                                        {value}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="text-slate-500">{task.finish_period || "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={editingTaskTotal}
+                                  onChange={(e) => setEditingTaskTotal(e.target.value)}
+                                  placeholder="0"
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                />
+                              ) : (
+                                <span className="text-slate-500">
+                                  {task.daily_products ?? controlEdits[task.id]?.total ?? "-"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="col-span-2 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={editingTaskCompleted}
+                                  onChange={(e) => {
+                                    const rawValue = e.target.value
+                                    const completedNum = toNonNegativeInt(rawValue)
+                                    const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+                                    const totalNum = toNonNegativeInt(totalValue)
+                                    // Cap completed at total
+                                    const cappedCompleted = Math.min(completedNum, totalNum)
+                                    const newCompleted = cappedCompleted.toString()
+                                    const newStatus = computeStatusFromCompleted(totalNum, cappedCompleted)
+                                    setEditingTaskCompleted(newCompleted)
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                  }}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                                />
+                              ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                    onClick={async () => {
+                                      const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                      const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
+                                      const newCompleted = completedNum.toString()
+                                      const newStatus = computeStatusFromCompleted(totalVal, completedNum)
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                      }))
+                                      const currentNotes = task.internal_notes || ""
+                                      const originTaskId = getOriginTaskId(currentNotes)
+                                      const koUserId = parseKoUserId(currentNotes)
+                                      const internalNotes = serializeInternalNotes({
+                                        originTaskId: originTaskId || undefined,
+                                        total: totalVal.toString(),
+                                        completed: newCompleted,
+                                        koUserId: koUserId || null,
+                                      })
+                                      const res = await apiFetch(`/tasks/${task.id}`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          internal_notes: internalNotes,
+                                        }),
+                                      })
+                                      if (!res?.ok) {
+                                        toast.error("Failed to update completed count")
+                                        const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                        setControlEdits((prev) => ({
+                                          ...prev,
+                                          [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                        }))
+                                        return
+                                      }
+                                      try {
+                                        const updated = (await res.json()) as Task
+                                        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                      } catch {
+                                        // ignore JSON parse errors
+                                      }
+                                    }}
+                                  >
+                                    -
+                                  </button>
+                                  <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                    {controlEdits[task.id]?.completed || "0"}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                    onClick={async () => {
+                                      const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                      const prevCompletedNum = toNonNegativeInt(prevCompleted)
+                                      // Cap completed at total - don't allow exceeding total
+                                      const completedNum = Math.min(prevCompletedNum + 1, totalVal)
+                                      if (completedNum === prevCompletedNum) {
+                                        // Already at max, don't update
+                                        return
+                                      }
+                                      const newCompleted = completedNum.toString()
+                                      const newStatus = computeStatusFromCompleted(totalVal, completedNum)
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                      }))
+                                      const currentNotes = task.internal_notes || ""
+                                      const originTaskId = getOriginTaskId(currentNotes)
+                                      const koUserId = parseKoUserId(currentNotes)
+                                      const internalNotes = serializeInternalNotes({
+                                        originTaskId: originTaskId || undefined,
+                                        total: totalVal.toString(),
+                                        completed: newCompleted,
+                                        koUserId: koUserId || null,
+                                      })
+                                      const res = await apiFetch(`/tasks/${task.id}`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          internal_notes: internalNotes,
+                                        }),
+                                      })
+                                      if (!res?.ok) {
+                                        toast.error("Failed to update completed count")
+                                        const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                        setControlEdits((prev) => ({
+                                          ...prev,
+                                          [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                        }))
+                                        return
+                                      }
+                                      try {
+                                        const updated = (await res.json()) as Task
+                                        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                      } catch {
+                                        // ignore JSON parse errors
+                                      }
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              <Badge
+                                variant={autoStatus === "DONE" ? "default" : "outline"}
+                                className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                              >
+                                {statusLabel(autoStatus)}
+                              </Badge>
+                            </div>
+                            <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1">
                               {isEditing ? (
                                 <>
                                   <Button
+                                    variant="ghost"
                                     size="sm"
-                                    variant="outline"
-                                    onClick={() => void saveFinalizationItem()}
-                                    disabled={savingFinalization}
+                                    className="h-8 px-2 text-slate-400 hover:text-blue-600"
+                                    onClick={() => void saveTaskEdit()}
+                                    disabled={savingTaskEdit}
                                   >
-                                    Save
+                                    {savingTaskEdit ? "Saving..." : "Save"}
                                   </Button>
                                   <Button
-                                    size="sm"
                                     variant="ghost"
-                                    onClick={cancelEditFinalizationItem}
+                                    size="sm"
+                                    className="h-8 px-2 text-slate-400 hover:text-slate-600"
+                                    onClick={cancelEditTask}
                                   >
                                     Cancel
                                   </Button>
@@ -7853,19 +6669,32 @@ export default function PcmProjectPage() {
                               ) : (
                                 <>
                                   <Button
-                                    size="sm"
                                     variant="ghost"
-                                    onClick={() => startEditFinalizationItem(item.id)}
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                    onClick={() => startEditTask(task)}
                                   >
-                                    Edit
+                                    <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button
-                                    size="sm"
                                     variant="ghost"
-                                    onClick={() => void deleteFinalizationItem(item.id)}
-                                    className="text-red-600 hover:text-red-700"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                    onClick={async () => {
+                                      const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                      if (!res?.ok) {
+                                        if (res?.status == 405) {
+                                          toast.error("Delete endpoint not active. Restart backend.")
+                                        } else {
+                                          toast.error("Failed to delete task")
+                                        }
+                                        return
+                                      }
+                                      setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                      toast.success("Task deleted")
+                                    }}
                                   >
-                                    Delete
+                                    <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </>
                               )}
@@ -7873,62 +6702,1217 @@ export default function PcmProjectPage() {
                           </div>
                         )
                       })}
-                    {finalizationItems.length === 0 && (
-                      <div className="text-sm text-muted-foreground text-center py-8">
-                        No checklist items yet. Add one above.
+                      {tasks.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-slate-400">
+                          No tasks yet. Add one above to get started.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              ) : null}
+
+              {mstTab === "checklists" ? (
+                <Card>
+                  <div className="p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-lg font-semibold">Checklists</div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void exportMstChecklist()}
+                        disabled={exportingMstChecklist || mstChecklistItems.length === 0}
+                        className="h-8 rounded-xl border-slate-200 text-xs"
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        {exportingMstChecklist ? "Exporting..." : "Export Excel"}
+                      </Button>
+                    </div>
+                    <div className="text-sm text-red-600 space-y-1">
+                      <div>!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER</div>
+                      <div>!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA</div>
+                      <div>!!! KRAHASO TE DHENAT QE DERGOHEN TE PLOTESUARA, A JANE NE PERPUTHSHMERI ME DROPDOWN DHE ME TE DHENAT QE NA I KANE DERGUAR NE PDF/EXCEL</div>
+                      <div>!!! BESONDERE MERKMALE - MAX 70 CHARACTERS</div>
+                      <div>!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)</div>
+                      <div>!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.</div>
+                    </div>
+                    <div
+                      ref={mstChecklistScrollRef}
+                      className="overflow-x-auto scrollbar-hide cursor-grab active:cursor-grabbing"
+                      style={{ WebkitOverflowScrolling: "touch" }}
+                      onMouseDown={(event) => {
+                        if (event.button !== 0) return
+                        const target = event.target as HTMLElement
+                        if (target.closest("input, textarea, button, select, [role=\"checkbox\"]")) {
+                          return
+                        }
+                        const container = mstChecklistScrollRef.current
+                        if (!container) return
+                        mstChecklistDragRef.current.active = true
+                        mstChecklistDragRef.current.startX = event.pageX - container.offsetLeft
+                        mstChecklistDragRef.current.startScrollLeft = container.scrollLeft
+                      }}
+                      onMouseUp={() => {
+                        mstChecklistDragRef.current.active = false
+                      }}
+                      onMouseLeave={() => {
+                        mstChecklistDragRef.current.active = false
+                      }}
+                      onMouseMove={(event) => {
+                        if (!mstChecklistDragRef.current.active) return
+                        event.preventDefault()
+                        const container = mstChecklistScrollRef.current
+                        if (!container) return
+                        const x = event.pageX - container.offsetLeft
+                        const walk = (x - mstChecklistDragRef.current.startX) * 1.2
+                        container.scrollLeft = mstChecklistDragRef.current.startScrollLeft - walk
+                      }}
+                    >
+                      <div className="min-w-[1200px]">
+                        <div className="grid grid-cols-15 gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                          <div className="col-span-1">NO</div>
+                          <div className="col-span-2">PATH</div>
+                          <div className="col-span-2">DETYRAT</div>
+                          <div className="col-span-2">KEYWORDS</div>
+                          <div className="col-span-2">PERSHKRIMI</div>
+                          <div className="col-span-1">KATEGORIA</div>
+                          <div className="col-span-1">CHECK</div>
+                          <div className="col-span-1">INCL</div>
+                          <div className="col-span-2">KOMENT</div>
+                          <div className="col-span-1 text-right">ACTIONS</div>
+                        </div>
+                        <div className="grid grid-cols-15 gap-3 py-3 text-sm items-center border-b">
+                          <div className="col-span-1 text-xs font-semibold text-slate-400">+</div>
+                          <div className="col-span-2">
+                            <Input
+                              value={newMstChecklistRow.path}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
+                              placeholder="Path"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              value={newMstChecklistRow.detyrat}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
+                              placeholder="Detyrat"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              value={newMstChecklistRow.keywords}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
+                              placeholder="Keywords"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              value={newMstChecklistRow.pershkrimi}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
+                              placeholder="Pershkrimi"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            <Input
+                              value={newMstChecklistRow.kategoria}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
+                              placeholder="Kategoria"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-1" />
+                          <div className="col-span-1" />
+                          <div className="col-span-2" />
+                          <div className="col-span-1 flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void addMstChecklistRow()}
+                              disabled={savingMstChecklistRow || !newMstChecklistRow.path.trim() || !newMstChecklistRow.detyrat.trim()}
+                            >
+                              {savingMstChecklistRow ? "Saving..." : "Add"}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="divide-y">
+                          {mstChecklistRows.map((row, index) => {
+                            const key = row.key
+                            const isChecked = mstChecklistChecked[key] || false
+                            const comment = mstChecklistComments[key] ?? row.item.comment ?? ""
+                            const assignees = row.item.assignees || []
+                            const assigneeInitials = assignees
+                              .map((a) => {
+                                const user = allUsers.find((u) => u.id === a.user_id)
+                                if (user?.full_name) {
+                                  const names = user.full_name.split(" ")
+                                  return names.map((n) => n[0]).join("").toUpperCase()
+                                }
+                                return user?.username?.substring(0, 2).toUpperCase() || ""
+                              })
+                              .filter(Boolean)
+                              .join(", ") || row.incl || "-"
+                            const isEditing = editingMstChecklistKey === key
+
+                            return (
+                              <div key={key} className="grid grid-cols-15 gap-3 py-3 text-sm items-center">
+                                <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
+                                <div className="col-span-2" title={row.path}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.path}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, path: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex items-start gap-1"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        if (row.path) {
+                                          setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if ((event.key === "Enter" || event.key === " ") && row.path) {
+                                          setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })
+                                        }
+                                      }}
+                                    >
+                                      <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                        {row.path}
+                                      </span>
+                                      {row.path && row.path.length > 20 && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-5 w-5 shrink-0"
+                                          onClick={() => setViewingChecklistField({ key, field: "path", value: row.path, label: "Path" })}
+                                          title="View full text"
+                                        >
+                                          <FileText className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="col-span-2 min-w-0 font-semibold" title={row.detyrat}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.detyrat}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    <div className="flex items-center gap-1 min-w-0">
+                                      <span className="flex-1 whitespace-normal break-words max-h-10 overflow-hidden text-ellipsis">
+                                        {row.detyrat}
+                                      </span>
+                                      {row.detyrat && row.detyrat.length > 20 && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-5 w-5 shrink-0"
+                                          onClick={() => setViewingChecklistField({ key, field: "detyrat", value: row.detyrat, label: "Task" })}
+                                          title="View full text"
+                                        >
+                                          <FileText className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="col-span-2 min-w-0" title={row.keywords}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.keywords}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex items-start gap-1 min-w-0"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        if (row.keywords) {
+                                          setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if ((event.key === "Enter" || event.key === " ") && row.keywords) {
+                                          setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })
+                                        }
+                                      }}
+                                    >
+                                      <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                        {row.keywords}
+                                      </span>
+                                      {row.keywords && row.keywords.length > 20 && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-5 w-5 shrink-0"
+                                          onClick={() => setViewingChecklistField({ key, field: "keywords", value: row.keywords, label: "Keywords" })}
+                                          title="View full text"
+                                        >
+                                          <FileText className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="col-span-2" title={row.pershkrimi}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.pershkrimi}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex items-start gap-1"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        if (row.pershkrimi) {
+                                          setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if ((event.key === "Enter" || event.key === " ") && row.pershkrimi) {
+                                          setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })
+                                        }
+                                      }}
+                                    >
+                                      <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
+                                        {row.pershkrimi}
+                                      </span>
+                                      {row.pershkrimi && row.pershkrimi.length > 20 && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-5 w-5 shrink-0"
+                                          onClick={() => setViewingChecklistField({ key, field: "pershkrimi", value: row.pershkrimi, label: "Description" })}
+                                          title="View full text"
+                                        >
+                                          <FileText className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="col-span-1" title={row.kategoria}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.kategoria}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    <div className="flex items-start gap-1">
+                                      <span className="flex-1 whitespace-normal break-words">{row.kategoria}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="col-span-1 flex justify-center">
+                                  <Checkbox
+                                    checked={isChecked}
+                                    onCheckedChange={() => toggleFinalChecklist(row.item)}
+                                  />
+                                </div>
+                                <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
+                                <div className="col-span-2 pr-3">
+                                  <Input
+                                    placeholder="Koment"
+                                    className="h-8 text-xs w-full"
+                                    value={comment}
+                                    onChange={(e) => {
+                                      const newComment = e.target.value
+                                      setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
+                                      queueMstCommentSave(row.item, newComment)
+                                    }}
+                                    onBlur={(e) => updateMstChecklistComment(row.item, e.target.value)}
+                                  />
+                                </div>
+                                <div className="col-span-1 flex items-center justify-end gap-2">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => void saveMstChecklistRow(row)}
+                                        aria-label="Save checklist row"
+                                        title="Save"
+                                        disabled={savingMstChecklistRow}
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        onClick={cancelEditMstChecklistRow}
+                                        aria-label="Cancel editing"
+                                        title="Cancel"
+                                      >
+                                        <span className="text-xs">X</span>
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => startEditMstChecklistRow(row)}
+                                        aria-label="Edit checklist row"
+                                        title="Edit"
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        className="text-red-600 border-red-200 hover:bg-red-50"
+                                        onClick={() => void deleteMstChecklistRow(row)}
+                                        aria-label="Delete checklist row"
+                                        title="Delete"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                          {!mstChecklistRows.length ? (
+                            <div className="py-8 text-center text-sm text-muted-foreground">
+                              No checklist rows yet. Add one above to get started.
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {/* View Full Text Modal */}
+                        <Dialog open={viewingChecklistField !== null} onOpenChange={(open) => !open && setViewingChecklistField(null)}>
+                          <DialogContent className="sm:max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>{viewingChecklistField?.label || "Full Text"}</DialogTitle>
+                            </DialogHeader>
+                            <div className="mt-4">
+                              <div className="rounded-lg border bg-slate-50 p-4">
+                                <p className="whitespace-pre-wrap text-sm">{viewingChecklistField?.value || ""}</p>
+                              </div>
+                              <div className="mt-4 flex justify-end">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    const value = viewingChecklistField?.value || ""
+                                    if (!value) return
+                                    void navigator.clipboard.writeText(value)
+                                    toast.success("Copied to clipboard")
+                                  }}
+                                >
+                                  Copy
+                                </Button>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ) : null}
+
+              {mstTab === "members" ? (
+                <Card>
+                  <div className="p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-lg font-semibold">Members</div>
+                      <div className="flex items-center gap-2">
+                        <Select value={newMemberId} onValueChange={setNewMemberId}>
+                          <SelectTrigger className="w-56">
+                            <SelectValue placeholder="Select member" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {departmentUsers
+                              .filter((u) => !members.some((m) => m.id === u.id))
+                              .map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.username || u.email}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={async () => {
+                            if (!project || !newMemberId) return
+                            setSavingMembers(true)
+                            try {
+                              const res = await apiFetch("/project-members", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ project_id: project.id, user_ids: [newMemberId] }),
+                              })
+                              if (!res?.ok) {
+                                toast.error("Failed to add member")
+                                return
+                              }
+                              const added = (await res.json()) as User[]
+                              const map = new Map(members.map((m) => [m.id, m]))
+                              added.forEach((u) => map.set(u.id, u))
+                              setMembers(Array.from(map.values()))
+                              setNewMemberId("")
+                              toast.success("Member added")
+                            } finally {
+                              setSavingMembers(false)
+                            }
+                          }}
+                          disabled={savingMembers || !newMemberId}
+                        >
+                          {savingMembers ? "Adding..." : "Add"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-6">
+                      {members.length ? (
+                        members.map((m, idx) => {
+                          const initialsText = initials(m.full_name || m.username || m.email || "-")
+                          const colors = ["bg-blue-100 text-blue-800", "bg-green-100 text-green-800", "bg-purple-100 text-purple-800", "bg-rose-100 text-rose-800", "bg-amber-100 text-amber-800"]
+                          const colorClass = colors[idx % colors.length]
+                          return (
+                            <div key={m.id} className="flex flex-col items-center gap-2">
+                              <div className={`h-16 w-16 rounded-full flex items-center justify-center text-lg font-semibold ${colorClass}`}>
+                                {initialsText}
+                              </div>
+                              <div className="text-sm font-semibold">{m.full_name || m.username || m.email}</div>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No members added.</div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ) : null}
+
+              {mstTab === "ga" ? renderGaNotes() : null}
+            </>
+          ) : mstPhase === "CONTROL" ? (
+            <>
+              <div className="border-b flex gap-6">
+                {[
+                  { id: "tasks", label: "Tasks (Detyrat)" },
+                  { id: "ga", label: "Shenime GA/KA" },
+                ].map((tab) => {
+                  const isActive = mstTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setMstTab(tab.id as typeof mstTab)}
+                      className={[
+                        "relative pb-3 text-sm font-medium",
+                        tab.id === "ga" ? "ml-auto" : "",
+                        isActive ? "text-blue-600" : "text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {tab.label}
+                      {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              {mstTab === "ga" ? (
+                renderGaNotes()
+              ) : (
+                <Card className="border-0 shadow-sm">
+                  <div className="p-6 space-y-4">
+                    <div className="text-lg font-semibold tracking-tight">Kontrolli</div>
+                    {/* Table header */}
+                    <div className="sticky top-0 z-40 -mx-6 px-6 py-3 grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider bg-white border-b border-slate-100 shadow-sm">
+                      <div className="col-span-2">Task</div>
+                      <div className="col-span-1">Assigned</div>
+                      <div className="col-span-1">Date</div>
+                      <div className="col-span-1">Finish</div>
+                      <div className="col-span-2">Total</div>
+                      <div className="col-span-2">Completed</div>
+                      <div className="col-span-1">KO</div>
+                      <div className="col-span-1">Status</div>
+                      <div className="col-span-1"></div>
+                    </div>
+                    {/* Inline form row */}
+                    <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
+                      <div className="col-span-2">
+                        <input
+                          type="text"
+                          placeholder="Enter task name..."
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={controlTitle}
+                          onChange={(e) => setControlTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Select value={controlAssignee} onValueChange={setControlAssignee}>
+                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                            <SelectValue placeholder="-" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">-</SelectItem>
+                            {assignableUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || u.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1">
+                        <input
+                          type="date"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
+                          value={controlProductionDate}
+                          onChange={(e) => setControlProductionDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Select
+                          value={controlFinishPeriod}
+                          onValueChange={(value) =>
+                            setControlFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                            <SelectValue placeholder="All day" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={controlTotal}
+                          onChange={(e) => setControlTotal(e.target.value)}
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={controlCompleted}
+                          onChange={(e) => setControlCompleted(e.target.value)}
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
+                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
+                            <SelectValue placeholder="-" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unassigned__">-</SelectItem>
+                            {members.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.full_name || u.username || u.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1">
+                        <Button
+                          size="sm"
+                          className="rounded-full px-5 shadow-sm"
+                          onClick={async () => {
+                            if (!project || !controlTitle.trim()) return
+                            setCreatingControlTask(true)
+                            try {
+                              const res = await apiFetch("/tasks", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  title: controlTitle.trim(),
+                                  project_id: project.id,
+                                  department_id: project.department_id,
+                                  assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
+                                  priority: "NORMAL",
+                                  phase: "CONTROL",
+                                  finish_period:
+                                    controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
+                                  due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
+                                  internal_notes: serializeInternalNotes({
+                                    total: controlTotal || "0",
+                                    completed: controlCompleted || "0",
+                                    koUserId: controlKoUserId === "__unassigned__" ? null : controlKoUserId,
+                                    productionDate: controlProductionDate || null,
+                                  }),
+                                }),
+                              })
+                              if (!res?.ok) {
+                                toast.error("Failed to add task")
+                                return
+                              }
+                              const created = (await res.json()) as Task
+                              setTasks((prev) => [...prev, created])
+                              setControlTitle("")
+                              setControlAssignee("__unassigned__")
+                              setControlKoUserId("__unassigned__")
+                              setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                              setControlTotal("0")
+                              setControlCompleted("0")
+                              toast.success("Task added")
+                            } finally {
+                              setCreatingControlTask(false)
+                            }
+                          }}
+                          disabled={creatingControlTask || !controlTitle.trim()}
+                        >
+                          {creatingControlTask ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                      <div className="col-span-1"></div>
+                    </div>
+                    {/* Task rows */}
+                    <div className="divide-y divide-slate-100">
+                      {tasks.filter((task) => task.phase === "CONTROL").map((task, index) => {
+                        const koUserId = parseKoUserId(task.internal_notes)
+                        const productionDate = parseProductionDate(task.internal_notes)
+                        const isEditing = editingTaskId === task.id
+
+                        // Get TOTAL from origin task's daily_products
+                        const originTaskId = getOriginTaskId(task.internal_notes)
+                        const originTask = originTaskId ? tasks.find((t) => t.id === originTaskId) : null
+                        const totalFromOrigin = originTask?.daily_products ?? null
+                        const baseTotalVal = totalFromOrigin !== null
+                          ? totalFromOrigin
+                          : toNonNegativeInt(controlEdits[task.id]?.total || "0")
+                        const totalVal = isEditing ? toNonNegativeInt(editingTaskTotal || baseTotalVal) : baseTotalVal
+                        const completedValue = isEditing
+                          ? editingTaskCompleted || controlEdits[task.id]?.completed || "0"
+                          : controlEdits[task.id]?.completed || "0"
+                        const completedNum = toNonNegativeInt(completedValue)
+                        const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
+                        return (
+                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                            <div className="col-span-2 pr-2">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editingTaskTitle}
+                                  onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm font-medium"
+                                  autoFocus
+                                />
+                              ) : (
+                                <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2 min-w-0">
+                              {isEditing ? (
+                                <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
+                                  <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                    <SelectValue>
+                                      {editingTaskAssignee === "__unassigned__"
+                                        ? "-"
+                                        : memberLabel(editingTaskAssignee)}
+                                    </SelectValue>
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__unassigned__">-</SelectItem>
+                                    {assignableUsers.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>
+                                        {u.full_name || u.username || u.email}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editingTaskProductionDate}
+                                  onChange={(e) => setEditingTaskProductionDate(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                />
+                              ) : (
+                                <span className="text-slate-500">{productionDate ? new Date(productionDate).toLocaleDateString() : "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <Select
+                                  value={editingTaskFinishPeriod}
+                                  onValueChange={(value) =>
+                                    setEditingTaskFinishPeriod(
+                                      value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                    <SelectValue placeholder="All day" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                                    {FINISH_PERIOD_OPTIONS.map((value) => (
+                                      <SelectItem key={value} value={value}>
+                                        {value}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="text-slate-500">{task.finish_period || "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-2 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={totalFromOrigin !== null ? totalFromOrigin.toString() : editingTaskTotal}
+                                  onChange={(e) => setEditingTaskTotal(e.target.value)}
+                                  placeholder="0"
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                  readOnly={totalFromOrigin !== null}
+                                  title={totalFromOrigin !== null ? "TOTAL from PRODUCT phase (read-only)" : ""}
+                                />
+                              ) : (
+                                <span className="text-slate-500">{totalFromOrigin !== null ? totalFromOrigin.toString() : (controlEdits[task.id]?.total || "-")}</span>
+                              )}
+                            </div>
+                            <div className="col-span-2 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={editingTaskCompleted}
+                                  onChange={(e) => {
+                                    const rawValue = e.target.value
+                                    const completedNum = toNonNegativeInt(rawValue)
+                                    const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
+                                    const totalNum = toNonNegativeInt(totalValue)
+                                    const newCompleted = completedNum.toString()
+                                    const newStatus = computeStatusFromCompleted(totalNum, completedNum)
+                                    setEditingTaskCompleted(newCompleted)
+                                    setControlEdits((prev) => ({
+                                      ...prev,
+                                      [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                    }))
+                                  }}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                                />
+                              ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                    onClick={async () => {
+                                      const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                      const completedNum = Math.max(0, toNonNegativeInt(prevCompleted) - 1)
+                                      const newCompleted = completedNum.toString()
+                                      const newStatus = computeStatusFromCompleted(totalVal, completedNum)
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                      }))
+                                      const currentNotes = task.internal_notes || ""
+                                      const originTaskId = getOriginTaskId(currentNotes)
+                                      const koUserId = parseKoUserId(currentNotes)
+                                      const productionDate = parseProductionDate(currentNotes)
+                                      const internalNotes = serializeInternalNotes({
+                                        originTaskId: originTaskId || undefined,
+                                        total: controlEdits[task.id]?.total || totalVal.toString(),
+                                        completed: newCompleted,
+                                        koUserId: koUserId || null,
+                                        productionDate: productionDate || null,
+                                      })
+                                      const res = await apiFetch(`/tasks/${task.id}`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          internal_notes: internalNotes,
+                                          due_date: productionDate ? new Date(productionDate).toISOString() : null,
+                                        }),
+                                      })
+                                      if (!res?.ok) {
+                                        toast.error("Failed to update completed count")
+                                        const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                        setControlEdits((prev) => ({
+                                          ...prev,
+                                          [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                        }))
+                                        return
+                                      }
+                                      try {
+                                        const updated = (await res.json()) as Task
+                                        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                      } catch {
+                                        // ignore JSON parse errors
+                                      }
+                                    }}
+                                  >
+                                    -
+                                  </button>
+                                  <div className="min-w-[32px] text-center text-sm text-slate-700">
+                                    {controlEdits[task.id]?.completed || "0"}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
+                                    onClick={async () => {
+                                      const prevCompleted = controlEdits[task.id]?.completed || "0"
+                                      const prevCompletedNum = toNonNegativeInt(prevCompleted)
+                                      // Cap completed at total - don't allow exceeding total
+                                      const completedNum = Math.min(prevCompletedNum + 1, totalVal)
+                                      if (completedNum === prevCompletedNum) {
+                                        // Already at max, don't update
+                                        return
+                                      }
+                                      const newCompleted = completedNum.toString()
+                                      const newStatus = computeStatusFromCompleted(totalVal, completedNum)
+                                      setControlEdits((prev) => ({
+                                        ...prev,
+                                        [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
+                                      }))
+                                      const currentNotes = task.internal_notes || ""
+                                      const originTaskId = getOriginTaskId(currentNotes)
+                                      const koUserId = parseKoUserId(currentNotes)
+                                      const productionDate = parseProductionDate(currentNotes)
+                                      const internalNotes = serializeInternalNotes({
+                                        originTaskId: originTaskId || undefined,
+                                        total: controlEdits[task.id]?.total || totalVal.toString(),
+                                        completed: newCompleted,
+                                        koUserId: koUserId || null,
+                                        productionDate: productionDate || null,
+                                      })
+                                      const res = await apiFetch(`/tasks/${task.id}`, {
+                                        method: "PATCH",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          internal_notes: internalNotes,
+                                          due_date: productionDate ? new Date(productionDate).toISOString() : null,
+                                        }),
+                                      })
+                                      if (!res?.ok) {
+                                        toast.error("Failed to update completed count")
+                                        const prevStatus = computeStatusFromCompleted(totalVal, toNonNegativeInt(prevCompleted))
+                                        setControlEdits((prev) => ({
+                                          ...prev,
+                                          [task.id]: { ...prev[task.id], completed: prevCompleted, status: prevStatus },
+                                        }))
+                                        return
+                                      }
+                                      try {
+                                        const updated = (await res.json()) as Task
+                                        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+                                      } catch {
+                                        // ignore JSON parse errors
+                                      }
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <Select value={editingTaskKoUserId} onValueChange={setEditingTaskKoUserId}>
+                                  <SelectTrigger className="h-8 w-full border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
+                                    <SelectValue placeholder="-" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__unassigned__">-</SelectItem>
+                                    {members.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>
+                                        {u.full_name || u.username || u.email}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="block truncate text-slate-500">{memberLabel(koUserId)}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              <Badge
+                                variant={autoStatus === "DONE" ? "default" : "outline"}
+                                className={autoStatus === "DONE" ? "bg-emerald-500 hover:bg-emerald-600" : "text-slate-600 border-slate-300"}
+                              >
+                                {statusLabel(autoStatus)}
+                              </Badge>
+                            </div>
+                            <div className="col-span-1 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1 px-2">
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-slate-400 hover:text-blue-600"
+                                    onClick={() => void saveTaskEdit()}
+                                    disabled={savingTaskEdit}
+                                  >
+                                    {savingTaskEdit ? "Saving..." : "Save"}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-slate-400 hover:text-slate-600"
+                                    onClick={cancelEditTask}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                    onClick={() => startEditTask(task)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                    onClick={async () => {
+                                      const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
+                                      if (!res?.ok) {
+                                        if (res?.status == 405) {
+                                          toast.error("Delete endpoint not active. Restart backend.")
+                                        } else {
+                                          toast.error("Failed to delete task")
+                                        }
+                                        return
+                                      }
+                                      setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                      toast.success("Task deleted")
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {tasks.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-slate-400">
+                          No tasks yet. Add one above to get started.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : mstPhase === "FINAL" ? (
+            <>
+              <div className="border-b flex gap-6">
+                {[
+                  { id: "final", label: "Finalizimi" },
+                  { id: "ga", label: "Shenime GA/KA" },
+                ].map((tab) => {
+                  const isActive = mstTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setMstTab(tab.id as typeof mstTab)}
+                      className={[
+                        "relative pb-3 text-sm font-medium",
+                        tab.id === "ga" ? "ml-auto" : "",
+                        isActive ? "text-blue-600" : "text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {tab.label}
+                      {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              {mstTab === "ga" ? (
+                renderGaNotes()
+              ) : (
+                <Card className="border-0 shadow-sm">
+                  <div className="p-6 space-y-6">
+                    <div className="text-lg font-semibold tracking-tight">Finalizimi - Checklist</div>
+
+                    <div className="space-y-4">
+                      {finalizationItems
+                        .slice()
+                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                        .map((item) => {
+                          const isEditing = editingFinalizationId === item.id
+                          const itemNumber = item.position ?? 0
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex items-center gap-4 p-4 rounded-lg border border-slate-100 hover:bg-slate-50/70 transition-colors"
+                            >
+                              <div className="w-10 text-right text-xs text-muted-foreground">
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    inputMode="numeric"
+                                    value={editingFinalizationNumber}
+                                    onChange={(e) => setEditingFinalizationNumber(e.target.value)}
+                                    className="h-8 w-14 text-right"
+                                  />
+                                ) : (
+                                  itemNumber ? `${itemNumber}.` : "-"
+                                )}
+                              </div>
+                              <Checkbox
+                                id={item.id}
+                                checked={Boolean(finalizationChecks[item.id])}
+                                onCheckedChange={(checked) =>
+                                  void toggleFinalizationChecklist(item.id, Boolean(checked))
+                                }
+                              />
+                              <div className="flex-1">
+                                {isEditing ? (
+                                  <Input
+                                    value={editingFinalizationText}
+                                    onChange={(e) => setEditingFinalizationText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && !savingFinalization) {
+                                        void saveFinalizationItem()
+                                      } else if (e.key === "Escape") {
+                                        cancelEditFinalizationItem()
+                                      }
+                                    }}
+                                    className="border-slate-200"
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <label
+                                    htmlFor={item.id}
+                                    className={`text-sm font-medium cursor-pointer ${finalizationChecks[item.id] ? "text-slate-400 line-through" : "text-slate-700"}`}
+                                  >
+                                    {item.title}
+                                  </label>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void saveFinalizationItem()}
+                                      disabled={savingFinalization}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={cancelEditFinalizationItem}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => startEditFinalizationItem(item.id)}
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => void deleteFinalizationItem(item.id)}
+                                      className="text-red-600 hover:text-red-700"
+                                    >
+                                      Delete
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      {finalizationItems.length === 0 && (
+                        <div className="text-sm text-muted-foreground text-center py-8">
+                          No checklist items yet. Add one above.
+                        </div>
+                      )}
+                    </div>
+                    {/* Add new item */}
+                    <div className="flex items-center gap-2 pt-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        placeholder="No."
+                        value={newFinalizationNumber}
+                        onChange={(e) => setNewFinalizationNumber(e.target.value)}
+                        className="w-24"
+                      />
+                      <Input
+                        placeholder="Add checklist item..."
+                        value={newFinalizationText}
+                        onChange={(e) => setNewFinalizationText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !savingFinalization) {
+                            void addFinalizationItem()
+                          }
+                        }}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={() => void addFinalizationItem()}
+                        disabled={!newFinalizationText.trim() || savingFinalization}
+                        size="sm"
+                      >
+                        {savingFinalization ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                    {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
+                      <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <div className="flex items-center gap-2 text-emerald-700 font-medium">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                          Projekti eshte gati per mbyllje!
+                        </div>
                       </div>
                     )}
                   </div>
-                  {/* Add new item */}
-                  <div className="flex items-center gap-2 pt-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      placeholder="No."
-                      value={newFinalizationNumber}
-                      onChange={(e) => setNewFinalizationNumber(e.target.value)}
-                      className="w-24"
-                    />
-                    <Input
-                      placeholder="Add checklist item..."
-                      value={newFinalizationText}
-                      onChange={(e) => setNewFinalizationText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !savingFinalization) {
-                          void addFinalizationItem()
-                        }
-                      }}
-                      className="flex-1"
-                    />
-                    <Button
-                      onClick={() => void addFinalizationItem()}
-                      disabled={!newFinalizationText.trim() || savingFinalization}
-                      size="sm"
-                    >
-                      {savingFinalization ? "Adding..." : "Add"}
-                    </Button>
-                  </div>
-                  {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
-                    <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
-                      <div className="flex items-center gap-2 text-emerald-700 font-medium">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-                        Projekti eshte gati per mbyllje!
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            )}
-          </>
-        ) : (
-          <Card>
-            <div className="p-4 space-y-3">
-              <div className="text-lg font-semibold">{MST_PHASE_LABELS[mstPhase]}</div>
-              <div className="text-sm text-muted-foreground">{project.description || "No description."}</div>
-            </div>
-          </Card>
-        )}
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card>
+              <div className="p-4 space-y-3">
+                <div className="text-lg font-semibold">{MST_PHASE_LABELS[mstPhase]}</div>
+                <div className="text-sm text-muted-foreground">{project.description || "No description."}</div>
+              </div>
+            </Card>
+          )}
         </div>
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}

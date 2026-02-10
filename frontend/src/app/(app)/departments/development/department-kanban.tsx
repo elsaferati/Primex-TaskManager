@@ -247,6 +247,12 @@ function formatDate(value?: string | null) {
   return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
 }
 
+function todayInputValue() {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
+  return local.toISOString().slice(0, 10)
+}
+
 function getInitials(label: string) {
   const trimmed = label.trim()
   if (!trimmed) return "?"
@@ -269,6 +275,19 @@ const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
   NORMAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
   HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
+
+type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "GA"
+const GA_NOTE_TASK_TYPE_OPTIONS_PROJECT: Array<{ value: GaNoteTaskType; label: string }> = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+]
+const GA_NOTE_TASK_TYPE_OPTIONS_FAST: Array<{ value: GaNoteTaskType; label: string }> = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "BLLOK", label: "BLLOK" },
+  { value: "1H", label: "1H" },
+  { value: "R1", label: "R1" },
+  { value: "GA", label: "GA" },
+]
 
 function formatDayLabel(date: Date) {
   const today = new Date()
@@ -375,21 +394,21 @@ function findPreviousOccurrenceDate(t: SystemTaskTemplate, fromDate: Date) {
 function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date()): Date {
   const today = new Date(fromDate)
   today.setHours(0, 0, 0, 0)
-  
+
   if (t.frequency === "DAILY") {
     return today
   }
-  
+
   if (t.frequency === "WEEKLY") {
     const days = t.days_of_week && t.days_of_week.length
       ? t.days_of_week
       : t.day_of_week != null
         ? [t.day_of_week]
         : [0] // Monday by default
-    
+
     const currentDayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
     const sortedDays = [...days].sort((a, b) => a - b)
-    
+
     // Find next day in this week
     for (const dayIdx of sortedDays) {
       if (dayIdx >= currentDayIdx) {
@@ -398,14 +417,14 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
         return nextDate
       }
     }
-    
+
     // If no day found this week, use first day of next week
     const nextDate = new Date(today)
     const daysUntilNextWeek = 7 - currentDayIdx + sortedDays[0]
     nextDate.setDate(today.getDate() + daysUntilNextWeek)
     return nextDate
   }
-  
+
   if (t.frequency === "MONTHLY") {
     const current = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth())
     if (current && current >= today) {
@@ -414,7 +433,7 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
     const next = getScheduledDateForMonth(t, today.getFullYear(), today.getMonth() + 1)
     return next || today
   }
-  
+
   if (t.frequency === "YEARLY") {
     if (t.day_of_month === 0) {
       const current = getYearEndDate(today.getFullYear())
@@ -439,12 +458,12 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
     }
     return getScheduledDateForMonth(t, today.getFullYear() + 1, targetMonth) || today
   }
-  
+
   if (t.frequency === "3_MONTHS" || t.frequency === "6_MONTHS") {
     const interval = t.frequency === "3_MONTHS" ? 3 : 6
     let checkMonth = today.getMonth()
     let checkYear = today.getFullYear()
-    
+
     // Check up to 2 years ahead
     for (let i = 0; i < 24; i++) {
       const monthValue = checkMonth + 1
@@ -461,7 +480,7 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
       }
     }
   }
-  
+
   return today
 }
 
@@ -892,6 +911,9 @@ export default function DepartmentKanban() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [projectTitleLookup, setProjectTitleLookup] = React.useState<Map<string, string>>(new Map())
+  const [projectMetaLookup, setProjectMetaLookup] = React.useState<
+    Map<string, { title: string; department_id?: string | null }>
+  >(new Map())
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
   const printContainerRef = React.useRef<HTMLDivElement | null>(null)
@@ -1036,10 +1058,12 @@ export default function DepartmentKanban() {
   >(FINISH_PERIOD_NONE_VALUE)
   const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
   const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
-  const [gaNoteTaskAssigneeId, setGaNoteTaskAssigneeId] = React.useState("__unassigned__")
+  const [gaNoteTaskAssigneeIds, setGaNoteTaskAssigneeIds] = React.useState<string[]>([])
   const [gaNoteTaskTitle, setGaNoteTaskTitle] = React.useState("")
   const [gaNoteTaskDescription, setGaNoteTaskDescription] = React.useState("")
-  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<TaskPriority>("NORMAL")
+  const [gaNoteTaskPriority, setGaNoteTaskPriority] = React.useState<GaNoteTaskType>("NORMAL")
+  const [gaNoteTaskHasProject, setGaNoteTaskHasProject] = React.useState(false)
+  const [gaNoteTaskStartDate, setGaNoteTaskStartDate] = React.useState(todayInputValue())
   const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
   const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -1053,6 +1077,16 @@ export default function DepartmentKanban() {
   const [internalNoteProjects, setInternalNoteProjects] = React.useState<Project[]>([])
   const [loadingInternalNoteProjects, setLoadingInternalNoteProjects] = React.useState(false)
   const [internalNoteToUserIds, setInternalNoteToUserIds] = React.useState<string[]>([])
+  const [editInternalNoteOpen, setEditInternalNoteOpen] = React.useState(false)
+  const [editingInternalNoteIds, setEditingInternalNoteIds] = React.useState<string[]>([])
+  const [savingInternalNoteEdit, setSavingInternalNoteEdit] = React.useState(false)
+  const [editInternalNoteTitle, setEditInternalNoteTitle] = React.useState("")
+  const [editInternalNoteDescription, setEditInternalNoteDescription] = React.useState("")
+  const [editInternalNoteDepartmentId, setEditInternalNoteDepartmentId] = React.useState("")
+  const [editInternalNoteProjectId, setEditInternalNoteProjectId] = React.useState("")
+  const [editInternalNoteProjects, setEditInternalNoteProjects] = React.useState<Project[]>([])
+  const [loadingEditInternalNoteProjects, setLoadingEditInternalNoteProjects] = React.useState(false)
+  const [editInternalNoteToUserIds, setEditInternalNoteToUserIds] = React.useState<string[]>([])
   const [showDoneInternalNotes, setShowDoneInternalNotes] = React.useState(false)
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
@@ -1083,17 +1117,11 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
           setUsers(allUsers)
         }
-        
-        // Create a set of user IDs that belong to this department
-        const departmentUserIds = new Set(
-          allUsers.filter((u) => u.department_id === dep.id).map((u) => u.id)
-        )
 
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
-          // Remove department_id filter to get all tasks, then filter client-side
-          apiFetch(`/tasks?include_done=true`),
+          apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
@@ -1102,23 +1130,8 @@ export default function DepartmentKanban() {
         if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
         if (tasksRes.ok) {
           const taskRows = (await tasksRes.json()) as Task[]
-          // Filter tasks: include if task belongs to this department OR any assignee belongs to this department
-          const nonSystemTasks = taskRows.filter((t) => {
-            // Exclude system tasks
-            if (t.system_template_origin_id) return false
-            // Include if task belongs to this department
-            if (t.department_id === dep.id) return true
-            // Include if primary assignee belongs to this department
-            if (t.assigned_to && departmentUserIds.has(t.assigned_to)) return true
-            // Include if any assignee in the assignees array belongs to this department
-            // Check both string and direct ID matching
-            if (t.assignees?.some((a) => {
-              const assigneeId = a.id
-              if (!assigneeId) return false
-              return departmentUserIds.has(assigneeId)
-            })) return true
-            return false
-          })
+          // Show all non-system tasks for this department.
+          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
           setDepartmentTasks(nonSystemTasks)
           setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
         }
@@ -1166,7 +1179,9 @@ export default function DepartmentKanban() {
       try {
         const res = await apiFetch(`/projects?department_id=${internalNoteDepartmentId}`)
         if (!res.ok) {
-          console.error("Failed to load department projects:", res.status)
+          if (res.status !== 401 && res.status !== 403) {
+            console.error("Failed to load department projects:", res.status)
+          }
           setInternalNoteProjects([])
           return
         }
@@ -1182,8 +1197,48 @@ export default function DepartmentKanban() {
   }, [apiFetch, internalNoteDepartmentId])
 
   React.useEffect(() => {
+    const loadProjects = async () => {
+      if (!editInternalNoteDepartmentId) {
+        setEditInternalNoteProjects([])
+        return
+      }
+      if (editInternalNoteDepartmentId === internalNoteDepartmentId) {
+        setEditInternalNoteProjects(internalNoteProjects)
+        return
+      }
+      setLoadingEditInternalNoteProjects(true)
+      try {
+        const res = await apiFetch(`/projects?department_id=${editInternalNoteDepartmentId}`)
+        if (!res.ok) {
+          if (res.status !== 401 && res.status !== 403) {
+            console.error("Failed to load department projects:", res.status)
+          }
+          setEditInternalNoteProjects([])
+          return
+        }
+        setEditInternalNoteProjects((await res.json()) as Project[])
+      } catch (error) {
+        console.error("Error loading department projects:", error)
+        setEditInternalNoteProjects([])
+      } finally {
+        setLoadingEditInternalNoteProjects(false)
+      }
+    }
+    void loadProjects()
+  }, [apiFetch, editInternalNoteDepartmentId, internalNoteDepartmentId, internalNoteProjects])
+
+  React.useEffect(() => {
     projectMembersRef.current = projectMembers
   }, [projectMembers])
+
+  React.useEffect(() => {
+    if (gaNoteTaskHasProject && gaNoteTaskPriority !== "NORMAL" && gaNoteTaskPriority !== "HIGH") {
+      setGaNoteTaskPriority("NORMAL")
+    }
+    if (!gaNoteTaskHasProject && gaNoteTaskPriority === "HIGH") {
+      setGaNoteTaskPriority("NORMAL")
+    }
+  }, [gaNoteTaskHasProject, gaNoteTaskPriority])
 
   React.useEffect(() => {
     const handleBeforePrint = () => {
@@ -1293,7 +1348,7 @@ export default function DepartmentKanban() {
         if (cancelled) return
         setInternalMeetingChecklistId(selected.id)
         let items = selected.items || []
-        
+
         // Delete only the test item "dssdgsdg" if it exists
         const itemsToDelete = ["dssdgsdg"]
         const deletePromises: Promise<Response>[] = []
@@ -1311,7 +1366,7 @@ export default function DepartmentKanban() {
             items = (await reloadRes.json()) as ChecklistItem[]
           }
         }
-        
+
         const existingKeys = new Set(
           items.map((item) => `${item.day || ""}|${(item.title || "").trim().toLowerCase()}`)
         )
@@ -1472,27 +1527,22 @@ export default function DepartmentKanban() {
     })
   }, [projects, projectMembers, user?.id, viewMode])
 
-  const visibleDepartmentTasks = React.useMemo(
-    () => (isMineView && user?.id ? departmentTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : departmentTasks),
-    [departmentTasks, isMineView, isTaskAssignedToUser, user?.id]
-  )
+  const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
   const visibleNoProjectTasks = React.useMemo(() => {
-    const base =
-      isMineView && user?.id ? noProjectTasks.filter((t) => isTaskAssignedToUser(t, user.id)) : noProjectTasks
-    const filtered = base.filter(isNoProjectTask)
-    
+    const filtered = noProjectTasks.filter(isNoProjectTask)
+
     // Deduplicate only exact duplicates by ID.
     // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
     // so we must NOT merge by title/properties. Otherwise users can end up opening/editing
     // someone else's copy from "My view" / "All users" lists.
     const taskMapById = new Map<string, Task>()
-    
+
     for (const t of filtered) {
       const existingById = taskMapById.get(t.id)
       if (existingById) {
         // Merge assignees if task already exists with same ID
         const assigneeMap = new Map<string, TaskAssignee>()
-        
+
         // Add existing assignees
         if (existingById.assigned_to && userMap.has(existingById.assigned_to)) {
           const user = userMap.get(existingById.assigned_to)!
@@ -1507,7 +1557,7 @@ export default function DepartmentKanban() {
         existingById.assignees?.forEach(a => {
           if (a.id) assigneeMap.set(a.id, a)
         })
-        
+
         // Add new task's assignees
         if (t.assigned_to && userMap.has(t.assigned_to)) {
           const user = userMap.get(t.assigned_to)!
@@ -1522,7 +1572,7 @@ export default function DepartmentKanban() {
         t.assignees?.forEach(a => {
           if (a.id) assigneeMap.set(a.id, a)
         })
-        
+
         // Update existing task with merged assignees
         existingById.assignees = Array.from(assigneeMap.values())
         if (!existingById.assigned_to && t.assigned_to) {
@@ -1530,21 +1580,24 @@ export default function DepartmentKanban() {
         }
         continue
       }
-      
+
       const taskCopy = { ...t }
       taskMapById.set(t.id, taskCopy)
     }
-    
+
     return Array.from(taskMapById.values())
-  }, [noProjectTasks, isMineView, user?.id, userMap])
+  }, [noProjectTasks, userMap])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
   )
   const visibleInternalNotes = React.useMemo(() => {
     const base = isMineView && user?.id ? internalNotes.filter((n) => n.to_user_id === user.id) : internalNotes
-    const filteredByUser = selectedUserId === "__all__" ? base : base.filter((n) => n.to_user_id === selectedUserId)
-    if (showDoneInternalNotes) return filteredByUser
+    const filteredByUser =
+      !isMineView && selectedUserId !== "__all__"
+        ? base.filter((n) => n.to_user_id === selectedUserId)
+        : base
+    if (showDoneInternalNotes) return filteredByUser.filter((n) => n.is_done)
     return filteredByUser.filter((n) => !n.is_done)
   }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
   const groupedInternalNotes = React.useMemo(() => {
@@ -1581,12 +1634,12 @@ export default function DepartmentKanban() {
     if (isMineView && user?.id) {
       grouped = grouped.filter((group) => group.toUserIds.includes(user.id))
     }
-    if (selectedUserId !== "__all__") {
+    if (!isMineView && selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
-    if (!showDoneInternalNotes) {
-      grouped = grouped.filter((group) => group.notes.some((n) => !n.is_done))
-    }
+    grouped = showDoneInternalNotes
+      ? grouped.filter((group) => group.notes.length > 0 && group.notes.every((n) => n.is_done))
+      : grouped.filter((group) => group.notes.some((n) => !n.is_done))
     return grouped.sort((a, b) => {
       const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
       const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
@@ -1601,10 +1654,10 @@ export default function DepartmentKanban() {
     () => {
       const depTasks = department
         ? systemTasks.filter((t) => {
-            if (t.department_id === department.id) return true
-            if (t.department_ids?.includes(department.id)) return true
-            return false
-          })
+          if (t.department_id === department.id) return true
+          if (t.department_ids?.includes(department.id)) return true
+          return false
+        })
         : []
       if (!isMineView || !user?.id) return depTasks
       return depTasks.filter((t) => {
@@ -1627,31 +1680,31 @@ export default function DepartmentKanban() {
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
-      
+
       // If in "my view", also include overdue system tasks where next occurrence has passed
       if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
         const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
         const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
-        
+
         const overdueTasks = visibleSystemTemplates.filter((t) => {
           const templateId = t.template_id || t.id
           // Skip if already in today's tasks
           if (todayTaskIds.has(templateId)) return false
           // Only include if it's in overdue list
           if (!overdueTaskIds.has(templateId)) return false
-          
+
           // Check if next occurrence date has passed
           const nextOccurrence = getNextOccurrenceDate(t, todayDate)
           const nextOccurrenceKey = dayKey(nextOccurrence)
           const todayKey = dayKey(todayDate)
-          
+
           // Only show if next occurrence is in the past (overdue)
           return nextOccurrenceKey < todayKey
         })
-        
+
         return [...todayTasks, ...overdueTasks]
       }
-      
+
       return todayTasks
     },
     [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
@@ -1676,6 +1729,44 @@ export default function DepartmentKanban() {
     isTaskAssignedToUser,
     isTaskOverlappingWeek,
   ])
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const missingIds = new Set<string>()
+      for (const task of todayProjectTasks) {
+        if (!task.project_id) continue
+        const projectId = String(task.project_id)
+        if (projects.some((p) => p.id === projectId)) continue
+        if (projectMetaLookup.has(projectId)) continue
+        missingIds.add(projectId)
+      }
+      if (!missingIds.size) return
+
+      const results = await Promise.all(
+        Array.from(missingIds).map(async (id) => {
+          const res = await apiFetch(`/projects/${encodeURIComponent(id)}`)
+          if (!res.ok) return null
+          const data = (await res.json()) as { id?: string; title?: string | null; name?: string | null; department_id?: string | null }
+          const title = data.title || data.name
+          if (!data.id || !title) return null
+          return { id: data.id, title, department_id: data.department_id ?? null }
+        })
+      )
+      if (cancelled) return
+      setProjectMetaLookup((prev) => {
+        const next = new Map(prev)
+        for (const item of results) {
+          if (!item) continue
+          next.set(item.id, { title: item.title, department_id: item.department_id })
+        }
+        return next
+      })
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, projects, projectMetaLookup, todayProjectTasks])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const matchesRange =
@@ -1731,7 +1822,18 @@ export default function DepartmentKanban() {
   )
   const dailyReportFastTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+
     return visibleNoProjectTasks.filter((task) => {
+      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+        return false
+      }
+
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
       if (completedDate && !completedToday) return false
@@ -1747,47 +1849,58 @@ export default function DepartmentKanban() {
       if (!baseDate) return false
       return dayKey(baseDate) <= todayKey
     })
-  }, [todayDate, visibleNoProjectTasks])
+  }, [todayDate, visibleNoProjectTasks, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
   const dailyReportProjectTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+
     return projectTasks.filter((task) => {
+      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+        return false
+      }
+
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      
+
       // Show completed tasks if completed today
       if (completedToday) return true
       // Don't show tasks completed on other days
       if (completedDate && !completedToday) return false
-      
+
       // Show project tasks from start_date through due_date (and after for late)
       const startDate = task.start_date ? toDate(task.start_date) : null
       const dueDate = task.due_date ? toDate(task.due_date) : null
       const createdDate = task.created_at ? toDate(task.created_at) : null
-      
+
       // If we have both start and due dates, show if today is on/after start
       if (startDate && dueDate) {
         const startKey = dayKey(startDate)
         return todayKey >= startKey
       }
-      
+
       // If only due date, show if due today or before
       if (dueDate) {
         const dueKey = dayKey(dueDate)
         return todayKey >= dueKey
       }
-      
+
       // If only start date, show if started today or before
       if (startDate) {
         const startKey = dayKey(startDate)
         return todayKey >= startKey
       }
-      
+
       // Fallback to created_at if no dates
       if (!createdDate) return false
       const createdKey = dayKey(createdDate)
       return createdKey <= todayKey
     })
-  }, [projectTasks, todayDate])
+  }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -1930,7 +2043,7 @@ export default function DepartmentKanban() {
             ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
             : tmpl?.alignment_roles?.length
               ? tmpl.alignment_roles.join(", ")
-            : "-"
+              : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
@@ -1965,7 +2078,7 @@ export default function DepartmentKanban() {
             ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
             : tmpl.alignment_roles?.length
               ? tmpl.alignment_roles.join(", ")
-            : "-"
+              : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
         tyo: "T",
@@ -2147,7 +2260,7 @@ export default function DepartmentKanban() {
               ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
               : tmpl?.alignment_roles?.length
                 ? tmpl.alignment_roles.join(", ")
-              : "-"
+                : "-"
             : "-",
           kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
           tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
@@ -2669,13 +2782,26 @@ export default function DepartmentKanban() {
     }
     return Array.from(map.entries()).map(([projectId, tasks]) => {
       const project = projects.find((p) => p.id === projectId) || null
+      const department = project?.department_id
+        ? departments.find((d) => d.id === project.department_id) || null
+        : null
+      const meta = project ? null : (projectMetaLookup.get(projectId) || null)
+      const projectTitle = project?.title || project?.name || meta?.title || "Project"
+      const projectDepartmentId = project?.department_id || meta?.department_id || null
+      const projectDepartment = projectDepartmentId
+        ? departments.find((d) => d.id === projectDepartmentId) || null
+        : null
+      const name =
+        projectDepartment && department?.id && projectDepartment.id !== department.id
+          ? `${projectTitle} — ${projectDepartment.name}`
+          : projectTitle
       return {
         id: projectId,
-        name: project?.title || project?.name || "Project",
+        name,
         tasks,
       }
     })
-  }, [todayProjectTasks, projects])
+  }, [todayProjectTasks, projects, projectMetaLookup, departments, department?.id])
 
   const counts = React.useMemo(
     () => ({
@@ -2720,7 +2846,11 @@ export default function DepartmentKanban() {
         return
       }
       const targetUserId =
-        viewMode === "department" ? (selectedUserId !== "__all__" ? selectedUserId : null) : user?.id
+        viewMode === "department"
+          ? selectedUserId !== "__all__"
+            ? selectedUserId
+            : user?.id
+          : user?.id
       if (!department?.id || !targetUserId) {
         setDailyReport(null)
         return
@@ -2880,7 +3010,7 @@ export default function DepartmentKanban() {
       }, 0)
       return
     }
-    
+
     if (showAllTodayPrint && loadingAllUsersDailyReports) {
       setPendingPrint(true)
       return
@@ -3026,13 +3156,48 @@ export default function DepartmentKanban() {
 
   const gaNoteTaskMap = React.useMemo(() => {
     const map = new Map<string, Task>()
-    for (const task of departmentTasks) {
-      if (task.ga_note_origin_id) {
-        map.set(task.ga_note_origin_id, task)
+    const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
+      const result: TaskAssignee[] = []
+      const seen = new Set<string>()
+      const add = (assignee: TaskAssignee) => {
+        const key =
+          assignee.id ||
+          assignee.username ||
+          assignee.full_name ||
+          assignee.email ||
+          Math.random().toString()
+        if (seen.has(key)) return
+        seen.add(key)
+        result.push(assignee)
       }
+      base.forEach(add)
+      incoming.forEach(add)
+      return result
+    }
+    const buildAssignees = (task: Task) => {
+      let list: TaskAssignee[] = task.assignees ?? []
+      if (list.length === 0 && task.assigned_to) {
+        const fallback = userMap.get(task.assigned_to)
+        if (fallback) {
+          list = [{
+            id: fallback.id,
+            email: fallback.email ?? null,
+            username: fallback.username || null,
+            full_name: fallback.full_name || null,
+            department_id: fallback.department_id || null,
+          }]
+        }
+      }
+      return list
+    }
+    for (const task of departmentTasks) {
+      if (!task.ga_note_origin_id) continue
+      const existing = map.get(task.ga_note_origin_id)
+      const mergedAssignees = mergeAssignees(existing?.assignees ?? [], buildAssignees(task))
+      map.set(task.ga_note_origin_id, { ...task, assignees: mergedAssignees })
     }
     return map
-  }, [departmentTasks])
+  }, [departmentTasks, userMap])
 
   const systemGroups = React.useMemo(() => {
     const groups = new Map<string, SystemTaskTemplate[]>()
@@ -3202,7 +3367,7 @@ export default function DepartmentKanban() {
             : task
         })
       )
-      
+
       // Reload system tasks
       const sysRes = await apiFetch(
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
@@ -3210,7 +3375,7 @@ export default function DepartmentKanban() {
       if (sysRes.ok) {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }
-      
+
       setCloseTaskDialogOpen(false)
       setTaskToCloseId(null)
       setTaskToCloseTemplate(null)
@@ -3490,7 +3655,7 @@ export default function DepartmentKanban() {
         manager_id: projectMemberIds.length > 0 ? projectMemberIds[0] : (projectManagerId === "__unassigned__" ? null : projectManagerId),
         status: projectStatus,
       }
-      
+
       // Add due_date if provided
       if (projectDueDate.trim()) {
         const normalized = normalizeDueDateInput(projectDueDate.trim())
@@ -3519,7 +3684,7 @@ export default function DepartmentKanban() {
         return
       }
       const created = (await res.json()) as Project
-      
+
       // Add project members if any were selected
       if (projectMemberIds.length > 0) {
         try {
@@ -3542,7 +3707,7 @@ export default function DepartmentKanban() {
           console.error("Error adding project members:", error)
         }
       }
-      
+
       setProjects((prev) => [created, ...prev])
       setCreateProjectOpen(false)
       setProjectTitle("")
@@ -3708,22 +3873,22 @@ export default function DepartmentKanban() {
       }
       const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
-        const payload = {
-          title: noProjectTitle.trim(),
-          description: noProjectDescription.trim() || null,
-          project_id: null,
-          department_id: department.id,
-          status: "TODO",
-          priority: "NORMAL",
-          finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
-          is_bllok: noProjectType === "blocked",
-          is_1h_report: noProjectType === "hourly",
-          is_r1: noProjectType === "r1",
-          is_personal: noProjectType === "personal",
-          ga_note_origin_id: gaNoteId,
-          start_date: startDate,
-          due_date: dueDate,
-        }
+      const payload = {
+        title: noProjectTitle.trim(),
+        description: noProjectDescription.trim() || null,
+        project_id: null,
+        department_id: department.id,
+        status: "TODO",
+        priority: "NORMAL",
+        finish_period: noProjectFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : noProjectFinishPeriod,
+        is_bllok: noProjectType === "blocked",
+        is_1h_report: noProjectType === "hourly",
+        is_r1: noProjectType === "r1",
+        is_personal: noProjectType === "personal",
+        ga_note_origin_id: gaNoteId,
+        start_date: startDate,
+        due_date: dueDate,
+      }
       // Create one task with multiple assignees instead of multiple tasks
       const assigneeIds = noProjectAssignees.length > 0 ? noProjectAssignees : null
       const res = await apiFetch("/tasks", {
@@ -4201,6 +4366,7 @@ export default function DepartmentKanban() {
       const created = (await res.json()) as GaNote
       setGaNotes((prev) => [created, ...prev])
       if (gaNoteCreateTask) {
+        const startDateValue = gaNoteTaskStartDate ? new Date(gaNoteTaskStartDate).toISOString() : null
         const taskPayload = {
           title: gaNoteTaskDefaultTitle(newGaNote),
           description: newGaNote.trim(),
@@ -4210,6 +4376,7 @@ export default function DepartmentKanban() {
           status: "TODO",
           priority: newGaNotePriority === "__none__" ? "NORMAL" : newGaNotePriority,
           ga_note_origin_id: created.id,
+          start_date: startDateValue,
           finish_period:
             gaNoteCreateTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteCreateTaskFinishPeriod,
         }
@@ -4297,6 +4464,77 @@ export default function DepartmentKanban() {
     }
   }
 
+  const startEditInternalNote = (note: InternalNote, toUserIds: string[], noteIds: string[]) => {
+    setEditingInternalNoteIds(noteIds)
+    setEditInternalNoteTitle(note.title || "")
+    setEditInternalNoteDescription(note.description || "")
+    setEditInternalNoteDepartmentId((note.department_id || note.to_department_id || "") as string)
+    setEditInternalNoteProjectId(note.project_id || "")
+    setEditInternalNoteToUserIds(toUserIds)
+    setEditInternalNoteOpen(true)
+  }
+
+  const submitInternalNoteEdit = async () => {
+    if (!department?.id) return
+    if (editingInternalNoteIds.length === 0) return
+
+    const title = editInternalNoteTitle.trim()
+    const description = editInternalNoteDescription.trim()
+    if (!title || editInternalNoteToUserIds.length === 0 || !editInternalNoteDepartmentId) {
+      return
+    }
+
+    setSavingInternalNoteEdit(true)
+    try {
+      const res = await apiFetch("/internal-notes/group", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          noteIds: editingInternalNoteIds,
+          title,
+          description: description || null,
+          departmentId: editInternalNoteDepartmentId,
+          projectId: editInternalNoteProjectId || null,
+          toUserIds: editInternalNoteToUserIds,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update internal note"
+        try {
+          const data = (await res.json()) as { detail?: unknown }
+          const rawDetail = data?.detail
+          if (typeof rawDetail === "string") {
+            detail = rawDetail
+          } else if (Array.isArray(rawDetail)) {
+            detail =
+              rawDetail
+                .map((item) => {
+                  if (typeof item === "string") return item
+                  if (item && typeof item === "object" && "msg" in item) return String((item as { msg?: unknown }).msg)
+                  return "Invalid request"
+                })
+                .filter(Boolean)
+                .join(", ") || detail
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+
+      const refresh = await apiFetch(`/internal-notes?department_id=${department.id}`)
+      if (refresh.ok) {
+        setInternalNotes((await refresh.json()) as InternalNote[])
+      }
+      setEditInternalNoteOpen(false)
+      setEditingInternalNoteIds([])
+      toast.success("Internal note updated")
+    } finally {
+      setSavingInternalNoteEdit(false)
+    }
+  }
+
   const deleteInternalNote = async (noteIds: string[] | string) => {
     const ids = Array.isArray(noteIds) ? noteIds : [noteIds]
     if (!ids.length) return
@@ -4361,20 +4599,36 @@ export default function DepartmentKanban() {
       toast.error("GA/KA note not found.")
       return
     }
+    if (!gaNoteTaskDueDate) {
+      toast.error("Due date is required")
+      return
+    }
     setCreatingGaNoteTask(true)
     try {
+      const startDateValue = gaNoteTaskStartDate ? new Date(gaNoteTaskStartDate).toISOString() : null
       const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
+      const isProjectLinked = gaNoteTaskHasProject
+      const priorityValue: TaskPriority = isProjectLinked && gaNoteTaskPriority === "HIGH" ? "HIGH" : "NORMAL"
+      const isBllok = !isProjectLinked && gaNoteTaskPriority === "BLLOK"
+      const is1hReport = !isProjectLinked && gaNoteTaskPriority === "1H"
+      const isR1 = !isProjectLinked && gaNoteTaskPriority === "R1"
       const taskPayload = {
         title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(note.content || ""),
         description: gaNoteTaskDescription.trim() || null,
         project_id: note.project_id ?? null,
         department_id: department.id,
-        assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
+        assigned_to: gaNoteTaskAssigneeIds[0] ?? null,
+        assignees: gaNoteTaskAssigneeIds,
         status: "TODO",
-        priority: gaNoteTaskPriority,
+        priority: priorityValue,
         ga_note_origin_id: note.id,
+        start_date: startDateValue,
         due_date: dueDateValue,
         finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
+        is_bllok: isBllok,
+        is_1h_report: is1hReport,
+        is_r1: isR1,
+        is_personal: false,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -4399,10 +4653,11 @@ export default function DepartmentKanban() {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
       setGaNoteTaskOpenId(null)
-      setGaNoteTaskAssigneeId("__unassigned__")
+      setGaNoteTaskAssigneeIds([])
       setGaNoteTaskTitle("")
       setGaNoteTaskDescription("")
       setGaNoteTaskPriority("NORMAL")
+      setGaNoteTaskStartDate(todayInputValue())
       setGaNoteTaskDueDate("")
       setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
@@ -4631,9 +4886,9 @@ export default function DepartmentKanban() {
       </div>
       <div className="px-4 sm:px-6 pb-4 sm:pb-6 print:hidden">
         {activeTab === "projects" ? (
-            <div className="mb-4 sm:mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
+          <div className="mb-4 sm:mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-lg sm:text-xl font-semibold text-slate-800">Active Projects</div>
               {canManage ? (
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
@@ -4734,14 +4989,14 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Due Date</Label>
-                          <Input
-                            type="date"
-                            value={projectDueDate}
-                            onChange={(e) => setProjectDueDate(e.target.value)}
-                            placeholder="Select due date"
-                            className="border-slate-200 focus:border-slate-400 rounded-xl"
-                          />
-                        </div>
+                        <Input
+                          type="date"
+                          value={projectDueDate}
+                          onChange={(e) => setProjectDueDate(e.target.value)}
+                          placeholder="Select due date"
+                          className="border-slate-200 focus:border-slate-400 rounded-xl"
+                        />
+                      </div>
                       <div className="flex justify-end gap-2 md:col-span-2">
                         <Button variant="outline" onClick={() => setCreateProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
@@ -4754,9 +5009,9 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
-              </div>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
         {activeTab === "projects" ? (
           <div className="space-y-4 sm:space-y-6">
@@ -4777,13 +5032,13 @@ export default function DepartmentKanban() {
                 const remainingMembers = uniqueMembers.length - visibleMembers.length
                 const phase = project.current_phase || "MEETINGS"
                 const isClosed = phase.toUpperCase() === "CLOSED"
-                
+
                 // Count tasks for this project
                 const taskCount = departmentTasks.filter(t => t.project_id === project.id).length
-                
+
                 // Count GA notes for this project
                 const gaNoteCount = gaNotes.filter(n => n.project_id === project.id).length
-                
+
                 // Format deadline
                 const formatDeadline = (dateStr?: string | null) => {
                   if (!dateStr) return "-"
@@ -4791,7 +5046,7 @@ export default function DepartmentKanban() {
                   if (Number.isNaN(date.getTime())) return "-"
                   return date.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" })
                 }
-                
+
                 return (
                   <Link key={project.id} href={`/projects/${project.id}`} className="group block">
                     <Card className={`bg-white border rounded-lg p-2.5 transition-all ${isClosed ? "border-slate-300 opacity-60 hover:opacity-80" : "border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1"}`}>
@@ -4833,14 +5088,14 @@ export default function DepartmentKanban() {
                           ) : null}
                         </div>
                       </div>
-                      
+
                       {/* Current Phase */}
                       <div className="mb-2">
                         <Badge className={`text-xs whitespace-nowrap px-2 py-0.5 ${isClosed ? "bg-slate-200 text-slate-500 border border-slate-300" : "bg-blue-100 text-blue-700 border border-blue-200"}`}>
                           {PHASE_LABELS[phase] || "Meetings"}
                         </Badge>
                       </div>
-                      
+
                       {/* Stats Grid: Tasks, GA Notes, Deadline */}
                       <div className="grid grid-cols-3 gap-1.5 mb-2">
                         <div className="text-center p-1.5 bg-slate-50 dark:bg-slate-800 rounded-md">
@@ -4856,7 +5111,7 @@ export default function DepartmentKanban() {
                           <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 leading-tight">{formatDeadline(project.due_date)}</div>
                         </div>
                       </div>
-                      
+
                       {/* Members */}
                       <div className="mb-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Members</div>
@@ -4883,7 +5138,7 @@ export default function DepartmentKanban() {
                           )}
                         </div>
                       </div>
-                      
+
                       {/* View Details Link */}
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
                         <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 group-hover:underline">
@@ -4950,30 +5205,30 @@ export default function DepartmentKanban() {
                     </Button>
                   </>
                 ) : null}
-                  {viewMode === "mine" ? (
-                    <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
-                      <Button
-                        variant="outline"
-                        className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                        onClick={() =>
-                          setShowDailyUserReport((prev) => {
-                            const next = !prev
-                            if (next) setPrintRange("today")
-                            return next
-                          })
-                        }
-                      >
-                        {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
-                      </Button>
-                      <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                      <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                        <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                          <SelectValue placeholder="Today" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="today">Today</SelectItem>
-                        </SelectContent>
-                      </Select>
+                {viewMode === "mine" ? (
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                      onClick={() =>
+                        setShowDailyUserReport((prev) => {
+                          const next = !prev
+                          if (next) setPrintRange("today")
+                          return next
+                        })
+                      }
+                    >
+                      {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
+                    </Button>
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
+                    <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
+                      <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
+                        <SelectValue placeholder="Today" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="today">Today</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -5024,9 +5279,8 @@ export default function DepartmentKanban() {
                 </div>
                 <div
                   ref={dailyReportScrollRef}
-                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
-                    isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
-                  }`}
+                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                    }`}
                   onMouseDown={handleDailyReportMouseDown}
                   onMouseMove={handleDailyReportMouseMove}
                   onMouseUp={handleDailyReportMouseEnd}
@@ -5218,70 +5472,70 @@ export default function DepartmentKanban() {
             ) : null}
 
             {viewMode === "department" ? (
-            <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    Shows overdue items for the selected user (not for “All users”).
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      Shows overdue items for the selected user (not for “All users”).
+                    </div>
                   </div>
+                  {loadingDailyReport ? (
+                    <div className="text-xs text-slate-500">Loading…</div>
+                  ) : null}
                 </div>
-                {loadingDailyReport ? (
-                  <div className="text-xs text-slate-500">Loading…</div>
-                ) : null}
-              </div>
-              {selectedUserId === "__all__" ? (
-                <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
-              ) : dailyReport ? (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
-                    {dailyReport.tasks_overdue.length ? (
-                      <div className="mt-2 space-y-2">
-                        {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
-                          <div key={item.task.id} className="flex items-start justify-between gap-2">
-                            <div className="text-sm text-slate-800">{item.task.title}</div>
-                            <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                              late {item.late_days ?? 0}d
+                {selectedUserId === "__all__" ? (
+                  <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
+                ) : dailyReport ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
+                      {dailyReport.tasks_overdue.length ? (
+                        <div className="mt-2 space-y-2">
+                          {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
+                            <div key={item.task.id} className="flex items-start justify-between gap-2">
+                              <div className="text-sm text-slate-800">{item.task.title}</div>
+                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                late {item.late_days ?? 0}d
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                        {dailyReport.tasks_overdue.length > 8 ? (
-                          <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
-                    )}
+                          ))}
+                          {dailyReport.tasks_overdue.length > 8 ? (
+                            <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
+                      {dailyReport.system_overdue.length ? (
+                        <div className="mt-2 space-y-2">
+                          {dailyReport.system_overdue.slice(0, 8).map((occ) => (
+                            <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
+                              <div className="text-sm text-slate-800">
+                                {occ.title}{" "}
+                                <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
+                              </div>
+                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
+                                late {occ.late_days ?? 0}d
+                              </div>
+                            </div>
+                          ))}
+                          {dailyReport.system_overdue.length > 8 ? (
+                            <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
+                      )}
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
-                    {dailyReport.system_overdue.length ? (
-                      <div className="mt-2 space-y-2">
-                        {dailyReport.system_overdue.slice(0, 8).map((occ) => (
-                          <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
-                            <div className="text-sm text-slate-800">
-                              {occ.title}{" "}
-                              <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
-                            </div>
-                            <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                              late {occ.late_days ?? 0}d
-                            </div>
-                          </div>
-                        ))}
-                        {dailyReport.system_overdue.length > 8 ? (
-                          <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-3 text-sm text-slate-500">No report available.</div>
-              )}
-            </Card>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No report available.</div>
+                )}
+              </Card>
             ) : null}
             <div className="space-y-4">
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
@@ -5330,7 +5584,9 @@ export default function DepartmentKanban() {
                                     )}
                                   </div>
                                   <div className="mt-1 text-xs text-slate-600">
-                                    {assigneeList.join(", ")}
+                                    <span className="font-medium text-slate-700">{group.name}</span>
+                                    {assigneeList.length ? <span className="text-slate-400"> • </span> : null}
+                                    {assigneeList.length ? <span>{assigneeList.join(", ")}</span> : null}
                                   </div>
                                 </Link>
                               )
@@ -5359,23 +5615,23 @@ export default function DepartmentKanban() {
                       {todayOpenNotes.map((note) => {
                         const priorityValue = normalizePriority(note.priority)
                         return (
-                        <div
-                          key={note.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {note.note_type || "GA"}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
-                            <div className="font-medium">{note.content}</div>
+                          <div
+                            key={note.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                {note.note_type || "GA"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                              <div className="font-medium">{note.content}</div>
+                            </div>
                           </div>
-                        </div>
                         )
                       })}
                     </div>
@@ -5467,11 +5723,10 @@ export default function DepartmentKanban() {
                           <Link
                             key={task.id}
                             href={`/tasks/${task.id}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
-                              isCompleted 
-                                ? "border-green-500 bg-green-50/30 opacity-75" 
-                                : "border-blue-500 bg-white"
-                            }`}
+                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                              ? "border-green-500 bg-green-50/30 opacity-75"
+                              : "border-blue-500 bg-white"
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -5507,7 +5762,7 @@ export default function DepartmentKanban() {
                                 {Array.from(assigneeIds).map((userId) => {
                                   const userFromMap = userMap.get(userId)
                                   const assigneeFromArray = task.assignees?.find(a => a.id === userId)
-                                  const label = userFromMap 
+                                  const label = userFromMap
                                     ? assigneeLabel(userFromMap)
                                     : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
                                   return (
@@ -5546,21 +5801,21 @@ export default function DepartmentKanban() {
                       {todaySystemTasks.map((task) => {
                         const priorityValue = normalizePriority(task.priority)
                         return (
-                        <div
-                          key={task.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="font-medium text-slate-800">{task.title}</div>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                            >
-                              {PRIORITY_LABELS[priorityValue]}
-                            </Badge>
+                          <div
+                            key={task.id}
+                            className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-slate-800">{task.title}</div>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
+                              >
+                                {PRIORITY_LABELS[priorityValue]}
+                              </Badge>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
                           </div>
-                          <div className="mt-1 text-xs text-slate-600">{task.description || "-"}</div>
-                        </div>
                         )
                       })}
                     </div>
@@ -5793,7 +6048,7 @@ export default function DepartmentKanban() {
                                 : department
                                   ? formatDepartmentName(department.name)
                                   : "-"
-                          const ownerLabel = assigneeSummary(template.assignees) || 
+                          const ownerLabel = assigneeSummary(template.assignees) ||
                             (template.default_assignee_id ? users.find((u) => u.id === template.default_assignee_id)?.full_name || users.find((u) => u.id === template.default_assignee_id)?.username || "-" : "-")
                           const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
                           const statusValue = template.status || "TODO"
@@ -5886,25 +6141,25 @@ export default function DepartmentKanban() {
         {/* Dialog for closing task with optional comment */}
         <Dialog open={closeTaskDialogOpen} onOpenChange={setCloseTaskDialogOpen}>
           <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Close System Task</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="close-task-comment">
-              Employee Comment
-            </Label>
-            <Textarea
-              id="close-task-comment"
-              value={closeTaskComment}
-              onChange={(e) => setCloseTaskComment(e.target.value)}
-              placeholder="Describe what was done in this task..."
-              className="min-h-[120px]"
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
+            <DialogHeader>
+              <DialogTitle>Close System Task</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="close-task-comment">
+                  Employee Comment
+                </Label>
+                <Textarea
+                  id="close-task-comment"
+                  value={closeTaskComment}
+                  onChange={(e) => setCloseTaskComment(e.target.value)}
+                  placeholder="Describe what was done in this task..."
+                  className="min-h-[120px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setCloseTaskDialogOpen(false)
                     setTaskToCloseId(null)
@@ -5913,14 +6168,14 @@ export default function DepartmentKanban() {
                   disabled={closingTask}
                 >
                   Cancel
-            </Button>
-            <Button
-              onClick={() => void confirmCloseTask()}
-              disabled={closingTask || !closeTaskComment.trim()}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {closingTask ? "Closing..." : "Close Task"}
-            </Button>
+                </Button>
+                <Button
+                  onClick={() => void confirmCloseTask()}
+                  disabled={closingTask || !closeTaskComment.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {closingTask ? "Closing..." : "Close Task"}
+                </Button>
               </div>
             </div>
           </DialogContent>
@@ -5974,67 +6229,67 @@ export default function DepartmentKanban() {
                         <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label className="text-slate-700">Assign to</Label>
-                            <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
-                              <DialogTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
-                                >
-                                  {noProjectAssigneeLabel}
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Assign to</Label>
+                          <Dialog open={selectNoProjectAssigneesOpen} onOpenChange={setSelectNoProjectAssigneesOpen}>
+                            <DialogTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                              >
+                                {noProjectAssigneeLabel}
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-md z-[110]">
+                              <DialogHeader>
+                                <DialogTitle>Select Assignees</DialogTitle>
+                              </DialogHeader>
+                              <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                                {users.length ? (
+                                  users.map((u) => {
+                                    const isSelected = noProjectAssignees.includes(u.id)
+                                    return (
+                                      <div
+                                        key={u.id}
+                                        className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
+                                          } else {
+                                            setNoProjectAssignees((prev) => [...prev, u.id])
+                                          }
+                                        }}
+                                      >
+                                        <Checkbox checked={isSelected} />
+                                        <Label className="cursor-pointer flex-1">
+                                          {u.full_name || u.username || "-"}
+                                        </Label>
+                                      </div>
+                                    )
+                                  })
+                                ) : (
+                                  <div className="text-sm text-slate-600">No users available.</div>
+                                )}
+                              </div>
+                              <div className="mt-4 flex justify-end gap-2">
+                                <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
+                                  Clear
                                 </Button>
-                              </DialogTrigger>
-                              <DialogContent className="sm:max-w-md z-[110]">
-                                <DialogHeader>
-                                  <DialogTitle>Select Assignees</DialogTitle>
-                                </DialogHeader>
-                                <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
-                                  {users.length ? (
-                                    users.map((u) => {
-                                      const isSelected = noProjectAssignees.includes(u.id)
-                                      return (
-                                        <div
-                                          key={u.id}
-                                          className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
-                                          onClick={() => {
-                                            if (isSelected) {
-                                              setNoProjectAssignees((prev) => prev.filter((id) => id !== u.id))
-                                            } else {
-                                              setNoProjectAssignees((prev) => [...prev, u.id])
-                                            }
-                                          }}
-                                        >
-                                          <Checkbox checked={isSelected} />
-                                          <Label className="cursor-pointer flex-1">
-                                            {u.full_name || u.username || "-"}
-                                          </Label>
-                                        </div>
-                                      )
-                                    })
-                                  ) : (
-                                    <div className="text-sm text-slate-600">No users available.</div>
-                                  )}
-                                </div>
-                                <div className="mt-4 flex justify-end gap-2">
-                                  <Button variant="outline" onClick={() => setNoProjectAssignees([])}>
-                                    Clear
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => setNoProjectAssignees(users.map((u) => u.id))}
-                                    disabled={!users.length}
-                                  >
-                                    All users
-                                  </Button>
-                                  <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
-                                    Done
-                                  </Button>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          </div>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setNoProjectAssignees(users.map((u) => u.id))}
+                                  disabled={!users.length}
+                                >
+                                  All users
+                                </Button>
+                                <Button onClick={() => setSelectNoProjectAssigneesOpen(false)}>
+                                  Done
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
                         <div className="space-y-2">
                           <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
@@ -6255,117 +6510,116 @@ export default function DepartmentKanban() {
                           const statusValue = taskStatusValue(t)
                           const isCompleted = statusValue === "DONE"
                           return (
-                          <Link
-                            key={t.id}
-                            id={`task-${t.id}`}
-                            href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${
-                              isCompleted 
-                                ? "border-green-500 bg-green-50/30 opacity-75" 
+                            <Link
+                              key={t.id}
+                              id={`task-${t.id}`}
+                              href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
+                              className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                                ? "border-green-500 bg-green-50/30 opacity-75"
                                 : `${row.borderClass} bg-white`
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
-                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
-                                    GA
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                                    <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                      GA
+                                    </Badge>
+                                  )}
+                                  <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                    {t.title}
+                                  </div>
+                                  <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
+                                    {reportStatusLabel(statusValue)}
                                   </Badge>
-                                )}
-                                <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                  {t.title}
+                                  {isHighPriority && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[11px] bg-red-100 text-red-700 border-red-200"
+                                    >
+                                      {taskPriority}
+                                    </Badge>
+                                  )}
                                 </div>
-                                <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
-                                  {reportStatusLabel(statusValue)}
-                                </Badge>
-                                {isHighPriority && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[11px] bg-red-100 text-red-700 border-red-200"
-                                  >
-                                    {taskPriority}
+                                <div className="flex items-center gap-2">
+                                  <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
+                                    {row.itemBadge}
                                   </Badge>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
-                                  {row.itemBadge}
-                                </Badge>
-                                {(() => {
-                                  // Collect all assignees: from assigned_to and assignees array
-                                  const assigneeIds = new Set<string>()
-                                  if (t.assigned_to) {
-                                    assigneeIds.add(t.assigned_to)
-                                  }
-                                  if (t.assignees) {
-                                    for (const assignee of t.assignees) {
-                                      if (assignee.id) {
-                                        assigneeIds.add(assignee.id)
+                                  {(() => {
+                                    // Collect all assignees: from assigned_to and assignees array
+                                    const assigneeIds = new Set<string>()
+                                    if (t.assigned_to) {
+                                      assigneeIds.add(t.assigned_to)
+                                    }
+                                    if (t.assignees) {
+                                      for (const assignee of t.assignees) {
+                                        if (assignee.id) {
+                                          assigneeIds.add(assignee.id)
+                                        }
                                       }
                                     }
-                                  }
-                                  
-                                  // Render all assignee initials
-                                  const assigneeChips = Array.from(assigneeIds).map((userId) => {
-                                    // Try to get user from userMap first, then from assignees array
-                                    const userFromMap = userMap.get(userId)
-                                    const assigneeFromArray = t.assignees?.find(a => a.id === userId)
-                                    // Get label from userMap or assignees array
-                                    const label = userFromMap 
-                                      ? assigneeLabel(userFromMap)
-                                      : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
-                                    return (
-                                      <div
-                                        key={userId}
-                                        className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
-                                        title={label}
+
+                                    // Render all assignee initials
+                                    const assigneeChips = Array.from(assigneeIds).map((userId) => {
+                                      // Try to get user from userMap first, then from assignees array
+                                      const userFromMap = userMap.get(userId)
+                                      const assigneeFromArray = t.assignees?.find(a => a.id === userId)
+                                      // Get label from userMap or assignees array
+                                      const label = userFromMap
+                                        ? assigneeLabel(userFromMap)
+                                        : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+                                      return (
+                                        <div
+                                          key={userId}
+                                          className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                          title={label}
+                                        >
+                                          {initials(label)}
+                                        </div>
+                                      )
+                                    })
+
+                                    return assigneeChips.length > 0 ? assigneeChips : null
+                                  })()}
+                                  {canDeleteNoProject ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                        title="Edit"
+                                        aria-label={`Edit ${t.title}`}
+                                        onClick={(event) => {
+                                          event.preventDefault()
+                                          event.stopPropagation()
+                                          startEditTask(t)
+                                        }}
                                       >
-                                        {initials(label)}
-                                      </div>
-                                    )
-                                  })
-                                  
-                                  return assigneeChips.length > 0 ? assigneeChips : null
-                                })()}
-                                {canDeleteNoProject ? (
-                                  <>
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                      title="Edit"
-                                      aria-label={`Edit ${t.title}`}
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        startEditTask(t)
-                                      }}
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      disabled={deletingNoProjectTaskId === t.id}
-                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                      title="Delete"
-                                      aria-label={`Delete ${t.title}`}
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        void deleteNoProjectTask(t.id)
-                                      }}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </>
-                                ) : null}
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        disabled={deletingNoProjectTaskId === t.id}
+                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                        title="Delete"
+                                        aria-label={`Delete ${t.title}`}
+                                        onClick={(event) => {
+                                          event.preventDefault()
+                                          event.stopPropagation()
+                                          void deleteNoProjectTask(t.id)
+                                        }}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </>
+                                  ) : null}
+                                </div>
                               </div>
-                            </div>
-                            {t.description ? (
-                              <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
-                            ) : null}
-                          </Link>
+                              {t.description ? (
+                                <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                              ) : null}
+                            </Link>
                           )
                         })}
                       </div>
@@ -6518,7 +6772,12 @@ export default function DepartmentKanban() {
             <Dialog
               open={Boolean(gaNoteTaskOpenId)}
               onOpenChange={(open) => {
-                if (!open) setGaNoteTaskOpenId(null)
+                if (!open) {
+                  setGaNoteTaskOpenId(null)
+                  setGaNoteTaskStartDate(todayInputValue())
+                  setGaNoteTaskHasProject(false)
+                  setGaNoteTaskAssigneeIds([])
+                }
               }}
             >
               <DialogContent className="sm:max-w-md">
@@ -6541,16 +6800,19 @@ export default function DepartmentKanban() {
                       rows={4}
                     />
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as TaskPriority)}>
+                      <Label>Type</Label>
+                      <Select value={gaNoteTaskPriority} onValueChange={(v) => setGaNoteTaskPriority(v as GaNoteTaskType)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Priority" />
+                          <SelectValue placeholder="Type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="NORMAL">Normal</SelectItem>
-                          <SelectItem value="HIGH">High</SelectItem>
+                          {(gaNoteTaskHasProject ? GA_NOTE_TASK_TYPE_OPTIONS_PROJECT : GA_NOTE_TASK_TYPE_OPTIONS_FAST).map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -6576,6 +6838,14 @@ export default function DepartmentKanban() {
                       </Select>
                     </div>
                     <div className="space-y-2">
+                      <Label>Start date</Label>
+                      <Input
+                        type="date"
+                        value={gaNoteTaskStartDate}
+                        onChange={(e) => setGaNoteTaskStartDate(normalizeDueDateInput(e.target.value))}
+                      />
+                    </div>
+                    <div className="space-y-2">
                       <Label>Due date</Label>
                       <Input
                         type="date"
@@ -6586,19 +6856,55 @@ export default function DepartmentKanban() {
                   </div>
                   <div className="space-y-2">
                     <Label>Assign to</Label>
-                    <Select value={gaNoteTaskAssigneeId} onValueChange={setGaNoteTaskAssigneeId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                        {departmentUsers.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            {member.full_name || member.username}
+                    <div className="rounded-md border bg-white p-2">
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {gaNoteTaskAssigneeIds.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">No assignees selected.</span>
+                        ) : (
+                          gaNoteTaskAssigneeIds.map((id) => {
+                            const person = departmentUsers.find((member) => member.id === id)
+                            const label = person?.full_name || person?.username || id
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                                onClick={() =>
+                                  setGaNoteTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
+                                }
+                              >
+                                {label}
+                                <span className="text-slate-500">×</span>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                      <Select
+                        value="__picker__"
+                        onValueChange={(value) => {
+                          if (value === "__picker__") return
+                          setGaNoteTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                        }}
+                        disabled={departmentUsers.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Add assignee" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__picker__" disabled>
+                            Add assignee
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                          {departmentUsers
+                            .filter((member) => member.id && !gaNoteTaskAssigneeIds.includes(member.id))
+                            .map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.full_name || member.username}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setGaNoteTaskOpenId(null)}>
@@ -6620,6 +6926,7 @@ export default function DepartmentKanban() {
                       <th className="w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
@@ -6649,6 +6956,11 @@ export default function DepartmentKanban() {
                         .map((note, idx) => {
                           const author = users.find((u) => u.id === note.created_by) || null
                           const project = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+                          const projectDepartment = project?.department_id
+                            ? departments.find((d) => d.id === project.department_id) || null
+                            : null
+                          const projectDepartmentCode = projectDepartment?.code?.toUpperCase() || ""
+                          const isManualOnlyProject = projectDepartmentCode === "PCM" || projectDepartmentCode === "GDS"
                           const linkedTask = gaNoteTaskMap.get(note.id) || null
                           const creatorLabel = author?.full_name || author?.username || "Unknown user"
                           const creatorInitials = getInitials(creatorLabel)
@@ -6658,6 +6970,16 @@ export default function DepartmentKanban() {
                               : creatorInitials === "KA"
                                 ? "bg-blue-100 text-blue-800 border border-blue-200"
                                 : "bg-slate-200 text-slate-700"
+                          const linkedAssignees = linkedTask?.assignees && linkedTask.assignees.length > 0
+                            ? linkedTask.assignees
+                            : (() => {
+                              const assignedId = linkedTask?.assigned_to || null
+                              if (!assignedId) return []
+                              const assignedUser = userMap.get(assignedId)
+                              return assignedUser
+                                ? [{ id: assignedId, full_name: assignedUser.full_name, username: assignedUser.username, email: assignedUser.email }]
+                                : []
+                            })()
                           // Use the current department if the note's department_id matches, otherwise show nothing
                           const noteDepartment = note.department_id === department?.id ? department : null
 
@@ -6687,6 +7009,33 @@ export default function DepartmentKanban() {
                                   </div>
                                 </div>
                               </td>
+                              <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                                {linkedAssignees.length === 0 ? (
+                                  <span className="text-xs text-slate-500">-</span>
+                                ) : (
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {linkedAssignees.map((assignee, assigneeIdx) => {
+                                      const assigneeLabel = assignee.full_name || assignee.username || assignee.email || "Unknown"
+                                      const assigneeInitials = getInitials(assigneeLabel)
+                                      const assigneeBadgeClasses =
+                                        assigneeInitials === "GA"
+                                          ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                          : assigneeInitials === "KA"
+                                            ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                            : "bg-slate-200 text-slate-700"
+                                      return (
+                                        <div
+                                          key={assignee.id || assigneeIdx}
+                                          className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${assigneeBadgeClasses}`}
+                                          title={assigneeLabel}
+                                        >
+                                          {assigneeInitials}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </td>
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                                 {noteDepartment ? (
                                   <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
@@ -6707,6 +7056,10 @@ export default function DepartmentKanban() {
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
                                       Task Created
                                     </Badge>
+                                  ) : isManualOnlyProject ? (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
+                                      Manual only
+                                    </Badge>
                                   ) : canCreate && !isReadOnly && note.status !== "CLOSED" ? (
                                     <Button
                                       variant="outline"
@@ -6716,9 +7069,11 @@ export default function DepartmentKanban() {
                                         setGaNoteTaskOpenId(note.id)
                                         setGaNoteTaskTitle(gaNoteTaskDefaultTitle(note.content || ""))
                                         setGaNoteTaskDescription(note.content || "")
-                                        setGaNoteTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
+                                        setGaNoteTaskPriority("NORMAL")
+                                        setGaNoteTaskHasProject(Boolean(note.project_id))
+                                        setGaNoteTaskStartDate(todayInputValue())
                                         setGaNoteTaskDueDate("")
-                                        setGaNoteTaskAssigneeId("__unassigned__")
+                                        setGaNoteTaskAssigneeIds([])
                                         setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                                       }}
                                     >
@@ -6781,6 +7136,21 @@ export default function DepartmentKanban() {
                   />
                   <span>Show Done</span>
                 </label>
+                {viewMode === "department" ? (
+                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                    <SelectTrigger className="h-8 sm:h-9 w-full sm:w-48 border-slate-200 focus:border-slate-400 rounded-xl text-xs sm:text-sm">
+                      <SelectValue placeholder="All users" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All users</SelectItem>
+                      {departmentUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.full_name || u.username || "-"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
                 <Dialog open={internalNoteOpen} onOpenChange={setInternalNoteOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" className="w-full sm:w-auto">Create Internal Note</Button>
@@ -6906,6 +7276,156 @@ export default function DepartmentKanban() {
                     </div>
                   </DialogContent>
                 </Dialog>
+
+                <Dialog
+                  open={editInternalNoteOpen}
+                  onOpenChange={(open) => {
+                    setEditInternalNoteOpen(open)
+                    if (!open) {
+                      setEditingInternalNoteIds([])
+                      setEditInternalNoteTitle("")
+                      setEditInternalNoteDescription("")
+                      setEditInternalNoteDepartmentId("")
+                      setEditInternalNoteProjectId("")
+                      setEditInternalNoteToUserIds([])
+                    }
+                  }}
+                >
+                  <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Edit Internal Note</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input
+                          value={editInternalNoteTitle}
+                          onChange={(e) => setEditInternalNoteTitle(e.target.value)}
+                          placeholder="Enter title"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          value={editInternalNoteDescription}
+                          onChange={(e) => setEditInternalNoteDescription(e.target.value)}
+                          placeholder="Enter description"
+                          rows={4}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select
+                          value={editInternalNoteDepartmentId}
+                          onValueChange={(value) => {
+                            setEditInternalNoteDepartmentId(value)
+                            setEditInternalNoteProjectId("")
+                            setEditInternalNoteToUserIds([])
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {departments.map((dep) => (
+                              <SelectItem key={dep.id} value={dep.id}>
+                                {dep.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Project</Label>
+                        <Select
+                          value={editInternalNoteProjectId}
+                          onValueChange={setEditInternalNoteProjectId}
+                          disabled={!editInternalNoteDepartmentId || loadingEditInternalNoteProjects}
+                        >
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                !editInternalNoteDepartmentId
+                                  ? "Select a department first"
+                                  : loadingEditInternalNoteProjects
+                                    ? "Loading projects..."
+                                    : "Select project"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {editInternalNoteProjects.map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                {project.title || project.name || "Untitled project"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>User (To)</Label>
+                        <div className="rounded-md border border-slate-200 p-2 max-h-56 overflow-y-auto space-y-2">
+                          {(() => {
+                            const eligibleUsers = editInternalNoteDepartmentId
+                              ? users.filter((u) => u.department_id === editInternalNoteDepartmentId)
+                              : users
+                            return (
+                              <>
+                                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                                  <Checkbox
+                                    checked={
+                                      eligibleUsers.length > 0 &&
+                                      eligibleUsers.every((u) => editInternalNoteToUserIds.includes(u.id))
+                                    }
+                                    onCheckedChange={(value) => {
+                                      const next = Boolean(value)
+                                      setEditInternalNoteToUserIds(next ? eligibleUsers.map((u) => u.id) : [])
+                                    }}
+                                  />
+                                  <span>Select all users</span>
+                                </label>
+                                {eligibleUsers.map((member) => {
+                                  const label = member.full_name || member.username || "-"
+                                  const checked = editInternalNoteToUserIds.includes(member.id)
+                                  return (
+                                    <label key={member.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(value) => {
+                                          const next = Boolean(value)
+                                          setEditInternalNoteToUserIds((prev) =>
+                                            next ? [...prev, member.id] : prev.filter((id) => id !== member.id)
+                                          )
+                                        }}
+                                      />
+                                      <span>{label}</span>
+                                    </label>
+                                  )
+                                })}
+                              </>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setEditInternalNoteOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={
+                            !editInternalNoteTitle.trim() ||
+                            editInternalNoteToUserIds.length === 0 ||
+                            !editInternalNoteDepartmentId ||
+                            savingInternalNoteEdit
+                          }
+                          onClick={() => void submitInternalNoteEdit()}
+                        >
+                          {savingInternalNoteEdit ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 
@@ -6922,7 +7442,7 @@ export default function DepartmentKanban() {
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DATE, TIME</th>
                       <th className="w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>FROM</th>
                       <th className="w-[160px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>TO</th>
-                      <th className="w-[80px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>ACTIONS</th>
+                      <th className="w-[160px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -6944,84 +7464,100 @@ export default function DepartmentKanban() {
                           projects.find((p) => p.id === note.project_id)?.title ||
                           projects.find((p) => p.id === note.project_id)?.name ||
                           "-"
+                        const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
                         const canDeleteNote =
-                          user?.role === "ADMIN" ||
-                          user?.role === "MANAGER" ||
+                          isAdminOrManager ||
                           (user?.id ? group.toUserIds.includes(user.id) : false)
+                        const canEditNote = isAdminOrManager || (user?.id ? note.from_user_id === user.id : false)
                         const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
                         const noteIdsForAction = (() => {
-                          const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
                           if (isAdminOrManager) return group.notes.map((n) => n.id)
                           return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
                         })()
+                        const noteIdsForEdit = canEditNote ? group.notes.map((n) => n.id) : []
+                        const canUpdateDone = noteIdsForAction.length > 0
 
-                          return (
-                            <tr
-                              key={note.id}
-                              className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
-                            >
-                              <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
-                              <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
-                                <div className="flex flex-col gap-1">
-                                  <span className={`text-sm font-semibold ${groupIsDone ? "line-through text-slate-500" : ""}`}>{note.title}</span>
-                                </div>
-                              </td>
-                              <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
-                                <span className="text-sm">{note.description || "-"}</span>
-                              </td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{departmentLabel}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{projectLabel}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{formatDate(note.created_at)}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
-                              <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
-                              <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
-                                <div className="flex items-center justify-center gap-2">
-                                  {!groupIsDone ? (
+                        return (
+                          <tr
+                            key={note.id}
+                            className={`hover:bg-muted/50 border-b transition-colors ${groupIsDone ? "bg-slate-50/70 opacity-70" : ""}`}
+                          >
+                            <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{idx + 1}</td>
+                            <td className="whitespace-pre-wrap break-words w-[300px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                              <div className="flex flex-col gap-1">
+                                <span className={`text-sm font-semibold ${groupIsDone ? "line-through text-slate-500" : ""}`}>{note.title}</span>
+                              </div>
+                            </td>
+                            <td className="whitespace-pre-wrap break-words w-[360px] border border-slate-600 p-2 align-middle" style={{ verticalAlign: "bottom" }}>
+                              <span className="text-sm">{note.description || "-"}</span>
+                            </td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{departmentLabel}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{projectLabel}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{formatDate(note.created_at)}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{initials(fromLabel)}</td>
+                            <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>{toInitials}</td>
+                            <td className="border border-slate-600 border-r-2 border-r-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: "bottom" }}>
+                              <div className="flex items-center justify-center gap-2">
+                                {canEditNote ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 border-slate-200 text-slate-500 hover:border-sky-200 hover:text-sky-700"
+                                    title="Edit"
+                                    aria-label={`Edit ${note.title}`}
+                                    onClick={() => startEditInternalNote(note, group.toUserIds, noteIdsForEdit)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                                {!groupIsDone ? (
+                                  canUpdateDone ? (
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                                      disabled={noteIdsForAction.length === 0 || noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                      disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
                                       onClick={() => void updateInternalNoteDone(noteIdsForAction, true)}
                                     >
                                       <Check className="h-3.5 w-3.5 mr-1" />
                                       Mark as done
                                     </Button>
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs text-emerald-700">Done</span>
-                                      <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                      {noteIdsForAction.length ? (
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="h-7 w-7 border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600"
-                                          title="Undo"
-                                          aria-label={`Undo done for ${note.title}`}
-                                          disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
-                                          onClick={() => void updateInternalNoteDone(noteIdsForAction, false)}
-                                        >
-                                          <RotateCcw className="h-3.5 w-3.5" />
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  )}
-                                  {canDeleteNote ? (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                      title="Delete"
-                                      aria-label={`Delete ${note.title}`}
-                                      onClick={() => void deleteInternalNote(noteIdsForAction)}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          )
+                                  ) : null
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-emerald-700">Done</span>
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                    {canUpdateDone ? (
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-7 border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600"
+                                        title="Undo"
+                                        aria-label={`Undo done for ${note.title}`}
+                                        disabled={noteIdsForAction.some((id) => updatingInternalNoteIds.includes(id))}
+                                        onClick={() => void updateInternalNoteDone(noteIdsForAction, false)}
+                                      >
+                                        <RotateCcw className="h-3.5 w-3.5" />
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                )}
+                                {canDeleteNote ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${note.title}`}
+                                    onClick={() => void deleteInternalNote(noteIdsForAction)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        )
                       })
                     ) : (
                       <tr>
@@ -7164,7 +7700,7 @@ export default function DepartmentKanban() {
                                         <Dialog open={showEditParticipantDialog} onOpenChange={setShowEditParticipantDialog}>
                                           <DialogTrigger asChild>
                                             <Button variant="outline" className="w-full justify-between">
-                                              {editMeetingParticipantIds.length > 0 
+                                              {editMeetingParticipantIds.length > 0
                                                 ? `${editMeetingParticipantIds.length} participant${editMeetingParticipantIds.length > 1 ? 's' : ''} selected`
                                                 : "Select participants"}
                                             </Button>
@@ -7214,17 +7750,17 @@ export default function DepartmentKanban() {
                                           </SelectContent>
                                         </Select>
                                         <div className="flex gap-2">
-                                          <Button 
-                                            variant="outline" 
-                                            onClick={cancelEditMeeting} 
+                                          <Button
+                                            variant="outline"
+                                            onClick={cancelEditMeeting}
                                             className="flex-1"
                                             type="button"
                                             disabled={savingMeeting}
                                           >
                                             Cancel
                                           </Button>
-                                          <Button 
-                                            onClick={() => void saveMeeting(meeting.id)} 
+                                          <Button
+                                            onClick={() => void saveMeeting(meeting.id)}
                                             className="flex-1"
                                             type="button"
                                             disabled={!editMeetingTitle.trim() || savingMeeting}
@@ -7263,8 +7799,8 @@ export default function DepartmentKanban() {
                                         {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
                                           ? `W: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
                                           : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
-                                          ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
-                                          : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
+                                            ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
+                                            : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
                                       </span>
                                     ) : (
                                       <span className="text-slate-400 text-sm">-</span>
@@ -7433,7 +7969,7 @@ export default function DepartmentKanban() {
                             <Dialog open={showParticipantDialog} onOpenChange={setShowParticipantDialog}>
                               <DialogTrigger asChild>
                                 <Button variant="outline" className="w-full justify-between">
-                                  {meetingParticipantIds.length > 0 
+                                  {meetingParticipantIds.length > 0
                                     ? `${meetingParticipantIds.length} participant${meetingParticipantIds.length > 1 ? 's' : ''} selected`
                                     : "Select participants"}
                                 </Button>
@@ -7483,16 +8019,16 @@ export default function DepartmentKanban() {
                               </SelectContent>
                             </Select>
                             <div className="flex gap-2">
-                              <Button 
-                                disabled={!meetingTitle.trim() || creatingMeeting} 
+                              <Button
+                                disabled={!meetingTitle.trim() || creatingMeeting}
                                 onClick={() => void submitMeeting()}
                                 className="flex-1"
                                 type="button"
                               >
                                 {creatingMeeting ? "Saving..." : "Add"}
                               </Button>
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 onClick={() => {
                                   setShowAddMeetingForm(false)
                                   setMeetingTitle("")
@@ -7634,8 +8170,8 @@ export default function DepartmentKanban() {
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
-                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3") 
-                          ? (item.title || "").toUpperCase() 
+                        const displayTitle = (internalSlot === "M2" || internalSlot === "M3")
+                          ? (item.title || "").toUpperCase()
                           : (item.title || "")
                         return (
                           <div key={item.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
@@ -7660,18 +8196,18 @@ export default function DepartmentKanban() {
                               <div className="flex items-center gap-2">
                                 {isEditing ? (
                                   <>
-                                    <Button 
-                                      size="sm" 
-                                      variant="outline" 
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
                                       onClick={() => void saveInternalMeetingItem()}
                                       type="button"
                                       disabled={!editingInternalMeetingItem.trim() || savingInternalMeetingItem}
                                     >
                                       {savingInternalMeetingItem ? "Saving..." : "Save"}
                                     </Button>
-                                    <Button 
-                                      size="sm" 
-                                      variant="ghost" 
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
                                       onClick={cancelEditInternalMeetingItem}
                                       type="button"
                                       disabled={savingInternalMeetingItem}
@@ -7838,7 +8374,7 @@ export default function DepartmentKanban() {
                   userName: string
                   userInitials: string
                 }> = []
-                
+
                 for (const member of allTodayPrintBaseUsers) {
                   const userReport = allUsersDailyReports.get(member.id)
                   if (!userReport) continue
@@ -7850,7 +8386,7 @@ export default function DepartmentKanban() {
                     allRows.push({ ...row, userName, userInitials })
                   }
                 }
-                
+
                 // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
                 allRows.sort((a, b) => {
                   // First sort by typeLabel (LL)
@@ -7864,7 +8400,7 @@ export default function DepartmentKanban() {
                   // Finally by tyo (T/Y/O)
                   return a.tyo.localeCompare(b.tyo)
                 })
-                
+
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                     <colgroup>

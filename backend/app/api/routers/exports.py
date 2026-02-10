@@ -40,10 +40,12 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
+from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.ga_note import GaNote
 from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope, GaNoteStatus
 from app.api.routers.planners import weekly_table_planner
+from app.schemas.planner import WeeklyTableDepartment
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 
 
@@ -2682,6 +2684,307 @@ async def export_weekly_planner_xlsx(
     )
 
 
+@router.get("/weekly-snapshot.xlsx")
+async def export_weekly_snapshot_xlsx(
+    snapshot_id: uuid.UUID = Query(..., description="Weekly planner snapshot id"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == snapshot_id))
+    ).scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
+
+    ensure_department_access(user, snapshot.department_id)
+
+    payload = snapshot.payload or {}
+    department_payload = payload.get("department")
+    if not department_payload:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot payload missing department")
+
+    try:
+        dept = WeeklyTableDepartment.model_validate(department_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid snapshot payload") from exc
+
+    def _parse_iso_date(value: object | None, fallback: date | None) -> date | None:
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value[:10])
+            except Exception:
+                return fallback
+        return fallback
+
+    week_start_date = _parse_iso_date(payload.get("week_start"), snapshot.week_start_date)
+    week_end_date = _parse_iso_date(payload.get("week_end"), snapshot.week_end_date)
+    if week_start_date is None or week_end_date is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Snapshot payload missing week range")
+
+    official_snapshot_id = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot.id)
+            .where(
+                WeeklyPlannerSnapshot.department_id == snapshot.department_id,
+                WeeklyPlannerSnapshot.week_start_date == snapshot.week_start_date,
+                WeeklyPlannerSnapshot.snapshot_type == snapshot.snapshot_type,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    is_official = official_snapshot_id == snapshot.id
+
+    snapshot_type_label = (snapshot.snapshot_type or "").upper()
+    if snapshot_type_label == "PLANNED":
+        week_label = "PLANNED SNAPSHOT"
+    elif snapshot_type_label == "FINAL":
+        week_label = "FINAL SNAPSHOT"
+    else:
+        week_label = f"{snapshot_type_label} SNAPSHOT".strip()
+    if is_official:
+        week_label = f"OFFICIAL {week_label}".strip()
+
+    dept_label = _display_department_name(dept.department_name)
+    title_label = (
+        f"{dept_label} "
+        f"{week_start_date.day:02d}-{week_start_date.month:02d}-{week_start_date.year} - "
+        f"{week_end_date.day:02d}-{week_end_date.month:02d}-{week_end_date.year} - "
+        f"{week_label}"
+    )
+    title_upper = title_label.upper()
+
+    # Collect users in stable order
+    user_map: dict[uuid.UUID, str] = {}
+    for day in dept.days:
+        for user_day in day.users:
+            user_map.setdefault(user_day.user_id, user_day.user_name or "")
+    user_ids = list(user_map.keys())
+    user_names = [user_map[user_id] for user_id in user_ids]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = dept_label[:31] if dept_label else "Weekly Snapshot"
+
+    status_fills = {
+        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+    }
+
+    last_col = 4 + len(user_names)  # NR, DAY, LL, TIME + users
+
+    # Title row
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_upper)
+    title_cell.font = Font(bold=True, size=12)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.row_dimensions[1].height = 18
+    ws.row_dimensions[2].height = 4
+    ws.row_dimensions[3].height = 4
+
+    header_row = 4
+    data_start_row = 5
+    ws.row_dimensions[header_row].height = 15
+
+    headers = ["NR", "DAY", "LLOJI", "TIME"] + [name.upper() for name in user_names]
+    for col_idx, label in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 6
+    ws.column_dimensions["D"].width = 6
+    for idx in range(5, last_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 28
+
+    current_row = data_start_row
+    for day_index, day in enumerate(dept.days, start=1):
+        day_name = DAY_NAMES[day_index - 1].upper() if 0 <= day_index - 1 < len(DAY_NAMES) else ""
+        day_date = f"{day.date.day:02d}-{day.date.month:02d}-{day.date.year}"
+        day_label = f"{day_name}\n{day_date}".strip()
+
+        slot_specs = [
+            ("PRJK", "AM", False),
+            ("FT", "AM", True),
+            ("PRJK", "PM", False),
+            ("FT", "PM", True),
+        ]
+
+        slot_rows: list[dict[str, object]] = []
+        for ll_label, time_label, include_fast in slot_specs:
+            per_user_items: list[list[dict[str, str | None]]] = []
+            max_items = 0
+            for user_id in user_ids:
+                user_day = next((u for u in day.users if u.user_id == user_id), None)
+                projects = []
+                system_tasks = []
+                fast_tasks = []
+                if user_day:
+                    if time_label == "AM":
+                        projects = user_day.am_projects or []
+                        system_tasks = user_day.am_system_tasks or []
+                        fast_tasks = user_day.am_fast_tasks or []
+                    else:
+                        projects = user_day.pm_projects or []
+                        system_tasks = user_day.pm_system_tasks or []
+                        fast_tasks = user_day.pm_fast_tasks or []
+
+                if include_fast:
+                    projects = []
+                    system_tasks = []
+
+                items = _planner_cell_items(
+                    projects=projects,
+                    system_tasks=system_tasks,
+                    fast_tasks=fast_tasks,
+                    include_fast=include_fast,
+                    day_date=day.date,
+                )
+                per_user_items.append(items)
+                max_items = max(max_items, len(items))
+
+            slot_rows.append(
+                {
+                    "ll_label": ll_label,
+                    "time_label": time_label,
+                    "include_fast": include_fast,
+                    "row_count": max(1, max_items),
+                    "per_user_items": per_user_items,
+                }
+            )
+
+        total_day_rows = sum(slot["row_count"] for slot in slot_rows)
+        base_row = current_row
+
+        ws.merge_cells(start_row=base_row, start_column=1, end_row=base_row + total_day_rows - 1, end_column=1)
+        ws.merge_cells(start_row=base_row, start_column=2, end_row=base_row + total_day_rows - 1, end_column=2)
+        nr_cell = ws.cell(row=base_row, column=1, value=day_index)
+        nr_cell.font = Font(bold=True)
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        day_cell = ws.cell(row=base_row, column=2, value=day_label)
+        day_cell.font = Font(bold=True)
+        day_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+        row_cursor = base_row
+        for slot in slot_rows:
+            slot_start = row_cursor
+            row_count = slot["row_count"]
+            ll_label = slot["ll_label"]
+            time_label = slot["time_label"]
+            per_user_items = slot["per_user_items"]
+
+            if row_count > 1:
+                ws.merge_cells(start_row=slot_start, start_column=3, end_row=slot_start + row_count - 1, end_column=3)
+                ws.merge_cells(start_row=slot_start, start_column=4, end_row=slot_start + row_count - 1, end_column=4)
+
+            ll_cell = ws.cell(row=slot_start, column=3, value=ll_label)
+            ll_cell.font = Font(bold=True)
+            ll_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+            time_cell = ws.cell(row=slot_start, column=4, value=time_label)
+            time_cell.font = Font(bold=True)
+            time_cell.alignment = Alignment(horizontal="left", vertical="bottom")
+
+            for offset in range(row_count):
+                row_idx = slot_start + offset
+                for u_idx, _ in enumerate(user_ids):
+                    items = per_user_items[u_idx]
+                    item = items[offset] if offset < len(items) else None
+                    cell_value = _planner_item_rich_text(item) if item else ""
+                    cell = ws.cell(row=row_idx, column=5 + u_idx, value=cell_value)
+                    cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+                    if item and item.get("status") in status_fills:
+                        cell.fill = status_fills[item["status"]]
+
+            row_cursor += row_count
+
+        current_row = base_row + total_day_rows
+
+    last_row = current_row - 1
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=header_row, column=c)
+        cell.border = Border(
+            left=thick if c == 1 else thin,
+            right=thick if c == last_col else thin,
+            top=thick,
+            bottom=thick,
+        )
+
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            if not cell.alignment:
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+            else:
+                cell.alignment = Alignment(
+                    horizontal=cell.alignment.horizontal or "left",
+                    vertical="bottom",
+                    wrap_text=True,
+                )
+
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.1
+    ws.page_margins.bottom = 0.1
+    ws.page_margins.header = 0.1
+    ws.page_margins.footer = 0.1
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    for r in range(data_start_row, last_row + 1):
+        cell = ws.cell(row=r, column=1)
+        cell.number_format = "#,##0"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    initials_value = user_initials or "USER"
+    filename_title = _safe_filename(title_upper)
+    filename = f"{filename_title}_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
 @router.get("/ga-notes.xlsx")
 async def export_ga_notes_xlsx(
     department_id: uuid.UUID | None = None,
@@ -2694,12 +2997,11 @@ async def export_ga_notes_xlsx(
     from app.models.enums import GaNoteStatus
     
     # Build query
-    cutoff = datetime.utcnow() - timedelta(days=7)
-    closed_cutoff = datetime.utcnow() - timedelta(days=5)
-    
-    stmt = select(GaNote).where(GaNote.created_at >= cutoff).order_by(GaNote.created_at.desc())
-    
-    # Exclude closed notes that are older than 5 days
+    closed_cutoff = datetime.utcnow() - timedelta(days=30)
+
+    stmt = select(GaNote).order_by(GaNote.created_at.desc())
+
+    # Include all open notes; include closed notes only if recently closed
     stmt = stmt.where(
         or_(
             GaNote.status != GaNoteStatus.CLOSED,
