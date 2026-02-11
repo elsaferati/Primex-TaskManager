@@ -131,6 +131,25 @@ export default function TaskDetailsPage() {
   const [reminder, setReminder] = React.useState(false)
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskType>("N")
 
+  const currentTaskAssigneeIds = React.useMemo(() => {
+    if (!task) return [] as string[]
+    if (task.assignees && task.assignees.length > 0) {
+      return task.assignees.map((a) => a.id).filter((id): id is string => Boolean(id))
+    }
+    if (task.assigned_to) return [task.assigned_to]
+    return []
+  }, [task])
+
+  const sameIdSet = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false
+    const aSet = new Set(a)
+    if (aSet.size !== b.length) return false
+    for (const id of b) {
+      if (!aSet.has(id)) return false
+    }
+    return true
+  }
+
   React.useEffect(() => {
     if (!task) return
     setDescription(task.description || "")
@@ -165,10 +184,12 @@ export default function TaskDetailsPage() {
       if (canAssign) {
         payload.start_date = startDate || null
         payload.due_date = dueDate || null
-        // Use first assignee for backward compatibility, or null if no assignees
-        payload.assigned_to = assignees.length > 0 ? assignees[0] : null
-        // Also send assignees array if backend supports it
-        if (assignees.length > 0) {
+        // Only send assignees if the user actually changed them.
+        // For fast tasks, sending assignees can trigger backend "group membership" logic
+        // (and potentially create per-user copies). Status-only changes shouldn't do that.
+        const assigneesChanged = !sameIdSet(assignees, currentTaskAssigneeIds)
+        if (assigneesChanged) {
+          payload.assigned_to = assignees.length > 0 ? assignees[0] : null
           payload.assignees = assignees
         }
       }
