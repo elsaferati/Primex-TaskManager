@@ -224,10 +224,22 @@ function hasProjectId(projectId?: Task["project_id"]) {
   return projectId.trim().length > 0
 }
 
+function isPcmProjectLikeFastTaskTitleKey(normalizedTitle: string) {
+  return (
+    normalizedTitle === "MST" ||
+    normalizedTitle.startsWith("MST ") ||
+    normalizedTitle === "TT" ||
+    normalizedTitle.startsWith("TT ") ||
+    normalizedTitle === "VS VL" ||
+    normalizedTitle.startsWith("VS VL ")
+  )
+}
+
 function isNoProjectTask(task: Task) {
   if (hasProjectId(task.project_id) || hasProjectId(task.dependency_task_id)) return false
   if (task.system_template_origin_id != null) return false
   const normalizedTitle = normalizeTaskTitle(task.title || "")
+  if (isPcmProjectLikeFastTaskTitleKey(normalizedTitle)) return false
   if (VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)) return false
   return true
 }
@@ -3889,7 +3901,12 @@ export default function DepartmentKanban() {
   }
 
   const submitNoProjectTask = async () => {
-    if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
+    const trimmedTitle = noProjectTitle.trim()
+    if (!trimmedTitle || !noProjectStartDate || !department) return
+    if (isPcmProjectLikeFastTaskTitleKey(normalizeTaskTitle(trimmedTitle))) {
+      toast.error("MST/TT and VS/VL items must be created inside their project, not as Fast Tasks.")
+      return
+    }
     setCreatingNoProject(true)
     try {
       let gaNoteId: string | null = null
@@ -3921,7 +3938,7 @@ export default function DepartmentKanban() {
       const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
       const payload = {
-        title: noProjectTitle.trim(),
+        title: trimmedTitle,
         description: noProjectDescription.trim() || null,
         project_id: null,
         department_id: department.id,
