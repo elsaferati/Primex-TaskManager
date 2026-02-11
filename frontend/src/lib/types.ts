@@ -35,6 +35,7 @@ export interface SystemTaskTemplate {
   days_of_week?: number[] | null
   day_of_month?: number | null
   month_of_year?: number | null
+  occurrence_date?: string | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
   requires_alignment?: boolean | null

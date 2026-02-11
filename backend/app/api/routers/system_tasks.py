@@ -248,6 +248,7 @@ def _task_row_to_out(
     user_comment: str | None = None,
     alignment_roles: list[str] | None = None,
     alignment_user_ids: list[uuid.UUID] | None = None,
+    occurrence_date: date | None = None,
     occurrence_status: str | None = None,  # NEW: occurrence status for current user
 ) -> SystemTaskOut:
     priority_value = task.priority or TaskPriority.NORMAL
@@ -283,6 +284,7 @@ def _task_row_to_out(
         days_of_week=template.days_of_week,
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
+        occurrence_date=occurrence_date,
         priority=priority_value,
         finish_period=task.finish_period,
         status=final_status,
@@ -350,6 +352,11 @@ async def list_system_tasks(
     await db.commit()
 
     template_ids = [t.id for t in templates]
+    base_date = occurrence_date or date.today()
+    occurrence_date_map: dict[uuid.UUID, date] = {
+        tmpl.id: (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
+        for tmpl in templates
+    }
     # Start from templates and LEFT JOIN tasks to include templates without tasks
     task_stmt = (
         select(SystemTaskTemplate, Task)
@@ -410,13 +417,8 @@ async def list_system_tasks(
     # Fetch occurrence statuses for the current user (for My View / per-user status)
     occurrence_status_map: dict[uuid.UUID, str] = {}
     if user.id and template_ids:
-        base_date = occurrence_date or date.today()
-        target_dates_by_template: dict[uuid.UUID, date] = {
-            tmpl.id: (_previous_occurrence_date(tmpl, base_date) if not matches_template_date(tmpl, base_date) else base_date)
-            for tmpl in templates
-        }
         templates_by_date: dict[date, list[uuid.UUID]] = {}
-        for template_id, target_date in target_dates_by_template.items():
+        for template_id, target_date in occurrence_date_map.items():
             templates_by_date.setdefault(target_date, []).append(template_id)
 
         for target_date, date_template_ids in templates_by_date.items():
@@ -471,6 +473,7 @@ async def list_system_tasks(
                 user_comment_map.get(task.id),
                 roles_map.get(template.id),
                 alignment_users_map.get(template.id),
+                occurrence_date=occurrence_date_map.get(template.id),
                 occurrence_status=occ_status,
             )
             # For individual tasks, department_ids is just the task's department
@@ -525,6 +528,7 @@ async def list_system_tasks(
             user_comment_map.get(first_task.id),
             roles_map.get(template.id),
             alignment_users_map.get(template.id),
+            occurrence_date=occurrence_date_map.get(template.id),
             occurrence_status=occ_status,
         )
         # Add department_ids to the response
@@ -573,6 +577,7 @@ async def list_system_tasks(
             days_of_week=template.days_of_week,
             day_of_month=template.day_of_month,
             month_of_year=template.month_of_year,
+            occurrence_date=occurrence_date_map.get(template.id),
             priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
             finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
             status=TaskStatus.TODO,

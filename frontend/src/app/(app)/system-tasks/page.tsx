@@ -617,6 +617,7 @@ export function SystemTasksView({
     const currentStatus = template.status || "OPEN"
     const newStatus = currentStatus === "DONE" ? "OPEN" : "DONE"
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const occurrenceDate = template.occurrence_date || today
     
     setUpdatingTaskIds((prev) => new Set(prev).add(String(templateId)))
     try {
@@ -625,7 +626,7 @@ export function SystemTasksView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template_id: templateId,
-          occurrence_date: today,
+          occurrence_date: occurrenceDate,
           status: newStatus,
         }),
       })

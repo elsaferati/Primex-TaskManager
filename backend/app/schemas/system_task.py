@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,7 @@ class SystemTaskOut(BaseModel):
     days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    occurrence_date: date | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
     status: TaskStatus
