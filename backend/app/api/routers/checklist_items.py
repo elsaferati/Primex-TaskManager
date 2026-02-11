@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import uuid
@@ -50,29 +50,29 @@ GD_MST_LOWBOARD_PATH = "gd_mst_lowboard"
 
 # Graphic Design (GD) - "Pranimi i Projektit" checklist items
 GD_PROJECT_ACCEPTANCE_TEMPLATE: list[str] = [
-    "A është pranuar projekti?",
-    "A është krijuar folderi për projektin?",
-    "A janë ruajtur të gjitha dokumentet?",
-    "A janë eksportuar të gjitha fotot në dosjen 01_ALL_PHOTO?",
-    "A është kryer organizimi i fotove në foldera?",
-    "A është shqyrtuar sa foto janë mungesë nese po është dergu email tek klienti?",
-    "A janë analizuar dokumentet që i ka dërguar klienti?",
+    "A Ã«shtÃ« pranuar projekti?",
+    "A Ã«shtÃ« krijuar folderi për projektin?",
+    "A jaNë ruajtur tÃ« gjitha dokumentet?",
+    "A jaNë eksportuar tÃ« gjitha fotot Në dosjen 01_ALL_PHOTO?",
+    "A Ã«shtÃ« kryer organizimi i fotove Në foldera?",
+    "A Ã«shtÃ« shqyrtuar sa foto jaNë mungesÃ« nese po Ã«shtÃ« dergu email tek klienti?",
+    "A jaNë analizuar dokumentet qÃ« i ka dÃ«rguar klienti?",
     "A jane identifikuar karakteristikat e produktit? p.sh (glass, soft close).",
-    "A janë gjetur variancat? (fusse, farbe)",
+    "A jaNë gjetur variancat? (fusse, farbe)",
     "A eshte pergatitur lista e produkteve e ndare me kategori?",
     "A eshte rast i ri, apo eshte kategori ekzistuese?",
 ]
 
 # Graphic Design (GD) - "Takim me GA/DV" checklist items
 GD_GA_DV_MEETING_TEMPLATE: list[str] = [
-    "A është diskutuar me GA për propozimin?",
-    "Çfarë është vendosur për të vazhduar?",
-    "A ka pasur pika shtesë nga takimi?",
+    "A Ã«shtÃ« diskutuar me GA për propozimin?",
+    "Ã‡farÃ« Ã«shtÃ« vendosur për tÃ« vazhduar?",
+    "A ka pasur pika shtesÃ« nga takimi?",
 ]
 
 # Graphic Design (GD) - "PROPOZIM KO1/KO2" checklist items
 GD_PROPOZIM_KO1_KO2_TEMPLATE: list[str] = [
-    "Cila është kategoria?",
+    "Cila Ã«shtÃ« kategoria?",
     "A eshte hulumtuar ne Otto.de, amazon.de dhe portale te tjera per top produkte te kategorise qe e kemi?",
     "Vendos linget ku je bazuar?",
 ]
@@ -80,18 +80,18 @@ GD_PROPOZIM_KO1_KO2_TEMPLATE: list[str] = [
 # Graphic Design (GD) - "PUNIMI" checklist items
 GD_PUNIMI_TEMPLATE: list[str] = [
     "Me dhan mundsi me shtu per kategorit qe vazhdojm psh mujn me 3 kategori ose 4 ose 1 nvaret prej klientit",
-    "A janë dërguar të gjitha fotot për bz 1n1?",
+    "A jaNë dÃ«rguar tÃ« gjitha fotot për bz 1n1?",
 ]
-# Graphic Design (GD) - "Përgatitja për dërgim KO1/KO2" checklist items
+# Graphic Design (GD) - "përgatitja për dÃ«rgim KO1/KO2" checklist items
 GD_CONTROL_KO1_KO2_TEMPLATE: list[str] = [
-    "A janë bartur të gjitha produktet te folderi FINAL?",
-    "A janë bartur vetëm fotot e nevojshme (3 foto)?",
-    "A janë riemërtuar të gjitha fotot sipas kodit (kodi_1, kodi_2, kodi_3)?",
-    "A është kontrolluar nëse janë kryer të gjitha produktet?",
-    "A janë riemërtuar të gjitha fotot me kodin e artikullit dhe SKU-në interne?",
-    "A janë vendosur të gjitha fotot e një kategorie në një folder?",
-    "A është krijuar WeTransfer?",
-    "A është dërguar WeTransfer-i në grup?",
+    "A jaNë bartur tÃ« gjitha produktet te folderi FINAL?",
+    "A jaNë bartur vetÃ«m fotot e nevojshme (3 foto)?",
+    "A jaNë riemÃ«rtuar tÃ« gjitha fotot sipas kodit (kodi_1, kodi_2, kodi_3)?",
+    "A Ã«shtÃ« kontrolluar Nëse jaNë kryer tÃ« gjitha produktet?",
+    "A jaNë riemÃ«rtuar tÃ« gjitha fotot me kodin e artikullit dhe SKU-Në interne?",
+    "A jaNë vendosur tÃ« gjitha fotot e njÃ« kategorie Në njÃ« folder?",
+    "A Ã«shtÃ« krijuar WeTransfer?",
+    "A Ã«shtÃ« dÃ«rguar WeTransfer-i Në grup?",
 ]
 # Graphic Design (GD) - "Finalizimi" checklist items
 GD_FINALIZATION_TEMPLATE: list[str] = [
@@ -103,12 +103,12 @@ GD_MST_SOFA_NEW_TEMPLATE: list[dict[str, str]] = [
     {
         "title": 'PIKAT E SELLING IMAGE 1',
         "keyword": 'PIKAT GJENERALE- SELLING IMAGE_1',
-        "description": 'Varesisht prej kategorise dhe funksioneve qe ka produkti, krijohen pikat dhe fotografi te ndryshme.\n\nMAX & MIN per Selling image_ eshte 3 foto dhe 3 pershkrime qe jane ne perputhje me ato foto.\nNe momentin qe produkti ka funksione, permenden te gjitha funksionet. Ne rast se produkti nuk ka funksione, fokusohemi tek materiali dhe dizajni.\nIkonat duhet te jene ne distance jo te ngjitura me tekst.\nTeksti duhet te jete paralel me foto.\nModernes Design – dizajn modern dhe formë elegante që përshtatet në çdo ambient.\nHochwertige Materialien – materiale cilësore dhe konstruksion i fortë për jetëgjatësi.\nFunktionale Schlaffunktion – funksion fjetjeje praktik për relaks ose mysafirë\nVerstellbarer Sitzkomfort – mbështetje dhe thellësi uljeje e rregullueshme për rehati maksimale.\nPraktischer Stauraum – hapësirë e integruar për ruajtje (për jastëkë, batanije etj.).',
+        "description": 'Varesisht prej kategorise dhe funksioneve qe ka produkti, krijohen pikat dhe fotografi te ndryshme.\n\nMAX & MIN per Selling image_ eshte 3 foto dhe 3 pershkrime qe jane ne perputhje me ato foto.\nNe momentin qe produkti ka funksione, permenden te gjitha funksionet. Ne rast se produkti nuk ka funksione, fokusohemi tek materiali dhe dizajni.\nIkonat duhet te jene ne distance jo te ngjitura me tekst.\nTeksti duhet te jete paralel me foto.\nModernes Design â€“ dizajn modern dhe formÃ« elegante qÃ« përshtatet Në Ã§do ambient.\nHochwertige Materialien â€“ materiale cilÃ«sore dhe konstruksion i fortÃ« për jetÃ«gjatÃ«si.\nFunktionale Schlaffunktion â€“ funksion fjetjeje praktik për relaks ose mysafirÃ«\nVerstellbarer Sitzkomfort â€“ mbÃ«shtetje dhe thellÃ«si uljeje e rregullueshme për rehati maksimale.\nPraktischer Stauraum â€“ hapÃ«sirÃ« e integruar për ruajtje (për jastÃ«kÃ«, batanije etj.).',
     },
     {
         "title": 'PIKAT E SELLING IMAGE 1',
         "keyword": 'VENDOSJA E FOTOVE NE KOCKA',
-        "description": 'Selling image_1 duhet të ketë së paku 3 kocka minimum:\n\nFOTO 1. pamjen e përgjithshme të divanit, (Kur nuk kemi funksion, per tu verejtur dizajni)\nFOTO 2. Materialin dhe teksturën e pëlhurës, (Kur nuk kemi funksion, per tu verejtur materiali)\nFOTO 3. Funksionin e shtrirjes,\n\nKur kockat vrehen mire per shkak te backgroundi ku mund te jep i zi dhe kockat e zeza ateher kockat duhet qe te i vendoset nje STROKE ne photoshop me ngjyre te bardh.',
+        "description": 'Selling image_1 duhet tÃ« ketÃ« sÃ« paku 3 kocka minimum:\n\nFOTO 1. pamjen e përgjithshme tÃ« divanit, (Kur nuk kemi funksion, per tu verejtur dizajni)\nFOTO 2. Materialin dhe teksturÃ«n e pÃ«lhurÃ«s, (Kur nuk kemi funksion, per tu verejtur materiali)\nFOTO 3. Funksionin e shtrirjes,\n\nKur kockat vrehen mire per shkak te backgroundi ku mund te jep i zi dhe kockat e zeza ateher kockat duhet qe te i vendoset nje STROKE ne photoshop me ngjyre te bardh.',
     },
     {
         "title": 'PIKAT E SELLING IMAGE 1',
@@ -118,7 +118,7 @@ GD_MST_SOFA_NEW_TEMPLATE: list[dict[str, str]] = [
     {
         "title": 'PIKAT E SELLING IMAGE 1',
         "keyword": 'BACKGROUND',
-        "description": 'Ne Background gjithmon vendoset fotoja e setit\nNese nuk ka foto ne set ateher vendoset foto e type me background.\nFoto e background nuk duhet të preket me kockat → duhet të ketë hapësirë mes kockave dhe setit mbrapa',
+        "description": 'Ne Background gjithmon vendoset fotoja e setit\nNese nuk ka foto ne set ateher vendoset foto e type me background.\nFoto e background nuk duhet të preket me kockat â†’ duhet të ketë hapësirë mes kockave dhe setit mbrapa',
     },
     {
         "title": 'PIKAT E SELLING IMAGE 1',
@@ -161,8 +161,162 @@ GD_MST_SOFA_NEW_TEMPLATE: list[dict[str, str]] = [
         "description": '1. Gjithmone logo e klientit e konfirmuar me email (Set One) ose (MST) vendoset larte majtas fotos\n2. Gjithmone logoja e garancise 5 vite vendoset poshte majtas fotos\n\nNe baze te ngjyrave te fotos zgjedhen edhe ngjyrat e logos qe do te perdorim',
     },
 ]
-GD_MST_VITRINE_NEW_TEMPLATE: list[str] = []
-GD_MST_SIDEBOARD_NEW_TEMPLATE: list[str] = []
+GD_MST_VITRINE_NEW_TEMPLATE: list[dict[str, str]] = [
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_1",
+        "description": (
+            "Foto Gjenerale 1 ka 4 foto vetem foto e Front Glas dhe foto e Griffe ndryshon sipas ngjyres. "
+            "Foto e backgroundit ndryshon. Teksti duhet te jete gjithmon I njejte vetem foto mund te ndryshohen: "
+            "1. Front und Oberplatte aus glaenzendem Glas. 2. Soft-Close Scharniere. 3. Hochwertige Metallgriffe. "
+            "4. ABS-Kanten."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_2",
+        "description": (
+            "Selling image_2 L/R (Mounting Options). Teksti duhet te jete Front links oder rechts montierbar. "
+            "Produkti duhet te jete ne vij te njejt e majta dhe e djathta jo njera me lart tjetra me posht."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_3",
+        "description": (
+            "Selling image_3 Varacione. Foto e background duhet te jete gjithmon white background perspektiv. "
+            "Duhet te I kete 4 katrora me te dhena: 1. Duhet te jete teksti Farbauswahl dhe ngjyra e varacionit "
+            "te ndryshohet varesisht nga produkti. 2. Nuk ndryshon. Teksti: Metallfuese: 3 kembet e vitrinet "
+            "dhe 3 ngjyrat e kembve. 3. Teksti Sockel dhe foto duhet te ndryshohet njejt si ngjyra e produktit, "
+            "foto duhet te vendoset ne pozicion njejt si ne template jo me lart ose me posht. 4. Teksti Gleiter "
+            "dhe foto duhet te jete e produktit pa kembe dhe te vendoset njejt si ne template."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "LOGO",
+        "description": (
+            "1. Gjithmone logo e klientit e konfirmuar me email (Set One) ose (MST) vendoset larte majtas fotos. "
+            "2. Gjithmone logoja e garancise 5 vite vendoset poshte majtas fotos. Ne baze te ngjyrave te fotos "
+            "zgjedhen edhe ngjyrat e logos qe do te perdorim. Ne te 3 Selling Images perdoret e njejta logo e KONF, "
+            "ne pozicion fiks dhe te pandryshueshem. E njejta gje vlen edhe per ikonen e garancise."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "BACKGROUND",
+        "description": (
+            "Ne Background gjithmon vendoset fotoja e setit. Nese nuk ka foto ne set ateher vendoset foto e type "
+            "me background. Foto e background nuk duhet te preket me kockat -> duhet te kete hapesire mes kockave "
+            "dhe setit mbrapa."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "EMERTIMI",
+        "description": (
+            "MST: Selling image 1 duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _1."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "EMERTIMI",
+        "description": (
+            "MST: Selling image 2 (Dimensionet / L/R ) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _2."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "EMERTIMI",
+        "description": (
+            "OTTO: Selling image 1 duhet gjithmone te emertohet kodi i produktit Article code (KODI I OTTOs) dhe _1. "
+            "Kur behet emertimi i fotove me kod te OTTOs duhet te kemi shume kujdes dhe patjeter te behen 2 kontrolla."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE 1",
+        "keyword": "EMERTIMI",
+        "description": (
+            "MST: Selling image 3 (Variacioni) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _3."
+        ),
+    },
+]
+GD_MST_VITRINE_COMBINED_EMERTIMI_DESCRIPTION = (
+    "MST: Selling image 1 duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _1. "
+    "MST: Selling image 2 (Dimensionet / L/R ) duhet gjithmone te emertohet kodi i produktit SKU "
+    "(KODI I MST) dhe _2. MST: Selling image 3 (Variacioni) duhet gjithmone te emertohet kodi i produktit "
+    "SKU (KODI I MST) dhe _3."
+)
+GD_MST_SIDEBOARD_NEW_TEMPLATE: list[dict[str, str]] = [
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_1",
+        "description": (
+            "(Teksti nga foto shembull): 1. Front und Oberplatte aus glänzendem Glas. 2. "
+            "Soft-Close Scharniere. 3. Hochwertige Metallgriffe. 4. ABS-Kanten."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_2",
+        "description": (
+            "Selling image_2 L/R (Mounting Options). Teksti duhet te jete Front links oder rechts montierbar ose "
+            "Modernes Sideboard mit drei Varianten ( Kategoria + Nese produkti ka me shume variante ). Produkti "
+            "duhet te jete ne vij te njejt e majta dhe e djathta jo njera me lart tjetra me posht."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_3",
+        "description": (
+            "Selling image_3 Varacione. Foto e background duhet te jete gjithmon white background perspektiv. "
+            "Duhet te I kete 4 katrora me te dhena: 1. Duhet te jete teksti Farbauswahl dhe ngjyra e varacionit "
+            "te ndryshohet varesisht nga produkti. 2. Nuk ndryshon. Teksti: Metallfüsse: 3 kembet e vitrinet dhe "
+            "3 ngjyrat e kembve. 3. Teksti Sockel dhe foto duhet te ndryshohet njejt si ngjyra e produktit, foto "
+            "duhet te vendoset ne pozicion njejt si ne template jo me lart ose me posht. 4. Teksti Gleiter dhe "
+            "foto duhet te jete e produktit pa kembe dhe te vendoset njejt si ne template."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "LOGO",
+        "description": (
+            "1. Gjithmone logo e klientit e konfirmuar me email (Set One) ose (MST) vendoset larte majtas fotos. "
+            "2. Gjithmone logoja e garancise 5 vite vendoset poshte majtas fotos. Ne baze te ngjyrave te fotos "
+            "zgjedhen edhe ngjyrat e logos qe do te perdorim. BACKGORUNDED QE KANE NGJYRE TE ERRET PERDORET LOGO "
+            "E BARDHE. BACKGROUNDET QE KANE NGJYRE TE HAPUR PERDORET LOGO E ZEZE. Në të 3 Selling Images përdoret "
+            "e njëjta logo e KONF, në pozicion fiks dhe të pandryshueshëm. E njëjta gjë vlen edhe për ikonën e "
+            "garancisë."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "BACKGROUND",
+        "description": (
+            "Ne Background gjithmon vendoset fotoja e setit. Nese nuk ka foto ne set ateher vendoset foto e type "
+            "me background. Foto e background nuk duhet të preket me kockat -> duhet të ketë hapësirë mes "
+            "kockave dhe setit mbrapa."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "EMERTIMI",
+        "description": (
+            "MST: Selling image 1 duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _1. "
+            "MST: Selling image 2 (Dimensionet / L/R ) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) "
+            "dhe _2. MST: Selling image 3 (Variacioni) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) "
+            "dhe _3."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "EMERTIMI",
+        "description": (
+            "OTTO: Selling image 1 duhet gjithmone te emertohet kodi i produktit Article code (KODI I OTTOs) dhe _1. "
+            "Kur behet emertimi i fotove me kod te OTTOs duhet te kemi shume kujdes dhe patjeter te behen 2 kontrolla."
+        ),
+    },
+]
 GD_MST_LOWBOARD_TEMPLATE: list[str] = []
 
 
@@ -443,7 +597,7 @@ async def _ensure_gd_punimi_items(db: AsyncSession, project: Project) -> None:
 
 async def _ensure_gd_control_ko1_ko2_items(db: AsyncSession, project: Project) -> None:
     """
-    Ensure the GD "Përgatitja për dërgim KO1/KO2" checklist exists for a project.
+    Ensure the GD "përgatitja për dÃ«rgim KO1/KO2" checklist exists for a project.
 
     - Does NOT delete anything.
     - Idempotent: only inserts missing items.
@@ -708,6 +862,212 @@ async def _ensure_gd_mst_sofa_new_template(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def _ensure_gd_mst_vitrine_new_template(db: AsyncSession) -> None:
+    """
+    Ensure global template checklist for GD MST VITRINE NEW exists.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    """
+    if not GD_MST_VITRINE_NEW_TEMPLATE:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .options(selectinload(Checklist.items))
+            .where(Checklist.group_key == GD_MST_VITRINE_NEW_PATH, Checklist.project_id.is_(None))
+        )
+    ).scalar_one_or_none()
+    if checklist is None:
+        checklist = Checklist(
+            title="GD MST VITRINE NEW (Template)",
+            group_key=GD_MST_VITRINE_NEW_PATH,
+            position=0,
+        )
+        db.add(checklist)
+        await db.flush()
+        checklist = (
+            await db.execute(
+                select(Checklist)
+                .options(selectinload(Checklist.items))
+                .where(Checklist.id == checklist.id)
+            )
+        ).scalar_one()
+
+    await _remove_gd_mst_vitrine_combined_row(db)
+
+    existing_items = checklist.items if checklist.items else []
+    existing_keys = {
+        _normalize_template_key(item.title, item.keyword, item.description)
+        for item in existing_items
+    }
+
+    for position, row in enumerate(GD_MST_VITRINE_NEW_TEMPLATE):
+        key = _normalize_template_key(row.get("title"), row.get("keyword"), row.get("description"))
+        if key in existing_keys:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=GD_MST_VITRINE_NEW_PATH,
+                title=row.get("title"),
+                keyword=row.get("keyword"),
+                description=row.get("description"),
+                is_checked=False,
+            )
+        )
+        existing_keys.add(key)
+
+    await db.commit()
+
+
+async def _ensure_gd_mst_sideboard_new_template(db: AsyncSession) -> None:
+    """
+    Ensure global template checklist for GD MST SIDEBOARD NEW exists.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    """
+    if not GD_MST_SIDEBOARD_NEW_TEMPLATE:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .options(selectinload(Checklist.items))
+            .where(Checklist.group_key == GD_MST_SIDEBOARD_NEW_PATH, Checklist.project_id.is_(None))
+        )
+    ).scalar_one_or_none()
+    if checklist is None:
+        checklist = Checklist(
+            title="GD MST SIDEBOARD NEW (Template)",
+            group_key=GD_MST_SIDEBOARD_NEW_PATH,
+            position=0,
+        )
+        db.add(checklist)
+        await db.flush()
+        checklist = (
+            await db.execute(
+                select(Checklist)
+                .options(selectinload(Checklist.items))
+                .where(Checklist.id == checklist.id)
+            )
+        ).scalar_one()
+
+    existing_items = checklist.items if checklist.items else []
+    existing_keys = {
+        _normalize_template_key(item.title, item.keyword, item.description)
+        for item in existing_items
+    }
+
+    for position, row in enumerate(GD_MST_SIDEBOARD_NEW_TEMPLATE):
+        key = _normalize_template_key(row.get("title"), row.get("keyword"), row.get("description"))
+        if key in existing_keys:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=GD_MST_SIDEBOARD_NEW_PATH,
+                title=row.get("title"),
+                keyword=row.get("keyword"),
+                description=row.get("description"),
+                is_checked=False,
+            )
+        )
+        existing_keys.add(key)
+
+    await db.commit()
+
+
+async def _remove_gd_mst_vitrine_combined_row(
+    db: AsyncSession,
+    project_id: uuid.UUID | None = None,
+) -> None:
+    filters = [
+        ChecklistItem.path == GD_MST_VITRINE_NEW_PATH,
+        ChecklistItem.title == "PIKAT E SELLING IMAGE 1",
+        ChecklistItem.keyword == "EMERTIMI",
+        ChecklistItem.description == GD_MST_VITRINE_COMBINED_EMERTIMI_DESCRIPTION,
+    ]
+
+    stmt = select(ChecklistItem).join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+    if project_id is None:
+        stmt = stmt.where(Checklist.group_key == GD_MST_VITRINE_NEW_PATH, Checklist.project_id.is_(None))
+    else:
+        stmt = stmt.where(Checklist.project_id == project_id)
+    stmt = stmt.where(*filters)
+
+    items = (await db.execute(stmt)).scalars().all()
+    if not items:
+        return
+
+    for item in items:
+        await db.delete(item)
+    await db.commit()
+
+
+async def _ensure_gd_mst_vitrine_otto_last(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+) -> None:
+    items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project_id,
+                ChecklistItem.path == GD_MST_VITRINE_NEW_PATH,
+                ChecklistItem.title == "PIKAT E SELLING IMAGE 1",
+                ChecklistItem.keyword == "EMERTIMI",
+                ChecklistItem.description.like("OTTO: Selling image 1%"),
+            )
+            .order_by(ChecklistItem.position, ChecklistItem.id)
+        )
+    ).scalars().all()
+    if not items:
+        return
+
+    otto_item = items[0]
+    max_position = (
+        await db.execute(
+            select(func.max(ChecklistItem.position))
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project_id,
+                ChecklistItem.path == GD_MST_VITRINE_NEW_PATH,
+            )
+        )
+    ).scalar_one_or_none()
+    max_position = max_position or 0
+    if otto_item.position != max_position:
+        otto_item.position = max_position + 1
+        await db.commit()
+
+    ordered_items = (
+        await db.execute(
+            select(ChecklistItem)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.project_id == project_id,
+                ChecklistItem.path == GD_MST_VITRINE_NEW_PATH,
+            )
+            .order_by(ChecklistItem.position, ChecklistItem.id)
+        )
+    ).scalars().all()
+    if not ordered_items:
+        return
+
+    for index, item in enumerate(ordered_items):
+        if item.position != index:
+            item.position = index
+    await db.commit()
+
+
 async def _ensure_gd_mst_section_from_template(
     db: AsyncSession,
     project: Project,
@@ -840,7 +1200,7 @@ async def list_checklist_items(
         await _ensure_gd_propozim_ko1_ko2_items(db, project)
         # Auto-seed GD "PUNIMI" checklist (no deletes, only inserts missing items).
         await _ensure_gd_punimi_items(db, project)
-        # Auto-seed GD "Përgatitja për dërgim KO1/KO2" checklist (no deletes, only inserts missing items).
+        # Auto-seed GD "përgatitja për dÃ«rgim KO1/KO2" checklist (no deletes, only inserts missing items).
         await _ensure_gd_control_ko1_ko2_items(db, project)
         # Auto-seed GD "Finalizimi" checklist (no deletes, only inserts missing items).
         await _ensure_gd_finalization_items(db, project)
@@ -853,11 +1213,15 @@ async def list_checklist_items(
             await _ensure_gd_mst_section_from_template(
                 db, project, GD_MST_SOFA_NEW_PATH, GD_MST_SOFA_NEW_PATH
             )
-            await _ensure_gd_mst_section_items(
-                db, project, GD_MST_VITRINE_NEW_PATH, GD_MST_VITRINE_NEW_TEMPLATE
+            await _remove_gd_mst_vitrine_combined_row(db, project.id)
+            await _ensure_gd_mst_vitrine_new_template(db)
+            await _ensure_gd_mst_section_from_template(
+                db, project, GD_MST_VITRINE_NEW_PATH, GD_MST_VITRINE_NEW_PATH
             )
-            await _ensure_gd_mst_section_items(
-                db, project, GD_MST_SIDEBOARD_NEW_PATH, GD_MST_SIDEBOARD_NEW_TEMPLATE
+            await _ensure_gd_mst_vitrine_otto_last(db, project.id)
+            await _ensure_gd_mst_sideboard_new_template(db)
+            await _ensure_gd_mst_section_from_template(
+                db, project, GD_MST_SIDEBOARD_NEW_PATH, GD_MST_SIDEBOARD_NEW_PATH
             )
             await _ensure_gd_mst_section_items(
                 db, project, GD_MST_LOWBOARD_PATH, GD_MST_LOWBOARD_TEMPLATE
@@ -1462,3 +1826,6 @@ async def delete_checklist_item(
     else:
         await db.commit()
     return {"ok": True}
+
+
+
