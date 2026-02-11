@@ -115,6 +115,10 @@ class WeeklySnapshotCompareTaskOut(BaseModel):
 class WeeklySnapshotCompareSummaryOut(BaseModel):
     total_planned: int = 0
     completed: int = 0
+    in_progress: int = 0
+    pending: int = 0
+    late: int = 0
+    additional: int = 0
     not_completed: int = 0
     added_during_week: int = 0
     removed_or_canceled: int = 0
@@ -124,6 +128,10 @@ class WeeklySnapshotCompareAssigneeGroupOut(BaseModel):
     assignee_id: uuid.UUID | None = None
     assignee_name: str
     completed: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    in_progress: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    pending: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    late: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    additional: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     not_completed: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     added_during_week: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     removed_or_canceled: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
@@ -137,9 +145,16 @@ class WeeklySnapshotPlanVsActualOut(BaseModel):
     snapshot_id: uuid.UUID | None = None
     snapshot_created_at: datetime | None = None
     snapshot_created_by: uuid.UUID | None = None
+    final_snapshot_id: uuid.UUID | None = None
+    final_snapshot_created_at: datetime | None = None
+    final_snapshot_created_by: uuid.UUID | None = None
     message: str | None = None
     summary: WeeklySnapshotCompareSummaryOut
     completed: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    in_progress: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    pending: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    late: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
+    additional: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     not_completed: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     added_during_week: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
     removed_or_canceled: list[WeeklySnapshotCompareTaskOut] = Field(default_factory=list)
