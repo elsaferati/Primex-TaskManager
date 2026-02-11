@@ -279,6 +279,7 @@ async def list_tasks(
     due_from: datetime | None = None,
     due_to: datetime | None = None,
     include_done: bool = True,
+    include_inactive: bool = False,
     include_all_departments: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -294,6 +295,9 @@ async def list_tasks(
     if project_id is None:
         # No role-based filtering for task visibility.
         pass
+
+    if not include_inactive:
+        stmt = stmt.where(Task.is_active.is_(True))
 
     if department_id:
         # Include tasks that belong to projects in the department (legacy tasks may have null/mismatched Task.department_id).
