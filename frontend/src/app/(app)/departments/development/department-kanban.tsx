@@ -1837,6 +1837,7 @@ export default function DepartmentKanban() {
         : user?.id
 
     return visibleNoProjectTasks.filter((task) => {
+      if (!task.due_date) return false
       if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
         return false
       }
@@ -1867,6 +1868,7 @@ export default function DepartmentKanban() {
         : user?.id
 
     return projectTasks.filter((task) => {
+      if (!task.due_date) return false
       if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
         return false
       }
@@ -2287,10 +2289,8 @@ export default function DepartmentKanban() {
 
       for (const item of allTaskItems) {
         const task = item.task
-        const baseDate = toDate(task.due_date || task.start_date || task.created_at)
-        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
-          continue
-        }
+        const startDate = task.start_date ? toDate(task.start_date) : null
+        const dueDate = task.due_date ? toDate(task.due_date) : null
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || item.project_title || null
@@ -2307,7 +2307,12 @@ export default function DepartmentKanban() {
             status: taskStatusLabel(task),
             bz: "-",
             kohaBz: "-",
-            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            tyo: getDailyReportTyo({
+              reportDate: todayDate,
+              startDate,
+              dueDate,
+              mode: startDate && dueDate ? "range" : "dueOnly",
+            }),
             comment: task.user_comment ?? null,
             userInitials: rowUserInitials,
             taskId: task.id,
@@ -2326,7 +2331,12 @@ export default function DepartmentKanban() {
               status: taskStatusLabel(task),
               bz: "-",
               kohaBz: "-",
-              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              tyo: getDailyReportTyo({
+                reportDate: todayDate,
+                startDate,
+                dueDate,
+                mode: startDate && dueDate ? "range" : "dueOnly",
+              }),
               comment: task.user_comment ?? null,
               userInitials: rowUserInitials,
               taskId: task.id,

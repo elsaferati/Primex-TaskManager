@@ -10,7 +10,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, insert, select, cast, update, String as SQLString
+from sqlalchemy import delete, insert, or_, select, cast, update, String as SQLString
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
@@ -33,6 +33,7 @@ from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFro
 from pydantic import BaseModel
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
+from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
@@ -295,7 +296,10 @@ async def list_tasks(
         pass
 
     if department_id:
-        stmt = stmt.where(Task.department_id == department_id)
+        # Include tasks that belong to projects in the department (legacy tasks may have null/mismatched Task.department_id).
+        stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
+            or_(Task.department_id == department_id, Project.department_id == department_id)
+        )
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)
     if status:
@@ -618,10 +622,15 @@ async def create_task(
                 db.add(t)
                 await db.flush()
                 await _replace_task_assignees(db, t, [assignee_id])
+                await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                 if payload.alignment_user_ids:
                     seen_align: set[uuid.UUID] = set()
-                    ids = [uid for uid in payload.alignment_user_ids if not (uid in seen_align or seen_align.add(uid))]
+                    ids = [
+                        uid
+                        for uid in payload.alignment_user_ids
+                        if not (uid in seen_align or seen_align.add(uid))
+                    ]
                     await db.execute(
                         insert(TaskAlignmentUser),
                         [{"task_id": t.id, "user_id": uid} for uid in ids],
@@ -748,6 +757,7 @@ async def create_task(
                         db.add(t)
                         await db.flush()
                         await _replace_task_assignees(db, t, [assignee_id])
+                        await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                         if payload.alignment_user_ids:
                             seen_align: set[uuid.UUID] = set()
@@ -862,6 +872,7 @@ async def create_task(
             db.add(t)
             await db.flush()
             await _replace_task_assignees(db, t, [assignee_id])
+            await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
             if payload.alignment_user_ids:
                 seen_align: set[uuid.UUID] = set()
@@ -1072,6 +1083,7 @@ async def create_task(
         await _replace_task_assignees(db, task, assignee_ids)
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
             task.is_active = False
+    await ensure_ko_user_is_task_assignee(db, task=task, project=project)
 
     # If this is a project task, and the project was previously removed from the weekly planner
     # for this user/day/slot, auto-clear that exclusion so the newly created task is visible.
@@ -1714,6 +1726,7 @@ async def update_task(
                     db.add(new_task)
                     await db.flush()
                     await _replace_task_assignees(db, new_task, [au.id])
+                    await ensure_ko_user_is_task_assignee(db, task=new_task)
 
                     if alignment_user_ids:
                         await db.execute(
@@ -1730,7 +1743,9 @@ async def update_task(
                             body=new_task.title,
                             data={"task_id": str(new_task.id)},
                         )
-                    )
+                  )
+
+    await ensure_ko_user_is_task_assignee(db, task=task)
 
     after = {
         "title": task.title,
@@ -1747,14 +1762,14 @@ async def update_task(
     }
 
     add_audit_log(
-        db=db,
-        actor_user_id=user.id,
-        entity_type="task",
-        entity_id=task.id,
-        action="updated",
-        before=before,
-        after=after,
-    )
+          db=db,
+          actor_user_id=user.id,
+          entity_type="task",
+          entity_id=task.id,
+          action="updated",
+          before=before,
+          after=after,
+      )
 
     await db.commit()
 
