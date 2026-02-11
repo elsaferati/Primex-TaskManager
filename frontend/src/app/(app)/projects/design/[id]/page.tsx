@@ -53,6 +53,12 @@ const MST_PHASE_LABELS: Record<string, string> = {
 const CONTROL_CHECKLIST_PATH = "control ko1/ko2"
 const CONTROL_CHECKLIST_TITLE = "PËRGATITJA PËR DËRGIM KO1/KO2"
 const FINALIZATION_PATH = "finalization"
+const GD_MST_GJENERALE_PATH = "gd_mst_gjenerale"
+const GD_MST_SOFA_NEW_PATH = "gd_mst_sofa_new"
+const GD_MST_VITRINE_NEW_PATH = "gd_mst_vitrine_new"
+const GD_MST_SIDEBOARD_NEW_PATH = "gd_mst_sideboard_new"
+const GD_MST_LOWBOARD_PATH = "gd_mst_lowboard"
+const LEGACY_GD_MST_PLANNING_PATH = "gd_mst_planning"
 const FINALIZATION_TITLE = "Finalizimi"
 
 // Tabs for Planning phase
@@ -148,6 +154,146 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+const sofaKey = (title?: string | null, keyword?: string | null) => `${title || ""}||${keyword || ""}`
+
+const SOFA_NEW_SHEMBULL: Record<string, string[]> = {
+  [sofaKey("PIKAT E SELLING IMAGE 1", "PIKAT GJENERALE - SELLING IMAGE_1")]: ["/sofa-new/selling-1.png"],
+  [sofaKey("PIKAT E SELLING IMAGE 1", "VENDOSJA E FOTOVE NE KOCKA")]: [
+    "/sofa-new/selling-2.1.png",
+    "/sofa-new/selling-2.2.png",
+    "/sofa-new/selling-2.3.png",
+    "/sofa-new/selling-2.4.png",
+  ],
+  [sofaKey("PIKAT E SELLING IMAGE 1", "LOGO")]: ["/sofa-new/selling-3.png"],
+  [sofaKey("PIKAT E SELLING IMAGE 2 - SKICA", "PIKAT GJENERALE")]: ["/sofa-new/skica-7.png"],
+  [sofaKey("PIKAT E SELLING IMAGE 2 - SKICA", "LOGO")]: ["/sofa-new/skica-8.png"],
+  [sofaKey("PIKAT E SELLING IMAGE 3 - NGJYRAT", "PIKAT GJENERALE")]: ["/sofa-new/ngjyrat-11.png"],
+  [sofaKey("PIKAT E SELLING IMAGE 3 - NGJYRAT", "LOGOT")]: ["/sofa-new/ngjyrat-12.png"],
+}
+const SOFA_NEW_ROW_IMAGES: Record<number, string[]> = {
+  1: ["/sofa-new/selling-1.png"],
+  2: [
+    "/sofa-new/selling-2.1.png",
+    "/sofa-new/selling-2.2.png",
+    "/sofa-new/selling-2.3.png",
+    "/sofa-new/selling-2.4.png",
+  ],
+  3: ["/sofa-new/selling-3.png"],
+  7: ["/sofa-new/skica-7.png"],
+  8: ["/sofa-new/skica-8.png"],
+  11: ["/sofa-new/ngjyrat-11.png"],
+  12: ["/sofa-new/ngjyrat-12.png"],
+}
+const VITRINE_NEW_SHEMBULL: Record<string, string[]> = {}
+const VITRINE_NEW_ROW_IMAGES: Record<number, string[]> = {
+  1: ["/vitrine-new/selling-1.png"],
+  2: ["/vitrine-new/selling-2.png"],
+  3: ["/vitrine-new/selling-3.png"],
+  4: ["/vitrine-new/selling-4.png"],
+}
+const VITRINE_NEW_ROW_SHEMBULL_TEXT: Record<number, string> = {
+  7: "MST: Selling image 2 (Dimensionet / L/R ) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _2",
+  8: "MST: Selling image 3 (Variacioni) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _3",
+}
+const SIDEBOARD_NEW_SHEMBULL: Record<string, string[]> = {}
+const SIDEBOARD_NEW_ROW_IMAGES: Record<number, string[]> = {
+  1: ["/sideboard_new/selling-1.png"],
+  2: ["/sideboard_new/selling-2.png"],
+  3: ["/sideboard_new/selling-3.png"],
+  4: ["/sideboard_new/selling-4.png"],
+}
+const LOWBOARD_SHEMBULL: Record<string, string[]> = {}
+const LOWBOARD_ROW_IMAGES: Record<number, string[]> = {
+  4: ["/lowboard/image.png"],
+}
+
+function ShembullSlider({ urls }: { urls: string[] }) {
+  const [index, setIndex] = React.useState(0)
+  const [open, setOpen] = React.useState(false)
+  React.useEffect(() => {
+    setIndex(0)
+  }, [urls.join("|")])
+
+  if (!urls.length) {
+    return <div className="text-xs text-muted-foreground italic">No photos</div>
+  }
+
+  const current = urls[Math.min(index, urls.length - 1)]
+  const goPrev = () => setIndex((prev) => (prev - 1 + urls.length) % urls.length)
+  const goNext = () => setIndex((prev) => (prev + 1) % urls.length)
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open image preview"
+        className="group relative w-full max-w-[220px] h-[140px] bg-muted/40 rounded-md overflow-hidden border cursor-zoom-in"
+      >
+        <img src={current} alt="Shembull" className="w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-black/25 opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Button variant="outline" size="sm" onClick={goPrev}>
+          Prev
+        </Button>
+        <span>
+          {Math.min(index + 1, urls.length)} / {urls.length}
+        </span>
+        <Button variant="outline" size="sm" onClick={goNext}>
+          Next
+        </Button>
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[90vw] max-w-[980px] h-[80vh] max-h-[80vh] p-0 overflow-hidden">
+          <div className="flex h-full flex-col">
+            <DialogHeader className="px-4 py-3 border-b">
+              <DialogTitle>Image preview</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 px-4 py-3">
+              <div className="h-full w-full flex items-center justify-center bg-muted/20 rounded-md">
+                <img
+                  src={current}
+                  alt="Shembull full"
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t">
+              <div className="flex items-center justify-center gap-3 text-sm text-muted-foreground">
+                <Button variant="outline" size="sm" onClick={goPrev}>
+                  Prev
+                </Button>
+                <span>
+                  {Math.min(index + 1, urls.length)} / {urls.length}
+                </span>
+                <Button variant="outline" size="sm" onClick={goNext}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function orderChecklistItems(items: ChecklistItem[]) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aPos = a.item.position
+      const bPos = b.item.position
+      if (aPos == null && bPos == null) return a.index - b.index
+      if (aPos == null) return 1
+      if (bPos == null) return -1
+      if (aPos !== bPos) return aPos - bPos
+      return a.index - b.index
+    })
+    .map((entry) => entry.item)
+}
+
 function parseProductTotals(notes?: string | null) {
   if (!notes) return { total: "", completed: "" }
   const totalMatch = notes.match(/total_products[:=]\s*(\d+)/i)
@@ -169,7 +315,14 @@ function hasProductTotals(notes?: string | null) {
 function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
   if (phase === "PLANNING") {
     return items.filter(
-      (item) => item.path === "project acceptance" || item.path === "ga/dv meeting"
+      (item) =>
+        item.path === "project acceptance" ||
+        item.path === "ga/dv meeting" ||
+        item.path === GD_MST_GJENERALE_PATH ||
+        item.path === GD_MST_SOFA_NEW_PATH ||
+        item.path === GD_MST_VITRINE_NEW_PATH ||
+        item.path === GD_MST_SIDEBOARD_NEW_PATH ||
+        item.path === GD_MST_LOWBOARD_PATH
     )
   }
   if (phase === "PRODUCT") {
@@ -198,6 +351,8 @@ export default function DesignProjectPage() {
   const router = useRouter()
   const projectId = String(params.id)
   const { apiFetch, user } = useAuth()
+  const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
+  const [stickyOffsetPx, setStickyOffsetPx] = React.useState(0)
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
@@ -212,6 +367,86 @@ export default function DesignProjectPage() {
   const [newChecklistContent, setNewChecklistContent] = React.useState("")
   const [newChecklistNumber, setNewChecklistNumber] = React.useState("")
   const [addingChecklist, setAddingChecklist] = React.useState(false)
+  const [mstGjeneraleContent, setMstGjeneraleContent] = React.useState("")
+  const [mstGjeneraleNumber, setMstGjeneraleNumber] = React.useState("")
+  const [mstGjeneraleKeyword, setMstGjeneraleKeyword] = React.useState("")
+  const [mstGjeneraleDescription, setMstGjeneraleDescription] = React.useState("")
+  const [mstGjeneraleOwner, setMstGjeneraleOwner] = React.useState("")
+  const [mstGjeneraleComment, setMstGjeneraleComment] = React.useState("")
+  const [mstGjeneraleAdding, setMstGjeneraleAdding] = React.useState(false)
+  const [mstGjeneraleCommentEditingId, setMstGjeneraleCommentEditingId] = React.useState<string | null>(null)
+  const [mstGjeneraleCommentEditingText, setMstGjeneraleCommentEditingText] = React.useState("")
+  const [mstGjeneraleCommentSaving, setMstGjeneraleCommentSaving] = React.useState(false)
+  const [mstGjeneraleEditingId, setMstGjeneraleEditingId] = React.useState<string | null>(null)
+  const [mstGjeneraleEditDraft, setMstGjeneraleEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    owner: "",
+    comment: "",
+    is_checked: false,
+  })
+  const [mstGjeneraleEditingSaving, setMstGjeneraleEditingSaving] = React.useState(false)
+  const [mstSofaNewContent, setMstSofaNewContent] = React.useState("")
+  const [mstSofaNewNumber, setMstSofaNewNumber] = React.useState("")
+  const [mstSofaNewKeyword, setMstSofaNewKeyword] = React.useState("")
+  const [mstSofaNewDescription, setMstSofaNewDescription] = React.useState("")
+  const [mstSofaNewAdding, setMstSofaNewAdding] = React.useState(false)
+  const [mstSofaNewEditingId, setMstSofaNewEditingId] = React.useState<string | null>(null)
+  const [mstSofaNewEditingSaving, setMstSofaNewEditingSaving] = React.useState(false)
+  const [mstSofaNewEditDraft, setMstSofaNewEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    is_checked: false,
+  })
+  const [mstVitrineNewContent, setMstVitrineNewContent] = React.useState("")
+  const [mstVitrineNewNumber, setMstVitrineNewNumber] = React.useState("")
+  const [mstVitrineNewKeyword, setMstVitrineNewKeyword] = React.useState("")
+  const [mstVitrineNewDescription, setMstVitrineNewDescription] = React.useState("")
+  const [mstVitrineNewAdding, setMstVitrineNewAdding] = React.useState(false)
+  const [mstVitrineNewEditingId, setMstVitrineNewEditingId] = React.useState<string | null>(null)
+  const [mstVitrineNewEditingSaving, setMstVitrineNewEditingSaving] = React.useState(false)
+  const [mstVitrineNewEditDraft, setMstVitrineNewEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    is_checked: false,
+  })
+  const [mstSideboardNewContent, setMstSideboardNewContent] = React.useState("")
+  const [mstSideboardNewNumber, setMstSideboardNewNumber] = React.useState("")
+  const [mstSideboardNewKeyword, setMstSideboardNewKeyword] = React.useState("")
+  const [mstSideboardNewDescription, setMstSideboardNewDescription] = React.useState("")
+  const [mstSideboardNewAdding, setMstSideboardNewAdding] = React.useState(false)
+  const [mstSideboardNewEditingId, setMstSideboardNewEditingId] = React.useState<string | null>(null)
+  const [mstSideboardNewEditingSaving, setMstSideboardNewEditingSaving] = React.useState(false)
+  const [mstSideboardNewEditDraft, setMstSideboardNewEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    is_checked: false,
+  })
+  const [mstLowboardContent, setMstLowboardContent] = React.useState("")
+  const [mstLowboardNumber, setMstLowboardNumber] = React.useState("")
+  const [mstLowboardKeyword, setMstLowboardKeyword] = React.useState("")
+  const [mstLowboardDescription, setMstLowboardDescription] = React.useState("")
+  const [mstLowboardAdding, setMstLowboardAdding] = React.useState(false)
+  const [mstLowboardEditingId, setMstLowboardEditingId] = React.useState<string | null>(null)
+  const [mstLowboardEditingSaving, setMstLowboardEditingSaving] = React.useState(false)
+  const [mstLowboardEditDraft, setMstLowboardEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    is_checked: false,
+  })
+  const [mstChecklistTab, setMstChecklistTab] = React.useState<
+    "gjenerale" | "sofa_new" | "vitrine_new" | "sideboard_new" | "lowboard"
+  >("gjenerale")
   const [createOpen, setCreateOpen] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
@@ -314,6 +549,8 @@ export default function DesignProjectPage() {
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
   const canEditProjectTitle = isAdmin || isManager
+  const canEditGjenerale =
+    Boolean(isAdmin || isManager) || Boolean(user && members.some((m) => m.id === user.id))
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -379,6 +616,19 @@ export default function DesignProjectPage() {
     const phaseValue = viewedPhase || project?.current_phase || "PLANNING"
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
+
+  React.useEffect(() => {
+    const node = stickyHeaderRef.current
+    if (!node) return
+    const update = () => {
+      const rect = node.getBoundingClientRect()
+      setStickyOffsetPx(Math.round(rect.height))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   // Task creation
   const submitCreateTask = async () => {
@@ -529,9 +779,16 @@ export default function DesignProjectPage() {
   }
 
   // Add checklist item
-  const submitChecklistItem = async () => {
-    if (!project || !newChecklistContent.trim()) return
-    const rawNumber = newChecklistNumber.trim()
+  const submitChecklistItem = async (options?: {
+    path?: string
+    content?: string
+    number?: string
+    onReset?: () => void
+  }) => {
+    if (!project) return
+    const content = (options?.content ?? newChecklistContent).trim()
+    if (!content) return
+    const rawNumber = (options?.number ?? newChecklistNumber).trim()
     const parsedNumber = Number.parseInt(rawNumber, 10)
     const position =
       rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
@@ -540,10 +797,14 @@ export default function DesignProjectPage() {
       const payload: Record<string, unknown> = {
         project_id: project.id,
         item_type: "CHECKBOX",
-        title: newChecklistContent.trim(),
+        title: content,
         is_checked: false,
       }
-      if (activePhase === "CONTROL") payload.path = CONTROL_CHECKLIST_PATH
+      if (options?.path) {
+        payload.path = options.path
+      } else if (activePhase === "CONTROL") {
+        payload.path = CONTROL_CHECKLIST_PATH
+      }
       if (position != null) payload.position = position
 
       const res = await apiFetch("/checklist-items", {
@@ -562,12 +823,260 @@ export default function DesignProjectPage() {
         toast.error(detail)
         return
       }
-      setNewChecklistContent("")
-      setNewChecklistNumber("")
+      if (options?.onReset) {
+        options.onReset()
+      } else {
+        setNewChecklistContent("")
+        setNewChecklistNumber("")
+      }
       await reloadChecklistItems()
       toast.success("Checklist item added")
     } finally {
       setAddingChecklist(false)
+    }
+  }
+
+  const submitMstGjeneraleRow = async () => {
+    if (!project) return
+    const title = mstGjeneraleContent.trim()
+    if (!title) return
+    const rawNumber = mstGjeneraleNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstGjeneraleAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_GJENERALE_PATH,
+        title,
+        keyword: mstGjeneraleKeyword.trim() || null,
+        description: mstGjeneraleDescription.trim() || null,
+        owner: mstGjeneraleOwner.trim() || null,
+        comment: mstGjeneraleComment.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstGjeneraleContent("")
+      setMstGjeneraleNumber("")
+      setMstGjeneraleKeyword("")
+      setMstGjeneraleDescription("")
+      setMstGjeneraleOwner("")
+      setMstGjeneraleComment("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstGjeneraleAdding(false)
+    }
+  }
+
+  const submitMstSofaNewRow = async () => {
+    if (!project) return
+    const title = mstSofaNewContent.trim()
+    if (!title) return
+    const rawNumber = mstSofaNewNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstSofaNewAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_SOFA_NEW_PATH,
+        title,
+        keyword: mstSofaNewKeyword.trim() || null,
+        description: mstSofaNewDescription.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstSofaNewContent("")
+      setMstSofaNewNumber("")
+      setMstSofaNewKeyword("")
+      setMstSofaNewDescription("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstSofaNewAdding(false)
+    }
+  }
+
+  const submitMstVitrineNewRow = async () => {
+    if (!project) return
+    const title = mstVitrineNewContent.trim()
+    if (!title) return
+    const rawNumber = mstVitrineNewNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstVitrineNewAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_VITRINE_NEW_PATH,
+        title,
+        keyword: mstVitrineNewKeyword.trim() || null,
+        description: mstVitrineNewDescription.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstVitrineNewContent("")
+      setMstVitrineNewNumber("")
+      setMstVitrineNewKeyword("")
+      setMstVitrineNewDescription("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstVitrineNewAdding(false)
+    }
+  }
+
+  const submitMstSideboardNewRow = async () => {
+    if (!project) return
+    const title = mstSideboardNewContent.trim()
+    if (!title) return
+    const rawNumber = mstSideboardNewNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstSideboardNewAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_SIDEBOARD_NEW_PATH,
+        title,
+        keyword: mstSideboardNewKeyword.trim() || null,
+        description: mstSideboardNewDescription.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstSideboardNewContent("")
+      setMstSideboardNewNumber("")
+      setMstSideboardNewKeyword("")
+      setMstSideboardNewDescription("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstSideboardNewAdding(false)
+    }
+  }
+
+  const submitMstLowboardRow = async () => {
+    if (!project) return
+    const title = mstLowboardContent.trim()
+    if (!title) return
+    const rawNumber = mstLowboardNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstLowboardAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_LOWBOARD_PATH,
+        title,
+        keyword: mstLowboardKeyword.trim() || null,
+        description: mstLowboardDescription.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstLowboardContent("")
+      setMstLowboardNumber("")
+      setMstLowboardKeyword("")
+      setMstLowboardDescription("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstLowboardAdding(false)
     }
   }
 
@@ -629,6 +1138,401 @@ export default function DesignProjectPage() {
     } finally {
       setCommentSaving(false)
     }
+  }
+
+  const startEditMstGjeneraleComment = (item: ChecklistItem) => {
+    setMstGjeneraleCommentEditingId(item.id)
+    setMstGjeneraleCommentEditingText(item.comment || "")
+  }
+
+  const cancelEditMstGjeneraleComment = () => {
+    setMstGjeneraleCommentEditingId(null)
+    setMstGjeneraleCommentEditingText("")
+  }
+
+  const saveMstGjeneraleComment = async (itemId: string) => {
+    setMstGjeneraleCommentSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: mstGjeneraleCommentEditingText.trim() || null }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to save comment")
+        return
+      }
+      await reloadChecklistItems()
+      setMstGjeneraleCommentEditingId(null)
+      setMstGjeneraleCommentEditingText("")
+      toast.success("Comment saved")
+    } finally {
+      setMstGjeneraleCommentSaving(false)
+    }
+  }
+
+  const startEditMstSofaNewRow = (item: ChecklistItem) => {
+    setMstSofaNewEditingId(item.id)
+    setMstSofaNewEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstSofaNewRow = () => {
+    setMstSofaNewEditingId(null)
+    setMstSofaNewEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstSofaNewRow = async () => {
+    if (!mstSofaNewEditingId) return
+    const title = mstSofaNewEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstSofaNewEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstSofaNewEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstSofaNewEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstSofaNewEditDraft.keyword.trim() || null,
+          description: mstSofaNewEditDraft.description.trim() || null,
+          is_checked: mstSofaNewEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstSofaNewRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstSofaNewEditingSaving(false)
+    }
+  }
+
+  const deleteMstSofaNewRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
+  }
+
+  const startEditMstVitrineNewRow = (item: ChecklistItem) => {
+    setMstVitrineNewEditingId(item.id)
+    setMstVitrineNewEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstVitrineNewRow = () => {
+    setMstVitrineNewEditingId(null)
+    setMstVitrineNewEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstVitrineNewRow = async () => {
+    if (!mstVitrineNewEditingId) return
+    const title = mstVitrineNewEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstVitrineNewEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstVitrineNewEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstVitrineNewEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstVitrineNewEditDraft.keyword.trim() || null,
+          description: mstVitrineNewEditDraft.description.trim() || null,
+          is_checked: mstVitrineNewEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstVitrineNewRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstVitrineNewEditingSaving(false)
+    }
+  }
+
+  const deleteMstVitrineNewRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
+  }
+
+  const startEditMstSideboardNewRow = (item: ChecklistItem) => {
+    setMstSideboardNewEditingId(item.id)
+    setMstSideboardNewEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstSideboardNewRow = () => {
+    setMstSideboardNewEditingId(null)
+    setMstSideboardNewEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstSideboardNewRow = async () => {
+    if (!mstSideboardNewEditingId) return
+    const title = mstSideboardNewEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstSideboardNewEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstSideboardNewEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstSideboardNewEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstSideboardNewEditDraft.keyword.trim() || null,
+          description: mstSideboardNewEditDraft.description.trim() || null,
+          is_checked: mstSideboardNewEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstSideboardNewRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstSideboardNewEditingSaving(false)
+    }
+  }
+
+  const deleteMstSideboardNewRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
+  }
+
+  const startEditMstLowboardRow = (item: ChecklistItem) => {
+    setMstLowboardEditingId(item.id)
+    setMstLowboardEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstLowboardRow = () => {
+    setMstLowboardEditingId(null)
+    setMstLowboardEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstLowboardRow = async () => {
+    if (!mstLowboardEditingId) return
+    const title = mstLowboardEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstLowboardEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstLowboardEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstLowboardEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstLowboardEditDraft.keyword.trim() || null,
+          description: mstLowboardEditDraft.description.trim() || null,
+          is_checked: mstLowboardEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstLowboardRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstLowboardEditingSaving(false)
+    }
+  }
+
+  const deleteMstLowboardRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
+  }
+
+  const startEditMstGjeneraleRow = (item: ChecklistItem) => {
+    setMstGjeneraleEditingId(item.id)
+    setMstGjeneraleEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      owner: item.owner || "",
+      comment: item.comment || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstGjeneraleRow = () => {
+    setMstGjeneraleEditingId(null)
+    setMstGjeneraleEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      owner: "",
+      comment: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstGjeneraleRow = async () => {
+    if (!mstGjeneraleEditingId) return
+    const title = mstGjeneraleEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstGjeneraleEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstGjeneraleEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstGjeneraleEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstGjeneraleEditDraft.keyword.trim() || null,
+          description: mstGjeneraleEditDraft.description.trim() || null,
+          owner: mstGjeneraleEditDraft.owner.trim() || null,
+          comment: mstGjeneraleEditDraft.comment.trim() || null,
+          is_checked: mstGjeneraleEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update checklist item")
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstGjeneraleRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstGjeneraleEditingSaving(false)
+    }
+  }
+
+  const deleteMstGjeneraleRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
   }
 
   // Project Acceptance admin functions
@@ -1430,6 +2334,28 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
 
+  const mstGjeneraleItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_GJENERALE_PATH)),
+    [checklistItems]
+  )
+  const mstSofaNewItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_SOFA_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstVitrineNewItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_VITRINE_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstSideboardNewItems = React.useMemo(
+    () =>
+      orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_SIDEBOARD_NEW_PATH)),
+    [checklistItems]
+  )
+  const mstLowboardItems = React.useMemo(
+    () => orderChecklistItems(checklistItems.filter((item) => item.path === GD_MST_LOWBOARD_PATH)),
+    [checklistItems]
+  )
+
   // Filter general checklist items (not project acceptance, GA meeting, propozim, or punimi)
   const generalChecklistItems = React.useMemo(
     () =>
@@ -1440,7 +2366,13 @@ export default function DesignProjectPage() {
           item.path !== "propozim ko1/ko2" &&
           item.path !== "punimi" &&
           item.path !== FINALIZATION_PATH &&
-          item.path !== CONTROL_CHECKLIST_PATH
+          item.path !== CONTROL_CHECKLIST_PATH &&
+          item.path !== GD_MST_GJENERALE_PATH &&
+          item.path !== GD_MST_SOFA_NEW_PATH &&
+          item.path !== GD_MST_VITRINE_NEW_PATH &&
+          item.path !== GD_MST_SIDEBOARD_NEW_PATH &&
+          item.path !== GD_MST_LOWBOARD_PATH &&
+          item.path !== LEGACY_GD_MST_PLANNING_PATH
       ),
     [checklistItems]
   )
@@ -1453,37 +2385,18 @@ export default function DesignProjectPage() {
     [checklistItems]
   )
   const finalizationItemsOrdered = React.useMemo(
-    () =>
-      finalizationItems
-        .map((item, index) => ({ item, index }))
-        .sort((a, b) => {
-          const aPos = a.item.position
-          const bPos = b.item.position
-          if (aPos == null && bPos == null) return a.index - b.index
-          if (aPos == null) return 1
-          if (bPos == null) return -1
-          if (aPos !== bPos) return aPos - bPos
-          return a.index - b.index
-        })
-        .map((entry) => entry.item),
+    () => orderChecklistItems(finalizationItems),
     [finalizationItems]
   )
   const checklistItemsForTab = React.useMemo(() => {
     const baseItems = activePhase === "CONTROL" ? controlChecklistItems : generalChecklistItems
-    return baseItems
-      .map((item, index) => ({ item, index }))
-      .sort((a, b) => {
-        const aPos = a.item.position
-        const bPos = b.item.position
-        if (aPos == null && bPos == null) return a.index - b.index
-        if (aPos == null) return 1
-        if (bPos == null) return -1
-        if (aPos !== bPos) return aPos - bPos
-        return a.index - b.index
-      })
-      .map((entry) => entry.item)
+    return orderChecklistItems(baseItems)
   }, [activePhase, controlChecklistItems, generalChecklistItems])
   const checklistTitle = activePhase === "CONTROL" ? CONTROL_CHECKLIST_TITLE : "Checklist"
+  const isMstProject =
+    (project?.project_type || "").toUpperCase() === "MST" ||
+    (project?.title || "").toUpperCase().includes("MST")
+  const showMstPlanningSections = isMstProject && activePhase === "PLANNING"
 
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
   const assignableUsers = React.useMemo(() => allUsers, [allUsers])
@@ -1492,6 +2405,1160 @@ export default function DesignProjectPage() {
     const member = userMap.get(id)
     return member?.full_name || member?.username || member?.email || "-"
   }
+
+  const renderChecklistItemsList = (items: ChecklistItem[]) => {
+    if (items.length === 0) {
+      return <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item, idx) => (
+          <div key={item.id} className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
+              <Checkbox
+                checked={item.is_checked || false}
+                onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+              />
+              <div className="flex-1">
+                {activePhase === "CONTROL" && isAdmin ? (
+                  controlChecklistEditingId === item.id ? (
+                    <Input
+                      value={controlChecklistEditingText}
+                      onChange={(e) => setControlChecklistEditingText(e.target.value)}
+                    />
+                  ) : (
+                    <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                      {item.title || item.content}
+                    </span>
+                  )
+                ) : (
+                  <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
+                    {item.title || item.content}
+                  </span>
+                )}
+              </div>
+              {activePhase === "CONTROL" && isAdmin ? (
+                <div className="ml-auto flex items-center gap-2">
+                  {controlChecklistEditingId === item.id ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={controlChecklistSaving || !controlChecklistEditingText.trim()}
+                        onClick={() => void saveControlChecklistItem()}
+                      >
+                        {controlChecklistSaving ? "Saving..." : "Save"}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={cancelEditControlChecklistItem}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => startEditControlChecklistItem(item)}>
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-600"
+                        disabled={controlChecklistSaving}
+                        onClick={() => void deleteControlChecklistItem(item.id)}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="ml-9 space-y-2">
+              {commentEditingId === item.id ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={commentEditingText}
+                    onChange={(e) => setCommentEditingText(e.target.value)}
+                    placeholder="Add a comment..."
+                    rows={2}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={commentSaving}
+                      onClick={() => void saveComment(item.id)}
+                    >
+                      {commentSaving ? "Saving..." : "Save Comment"}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={cancelEditComment}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2">
+                  {item.comment ? (
+                    <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
+                      {item.comment}
+                    </div>
+                  ) : (
+                    <div className="flex-1 text-sm text-muted-foreground italic">No comment</div>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
+                    {item.comment ? "Edit" : "Add"} Comment
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const renderMstGjeneraleTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[16%]" />
+            <col className="w-[20%]" />
+            <col className="w-[32%]" />
+            <col className="w-[7%]" />
+            <col className="w-[8%]" />
+            <col className="w-[10%]" />
+            <col className="w-[12%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">DETYRAT</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">INCL</th>
+              <th className="px-3 py-2 text-left">COMMENT</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstGjeneraleItems.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstGjeneraleItems.map((item, idx) => (
+                <tr key={item.id}>
+                  {mstGjeneraleEditingId === item.id ? (
+                    <>
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          value={mstGjeneraleEditDraft.number}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          value={mstGjeneraleEditDraft.keyword}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          value={mstGjeneraleEditDraft.title}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Textarea
+                          value={mstGjeneraleEditDraft.description}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                          }
+                          rows={2}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Checkbox
+                          checked={mstGjeneraleEditDraft.is_checked}
+                          onCheckedChange={(checked) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          value={mstGjeneraleEditDraft.owner}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, owner: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Textarea
+                          value={mstGjeneraleEditDraft.comment}
+                          onChange={(e) =>
+                            setMstGjeneraleEditDraft((prev) => ({ ...prev, comment: e.target.value }))
+                          }
+                          rows={2}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={mstGjeneraleEditingSaving || !mstGjeneraleEditDraft.title.trim()}
+                            onClick={() => void saveEditMstGjeneraleRow()}
+                          >
+                            {mstGjeneraleEditingSaving ? "Saving..." : "Save"}
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={cancelEditMstGjeneraleRow}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                      <td className="px-3 py-2 align-top font-semibold">{item.keyword || "-"}</td>
+                      <td className="px-3 py-2 align-top">{item.title || "-"}</td>
+                      <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                        {item.description || "-"}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Checkbox
+                          checked={item.is_checked || false}
+                          onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          disabled={!canEditGjenerale}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">{item.owner || "-"}</td>
+                      <td className="px-3 py-2 align-top text-sm text-muted-foreground whitespace-pre-line">
+                        {item.comment || "—"}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        {canEditGjenerale ? (
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstGjeneraleRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstGjeneraleRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        ) : null}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_140px_160px_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstGjeneraleNumber}
+            onChange={(e) => setMstGjeneraleNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Detyrat</Label>
+          <Input
+            value={mstGjeneraleContent}
+            onChange={(e) => setMstGjeneraleContent(e.target.value)}
+            placeholder="Detyra"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstGjeneraleKeyword}
+            onChange={(e) => setMstGjeneraleKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstGjeneraleDescription}
+            onChange={(e) => setMstGjeneraleDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Incl</Label>
+          <Input
+            value={mstGjeneraleOwner}
+            onChange={(e) => setMstGjeneraleOwner(e.target.value)}
+            placeholder="Incl"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Comment</Label>
+          <Input
+            value={mstGjeneraleComment}
+            onChange={(e) => setMstGjeneraleComment(e.target.value)}
+            placeholder="Comment"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button onClick={() => void submitMstGjeneraleRow()} disabled={mstGjeneraleAdding || !mstGjeneraleContent.trim()}>
+            {mstGjeneraleAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderMstSofaNewTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[25%]" />
+            <col className="w-[18%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">PATH</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">SHEMBULL</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstSofaNewItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstSofaNewItems.map((item, idx) => {
+                const rowNumber = (item.position ?? idx) + 1
+                const urls =
+                  SOFA_NEW_SHEMBULL[sofaKey(item.title, item.keyword)] ||
+                  SOFA_NEW_ROW_IMAGES[rowNumber] ||
+                  []
+                return (
+                  <tr key={item.id}>
+                    {mstSofaNewEditingId === item.id ? (
+                      <>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSofaNewEditDraft.number}
+                            onChange={(e) =>
+                              setMstSofaNewEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSofaNewEditDraft.title}
+                            onChange={(e) =>
+                              setMstSofaNewEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSofaNewEditDraft.keyword}
+                            onChange={(e) =>
+                              setMstSofaNewEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Textarea
+                            value={mstSofaNewEditDraft.description}
+                            onChange={(e) =>
+                              setMstSofaNewEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top text-muted-foreground text-xs">
+                          Photos are mapped in UI.
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={mstSofaNewEditDraft.is_checked}
+                            onCheckedChange={(checked) =>
+                              setMstSofaNewEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={mstSofaNewEditingSaving || !mstSofaNewEditDraft.title.trim()}
+                              onClick={() => void saveEditMstSofaNewRow()}
+                            >
+                              {mstSofaNewEditingSaving ? "Saving..." : "Save"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditMstSofaNewRow}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2 align-top font-semibold">{item.title || "-"}</td>
+                        <td className="px-3 py-2 align-top">{item.keyword || "-"}</td>
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                          {item.description || "-"}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <ShembullSlider urls={urls} />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={item.is_checked || false}
+                            onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstSofaNewRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstSofaNewRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstSofaNewNumber}
+            onChange={(e) => setMstSofaNewNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Path</Label>
+          <Input
+            value={mstSofaNewContent}
+            onChange={(e) => setMstSofaNewContent(e.target.value)}
+            placeholder="PATH"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstSofaNewKeyword}
+            onChange={(e) => setMstSofaNewKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstSofaNewDescription}
+            onChange={(e) => setMstSofaNewDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() => void submitMstSofaNewRow()}
+            disabled={mstSofaNewAdding || !mstSofaNewContent.trim()}
+          >
+            {mstSofaNewAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderMstVitrineNewTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[25%]" />
+            <col className="w-[18%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">PATH</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">SHEMBULL</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstVitrineNewItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstVitrineNewItems.map((item, idx) => {
+                const rowNumber = (item.position ?? idx) + 1
+                const urls =
+                  VITRINE_NEW_SHEMBULL[sofaKey(item.title, item.keyword)] ||
+                  VITRINE_NEW_ROW_IMAGES[rowNumber] ||
+                  []
+                const textShembull = VITRINE_NEW_ROW_SHEMBULL_TEXT[rowNumber]
+                return (
+                  <tr key={item.id}>
+                    {mstVitrineNewEditingId === item.id ? (
+                      <>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstVitrineNewEditDraft.number}
+                            onChange={(e) =>
+                              setMstVitrineNewEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstVitrineNewEditDraft.title}
+                            onChange={(e) =>
+                              setMstVitrineNewEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstVitrineNewEditDraft.keyword}
+                            onChange={(e) =>
+                              setMstVitrineNewEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Textarea
+                            value={mstVitrineNewEditDraft.description}
+                            onChange={(e) =>
+                              setMstVitrineNewEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top text-muted-foreground text-xs">
+                          Photos are mapped in UI.
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={mstVitrineNewEditDraft.is_checked}
+                            onCheckedChange={(checked) =>
+                              setMstVitrineNewEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={mstVitrineNewEditingSaving || !mstVitrineNewEditDraft.title.trim()}
+                              onClick={() => void saveEditMstVitrineNewRow()}
+                            >
+                              {mstVitrineNewEditingSaving ? "Saving..." : "Save"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditMstVitrineNewRow}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2 align-top font-semibold">{item.title || "-"}</td>
+                        <td className="px-3 py-2 align-top">{item.keyword || "-"}</td>
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                          {item.description || "-"}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          {urls.length ? (
+                            <ShembullSlider urls={urls} />
+                          ) : textShembull ? (
+                            <div className="text-xs text-muted-foreground whitespace-pre-line">
+                              {textShembull}
+                            </div>
+                          ) : (
+                            <ShembullSlider urls={urls} />
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={item.is_checked || false}
+                            onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstVitrineNewRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstVitrineNewRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstVitrineNewNumber}
+            onChange={(e) => setMstVitrineNewNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Path</Label>
+          <Input
+            value={mstVitrineNewContent}
+            onChange={(e) => setMstVitrineNewContent(e.target.value)}
+            placeholder="PATH"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstVitrineNewKeyword}
+            onChange={(e) => setMstVitrineNewKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstVitrineNewDescription}
+            onChange={(e) => setMstVitrineNewDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() => void submitMstVitrineNewRow()}
+            disabled={mstVitrineNewAdding || !mstVitrineNewContent.trim()}
+          >
+            {mstVitrineNewAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderMstSideboardNewTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[25%]" />
+            <col className="w-[18%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">PATH</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">SHEMBULL</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstSideboardNewItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstSideboardNewItems.map((item, idx) => {
+                const rowNumber = (item.position ?? idx) + 1
+                const urls =
+                  SIDEBOARD_NEW_SHEMBULL[sofaKey(item.title, item.keyword)] ||
+                  SIDEBOARD_NEW_ROW_IMAGES[rowNumber] ||
+                  []
+                return (
+                  <tr key={item.id}>
+                    {mstSideboardNewEditingId === item.id ? (
+                      <>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSideboardNewEditDraft.number}
+                            onChange={(e) =>
+                              setMstSideboardNewEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSideboardNewEditDraft.title}
+                            onChange={(e) =>
+                              setMstSideboardNewEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstSideboardNewEditDraft.keyword}
+                            onChange={(e) =>
+                              setMstSideboardNewEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Textarea
+                            value={mstSideboardNewEditDraft.description}
+                            onChange={(e) =>
+                              setMstSideboardNewEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top text-muted-foreground text-xs">
+                          Photos are mapped in UI.
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={mstSideboardNewEditDraft.is_checked}
+                            onCheckedChange={(checked) =>
+                              setMstSideboardNewEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={mstSideboardNewEditingSaving || !mstSideboardNewEditDraft.title.trim()}
+                              onClick={() => void saveEditMstSideboardNewRow()}
+                            >
+                              {mstSideboardNewEditingSaving ? "Saving..." : "Save"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditMstSideboardNewRow}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2 align-top font-semibold">{item.title || "-"}</td>
+                        <td className="px-3 py-2 align-top">{item.keyword || "-"}</td>
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                          {item.description || "-"}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <ShembullSlider urls={urls} />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={item.is_checked || false}
+                            onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstSideboardNewRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstSideboardNewRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstSideboardNewNumber}
+            onChange={(e) => setMstSideboardNewNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Path</Label>
+          <Input
+            value={mstSideboardNewContent}
+            onChange={(e) => setMstSideboardNewContent(e.target.value)}
+            placeholder="PATH"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstSideboardNewKeyword}
+            onChange={(e) => setMstSideboardNewKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstSideboardNewDescription}
+            onChange={(e) => setMstSideboardNewDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() => void submitMstSideboardNewRow()}
+            disabled={mstSideboardNewAdding || !mstSideboardNewContent.trim()}
+          >
+            {mstSideboardNewAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderMstLowboardTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[25%]" />
+            <col className="w-[18%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">PATH</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">SHEMBULL</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstLowboardItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstLowboardItems.map((item, idx) => {
+                const rowNumber = (item.position ?? idx) + 1
+                const urls =
+                  LOWBOARD_SHEMBULL[sofaKey(item.title, item.keyword)] ||
+                  LOWBOARD_ROW_IMAGES[rowNumber] ||
+                  []
+                return (
+                  <tr key={item.id}>
+                    {mstLowboardEditingId === item.id ? (
+                      <>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.number}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.title}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.keyword}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Textarea
+                            value={mstLowboardEditDraft.description}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top text-muted-foreground text-xs">
+                          Photos are mapped in UI.
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={mstLowboardEditDraft.is_checked}
+                            onCheckedChange={(checked) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={mstLowboardEditingSaving || !mstLowboardEditDraft.title.trim()}
+                              onClick={() => void saveEditMstLowboardRow()}
+                            >
+                              {mstLowboardEditingSaving ? "Saving..." : "Save"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditMstLowboardRow}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2 align-top font-semibold">{item.title || "-"}</td>
+                        <td className="px-3 py-2 align-top">{item.keyword || "-"}</td>
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                          {item.description || "-"}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <ShembullSlider urls={urls} />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={item.is_checked || false}
+                            onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstLowboardRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstLowboardRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstLowboardNumber}
+            onChange={(e) => setMstLowboardNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Path</Label>
+          <Input
+            value={mstLowboardContent}
+            onChange={(e) => setMstLowboardContent(e.target.value)}
+            placeholder="PATH"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstLowboardKeyword}
+            onChange={(e) => setMstLowboardKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstLowboardDescription}
+            onChange={(e) => setMstLowboardDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() => void submitMstLowboardRow()}
+            disabled={mstLowboardAdding || !mstLowboardContent.trim()}
+          >
+            {mstLowboardAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderMstChecklistSection = (options: {
+    title: string
+    items: ChecklistItem[]
+    path: string
+    number: string
+    setNumber: (value: string) => void
+    content: string
+    setContent: (value: string) => void
+  }) => (
+    <div className="space-y-4">
+      {renderChecklistItemsList(options.items)}
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={options.number}
+            onChange={(e) => options.setNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Item</Label>
+          <Input
+            value={options.content}
+            onChange={(e) => options.setContent(e.target.value)}
+            placeholder="Add new checklist item..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter")
+                void submitChecklistItem({
+                  path: options.path,
+                  content: options.content,
+                  number: options.number,
+                  onReset: () => {
+                    options.setContent("")
+                    options.setNumber("")
+                  },
+                })
+            }}
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() =>
+              void submitChecklistItem({
+                path: options.path,
+                content: options.content,
+                number: options.number,
+                onReset: () => {
+                  options.setContent("")
+                  options.setNumber("")
+                },
+              })
+            }
+            disabled={addingChecklist}
+          >
+            {addingChecklist ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -1554,14 +3621,14 @@ export default function DesignProjectPage() {
   const canClosePhase = phase !== "CLOSED"
 
   return (
-    <div className="space-y-6">
-      <div className="sticky top-0 z-40 bg-white/95 backdrop-blur print:static">
+    <div className="space-y-6" style={{ ["--design-sticky-offset" as string]: `${stickyOffsetPx}px` }}>
+      <div ref={stickyHeaderRef} className="sticky top-0 z-40 bg-white/95 backdrop-blur print:static">
         <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
-          <div className="mt-3 flex items-center gap-3">
+      <div className="flex flex-col gap-3">
+        <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">&larr; Back to Projects</button>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             {renderProjectTitle()}
             {canEditDueDate && (
               <button
@@ -1583,6 +3650,19 @@ export default function DesignProjectPage() {
               <span className="text-sm text-muted-foreground">Due: {formatDateDisplay(project.due_date)}</span>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            {user?.role === "ADMIN" && phase !== "PLANNING" ? (
+              <Button
+                variant="outline"
+                disabled={resettingPhase}
+                onClick={() => void resetToPlanning()}
+              >
+                {resettingPhase ? "Resetting..." : "Reset to Planning"}
+              </Button>
+            ) : null}
+            <Button className="rounded-xl" variant="outline">Settings</Button>
+          </div>
+        </div>
           <div className="mt-3">
             <Badge variant="outline" className="text-purple-600 border-purple-200 bg-purple-50">
               {phaseLabels[phase] || "Design"}
@@ -1591,13 +3671,13 @@ export default function DesignProjectPage() {
               Graphic Design
             </Badge>
           </div>
-          <div className="mt-3 text-sm text-muted-foreground">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {phaseSequence.map((p, idx) => {
               const isViewed = p === activePhase
               const isCurrent = p === phase
               const isLocked = idx > lockedAfterIndex
               return (
-                <span key={p}>
+                <span key={p} className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -1623,30 +3703,18 @@ export default function DesignProjectPage() {
                 </span>
               )
             })}
+            <span className="ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canClosePhase || advancingPhase}
+                onClick={() => void advancePhase()}
+              >
+                {advancingPhase ? "Advancing..." : activePhase === "FINAL" ? "Finalize" : "Next Phase"}
+              </Button>
+            </span>
           </div>
           {activePhase !== phase ? <div className="mt-2 text-xs text-muted-foreground">Viewing: {phaseLabels[activePhase] || "Design"}</div> : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button className="rounded-xl" variant="outline">Settings</Button>
-        </div>
-      </div>
-
-      {/* Advance Phase Button */}
-      <div className="flex justify-end">
-        <div className="flex items-center gap-2">
-          {user?.role === "ADMIN" && phase !== "PLANNING" ? (
-            <Button
-              variant="outline"
-              disabled={resettingPhase}
-              onClick={() => void resetToPlanning()}
-            >
-              {resettingPhase ? "Resetting..." : "Reset to Planning"}
-            </Button>
-          ) : null}
-          <Button variant="outline" disabled={!canClosePhase || advancingPhase} onClick={() => void advancePhase()}>
-          {advancingPhase ? "Advancing..." : activePhase === "FINAL" ? "Finalize" : "Next Phase"}
-          </Button>
-        </div>
       </div>
 
       {/* Tabs */}
@@ -1656,22 +3724,14 @@ export default function DesignProjectPage() {
             const isActive = tab.id === activeTab
             return (
               <button
-               
                 key={tab.id}
-               
                 type="button"
-               
                 onClick={() => setActiveTab(tab.id)}
-               
                 className={[
-                  
                   "relative pb-3 text-sm font-medium",
                   tab.id === "ga" ? "ml-auto" : "",
-                 
                   isActive ? "text-purple-600" : "text-muted-foreground",
-                ,
                 ].join(" ")}
-              
               >
                 {tab.label}
                 {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" /> : null}
@@ -1680,6 +3740,41 @@ export default function DesignProjectPage() {
           })}
         </div>
       </div>
+
+      {/* Checklist Sub-tabs (sticky with main tabs) */}
+      {activeTab === "checklist" && showMstPlanningSections ? (
+        <div className="border-b">
+          <div className="flex flex-wrap gap-6">
+            {[
+              { id: "gjenerale", label: "GJENERALE" },
+              { id: "sofa_new", label: "SOFA NEW" },
+              { id: "vitrine_new", label: "VITRINE_NEW" },
+              { id: "sideboard_new", label: "SIDEBOARD_NEW" },
+              { id: "lowboard", label: "LOWBOARD" },
+            ].map((tab) => {
+              const isActive = tab.id === mstChecklistTab
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() =>
+                    setMstChecklistTab(
+                      tab.id as "gjenerale" | "sofa_new" | "vitrine_new" | "sideboard_new" | "lowboard"
+                    )
+                  }
+                  className={[
+                    "relative pb-3 text-sm font-medium",
+                    isActive ? "text-purple-600" : "text-muted-foreground",
+                  ].join(" ")}
+                >
+                  {tab.label}
+                  {isActive ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" /> : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
         </div>
       </div>
 
@@ -1927,147 +4022,46 @@ export default function DesignProjectPage() {
         {/* Checklist Tab */}
         {activeTab === "checklist" && (
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">{checklistTitle}</h3>
-            {checklistItemsForTab.length === 0 ? (
-              <p className="text-muted-foreground">No checklist items yet. Add items below.</p>
+            {showMstPlanningSections ? (
+              <div className="space-y-4">
+
+                {mstChecklistTab === "gjenerale" && renderMstGjeneraleTable()}
+                {mstChecklistTab === "sofa_new" && renderMstSofaNewTable()}
+                {mstChecklistTab === "vitrine_new" && renderMstVitrineNewTable()}
+                {mstChecklistTab === "sideboard_new" && renderMstSideboardNewTable()}
+                {mstChecklistTab === "lowboard" && renderMstLowboardTable()}
+              </div>
             ) : (
-              <div className="space-y-2">
-                {checklistItemsForTab.map((item, idx) => (
-                  <div key={item.id} className="p-3 border rounded-lg space-y-2">
-                    <div className="flex items-center gap-3">
-                      <span className="text-purple-600 font-medium min-w-[24px] mt-0.5">{idx + 1}.</span>
-                      <Checkbox
-                        checked={item.is_checked || false}
-                        onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
-                      />
-                      <div className="flex-1">
-                        {activePhase === "CONTROL" && isAdmin ? (
-                          controlChecklistEditingId === item.id ? (
-                            <Input
-                              value={controlChecklistEditingText}
-                              onChange={(e) => setControlChecklistEditingText(e.target.value)}
-                            />
-                          ) : (
-                            <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                              {item.title || item.content}
-                            </span>
-                          )
-                        ) : (
-                          <span className={item.is_checked ? "line-through text-muted-foreground" : ""}>
-                            {item.title || item.content}
-                          </span>
-                        )}
-                      </div>
-                      {activePhase === "CONTROL" && isAdmin ? (
-                        <div className="ml-auto flex items-center gap-2">
-                          {controlChecklistEditingId === item.id ? (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={controlChecklistSaving || !controlChecklistEditingText.trim()}
-                                onClick={() => void saveControlChecklistItem()}
-                              >
-                                {controlChecklistSaving ? "Saving..." : "Save"}
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={cancelEditControlChecklistItem}>
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => startEditControlChecklistItem(item)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-500 hover:text-red-600"
-                                disabled={controlChecklistSaving}
-                                onClick={() => void deleteControlChecklistItem(item.id)}
-                              >
-                                Delete
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                    {/* Comment section */}
-                    <div className="ml-9 space-y-2">
-                      {commentEditingId === item.id ? (
-                        <div className="space-y-2">
-                          <Textarea
-                            value={commentEditingText}
-                            onChange={(e) => setCommentEditingText(e.target.value)}
-                            placeholder="Add a comment..."
-                            rows={2}
-                          />
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={commentSaving}
-                              onClick={() => void saveComment(item.id)}
-                            >
-                              {commentSaving ? "Saving..." : "Save Comment"}
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={cancelEditComment}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start gap-2">
-                          {item.comment ? (
-                            <div className="flex-1 text-sm text-muted-foreground bg-muted p-2 rounded">
-                              {item.comment}
-                            </div>
-                          ) : (
-                            <div className="flex-1 text-sm text-muted-foreground italic">
-                              No comment
-                            </div>
-                          )}
-                          <Button variant="ghost" size="sm" onClick={() => startEditComment(item)}>
-                            {item.comment ? "Edit" : "Add"} Comment
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+              <>
+                {renderChecklistItemsList(checklistItemsForTab)}
+                <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+                  <div className="space-y-1">
+                    <Label>Number</Label>
+                    <Input
+                      value={newChecklistNumber}
+                      onChange={(e) => setNewChecklistNumber(e.target.value)}
+                      placeholder="e.g. 3"
+                    />
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-1">
+                    <Label>Item</Label>
+                    <Input
+                      value={newChecklistContent}
+                      onChange={(e) => setNewChecklistContent(e.target.value)}
+                      placeholder="Add new checklist item..."
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void submitChecklistItem()
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
+                      {addingChecklist ? "Adding..." : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
-            <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-              <div className="space-y-1">
-                <Label>Number</Label>
-                <Input
-                  value={newChecklistNumber}
-                  onChange={(e) => setNewChecklistNumber(e.target.value)}
-                  placeholder="e.g. 3"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Item</Label>
-                <Input
-                  value={newChecklistContent}
-                  onChange={(e) => setNewChecklistContent(e.target.value)}
-                  placeholder="Add new checklist item..."
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void submitChecklistItem()
-                  }}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button onClick={() => void submitChecklistItem()} disabled={addingChecklist}>
-                  {addingChecklist ? "Adding..." : "Add"}
-                </Button>
-              </div>
-            </div>
           </Card>
         )}
 

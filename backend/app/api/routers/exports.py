@@ -44,8 +44,10 @@ from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.ga_note import GaNote
 from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope, GaNoteStatus
+from app.api.routers import planners as planners_router
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
+from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 from app.services.daily_report_logic import (
     DailyReportTyoMode,
@@ -156,6 +158,12 @@ def _display_department_name(label: str | None) -> str:
 def _safe_filename(label: str) -> str:
     cleaned = re.sub(r"[^\w\s\-]", "", label)
     cleaned = re.sub(r"\s+", "_", cleaned.strip())
+    return cleaned.upper() or "EXPORT"
+
+
+def _safe_filename_spaces(label: str) -> str:
+    cleaned = re.sub(r"[^\w\s\-]", "", label)
+    cleaned = re.sub(r"\s+", " ", cleaned.strip())
     return cleaned.upper() or "EXPORT"
 
 
@@ -755,7 +763,13 @@ async def export_tasks_xlsx(
         # Header/footer: date+time top-right, page x/y center bottom, initials bottom-right
         ws.oddHeader.right.text = "&D &T"
         ws.oddFooter.center.text = "Page &P / &N"
-        ws.oddFooter.right.text = _initials_compact(user.full_name or user.username or "") or "____"
+        ws.oddFooter.right.text = f"PUNOI: {_initials_compact(user.full_name or user.username or '') or '____'}"
+        ws.evenHeader.right.text = ws.oddHeader.right.text
+        ws.evenFooter.center.text = ws.oddFooter.center.text
+        ws.evenFooter.right.text = ws.oddFooter.right.text
+        ws.firstHeader.right.text = ws.oddHeader.right.text
+        ws.firstFooter.center.text = ws.oddFooter.center.text
+        ws.firstFooter.right.text = ws.oddFooter.right.text
 
         # Thick outside border for header row
         thin = Side(style="thin", color="000000")
@@ -2570,13 +2584,12 @@ async def export_weekly_planner_xlsx(
     # Title row
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value=title_upper)
-    title_cell.font = Font(bold=True, size=12)  # Reduced from 16 to help fit on one page
+    title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Reduced row heights to help fit on one page when printing
-    ws.row_dimensions[1].height = 18
-    ws.row_dimensions[2].height = 4
-    ws.row_dimensions[3].height = 4
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
 
     header_row = 4
     data_start_row = 5
@@ -2742,18 +2755,15 @@ async def export_weekly_planner_xlsx(
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
-    # Minimal margins to maximize printable area for fitting on one page
     ws.page_margins.left = 0.1
     ws.page_margins.right = 0.1
-    ws.page_margins.top = 0.1
-    ws.page_margins.bottom = 0.1
-    ws.page_margins.header = 0.1
-    ws.page_margins.footer = 0.1
-    # Force fit to exactly 1 page (width and height) - Excel will scale down as needed
-    # This is the key setting to ensure everything fits on one page
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
     ws.page_setup.fitToPage = True
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 0
 
     user_initials = _initials(user.full_name or user.username or "")
     ws.oddHeader.right.text = "&D &T"
@@ -2882,12 +2892,12 @@ async def export_weekly_snapshot_xlsx(
     # Title row
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     title_cell = ws.cell(row=1, column=1, value=title_upper)
-    title_cell.font = Font(bold=True, size=12)
+    title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.row_dimensions[1].height = 18
-    ws.row_dimensions[2].height = 4
-    ws.row_dimensions[3].height = 4
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
 
     header_row = 4
     data_start_row = 5
@@ -3049,13 +3059,13 @@ async def export_weekly_snapshot_xlsx(
     ws.page_setup.paperSize = 9
     ws.page_margins.left = 0.1
     ws.page_margins.right = 0.1
-    ws.page_margins.top = 0.1
-    ws.page_margins.bottom = 0.1
-    ws.page_margins.header = 0.1
-    ws.page_margins.footer = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
     ws.page_setup.fitToPage = True
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 0
 
     user_initials = _initials(user.full_name or user.username or "")
     ws.oddHeader.right.text = "&D &T"
@@ -3078,8 +3088,324 @@ async def export_weekly_snapshot_xlsx(
 
     today = datetime.now(timezone.utc).date()
     initials_value = user_initials or "USER"
-    filename_title = _safe_filename(title_upper)
-    filename = f"{filename_title}_{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]} ({initials_value}).xlsx"
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename_title = _safe_filename_spaces(title_upper)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/weekly-plan-vs-final.xlsx")
+async def export_weekly_plan_vs_final_xlsx(
+    department_id: uuid.UUID,
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_department_access(user, department_id)
+
+    normalized_week_start = planners_router._week_start(week_start)
+    week_dates = planners_router._get_next_5_working_days(normalized_week_start)
+    week_end = week_dates[-1]
+
+    department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+    dept_label = _display_department_name(department.name if department is not None else "")
+
+    title_label = (
+        f"{dept_label} "
+        f"{_format_excel_date(normalized_week_start)} - {_format_excel_date(week_end)} - "
+        "PLAN VS FINAL REPORT"
+    ).strip()
+    title_upper = title_label.upper() if title_label else "PLAN VS FINAL REPORT"
+
+    planned_official_snapshot = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+                WeeklyPlannerSnapshot.snapshot_type == WeeklySnapshotType.PLANNED.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    latest_final_snapshot = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+                WeeklyPlannerSnapshot.snapshot_type == WeeklySnapshotType.FINAL.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    def _assignee_columns_from_snapshot(snapshot: WeeklyPlannerSnapshot | None) -> list[tuple[uuid.UUID | None, str]]:
+        if snapshot is None:
+            return []
+        payload = snapshot.payload or {}
+        department_payload = payload.get("department")
+        if not department_payload:
+            return []
+        try:
+            dept = WeeklyTableDepartment.model_validate(department_payload)
+        except Exception:
+            return []
+
+        seen: set[str] = set()
+        columns: list[tuple[uuid.UUID | None, str]] = []
+        for day in dept.days:
+            for user_day in day.users:
+                name = (user_day.user_name or "").strip()
+                if not name:
+                    continue
+                user_id = getattr(user_day, "user_id", None)
+                key = str(user_id) if user_id is not None else f"name:{name.lower()}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                columns.append((user_id, name))
+
+        columns.sort(key=lambda item: item[1].lower())
+        return columns
+
+    # Prefer planned snapshot for column ordering (matches UI).
+    assignee_columns = _assignee_columns_from_snapshot(planned_official_snapshot) or _assignee_columns_from_snapshot(latest_final_snapshot)
+
+    message: str | None = None
+    groups: list[dict[str, object]] = []
+    if planned_official_snapshot is None:
+        message = planners_router.NO_PLAN_SNAPSHOT_MESSAGE
+    elif latest_final_snapshot is None:
+        message = "No final snapshot found for this week. Save This Week (Final) first."
+    else:
+        planned_tasks_by_key = planners_router._tasks_by_key_from_snapshot_payload(planned_official_snapshot.payload or {})
+        final_tasks_by_key = planners_router._tasks_by_key_from_snapshot_payload(latest_final_snapshot.payload or {})
+
+        as_of_date = week_end + timedelta(days=1)
+        buckets = planners_router._classify_weekly_plan_performance(
+            planned_tasks=planned_tasks_by_key,
+            actual_tasks=final_tasks_by_key,
+            week_end=week_end,
+            as_of_date=as_of_date,
+        )
+
+        completed = [planners_router._to_compare_task_out(task) for task in buckets.get("completed", [])]
+        in_progress = [planners_router._to_compare_task_out(task) for task in buckets.get("in_progress", [])]
+        pending = [planners_router._to_compare_task_out(task) for task in buckets.get("pending", [])]
+        late = [planners_router._to_compare_task_out(task) for task in buckets.get("late", [])]
+        additional = [planners_router._to_compare_task_out(task) for task in buckets.get("additional", [])]
+        removed_or_canceled = [
+            planners_router._to_compare_task_out(task) for task in buckets.get("removed_or_canceled", [])
+        ]
+
+        grouped = planners_router._group_compare_tasks_by_assignee(
+            completed=completed,
+            in_progress=in_progress,
+            pending=pending,
+            late=late,
+            additional=additional,
+            removed_or_canceled=removed_or_canceled,
+        )
+
+        if grouped:
+            groups = [
+                {
+                    "assignee_id": g.assignee_id,
+                    "assignee_name": g.assignee_name,
+                    "completed": g.completed or [],
+                    "in_progress": g.in_progress or [],
+                    "pending": g.pending or [],
+                    "late": g.late or [],
+                    "additional": g.additional or [],
+                    "removed_or_canceled": g.removed_or_canceled or [],
+                }
+                for g in grouped
+            ]
+
+    if not groups and assignee_columns:
+        groups = [
+            {
+                "assignee_id": assignee_id,
+                "assignee_name": assignee_name,
+                "completed": [],
+                "in_progress": [],
+                "pending": [],
+                "late": [],
+                "additional": [],
+                "removed_or_canceled": [],
+            }
+            for assignee_id, assignee_name in assignee_columns
+        ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PLAN VS FINAL"[:31]
+
+    # Columns: NR, STATUS, then one column per user
+    last_col = max(2, 2 + len(groups))
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_upper)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    # Row 2-3: spacing
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    user_initials = _initials(user.full_name or user.username or "")
+
+    # Standard print setup
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    if message:
+        ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=last_col)
+        msg_cell = ws.cell(row=4, column=1, value=str(message))
+        msg_cell.font = Font(bold=True)
+        msg_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        ws.row_dimensions[4].height = 30
+        ws.print_area = f"A1:{get_column_letter(last_col)}4"
+    else:
+        header_row = 4
+        data_start_row = 5
+
+        # Column widths
+        ws.column_dimensions["A"].width = 5
+        ws.column_dimensions["B"].width = 18
+        for idx in range(3, last_col + 1):
+            ws.column_dimensions[get_column_letter(idx)].width = 44
+
+        # Header row
+        ws.row_dimensions[header_row].height = 22
+        nr_header = ws.cell(row=header_row, column=1, value="NR")
+        nr_header.font = Font(bold=True)
+        nr_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+        status_header = ws.cell(row=header_row, column=2, value="STATUS")
+        status_header.font = Font(bold=True)
+        status_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+        for col_idx, group in enumerate(groups, start=3):
+            label = str(group.get("assignee_name") or "").upper()
+            cell = ws.cell(row=header_row, column=col_idx, value=label)
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+        categories: list[tuple[str, str]] = [
+            ("completed", "COMPLETED"),
+            ("in_progress", "IN PROGRESS"),
+            ("pending", "PENDING"),
+            ("late", "LATE"),
+            ("additional", "ADDITIONAL"),
+            ("removed_or_canceled", "REMOVED/CANCELED"),
+        ]
+
+        def _cell_text(tasks: list[object]) -> str:
+            if not tasks:
+                return "-"
+            lines: list[str] = [str(len(tasks))]
+            for task in tasks:
+                title = getattr(task, "title", None) or ""
+                project_title = getattr(task, "project_title", None)
+                suffix = f" ({project_title})" if project_title else ""
+                lines.append(f"{title}{suffix}".strip())
+            value = "\n".join(lines).strip()
+            if len(value) > 32000:
+                value = value[:31950].rstrip() + "\n...(TRUNCATED)"
+            return value
+
+        row_idx = data_start_row
+        for idx, (key, label) in enumerate(categories, start=1):
+            nr_cell = ws.cell(row=row_idx, column=1, value=idx)
+            nr_cell.font = Font(bold=True)
+            nr_cell.number_format = "#,##0"
+            nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+            label_cell = ws.cell(row=row_idx, column=2, value=label)
+            label_cell.font = Font(bold=True)
+            label_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            for col_idx, group in enumerate(groups, start=3):
+                tasks = group.get(key) or []
+                cell = ws.cell(row=row_idx, column=col_idx, value=_cell_text(list(tasks)))
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            row_idx += 1
+
+        last_row = row_idx - 1
+
+        # Filters + freeze + print titles
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+        ws.freeze_panes = "C5" if last_col >= 3 else "B5"
+        ws.print_title_rows = f"{header_row}:{header_row}"
+        ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+
+        # Borders (thick outside, thin inside; header thick outline)
+        thin = Side(style="thin", color="000000")
+        thick = Side(style="medium", color="000000")
+        for r in range(header_row, last_row + 1):
+            for c in range(1, last_col + 1):
+                left = thick if c == 1 else thin
+                right = thick if c == last_col else thin
+                top = thick if r == header_row else thin
+                bottom = thick if r == last_row else thin
+                ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=header_row, column=c)
+            cell.border = Border(
+                left=thick if c == 1 else thin,
+                right=thick if c == last_col else thin,
+                top=thick,
+                bottom=thick,
+            )
+
+        # Row heights (based on max wrapped lines)
+        for r in range(data_start_row, last_row + 1):
+            max_lines = 1
+            for c in range(1, last_col + 1):
+                value = ws.cell(row=r, column=c).value
+                lines = str(value).count("\n") + 1 if value is not None else 1
+                max_lines = max(max_lines, lines)
+            ws.row_dimensions[r].height = max(18, min(300, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    initials_value = user_initials or "USER"
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename_title = _safe_filename_spaces(title_upper)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
 
     return StreamingResponse(
         bio,

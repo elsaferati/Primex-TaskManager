@@ -14,12 +14,44 @@ import {
   getLegendLabelDisplay,
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
+import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import { formatDepartmentName } from "@/lib/department-name"
 import { toast } from "sonner"
 import { Printer } from "lucide-react"
 
 type SnapshotType = "PLANNED" | "FINAL"
 type SlotType = "am" | "pm"
+
+const sanitizeDownloadFilename = (value: string) => {
+  const trimmed = (value || "").trim()
+  const withoutUnsafe = trimmed.replace(/[\\/:*?"<>|]/g, "_")
+  const withoutControls = withoutUnsafe.replace(/[\u0000-\u001F\u007F]/g, "")
+  const collapsed = withoutControls.replace(/\s+/g, " ").trim()
+  if (!collapsed) return "download"
+  // Keep some headroom for OS/path limitations.
+  return collapsed.length > 180 ? collapsed.slice(0, 180).trim() : collapsed
+}
+
+const parseFilenameFromDisposition = (headerValue: string | null) => {
+  if (!headerValue) return null
+  const match = headerValue.match(/filename=\"?([^\";]+)\"?/i)
+  return match ? match[1] : null
+}
+
+const triggerBlobDownload = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = sanitizeDownloadFilename(filename)
+  link.style.display = "none"
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // Some browsers may cancel the download if we revoke immediately.
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url)
+  }, 30_000)
+}
 
 type SnapshotVersion = {
   id: string
@@ -136,6 +168,8 @@ const OVERVIEW_LABELS: Record<string, string> = {
   last_week: "Last Week",
   this_week: "This Week",
 }
+
+const PLAN_VS_FINAL_PRINT_ROOT_ID = "plan-vs-final-report-print-root"
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -746,6 +780,10 @@ export function WeeklyPlannerSnapshotsView({
   const [isLoadingCompare, setIsLoadingCompare] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [isExporting, setIsExporting] = React.useState(false)
+  const [isExportingPlanVsFinal, setIsExportingPlanVsFinal] = React.useState(false)
+  const [planVsFinal, setPlanVsFinal] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [isLoadingPlanVsFinal, setIsLoadingPlanVsFinal] = React.useState(false)
+  const [planVsFinalError, setPlanVsFinalError] = React.useState<string | null>(null)
 
   const fetchSnapshot = React.useCallback(
     async (snapshotId: string) => {
@@ -836,6 +874,40 @@ export function WeeklyPlannerSnapshotsView({
     void loadCompare()
   }, [loadCompare])
 
+  React.useEffect(() => {
+    setPlanVsFinal(null)
+    setPlanVsFinalError(null)
+  }, [departmentId, selectedWeekStart])
+
+  const loadPlanVsFinal = React.useCallback(async () => {
+    if (!departmentId || departmentId === allDepartmentsValue || !selectedWeekStart) {
+      setPlanVsFinal(null)
+      setPlanVsFinalError(null)
+      return
+    }
+    if (isLoadingPlanVsFinal) return
+
+    setIsLoadingPlanVsFinal(true)
+    setPlanVsFinalError(null)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("department_id", departmentId)
+      qs.set("week_start", selectedWeekStart)
+      const res = await apiFetch(`/planners/weekly-snapshots/plan-vs-final?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to load plan vs final report")
+        throw new Error(message || "Failed to load plan vs final report")
+      }
+      const payload = (await res.json()) as WeeklyPlanPerformanceResponse
+      setPlanVsFinal(payload)
+    } catch (err) {
+      setPlanVsFinal(null)
+      setPlanVsFinalError(err instanceof Error ? err.message : "Failed to load plan vs final report")
+    } finally {
+      setIsLoadingPlanVsFinal(false)
+    }
+  }, [allDepartmentsValue, apiFetch, departmentId, isLoadingPlanVsFinal, selectedWeekStart])
+
   const activeVersions = selectedPlanType === "PLANNED"
     ? (compare?.planned_versions ?? [])
     : (compare?.final_versions ?? [])
@@ -864,12 +936,6 @@ export function WeeklyPlannerSnapshotsView({
 
   const activeSnapshot = selectedVersionId ? snapshotById[selectedVersionId] ?? null : null
 
-  const parseFilenameFromDisposition = (headerValue: string | null) => {
-    if (!headerValue) return null
-    const match = headerValue.match(/filename=\"?([^\";]+)\"?/i)
-    return match ? match[1] : null
-  }
-
   const exportSnapshotExcel = React.useCallback(async () => {
     if (!activeSnapshot) return
     if (isExporting) return
@@ -884,15 +950,12 @@ export function WeeklyPlannerSnapshotsView({
         return
       }
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
+      if (blob.size === 0) {
+        toast.error("Export returned an empty file.")
+        return
+      }
       const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
-      link.download = filename || "weekly_snapshot.xlsx"
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      triggerBlobDownload(blob, filename || "weekly_snapshot.xlsx")
     } catch (err) {
       console.error("Failed to export snapshot", err)
       toast.error("Failed to export snapshot")
@@ -900,6 +963,117 @@ export function WeeklyPlannerSnapshotsView({
       setIsExporting(false)
     }
   }, [activeSnapshot, apiFetch, isExporting])
+
+  const exportPlanVsFinalExcel = React.useCallback(async () => {
+    if (!departmentId || departmentId === allDepartmentsValue || !selectedWeekStart) return
+    if (isExportingPlanVsFinal) return
+    setIsExportingPlanVsFinal(true)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("department_id", departmentId)
+      qs.set("week_start", selectedWeekStart)
+      const res = await apiFetch(`/exports/weekly-plan-vs-final.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to export plan vs final report")
+        toast.error(message || "Failed to export plan vs final report")
+        return
+      }
+      const blob = await res.blob()
+      if (blob.size === 0) {
+        toast.error("Export returned an empty file.")
+        return
+      }
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      triggerBlobDownload(blob, filename || "plan_vs_final_report.xlsx")
+    } catch (err) {
+      console.error("Failed to export plan vs final report", err)
+      toast.error("Failed to export plan vs final report")
+    } finally {
+      setIsExportingPlanVsFinal(false)
+    }
+  }, [allDepartmentsValue, apiFetch, departmentId, isExportingPlanVsFinal, selectedWeekStart])
+
+  const handlePrintPlanVsFinal = React.useCallback(() => {
+    if (!planVsFinal) return
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    const weekRange = `${formatDate(planVsFinal.week_start)} - ${formatDate(planVsFinal.week_end)}`
+    const departmentLabel = formatDepartmentName(planVsFinal.department_name || "")
+    const printedAt = new Date()
+    const printedAtLabel = printedAt.toLocaleString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+
+    const root = document.getElementById(PLAN_VS_FINAL_PRINT_ROOT_ID)
+    const table = root?.querySelector("table")
+    const reportHtml = table?.outerHTML || root?.innerHTML || ""
+    if (!reportHtml) {
+      toast.error("Nothing to print for plan vs final report.")
+      printWindow.close()
+      return
+    }
+
+    const baselineLabel = planVsFinal.snapshot_created_at ? new Date(planVsFinal.snapshot_created_at).toLocaleString() : ""
+    const finalLabel = planVsFinal.final_snapshot_created_at ? new Date(planVsFinal.final_snapshot_created_at).toLocaleString() : ""
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Plan vs Final Report - ${weekRange}</title>
+          <style>
+            @media print {
+              @page { size: letter landscape; margin: 0.35in; }
+            }
+
+            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+            .print-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 8px; }
+            .print-title { font-size: 16px; font-weight: 700; margin: 0; }
+            .print-meta { font-size: 11px; margin-top: 2px; }
+            .print-datetime { font-size: 11px; text-align: right; white-space: nowrap; }
+
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
+            th { font-weight: 700; }
+
+            a { color: #000; text-decoration: none; }
+            td div { margin-bottom: 4px; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          <div class="print-header">
+            <div>
+              <h1 class="print-title">PLAN VS FINAL REPORT</h1>
+              <div class="print-meta"><strong>Week:</strong> ${weekRange}</div>
+              <div class="print-meta"><strong>Department:</strong> ${departmentLabel || "-"}</div>
+              ${baselineLabel ? `<div class="print-meta"><strong>Baseline plan saved:</strong> ${baselineLabel}</div>` : ""}
+              ${finalLabel ? `<div class="print-meta"><strong>Final snapshot saved:</strong> ${finalLabel}</div>` : ""}
+            </div>
+            <div class="print-datetime">
+              <div><strong>Printed:</strong> ${printedAtLabel}</div>
+            </div>
+          </div>
+          ${reportHtml}
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+
+    setTimeout(() => {
+      printWindow.print()
+    }, 200)
+  }, [planVsFinal])
 
   const handlePrintSnapshot = React.useCallback(() => {
     if (!activeSnapshot) return
@@ -1817,12 +1991,8 @@ export function WeeklyPlannerSnapshotsView({
         <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle>Saved Weekly Snapshots</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={() => void exportSnapshotExcel()} disabled={!activeSnapshot || isExporting}>
-              {isExporting ? "Exporting..." : "Export Excel"}
-            </Button>
-            <Button variant="outline" onClick={() => void handlePrintSnapshot()} disabled={!activeSnapshot}>
-              <Printer className="mr-2 h-4 w-4" />
-              Print
+            <Button variant="outline" onClick={() => void loadPlanVsFinal()} disabled={!selectedWeekStart || isLoadingPlanVsFinal}>
+              {isLoadingPlanVsFinal ? "Loading..." : "Plan vs Final Report"}
             </Button>
           </div>
         </CardHeader>
@@ -1895,8 +2065,62 @@ export function WeeklyPlannerSnapshotsView({
         </CardContent>
       </Card>
 
+      {planVsFinalError ? <div className="text-sm text-destructive">{planVsFinalError}</div> : null}
+
+      {planVsFinal ? (
+        <Card>
+          <CardHeader className="flex flex-col gap-2 pb-2 md:flex-row md:items-center md:justify-between">
+            <CardTitle className="text-base">Plan vs Final Report</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void exportPlanVsFinalExcel()}
+                disabled={!departmentId || departmentId === allDepartmentsValue || !selectedWeekStart || isExportingPlanVsFinal}
+              >
+                {isExportingPlanVsFinal ? "Exporting..." : "Export Excel"}
+              </Button>
+              <Button variant="outline" onClick={() => void handlePrintPlanVsFinal()}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const sourceSnapshot = compare?.planned_official ?? compare?.final_official ?? activeSnapshot
+              const userMap = new Map<string, string>()
+              sourceSnapshot?.payload?.department?.days?.forEach((day) => {
+                day.users?.forEach((u) => {
+                  if (!userMap.has(u.user_id)) userMap.set(u.user_id, u.user_name)
+                })
+              })
+              const columns = Array.from(userMap.entries()).map(([user_id, user_name]) => ({
+                assignee_id: user_id,
+                assignee_name: user_name,
+              }))
+              return (
+                <WeeklyPlanPerformanceView
+                  data={planVsFinal}
+                  assigneeColumns={columns}
+                  printRootId={PLAN_VS_FINAL_PRINT_ROOT_ID}
+                />
+              )
+            })()}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {activeSnapshot ? (
         <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 print:hidden">
+            <Button variant="outline" onClick={() => void exportSnapshotExcel()} disabled={!activeSnapshot || isExporting}>
+              {isExporting ? "Exporting..." : "Export Excel"}
+            </Button>
+            <Button variant="outline" onClick={() => void handlePrintSnapshot()} disabled={!activeSnapshot}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </div>
           <SnapshotLegend snapshot={activeSnapshot} />
           <SnapshotDepartmentTable snapshot={activeSnapshot} />
         </div>

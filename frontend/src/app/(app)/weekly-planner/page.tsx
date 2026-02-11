@@ -33,6 +33,7 @@ import {
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
+import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import type { Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
@@ -120,71 +121,6 @@ type WeeklyPrintUser = {
   user_name: string
 }
 
-type PlanVsActualTaskAssignee = {
-  assignee_id: string | null
-  assignee_name: string
-}
-
-type PlanVsActualTaskOccurrence = {
-  day: string | null
-  time_slot: string | null
-  assignee_id: string | null
-  assignee_name: string | null
-}
-
-type PlanVsActualTask = {
-  match_key: string
-  task_id: string | null
-  fallback_key: string | null
-  title: string
-  project_id: string | null
-  project_title: string | null
-  source_type: string
-  status: string | null
-  daily_status: string | null
-  completed_at: string | null
-  is_completed: boolean
-  finish_period: string | null
-  priority: string | null
-  tags: string[]
-  assignees: PlanVsActualTaskAssignee[]
-  occurrences: PlanVsActualTaskOccurrence[]
-}
-
-type PlanVsActualSummary = {
-  total_planned: number
-  completed: number
-  not_completed: number
-  added_during_week: number
-  removed_or_canceled: number
-}
-
-type PlanVsActualAssigneeGroup = {
-  assignee_id: string | null
-  assignee_name: string
-  completed: PlanVsActualTask[]
-  not_completed: PlanVsActualTask[]
-  added_during_week: PlanVsActualTask[]
-  removed_or_canceled: PlanVsActualTask[]
-}
-
-type PlanVsActualResponse = {
-  week_start: string
-  week_end: string
-  department_id: string
-  department_name: string | null
-  snapshot_id: string | null
-  snapshot_created_at: string | null
-  snapshot_created_by: string | null
-  message: string | null
-  summary: PlanVsActualSummary
-  completed: PlanVsActualTask[]
-  not_completed: PlanVsActualTask[]
-  added_during_week: PlanVsActualTask[]
-  removed_or_canceled: PlanVsActualTask[]
-  by_assignee: PlanVsActualAssigneeGroup[]
-}
-
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -234,7 +170,7 @@ export default function WeeklyPlannerPage() {
   const [planVsActualOpen, setPlanVsActualOpen] = React.useState(false)
   const [isLoadingPlanVsActual, setIsLoadingPlanVsActual] = React.useState(false)
   const [planVsActualError, setPlanVsActualError] = React.useState<string | null>(null)
-  const [planVsActual, setPlanVsActual] = React.useState<PlanVsActualResponse | null>(null)
+  const [planVsActual, setPlanVsActual] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
@@ -2046,7 +1982,7 @@ export default function WeeklyPlannerPage() {
         const message = await res.text().catch(() => "Failed to compare plan vs actual")
         throw new Error(message || "Failed to compare plan vs actual")
       }
-      const payload = (await res.json()) as PlanVsActualResponse
+      const payload = (await res.json()) as WeeklyPlanPerformanceResponse
       setPlanVsActual(payload)
     } catch (err) {
       setPlanVsActualError(err instanceof Error ? err.message : "Failed to compare plan vs actual")
@@ -2065,66 +2001,6 @@ export default function WeeklyPlannerPage() {
     if (normalized === "DONE") return "Done"
     return "To Do"
   }
-
-  const renderPlanVsActualTaskList = React.useCallback((tasks: PlanVsActualTask[]) => {
-    if (!tasks.length) {
-      return <div className="text-xs text-muted-foreground">-</div>
-    }
-    return (
-      <div className="space-y-2">
-        {tasks.map((task) => {
-          const statusValue = task.daily_status || task.status || "TODO"
-          const assigneeLabel = task.assignees.map((assignee) => assignee.assignee_name).join(", ")
-          const occurrencePreview = task.occurrences
-            .slice(0, 2)
-            .map((occurrence) => {
-              const dateLabel = occurrence.day ? formatDate(occurrence.day) : "-"
-              return `${dateLabel} ${occurrence.time_slot || ""}`.trim()
-            })
-            .join(", ")
-          return (
-            <div key={task.match_key} className="rounded border p-2">
-              <div className="flex items-start justify-between gap-2">
-                {task.task_id ? (
-                  <Link href={`/tasks/${task.task_id}`} className="font-medium hover:underline">
-                    {task.title}
-                  </Link>
-                ) : (
-                  <div className="font-medium">{task.title}</div>
-                )}
-                <span
-                  className={[
-                    "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold",
-                    getStatusCardClasses(statusValue),
-                  ].join(" ")}
-                >
-                  {formatPlannerStatusLabel(statusValue)}
-                </span>
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {task.project_title ? `Project: ${task.project_title}` : `Type: ${task.source_type}`}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Assignee: {assigneeLabel || "Unassigned"}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Slots: {occurrencePreview || "-"}
-              </div>
-              {task.tags.length > 0 ? (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {task.tags.map((tag) => (
-                    <span key={`${task.match_key}-${tag}`} className="rounded border px-1.5 py-0.5 text-[10px]">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }, [getStatusCardClasses])
 
   return (
     <div className="space-y-4">
@@ -2546,85 +2422,21 @@ export default function WeeklyPlannerPage() {
             {planVsActualError ? (
               <div className="text-sm text-destructive">{planVsActualError}</div>
             ) : null}
-            {planVsActual ? (
-              <>
-                <div className="text-sm text-muted-foreground">
-                  Week: {formatDate(planVsActual.week_start)} - {formatDate(planVsActual.week_end)}
-                </div>
-                {planVsActual.snapshot_created_at ? (
-                  <div className="text-xs text-muted-foreground">
-                    Snapshot created: {new Date(planVsActual.snapshot_created_at).toLocaleString()}
-                  </div>
-                ) : null}
-                {planVsActual.message ? (
-                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    {planVsActual.message}
-                  </div>
-                ) : null}
-                <div className="grid gap-3 md:grid-cols-5">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Total Planned</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-xl font-semibold">{planVsActual.summary.total_planned}</CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Completed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-xl font-semibold">{planVsActual.summary.completed}</CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Not Completed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-xl font-semibold">{planVsActual.summary.not_completed}</CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Added During Week</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-xl font-semibold">{planVsActual.summary.added_during_week}</CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Removed / Canceled</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-xl font-semibold">{planVsActual.summary.removed_or_canceled}</CardContent>
-                  </Card>
-                </div>
-
-                {planVsActual.by_assignee.length > 0 ? (
-                  <div className="space-y-3">
-                    {planVsActual.by_assignee.map((group) => (
-                      <Card key={group.assignee_id || `unassigned-${group.assignee_name}`}>
-                        <CardHeader>
-                          <CardTitle className="text-base">{group.assignee_name}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <div className="text-sm font-semibold">Completed ({group.completed.length})</div>
-                            {renderPlanVsActualTaskList(group.completed)}
-                          </div>
-                          <div className="space-y-2">
-                            <div className="text-sm font-semibold">Not Completed ({group.not_completed.length})</div>
-                            {renderPlanVsActualTaskList(group.not_completed)}
-                          </div>
-                          <div className="space-y-2">
-                            <div className="text-sm font-semibold">Added During Week ({group.added_during_week.length})</div>
-                            {renderPlanVsActualTaskList(group.added_during_week)}
-                          </div>
-                          <div className="space-y-2">
-                            <div className="text-sm font-semibold">Removed / Canceled ({group.removed_or_canceled.length})</div>
-                            {renderPlanVsActualTaskList(group.removed_or_canceled)}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : null}
-              </>
-            ) : null}
+            {(() => {
+              if (!planVsActual) return null
+              const dept = data?.departments?.find((d) => d.department_id === departmentId)
+              const userMap = new Map<string, string>()
+              dept?.days?.forEach((day) => {
+                day.users?.forEach((u) => {
+                  if (!userMap.has(u.user_id)) userMap.set(u.user_id, u.user_name)
+                })
+              })
+              const columns = Array.from(userMap.entries()).map(([user_id, user_name]) => ({
+                assignee_id: user_id,
+                assignee_name: user_name,
+              }))
+              return <WeeklyPlanPerformanceView data={planVsActual} assigneeColumns={columns} />
+            })()}
           </div>
         </DialogContent>
       </Dialog>
