@@ -47,6 +47,13 @@ from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserR
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
+from app.services.daily_report_logic import (
+    DailyReportTyoMode,
+    completed_on_day,
+    daily_report_tyo_label,
+    planned_range_for_daily_report,
+    task_is_visible_to_user,
+)
 
 
 router = APIRouter()
@@ -1234,26 +1241,88 @@ async def _daily_report_rows_for_user(
     department_id: uuid.UUID | None,
     user_id: uuid.UUID,
 ) -> list[list[str]]:
+    dept_code: str | None = None
+    if department_id is not None:
+        dept = (
+            await db.execute(select(Department).where(Department.id == department_id))
+        ).scalar_one_or_none()
+        if dept is not None:
+            dept_code = (dept.code or "").strip().upper() or None
+            if dept_code is None and dept.name:
+                upper = dept.name.strip().upper()
+                if "DEVELOPMENT" in upper:
+                    dept_code = "DEV"
+                elif "GRAPHIC" in upper and "DESIGN" in upper:
+                    dept_code = "GDS"
+                elif ("PRODUCT" in upper and "CONTENT" in upper) or "PROJECT CONTENT" in upper:
+                    dept_code = "PCM"
+
+    day_start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     task_stmt = (
         select(Task)
-        .where(Task.completed_at.is_(None))
+        .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
         .where(Task.due_date.is_not(None))
+        .where(or_(Task.completed_at.is_(None), and_(Task.completed_at >= day_start, Task.completed_at < day_end)))
+        .outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
+        .where(
+            or_(
+                Task.assigned_to == user_id,
+                TaskAssignee.user_id == user_id,
+                Task.internal_notes.ilike(f"%ko_user_id={user_id}%"),
+                Task.internal_notes.ilike(f"%ko_user_id:%{user_id}%"),
+                Task.internal_notes.ilike(f"%ko_user_id%{user_id}%"),
+            )
+        )
+        .distinct()
     )
     if department_id is not None:
-        task_stmt = task_stmt.where(Task.department_id == department_id)
-    task_stmt = task_stmt.where(Task.assigned_to == user_id)
+        task_stmt = task_stmt.where(or_(Task.department_id == department_id, Project.department_id == department_id))
 
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
 
+    task_ids = [t.id for t in tasks]
+    assignee_ids_by_task: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in task_ids}
+    if task_ids:
+        rows = (
+            await db.execute(
+                select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids))
+            )
+        ).all()
+        for tid, uid in rows:
+            assignee_ids_by_task.setdefault(tid, set()).add(uid)
+
+    project_ids = {t.project_id for t in tasks if t.project_id is not None}
+    projects: list[Project] = []
+    if project_ids:
+        projects = (
+            await db.execute(select(Project).where(Project.id.in_(project_ids)))
+        ).scalars().all()
+    project_by_id = {p.id: p for p in projects}
+
     tasks_today: list[Task] = []
     tasks_overdue: list[Task] = []
+    planned_range_by_task_id: dict[uuid.UUID, tuple[date, date]] = {}
     for task in tasks:
-        planned_start, planned_end = _planned_range_for_task(task)
+        project = project_by_id.get(task.project_id) if task.project_id else None
+        if not task_is_visible_to_user(
+            task,
+            user_id=user_id,
+            assignee_ids=assignee_ids_by_task.get(task.id),
+            project=project,
+            dept_code=dept_code,
+        ):
+            continue
+        planned_start, planned_end = planned_range_for_daily_report(task, dept_code)
         if planned_start is None or planned_end is None:
             continue
-        if planned_start <= day <= planned_end:
+        planned_range_by_task_id[task.id] = (planned_start, planned_end)
+        if completed_on_day(task.completed_at, day):
+            tasks_today.append(task)
+        elif planned_start <= day <= planned_end:
             tasks_today.append(task)
         elif planned_end < day:
             tasks_overdue.append(task)
@@ -1386,10 +1455,16 @@ async def _daily_report_rows_for_user(
 
     for task in daily_tasks:
         base_dt = task.due_date or task.start_date or task.created_at
-        base_date = base_dt.date() if base_dt else None
-        tyo = _tyo_label(base_date, task.completed_at.date() if task.completed_at else None, day)
+        planned_start, planned_end = planned_range_by_task_id.get(task.id, (None, None))
+        mode: DailyReportTyoMode = "range" if planned_start and planned_end and planned_start < planned_end else "dueOnly"
+        tyo = daily_report_tyo_label(
+            report_day=day,
+            start_day=planned_start if mode == "range" else None,
+            due_day=planned_end,
+            mode=mode,
+        )
         period = _resolve_period(task.finish_period, base_dt)
-        status = _format_task_status(task.status)
+        status = _format_task_status("DONE" if task.completed_at else task.status)
         comment = task_comment_map.get(task.id) or ""
         if task.project_id is None:
             fast_rows.append(
