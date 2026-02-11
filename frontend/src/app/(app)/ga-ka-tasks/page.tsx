@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
+import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import type { DailyReportResponse, Department, SystemTaskOut, Task, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
 
@@ -1513,7 +1514,7 @@ export default function GaKaTasksPage() {
             <CardContent>
               <div className="flex items-center gap-3">
                 <div className="text-xs text-slate-500">
-                  {todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}
+                  {formatDateDMY(todayDate)}
                 </div>
                 {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
               </div>
@@ -2406,13 +2407,7 @@ export default function GaKaTasksPage() {
               <span />
               <div className="print-title">All Tasks Report</div>
               <div className="print-datetime">
-                {printedAt.toLocaleString("en-US", {
-                  year: "numeric",
-                  month: "2-digit",
-                  day: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatDateTimeDMY(printedAt)}
               </div>
             </div>
             <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
@@ -2519,13 +2514,7 @@ export default function GaKaTasksPage() {
               <span />
               <div className="print-title">Daily Report</div>
               <div className="print-datetime">
-                {printedAt.toLocaleString("en-US", {
-                  year: "numeric",
-                  month: "2-digit",
-                  day: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatDateTimeDMY(printedAt)}
               </div>
             </div>
           <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">

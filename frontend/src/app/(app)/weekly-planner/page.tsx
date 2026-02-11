@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner"
 import { ChevronDown, Plus, X, Printer } from "lucide-react"
 import { useAuth } from "@/lib/auth"
+import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import {
   DropdownMenu,
@@ -1421,13 +1422,7 @@ export default function WeeklyPlannerPage() {
 
 
 
-    const formatPrintedAt = printedAt.toLocaleString("en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const formatPrintedAt = formatDateTimeDMY(printedAt)
 
     const createHeader = (showTitle: boolean) => {
       const header = doc.createElement("div")

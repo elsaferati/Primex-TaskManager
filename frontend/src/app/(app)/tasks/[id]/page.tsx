@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, normalizeDueDateInput } from "@/lib/dates"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
@@ -73,10 +73,7 @@ function toDateInput(value?: string | null) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US")
+  return formatDateDMY(value)
 }
 
 function statusLabel(value?: string | null) {
