@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { formatDateTimeDMY } from "@/lib/dates"
 import type { User, Task, CommonEntry, Project, Meeting, Department } from "@/lib/types"
 
 type CommonType =
@@ -5392,13 +5393,7 @@ export default function CommonViewPage() {
               <div />
               <div className="print-title">COMMON VIEW - WEEK PLAN</div>
               <div className="print-datetime">
-                {printedAt.toLocaleString("en-US", {
-                  month: "2-digit",
-                  day: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatDateTimeDMY(printedAt)}
               </div>
             </div>
             <table className="week-table">
@@ -5661,13 +5656,7 @@ export default function CommonViewPage() {
             <div />
             <div className="print-title">COMMON VIEW</div>
             <div className="print-datetime">
-              {printedAt.toLocaleString("en-US", {
-                month: "2-digit",
-                day: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formatDateTimeDMY(printedAt)}
             </div>
           </div>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
