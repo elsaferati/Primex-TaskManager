@@ -317,7 +317,77 @@ GD_MST_SIDEBOARD_NEW_TEMPLATE: list[dict[str, str]] = [
         ),
     },
 ]
-GD_MST_LOWBOARD_TEMPLATE: list[str] = []
+GD_MST_LOWBOARD_TEMPLATE: list[dict[str, str]] = [
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_1",
+        "description": (
+            "Foto Gjenerale 1 ka 4 foto vetem foto e Front Glas dhe foto e Griffe ndryshon sipas ngjyres. "
+            "Foto e backgroundit ndryshon. Teksti duhet te jete gjithmon I njejte vetem foto mund te ndryshohen: "
+            "1. Front und Oberplatte aus glänzendem Glas. 2. Soft-Close Scharniere. 3. Hochwertige Metallgriffe. "
+            "4. ABS-Kanten. Orientimi i fotos se produktit ne background (horizontal/vertikal) zgjidhet sipas "
+            "produktit, për ta shfaqur atë në mënyrën më optimale."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_2",
+        "description": (
+            "Selling image_2 L/R (Mounting Options). Teksti duhet te jete Front links oder rechts montierbar ose "
+            "Modernes Sideboard mit drei Varianten ( Kategoria + Nese produkti ka me shume variante ). Produkti "
+            "duhet te jete ne vij te njejt e majta dhe e djathta jo njera me lart tjetra me posht."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "PIKAT GJENERALE- SELLING IMAGE_3",
+        "description": (
+            "Selling image_3 Varacione. Foto e background duhet te jete gjithmon white background perspektiv. "
+            "Duhet te I kete 4 katrora me te dhena: 1. Duhet te jete teksti Farbauswahl dhe ngjyra e varacionit "
+            "te ndryshohet varesisht nga produkti. 2. Nuk ndryshon. Teksti: Metallfüsse: 3 kembet e vitrinet dhe "
+            "3 ngjyrat e kembve. 3. Teksti Sockel dhe foto duhet te ndryshohet njejt si ngjyra e produktit, foto "
+            "duhet te vendoset ne pozicion njejt si ne template jo me lart ose me posht. 4. Teksti Gleiter dhe "
+            "foto duhet te jete e produktit pa kembe dhe te vendoset njejt si ne template."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "LOGO",
+        "description": (
+            "1. Gjithmone logo e klientit e konfirmuar me email (Set One) ose (MST) vendoset larte majtas fotos. "
+            "2. Gjithmone logoja e garancise 5 vite vendoset poshte majtas fotos. Ne baze te ngjyrave te fotos "
+            "zgjedhen edhe ngjyrat e logos qe do te perdorim. Në të 3 Selling Images përdoret e njëjta logo e KONF, "
+            "në pozicion fiks dhe të pandryshueshëm. E njëjta gjë vlen edhe për ikonën e garancisë."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "BACKGROUND",
+        "description": (
+            "Ne Background gjithmon vendoset fotoja e setit. Nese nuk ka foto ne set ateher vendoset foto e type "
+            "me background. Foto e background nuk duhet të preket me kockat → duhet të ketë hapësirë mes kockave "
+            "dhe setit mbrapa."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "EMERTIMI",
+        "description": (
+            "MST: Selling image 1 duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) dhe _1. "
+            "MST: Selling image 2 (Dimensionet / L/R ) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) "
+            "dhe _2. MST: Selling image 3 (Variacioni) duhet gjithmone te emertohet kodi i produktit SKU (KODI I MST) "
+            "dhe _3."
+        ),
+    },
+    {
+        "title": "PIKAT E SELLING IMAGE",
+        "keyword": "EMERTIMI",
+        "description": (
+            "OTTO: Selling image 1 duhet gjithmone te emertohet kodi i produktit Article code (KODI I OTTOs) dhe _1. "
+            "Kur behet emertimi I fotove me kod te OTTOs duhet te kemi shume kujdes dhe patjeter te behen 2 kontrolla."
+        ),
+    },
+]
 
 
 async def _ensure_project_member_or_manager(
@@ -984,6 +1054,66 @@ async def _ensure_gd_mst_sideboard_new_template(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def _ensure_gd_mst_lowboard_template(db: AsyncSession) -> None:
+    """
+    Ensure global template checklist for GD MST LOWBOARD exists.
+
+    - Does NOT delete anything.
+    - Idempotent: only inserts missing items.
+    """
+    if not GD_MST_LOWBOARD_TEMPLATE:
+        return
+
+    checklist = (
+        await db.execute(
+            select(Checklist)
+            .options(selectinload(Checklist.items))
+            .where(Checklist.group_key == GD_MST_LOWBOARD_PATH, Checklist.project_id.is_(None))
+        )
+    ).scalar_one_or_none()
+    if checklist is None:
+        checklist = Checklist(
+            title="GD MST LOWBOARD (Template)",
+            group_key=GD_MST_LOWBOARD_PATH,
+            position=0,
+        )
+        db.add(checklist)
+        await db.flush()
+        checklist = (
+            await db.execute(
+                select(Checklist)
+                .options(selectinload(Checklist.items))
+                .where(Checklist.id == checklist.id)
+            )
+        ).scalar_one()
+
+    existing_items = checklist.items if checklist.items else []
+    existing_keys = {
+        _normalize_template_key(item.title, item.keyword, item.description)
+        for item in existing_items
+    }
+
+    for position, row in enumerate(GD_MST_LOWBOARD_TEMPLATE):
+        key = _normalize_template_key(row.get("title"), row.get("keyword"), row.get("description"))
+        if key in existing_keys:
+            continue
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist.id,
+                item_type=ChecklistItemType.CHECKBOX,
+                position=position,
+                path=GD_MST_LOWBOARD_PATH,
+                title=row.get("title"),
+                keyword=row.get("keyword"),
+                description=row.get("description"),
+                is_checked=False,
+            )
+        )
+        existing_keys.add(key)
+
+    await db.commit()
+
+
 async def _remove_gd_mst_vitrine_combined_row(
     db: AsyncSession,
     project_id: uuid.UUID | None = None,
@@ -1223,8 +1353,9 @@ async def list_checklist_items(
             await _ensure_gd_mst_section_from_template(
                 db, project, GD_MST_SIDEBOARD_NEW_PATH, GD_MST_SIDEBOARD_NEW_PATH
             )
-            await _ensure_gd_mst_section_items(
-                db, project, GD_MST_LOWBOARD_PATH, GD_MST_LOWBOARD_TEMPLATE
+            await _ensure_gd_mst_lowboard_template(db)
+            await _ensure_gd_mst_section_from_template(
+                db, project, GD_MST_LOWBOARD_PATH, GD_MST_LOWBOARD_PATH
             )
 
         stmt = (

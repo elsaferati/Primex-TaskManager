@@ -202,6 +202,10 @@ const SIDEBOARD_NEW_ROW_IMAGES: Record<number, string[]> = {
   3: ["/sideboard_new/selling-3.png"],
   4: ["/sideboard_new/selling-4.png"],
 }
+const LOWBOARD_SHEMBULL: Record<string, string[]> = {}
+const LOWBOARD_ROW_IMAGES: Record<number, string[]> = {
+  4: ["/lowboard/image.png"],
+}
 
 function ShembullSlider({ urls }: { urls: string[] }) {
   const [index, setIndex] = React.useState(0)
@@ -428,6 +432,18 @@ export default function DesignProjectPage() {
   })
   const [mstLowboardContent, setMstLowboardContent] = React.useState("")
   const [mstLowboardNumber, setMstLowboardNumber] = React.useState("")
+  const [mstLowboardKeyword, setMstLowboardKeyword] = React.useState("")
+  const [mstLowboardDescription, setMstLowboardDescription] = React.useState("")
+  const [mstLowboardAdding, setMstLowboardAdding] = React.useState(false)
+  const [mstLowboardEditingId, setMstLowboardEditingId] = React.useState<string | null>(null)
+  const [mstLowboardEditingSaving, setMstLowboardEditingSaving] = React.useState(false)
+  const [mstLowboardEditDraft, setMstLowboardEditDraft] = React.useState({
+    number: "",
+    title: "",
+    keyword: "",
+    description: "",
+    is_checked: false,
+  })
   const [mstChecklistTab, setMstChecklistTab] = React.useState<
     "gjenerale" | "sofa_new" | "vitrine_new" | "sideboard_new" | "lowboard"
   >("gjenerale")
@@ -1016,6 +1032,54 @@ export default function DesignProjectPage() {
     }
   }
 
+  const submitMstLowboardRow = async () => {
+    if (!project) return
+    const title = mstLowboardContent.trim()
+    if (!title) return
+    const rawNumber = mstLowboardNumber.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstLowboardAdding(true)
+    try {
+      const payload: Record<string, unknown> = {
+        project_id: project.id,
+        item_type: "CHECKBOX",
+        path: GD_MST_LOWBOARD_PATH,
+        title,
+        keyword: mstLowboardKeyword.trim() || null,
+        description: mstLowboardDescription.trim() || null,
+        is_checked: false,
+      }
+      if (position != null) payload.position = position
+
+      const res = await apiFetch("/checklist-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to add checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setMstLowboardContent("")
+      setMstLowboardNumber("")
+      setMstLowboardKeyword("")
+      setMstLowboardDescription("")
+      await reloadChecklistItems()
+      toast.success("Checklist item added")
+    } finally {
+      setMstLowboardAdding(false)
+    }
+  }
+
   // Toggle checklist item
   const toggleChecklistItem = async (itemId: string, next: boolean) => {
     setChecklistItems((prev) =>
@@ -1316,6 +1380,79 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstSideboardNewRow = async (itemId: string) => {
+    if (!window.confirm("Delete this checklist item?")) return
+    const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to delete checklist item")
+      return
+    }
+    await reloadChecklistItems()
+    toast.success("Checklist item deleted")
+  }
+
+  const startEditMstLowboardRow = (item: ChecklistItem) => {
+    setMstLowboardEditingId(item.id)
+    setMstLowboardEditDraft({
+      number: `${(item.position ?? 0) + 1}`,
+      title: item.title || "",
+      keyword: item.keyword || "",
+      description: item.description || "",
+      is_checked: item.is_checked || false,
+    })
+  }
+
+  const cancelEditMstLowboardRow = () => {
+    setMstLowboardEditingId(null)
+    setMstLowboardEditDraft({
+      number: "",
+      title: "",
+      keyword: "",
+      description: "",
+      is_checked: false,
+    })
+  }
+
+  const saveEditMstLowboardRow = async () => {
+    if (!mstLowboardEditingId) return
+    const title = mstLowboardEditDraft.title.trim()
+    if (!title) return
+    const rawNumber = mstLowboardEditDraft.number.trim()
+    const parsedNumber = Number.parseInt(rawNumber, 10)
+    const position =
+      rawNumber && !Number.isNaN(parsedNumber) ? Math.max(0, parsedNumber - 1) : undefined
+    setMstLowboardEditingSaving(true)
+    try {
+      const res = await apiFetch(`/checklist-items/${mstLowboardEditingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position,
+          title,
+          keyword: mstLowboardEditDraft.keyword.trim() || null,
+          description: mstLowboardEditDraft.description.trim() || null,
+          is_checked: mstLowboardEditDraft.is_checked,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update checklist item"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      await reloadChecklistItems()
+      cancelEditMstLowboardRow()
+      toast.success("Checklist item updated")
+    } finally {
+      setMstLowboardEditingSaving(false)
+    }
+  }
+
+  const deleteMstLowboardRow = async (itemId: string) => {
     if (!window.confirm("Delete this checklist item?")) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
@@ -3172,6 +3309,195 @@ export default function DesignProjectPage() {
     </div>
   )
 
+  const renderMstLowboardTable = () => (
+    <div className="space-y-4">
+      <div className="relative overflow-x-auto rounded-lg border">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[25%]" />
+            <col className="w-[18%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+          </colgroup>
+          <thead className="sticky top-[var(--design-sticky-offset)] z-30 bg-white/95 backdrop-blur text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">NR</th>
+              <th className="px-3 py-2 text-left">PATH</th>
+              <th className="px-3 py-2 text-left">KEYWORDS</th>
+              <th className="px-3 py-2 text-left">PERSHKRIMI</th>
+              <th className="px-3 py-2 text-left">SHEMBULL</th>
+              <th className="px-3 py-2 text-left">CHECK</th>
+              <th className="px-3 py-2 text-left">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {mstLowboardItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-sm text-muted-foreground">
+                  No checklist items yet. Add items below.
+                </td>
+              </tr>
+            ) : (
+              mstLowboardItems.map((item, idx) => {
+                const rowNumber = (item.position ?? idx) + 1
+                const urls =
+                  LOWBOARD_SHEMBULL[sofaKey(item.title, item.keyword)] ||
+                  LOWBOARD_ROW_IMAGES[rowNumber] ||
+                  []
+                return (
+                  <tr key={item.id}>
+                    {mstLowboardEditingId === item.id ? (
+                      <>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.number}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, number: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.title}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Input
+                            value={mstLowboardEditDraft.keyword}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, keyword: e.target.value }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Textarea
+                            value={mstLowboardEditDraft.description}
+                            onChange={(e) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top text-muted-foreground text-xs">
+                          Photos are mapped in UI.
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={mstLowboardEditDraft.is_checked}
+                            onCheckedChange={(checked) =>
+                              setMstLowboardEditDraft((prev) => ({ ...prev, is_checked: !!checked }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={mstLowboardEditingSaving || !mstLowboardEditDraft.title.trim()}
+                              onClick={() => void saveEditMstLowboardRow()}
+                            >
+                              {mstLowboardEditingSaving ? "Saving..." : "Save"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelEditMstLowboardRow}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2 align-top text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2 align-top font-semibold">{item.title || "-"}</td>
+                        <td className="px-3 py-2 align-top">{item.keyword || "-"}</td>
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-pre-line">
+                          {item.description || "-"}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <ShembullSlider urls={urls} />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Checkbox
+                            checked={item.is_checked || false}
+                            onCheckedChange={(checked) => void toggleChecklistItem(item.id, !!checked)}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => startEditMstLowboardRow(item)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => void deleteMstLowboardRow(item.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[120px_1fr_1fr_1fr_auto]">
+        <div className="space-y-1">
+          <Label>Number</Label>
+          <Input
+            value={mstLowboardNumber}
+            onChange={(e) => setMstLowboardNumber(e.target.value)}
+            placeholder="e.g. 3"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Path</Label>
+          <Input
+            value={mstLowboardContent}
+            onChange={(e) => setMstLowboardContent(e.target.value)}
+            placeholder="PATH"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Keywords</Label>
+          <Input
+            value={mstLowboardKeyword}
+            onChange={(e) => setMstLowboardKeyword(e.target.value)}
+            placeholder="Keywords"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>Pershkrimi</Label>
+          <Input
+            value={mstLowboardDescription}
+            onChange={(e) => setMstLowboardDescription(e.target.value)}
+            placeholder="Pershkrimi"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button
+            onClick={() => void submitMstLowboardRow()}
+            disabled={mstLowboardAdding || !mstLowboardContent.trim()}
+          >
+            {mstLowboardAdding ? "Adding..." : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
   const renderMstChecklistSection = (options: {
     title: string
     items: ChecklistItem[]
@@ -3703,16 +4029,7 @@ export default function DesignProjectPage() {
                 {mstChecklistTab === "sofa_new" && renderMstSofaNewTable()}
                 {mstChecklistTab === "vitrine_new" && renderMstVitrineNewTable()}
                 {mstChecklistTab === "sideboard_new" && renderMstSideboardNewTable()}
-                {mstChecklistTab === "lowboard" &&
-                  renderMstChecklistSection({
-                    title: "LOWBOARD",
-                    items: mstLowboardItems,
-                    path: GD_MST_LOWBOARD_PATH,
-                    number: mstLowboardNumber,
-                    setNumber: setMstLowboardNumber,
-                    content: mstLowboardContent,
-                    setContent: setMstLowboardContent,
-                  })}
+                {mstChecklistTab === "lowboard" && renderMstLowboardTable()}
               </div>
             ) : (
               <>
