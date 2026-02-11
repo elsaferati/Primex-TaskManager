@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.models.department import Department
 from app.models.enums import GaNoteStatus, UserRole
 from app.models.ga_note import GaNote
 from app.models.project import Project
@@ -32,6 +34,11 @@ from app.schemas.task import TaskAssigneeOut, TaskOut
 from app.services.system_task_occurrences import (
     OPEN,
     ensure_occurrences_in_range,
+)
+from app.services.daily_report_logic import (
+    completed_on_day,
+    planned_range_for_daily_report,
+    task_is_visible_to_user,
 )
 
 
@@ -79,7 +86,7 @@ def _task_to_out(t: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         created_by=t.created_by,
         ga_note_origin_id=t.ga_note_origin_id,
         system_template_origin_id=t.system_template_origin_id,
-        status=t.status,
+        status="DONE" if t.completed_at else t.status,
         priority=t.priority,
         finish_period=t.finish_period,
         phase=t.phase,
@@ -112,6 +119,33 @@ def _planned_range_for_task(t: Task) -> tuple[date | None, date | None]:
     return due, due
 
 
+def _infer_department_code(name: str | None) -> str | None:
+    if not name:
+        return None
+    upper = name.strip().upper()
+    if "DEVELOPMENT" in upper:
+        return "DEV"
+    if "GRAPHIC" in upper and "DESIGN" in upper:
+        return "GDS"
+    if ("PRODUCT" in upper and "CONTENT" in upper) or "PROJECT CONTENT" in upper:
+        return "PCM"
+    cleaned = re.sub(r"[^A-Z]", "", upper)
+    return cleaned[:3] or None
+
+
+async def _department_code_for_id(db: AsyncSession, department_id: uuid.UUID | None) -> str | None:
+    if department_id is None:
+        return None
+    dept = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if dept is None:
+        return None
+    if dept.code:
+        return dept.code.strip().upper()
+    return _infer_department_code(dept.name)
+
+
 @router.get("/daily", response_model=DailyReportResponse)
 async def daily_report(
     day: date,
@@ -139,44 +173,98 @@ async def daily_report(
         user_id = user.id
 
     # --- Regular tasks (non-system) ---
+    dept_code = await _department_code_for_id(db, department_id)
+    day_start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     task_stmt = (
         select(Task)
-        .where(Task.completed_at.is_(None))
+        .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
         .where(Task.due_date.is_not(None))
+        .where(or_(Task.completed_at.is_(None), and_(Task.completed_at >= day_start, Task.completed_at < day_end)))
     )
     if department_id is not None:
-        task_stmt = task_stmt.where(Task.department_id == department_id)
+        task_stmt = task_stmt.where(or_(Task.department_id == department_id, Project.department_id == department_id))
+
+    # Prefilter by user to avoid scanning all tasks (still apply KO filtering in Python for correctness).
     if user_id is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == user_id)
+        task_stmt = (
+            task_stmt.outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
+            .where(
+                or_(
+                    Task.assigned_to == user_id,
+                    TaskAssignee.user_id == user_id,
+                    Task.internal_notes.ilike(f"%ko_user_id={user_id}%"),
+                    Task.internal_notes.ilike(f"%ko_user_id:%{user_id}%"),
+                    Task.internal_notes.ilike(f"%ko_user_id%{user_id}%"),
+                )
+            )
+            .distinct()
+        )
 
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
-    assignee_map = await _assignees_for_tasks(db, task_ids)
-    project_title_by_id: dict[uuid.UUID, str] = {}
-    project_ids = {t.project_id for t in tasks if t.project_id is not None}
-    if project_ids:
-        project_rows = (
+    assignee_out_map = await _assignees_for_tasks(db, task_ids)
+
+    assignee_ids_by_task: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in task_ids}
+    if task_ids:
+        rows = (
             await db.execute(
-                select(Project.id, Project.title).where(Project.id.in_(project_ids))
+                select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids))
             )
         ).all()
-        for pid, title in project_rows:
-            if title:
-                project_title_by_id[pid] = title
+        for tid, uid in rows:
+            assignee_ids_by_task.setdefault(tid, set()).add(uid)
+
+    project_ids = {t.project_id for t in tasks if t.project_id is not None}
+    projects: list[Project] = []
+    if project_ids:
+        projects = (
+            await db.execute(select(Project).where(Project.id.in_(project_ids)))
+        ).scalars().all()
+    project_by_id = {p.id: p for p in projects}
+    project_title_by_id: dict[uuid.UUID, str] = {
+        p.id: (p.title or p.name or "") for p in projects if (p.title or p.name)
+    }
 
     tasks_today: list[DailyReportTaskItem] = []
     tasks_overdue: list[DailyReportTaskItem] = []
     for t in tasks:
-        planned_start, planned_end = _planned_range_for_task(t)
+        project = project_by_id.get(t.project_id) if t.project_id else None
+        if user_id is not None and not task_is_visible_to_user(
+            t,
+            user_id=user_id,
+            assignee_ids=assignee_ids_by_task.get(t.id),
+            project=project,
+            dept_code=dept_code,
+        ):
+            continue
+
+        planned_start, planned_end = planned_range_for_daily_report(t, dept_code)
         if planned_start is None or planned_end is None:
+            continue
+
+        completed_today = completed_on_day(t.completed_at, day)
+        if completed_today:
+            tasks_today.append(
+                DailyReportTaskItem(
+                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
+                    project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
+                    planned_start=planned_start,
+                    planned_end=planned_end,
+                    original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
+                    is_overdue=False,
+                    late_days=None,
+                )
+            )
             continue
 
         if planned_start <= day <= planned_end:
             tasks_today.append(
                 DailyReportTaskItem(
-                    task=_task_to_out(t, assignee_map.get(t.id, [])),
+                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,
@@ -189,7 +277,7 @@ async def daily_report(
             late_days = (day - planned_end).days
             tasks_overdue.append(
                 DailyReportTaskItem(
-                    task=_task_to_out(t, assignee_map.get(t.id, [])),
+                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,

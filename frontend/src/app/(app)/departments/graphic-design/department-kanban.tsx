@@ -1554,6 +1554,7 @@ export default function DepartmentKanban() {
         : user?.id
 
     return visibleNoProjectTasks.filter((task) => {
+      if (!task.due_date) return false
       if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
         return false
       }
@@ -1563,11 +1564,14 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveForDate(task, todayDate)
+      const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
+      if (!startDate) return false
+      return todayKey >= dayKey(startDate)
     })
   }, [todayDate, visibleNoProjectTasks, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
   const dailyReportProjectTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
     const targetUserId =
       viewMode === "department"
         ? selectedUserId !== "__all__"
@@ -1576,6 +1580,7 @@ export default function DepartmentKanban() {
         : user?.id
 
     return projectTasks.filter((task) => {
+      if (!task.due_date) return false
       if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
         return false
       }
@@ -1585,7 +1590,9 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveForDate(task, todayDate)
+      const dueDate = toDate(task.due_date)
+      if (!dueDate) return false
+      return todayKey >= dayKey(dueDate)
     })
   }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
@@ -1950,31 +1957,9 @@ export default function DepartmentKanban() {
         }
       }
 
-      const printedTaskIds = new Set<string>()
-
       for (const task of allTasks) {
-        const dueDate = toDate(task.due_date)
-        const startDate = toDate(task.start_date)
-        const createdDate = toDate(task.created_at)
-
-        // Use the start date (or the earliest available date) to decide whether a task
-        // is active for the daily report. This keeps it visible from start_date until due_date.
-        const baseDate = startDate || createdDate || dueDate
-        const dueKey = dueDate ? dayKey(dueDate) : null
-        const startKey = baseDate ? dayKey(baseDate) : null
-
-        // Skip tasks that haven't started yet.
-        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
-          continue
-        }
-
-        // If a due date exists, keep the task visible through the due date (inclusive).
-        if (dueKey != null && startKey != null && dayKey(todayDate) > dueKey && !task.completed_at) {
-          // It will already be listed under overdue from the API; avoid double‑adding here.
-          continue
-        }
-
-        printedTaskIds.add(task.id)
+        const startDate = task.start_date ? toDate(task.start_date) : null
+        const dueDate = task.due_date ? toDate(task.due_date) : null
 
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
@@ -1991,7 +1976,11 @@ export default function DepartmentKanban() {
             status: taskStatusLabel(task),
             bz: "-",
             kohaBz: "-",
-            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            tyo: getDailyReportTyo({
+              reportDate: todayDate,
+              dueDate,
+              mode: "dueOnly",
+            }),
             comment: task.user_comment ?? null,
             taskId: task.id,
           })
@@ -2008,72 +1997,12 @@ export default function DepartmentKanban() {
               status: taskStatusLabel(task),
               bz: "-",
               kohaBz: "-",
-              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
-              comment: task.user_comment ?? null,
-              taskId: task.id,
-            },
-          })
-          fastIndex += 1
-        }
-      }
-
-      // Include in-progress tasks that fall between start_date and due_date (inclusive) but
-      // are missing from the API payload, so they appear every day of their active window.
-      const rangeTasks = visibleDepartmentTasks.filter((task) => {
-        const assigned =
-          task.assigned_to === userId ||
-          (task.assignees && task.assignees.some((a) => a.id === userId))
-        if (!assigned) return false
-
-        const startDate = toDate(task.start_date || task.created_at)
-        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
-        const todayKey = dayKey(todayDate)
-        const startKey = startDate ? dayKey(startDate) : null
-        const dueKey = dueDate ? dayKey(dueDate) : null
-
-        if (startKey != null && todayKey < startKey) return false
-        if (dueKey != null && todayKey > dueKey) return false
-        return true
-      })
-
-      for (const task of rangeTasks) {
-        if (printedTaskIds.has(task.id)) continue
-        const startDate = toDate(task.start_date || task.created_at)
-        const dueDate = toDate(task.due_date || task.start_date || task.created_at)
-        const baseDate = startDate || dueDate || toDate(task.created_at)
-        const isProject = Boolean(task.project_id)
-        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
-
-        if (isProject) {
-          projectRows.push({
-            typeLabel: "PRJK",
-            subtype: "-",
-            period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-            title: task.title || "-",
-            projectTitle: projectLabel,
-            description: task.description || "-",
-            status: taskStatusLabel(task),
-            bz: "-",
-            kohaBz: "-",
-            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
-            comment: task.user_comment ?? null,
-            taskId: task.id,
-          })
-        } else {
-          fastRows.push({
-            order: fastTypeOrder(task),
-            index: fastIndex,
-            row: {
-              typeLabel: "FT",
-              subtype: fastReportSubtypeShort(task),
-              period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-              title: task.title || "-",
-              description: task.description || "-",
-              status: taskStatusLabel(task),
-              bz: "-",
-              kohaBz: "-",
-              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              tyo: getDailyReportTyo({
+                reportDate: todayDate,
+                startDate,
+                dueDate,
+                mode: startDate && dueDate ? "range" : "dueOnly",
+              }),
               comment: task.user_comment ?? null,
               taskId: task.id,
             },

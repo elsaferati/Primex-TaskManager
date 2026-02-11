@@ -1,6 +1,4 @@
-# Run Database Migration for Meeting Features
-
-To add the new meeting fields (URL, recurrence, participants) to the database, you need to run the migration.
+# Run Database Migrations
 
 ## Steps:
 
@@ -21,16 +19,10 @@ To add the new meeting fields (URL, recurrence, participants) to the database, y
    ```bash
    alembic current
    ```
-   You should see: `0043_add_meeting_url_recurrence_participants (head)`
+   You should see the latest revision id marked as `(head)`.
 
 4. **Restart your backend server** to ensure all changes are loaded.
 
-## What the migration does:
+## Notes
 
-- Adds `meeting_url` column (String, 500 chars, nullable)
-- Adds `recurrence_type` column (String, 20 chars, nullable)
-- Adds `recurrence_days_of_week` column (Array of integers, nullable)
-- Adds `recurrence_days_of_month` column (Array of integers, nullable)
-- Creates `meeting_participants` table for many-to-many relationship
-
-After running the migration, all meeting data will be properly saved to the database!
+- A data backfill exists for PCM TT/MST CONTROL tasks to sync `ko_user_id` (stored in `tasks.internal_notes`) into `task_assignees` so KO behaves like an assignee across the app.

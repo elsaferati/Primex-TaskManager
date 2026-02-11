@@ -712,6 +712,29 @@ type TaskDateSource = {
   created_at?: string | null
 }
 
+function parseKoUserId(notes?: string | null): string | null {
+  if (!notes) return null
+  const match = notes.match(/ko_user_id[:=]\s*([a-f0-9-]+)/i)
+  return match ? match[1] : null
+}
+
+function isMstOrTtProject(project: Project | null): boolean {
+  if (!project) return false
+  const projectType = project.project_type
+  const title = (project.title || project.name || "").toUpperCase().trim()
+  const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
+  return projectType === "MST" || title.includes("MST") || isTt
+}
+
+function isPcmControlTaskOwnedByUser(task: Task, userId: string, project: Project | null): boolean {
+  if (!userId) return false
+  const phase = String(task.phase || "").toUpperCase().trim()
+  if (phase !== "CONTROL") return false
+  if (!isMstOrTtProject(project)) return false
+  const koUserId = parseKoUserId(task.internal_notes)
+  return Boolean(koUserId && koUserId === userId)
+}
+
 function isTaskActiveOnDate(task: TaskDateSource, date: Date) {
   const startDate = task.start_date ? toDate(task.start_date) : null
   const dueDate = task.due_date ? toDate(task.due_date) : null
@@ -1846,6 +1869,7 @@ export default function DepartmentKanban() {
         : user?.id
 
     return visibleNoProjectTasks.filter((task) => {
+      if (!task.due_date) return false
       if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
         return false
       }
@@ -1855,7 +1879,9 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveOnDate(task, todayDate)
+      const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
+      if (!startDate) return false
+      return todayKey >= dayKey(startDate)
     })
   }, [todayDate, visibleNoProjectTasks, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
   const dailyReportProjectTasks = React.useMemo(() => {
@@ -1867,8 +1893,17 @@ export default function DepartmentKanban() {
         : user?.id
 
     return projectTasks.filter((task) => {
-      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
-        return false
+      if (!task.due_date) return false
+      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+      if (targetUserId) {
+        if (isPcmControlTaskOwnedByUser(task, targetUserId, project)) {
+          // ok
+        } else if (isMstOrTtProject(project) && String(task.phase || "").toUpperCase().trim() === "CONTROL") {
+          // KO missing or not owner: hide
+          return false
+        } else if (!isTaskAssignedToUser(task, targetUserId)) {
+          return false
+        }
       }
 
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
@@ -1876,9 +1911,11 @@ export default function DepartmentKanban() {
       if (completedDate && !completedToday) return false
       if (completedToday) return true
 
-      return isTaskActiveOnDate(task, todayDate)
+      const dueDate = toDate(task.due_date)
+      if (!dueDate) return false
+      return dayKey(todayDate) >= dayKey(dueDate)
     })
-  }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
+  }, [projectTasks, projects, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -2243,10 +2280,8 @@ export default function DepartmentKanban() {
       }
 
       for (const task of allTasks) {
-        if (!isTaskActiveOnDate(task, todayDate)) {
-          continue
-        }
-        const baseDate = toDate(task.due_date || task.start_date || task.created_at)
+        const startDate = task.start_date ? toDate(task.start_date) : null
+        const dueDate = task.due_date ? toDate(task.due_date) : null
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
         const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
@@ -2262,7 +2297,11 @@ export default function DepartmentKanban() {
             status: taskStatusLabel(task),
             bz: "-",
             kohaBz: "-",
-            tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+            tyo: getDailyReportTyo({
+              reportDate: todayDate,
+              dueDate,
+              mode: "dueOnly",
+            }),
             comment: task.user_comment ?? null,
             taskId: task.id,
           })
@@ -2279,7 +2318,12 @@ export default function DepartmentKanban() {
               status: taskStatusLabel(task),
               bz: "-",
               kohaBz: "-",
-              tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+              tyo: getDailyReportTyo({
+                reportDate: todayDate,
+                startDate,
+                dueDate,
+                mode: startDate && dueDate ? "range" : "dueOnly",
+              }),
               comment: task.user_comment ?? null,
               taskId: task.id,
             },
