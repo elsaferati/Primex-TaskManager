@@ -6977,7 +6977,7 @@ export default function DepartmentKanban() {
                             ? departments.find((d) => d.id === project.department_id) || null
                             : null
                           const projectDepartmentCode = projectDepartment?.code?.toUpperCase() || ""
-                          const isManualOnlyProject = projectDepartmentCode === "PCM" || projectDepartmentCode === "GDS"
+                          const isManualOnlyProject = false
                           const linkedTask = gaNoteTaskMap.get(note.id) || null
                           const creatorLabel = author?.full_name || author?.username || "Unknown user"
                           const creatorInitials = getInitials(creatorLabel)

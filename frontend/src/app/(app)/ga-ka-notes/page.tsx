@@ -1559,6 +1559,16 @@ export default function GaKaNotesPage() {
                       : null
                     const displayDepartment = noteDepartment || taskDepartment
                     const displayProject = noteProject || taskProject
+                    const projectId = note.project_id || taskInfo?.taskProjectId || null
+                    const project = projectId ? projectMap.get(projectId) : null
+                    const projectDepartment = project?.department_id
+                      ? departmentMap.get(project.department_id)
+                      : null
+                    const projectDepartmentName = (projectDepartment?.name || "").trim().toUpperCase()
+                    const projectDepartmentCode = (projectDepartment?.code || "").trim().toUpperCase()
+                    const isDevProject =
+                      projectDepartmentName === "DEVELOPMENT" || projectDepartmentCode === "DEV"
+                    const hasProject = Boolean(projectId)
                     const assignees = taskInfo?.assignees ?? []
                     const attachments = note.attachments ?? []
                     const isClosed =
@@ -1570,6 +1580,8 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
+                    const canCreateTask = !isClosed && (!hasProject || isDevProject)
+                    const showManualOnly = hasProject && !isDevProject
                     const shenimiCellClass = isClosed
                       ? "bg-slate-200 opacity-70"
                       : hasTask
@@ -1721,11 +1733,7 @@ export default function GaKaNotesPage() {
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
                                 Task Created
                               </Badge>
-                            ) : note.project_id ? (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
-                                Manual only
-                              </Badge>
-                            ) : (
+                            ) : canCreateTask ? (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -1734,6 +1742,14 @@ export default function GaKaNotesPage() {
                               >
                                 Create Task
                               </Button>
+                            ) : showManualOnly ? (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
+                                Manual only
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
+                                Closed
+                              </Badge>
                             )}
                           </div>
                         </td>

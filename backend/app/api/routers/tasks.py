@@ -470,6 +470,17 @@ async def create_task(
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
+        ga_note_department = None
+        if ga_note.department_id is not None:
+            ga_note_department = (
+                await db.execute(select(Department).where(Department.id == ga_note.department_id))
+            ).scalar_one_or_none()
+        is_dev_ga_note = False
+        if ga_note_department is not None:
+            dept_name = (ga_note_department.name or "").strip().upper()
+            dept_code = (ga_note_department.code or "").strip().upper()
+            if dept_name == "DEVELOPMENT" or dept_code == "DEV":
+                is_dev_ga_note = True
         if ga_note.project_id is not None:
             ga_project = (
                 await db.execute(select(Project).where(Project.id == ga_note.project_id))
@@ -480,7 +491,7 @@ async def create_task(
                 ).scalar_one_or_none()
                 if ga_project_department is not None:
                     code = (ga_project_department.code or "").upper()
-                    if code in ("PCM", "GDS"):
+                    if code in ("PCM", "GDS") and not is_dev_ga_note:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Tasks for PCM/GDS projects must be created manually",
