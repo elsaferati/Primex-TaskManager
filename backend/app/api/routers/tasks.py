@@ -390,36 +390,6 @@ async def get_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    # For viewing, only check department access - editing is restricted separately
-    # GA managers can view tasks across departments
-    ga_manager_cross = (
-        user.role == UserRole.MANAGER
-        and getattr(user, "department", None) is not None
-        and getattr(user.department, "code", "") is not None
-        and user.department.code.upper() == "GA"
-    )
-    can_view = False
-    if task.project_id is None and task.dependency_task_id is None and task.system_template_origin_id is None:
-        can_view = True
-    if ga_manager_cross:
-        can_view = True
-    if task.created_by and task.created_by == user.id:
-        can_view = True
-    if task.assigned_to and task.assigned_to == user.id:
-        can_view = True
-    if not can_view:
-        assigned_row = (
-            await db.execute(
-                select(TaskAssignee)
-                .where(TaskAssignee.task_id == task.id)
-                .where(TaskAssignee.user_id == user.id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if assigned_row is not None:
-            can_view = True
-    if not can_view:
-        ensure_department_access(user, task.department_id)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
