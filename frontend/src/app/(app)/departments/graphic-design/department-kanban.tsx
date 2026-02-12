@@ -3967,7 +3967,8 @@ export default function DepartmentKanban() {
         </div>
 
         <div className="relative space-y-6">
-          <div className="sticky top-0 z-40 rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50 pb-4 px-4 pt-4 -mt-4 -mx-4 print:static">       <div className="space-y-6">
+          <div className="sticky top-0 z-40 rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50 pb-4 px-4 pt-4 -mt-4 -mx-4 print:static">
+            <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
@@ -4984,7 +4985,8 @@ export default function DepartmentKanban() {
                     )}
                   </Card>
                 </div>
-
+              </div>
+            )}
 
             {activeTab === "system" && (
               <div className="space-y-6">
@@ -5474,11 +5476,13 @@ export default function DepartmentKanban() {
                             {row.items.map((t) => {
                               const statusValue = taskStatusValue(t)
                               const isCompleted = statusValue === "DONE"
+                              const returnTo = `${returnToTasks}#task-${t.id}`
+                              const taskHref = `/tasks/${t.id}?returnTo=${encodeURIComponent(returnTo)}`
                               return (
                                 <Link
                                   key={t.id}
                                   id={`task-${t.id}`}
-                                  href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
+                                  href={taskHref}
                                   className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
                                     ? "border-green-500 bg-green-50/30 opacity-75"
                                     : `${row.borderClass} bg-white`
