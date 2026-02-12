@@ -390,36 +390,6 @@ async def get_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    # For viewing, only check department access - editing is restricted separately
-    # GA managers can view tasks across departments
-    ga_manager_cross = (
-        user.role == UserRole.MANAGER
-        and getattr(user, "department", None) is not None
-        and getattr(user.department, "code", "") is not None
-        and user.department.code.upper() == "GA"
-    )
-    can_view = False
-    if task.project_id is None and task.dependency_task_id is None and task.system_template_origin_id is None:
-        can_view = True
-    if ga_manager_cross:
-        can_view = True
-    if task.created_by and task.created_by == user.id:
-        can_view = True
-    if task.assigned_to and task.assigned_to == user.id:
-        can_view = True
-    if not can_view:
-        assigned_row = (
-            await db.execute(
-                select(TaskAssignee)
-                .where(TaskAssignee.task_id == task.id)
-                .where(TaskAssignee.user_id == user.id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if assigned_row is not None:
-            can_view = True
-    if not can_view:
-        ensure_department_access(user, task.department_id)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     if not assignee_map.get(task.id) and task.assigned_to is not None:
         assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
@@ -500,6 +470,17 @@ async def create_task(
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
+        ga_note_department = None
+        if ga_note.department_id is not None:
+            ga_note_department = (
+                await db.execute(select(Department).where(Department.id == ga_note.department_id))
+            ).scalar_one_or_none()
+        is_dev_ga_note = False
+        if ga_note_department is not None:
+            dept_name = (ga_note_department.name or "").strip().upper()
+            dept_code = (ga_note_department.code or "").strip().upper()
+            if dept_name == "DEVELOPMENT" or dept_code == "DEV":
+                is_dev_ga_note = True
         if ga_note.project_id is not None:
             ga_project = (
                 await db.execute(select(Project).where(Project.id == ga_note.project_id))
@@ -510,7 +491,7 @@ async def create_task(
                 ).scalar_one_or_none()
                 if ga_project_department is not None:
                     code = (ga_project_department.code or "").upper()
-                    if code in ("PCM", "GDS"):
+                    if code in ("PCM", "GDS") and not is_dev_ga_note:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Tasks for PCM/GDS projects must be created manually",

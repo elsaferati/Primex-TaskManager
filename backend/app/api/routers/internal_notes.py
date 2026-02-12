@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -25,6 +25,7 @@ from app.schemas.internal_note import (
 
 
 router = APIRouter()
+RETENTION_DAYS = 7
 
 
 @router.get("", response_model=list[InternalNoteOut])
@@ -39,6 +40,9 @@ async def list_internal_notes(
     ensure_department_access(user, department_id)
 
     stmt = select(InternalNote).where(InternalNote.department_id == department_id)
+    cutoff = datetime.utcnow() - timedelta(days=RETENTION_DAYS)
+    done_time = func.coalesce(InternalNote.done_at, InternalNote.updated_at, InternalNote.created_at)
+    stmt = stmt.where(or_(InternalNote.is_done.is_(False), done_time >= cutoff))
     if to_user_id is not None:
         stmt = stmt.where(InternalNote.to_user_id == to_user_id)
     stmt = stmt.order_by(InternalNote.created_at.desc())
