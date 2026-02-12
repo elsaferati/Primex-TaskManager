@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILES: int = 20
     GA_NOTES_MAX_FILE_MB: int = 25
 
+    OPENAI_API_KEY: str | None = None
+    SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"
+    SPEECH_MAX_FILE_MB: int = 20
+    SPEECH_ALLOWED_MIME: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         env_origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

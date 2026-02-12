@@ -3,12 +3,12 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Clock, Image as ImageIcon, Printer } from "lucide-react"
+import { Clock, Image as ImageIcon, Printer, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,6 +19,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { useCloudDictation } from "@/lib/useCloudDictation"
+import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
@@ -193,7 +195,91 @@ export default function GaKaNotesPage() {
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
+  const [voiceMode, setVoiceMode] = React.useState<"browser" | "cloud">("browser")
 
+  const {
+    isSupported: isVoiceSupported,
+    isListening: isVoiceListening,
+    interimText: voiceInterimText,
+    stop: stopVoice,
+    toggle: toggleVoice,
+  } = useSpeechDictation({
+    lang: "en-US",
+    onFinalText: (text) => {
+      const finalText = text.trim()
+      if (!finalText) return
+      setContent((prev) => {
+        const base = prev ?? ""
+        const needsSeparator = base.length > 0 && !/\s$/.test(base)
+        const separator = needsSeparator ? "\n" : ""
+        return `${base}${separator}${finalText}`
+      })
+    },
+  })
+
+  const {
+    isSupported: isCloudSupported,
+    isRecording: isCloudRecording,
+    isTranscribing: isCloudTranscribing,
+    stop: stopCloud,
+    toggle: toggleCloud,
+  } = useCloudDictation({
+    apiFetch,
+    lang: "en-US",
+    onFinalText: (text) => {
+      const finalText = text.trim()
+      if (!finalText) return
+      setContent((prev) => {
+        const base = prev ?? ""
+        const needsSeparator = base.length > 0 && !/\s$/.test(base)
+        const separator = needsSeparator ? "\n" : ""
+        return `${base}${separator}${finalText}`
+      })
+    },
+  })
+
+  React.useEffect(() => {
+    if (posting && isVoiceListening) stopVoice()
+    if (posting && isCloudRecording) stopCloud()
+  }, [isCloudRecording, isVoiceListening, posting, stopCloud, stopVoice])
+
+  React.useEffect(() => {
+    if (!isVoiceSupported && isCloudSupported) {
+      setVoiceMode("cloud")
+    }
+  }, [isCloudSupported, isVoiceSupported])
+
+  React.useEffect(() => {
+    if (voiceMode === "browser" && isCloudRecording) stopCloud()
+    if (voiceMode === "cloud" && isVoiceListening) stopVoice()
+  }, [isCloudRecording, isVoiceListening, stopCloud, stopVoice, voiceMode])
+
+  const handleVoiceToggle = () => {
+    if (voiceMode === "browser") {
+      if (isVoiceSupported) {
+        toggleVoice()
+        return
+      }
+      if (isCloudSupported) {
+        toggleCloud()
+        return
+      }
+      toast.error("Voice dictation not supported in this browser")
+      return
+    }
+
+    if (isCloudSupported) {
+      toggleCloud()
+      return
+    }
+    if (isVoiceSupported) {
+      toggleVoice()
+      return
+    }
+    toast.error("Voice dictation not supported in this browser")
+  }
 
 
   const loadDepartments = React.useCallback(async () => {
@@ -444,17 +530,23 @@ export default function GaKaNotesPage() {
       }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
-      const previewWindow = window.open(url, "_blank", "noopener,noreferrer")
-      if (!previewWindow) {
-        window.URL.revokeObjectURL(url)
-        toast.error("Popup blocked. Please allow popups to preview.")
-        return
-      }
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+      setPreviewTitle(attachment.original_filename || "Attachment preview")
+      setPreviewUrl((prev) => {
+        if (prev) window.URL.revokeObjectURL(prev)
+        return url
+      })
     } catch {
       toast.error("Failed to open file")
     }
   }
+
+  React.useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        window.URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
 
   const createNote = async () => {
     if (!content.trim()) {
@@ -467,7 +559,7 @@ export default function GaKaNotesPage() {
     
     // Determine department_id to send to backend
     let finalDepartmentId = departmentForNote
-    let finalProjectId = projectForNote
+    const finalProjectId = projectForNote
     
     // If no URL params, send user's department_id for STAFF users (for backend validation)
     // but we'll hide it in the display if it matches the user's auto-assigned department
@@ -652,7 +744,7 @@ export default function GaKaNotesPage() {
   }
 
   // Get available priority/type options based on whether a project is selected
-  const availablePriorityOptions = React.useMemo(() => {
+  const availablePriorityOptions = React.useMemo<readonly TaskTypeOption[]>(() => {
     if (taskProjectId !== "NONE") {
       return TASK_TYPE_OPTIONS_WITH_PROJECT
     }
@@ -891,15 +983,12 @@ export default function GaKaNotesPage() {
   // Reset priority when switching between project/non-project modes
   React.useEffect(() => {
     if (!taskDialogNoteId) return
-    const isProjectTask = taskProjectId !== "NONE"
-    const currentIsValid = isProjectTask 
-      ? TASK_TYPE_OPTIONS_WITH_PROJECT.includes(taskPriority as TaskPriority)
-      : TASK_TYPE_OPTIONS_NO_PROJECT.includes(taskPriority as any)
-    
+    const currentIsValid = availablePriorityOptions.includes(taskPriority)
+     
     if (!currentIsValid) {
       setTaskPriority("NORMAL")
     }
-  }, [taskProjectId, taskDialogNoteId, taskPriority])
+  }, [availablePriorityOptions, taskDialogNoteId, taskPriority])
   const visibleNotes = React.useMemo(() => {
     const now = Date.now()
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000
@@ -995,8 +1084,73 @@ export default function GaKaNotesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">New Note
-          </CardTitle>
+          <CardTitle className="text-sm">New Note</CardTitle>
+          <CardAction>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "browser" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setVoiceMode("browser")}
+                  disabled={!isVoiceSupported}
+                  title={isVoiceSupported ? "Use browser dictation" : "Browser dictation not supported"}
+                >
+                  Browser
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "cloud" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setVoiceMode("cloud")}
+                  disabled={!isCloudSupported}
+                  title={isCloudSupported ? "Use cloud dictation" : "Cloud dictation not supported"}
+                >
+                  Cloud
+                </Button>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-2"
+                onClick={handleVoiceToggle}
+                disabled={(!isVoiceSupported && !isCloudSupported) || (voiceMode === "cloud" && isCloudTranscribing)}
+                title={
+                  voiceMode === "browser"
+                    ? isVoiceSupported
+                      ? isVoiceListening
+                        ? "Stop voice dictation"
+                        : "Start voice dictation"
+                      : "Browser dictation not supported"
+                    : isCloudSupported
+                      ? isCloudRecording
+                        ? "Stop cloud dictation"
+                        : "Start cloud dictation"
+                      : "Cloud dictation not supported"
+                }
+              >
+                {voiceMode === "cloud" ? (
+                  isCloudRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />
+                ) : isVoiceListening ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+                {voiceMode === "cloud"
+                  ? isCloudRecording
+                    ? "Stop"
+                    : isCloudTranscribing
+                      ? "Transcribing"
+                      : "Voice"
+                  : isVoiceListening
+                    ? "Stop"
+                    : "Voice"}
+              </Button>
+            </div>
+          </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
@@ -1007,6 +1161,22 @@ export default function GaKaNotesPage() {
               className="min-h-[220px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
+            {isVoiceListening ? (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-slate-700">Listening...</span>
+                {voiceInterimText ? <span className="ml-2">{voiceInterimText}</span> : null}
+              </div>
+            ) : null}
+            {isCloudRecording ? (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-slate-700">Recording...</span>
+              </div>
+            ) : null}
+            {isCloudTranscribing ? (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-slate-700">Transcribing...</span>
+              </div>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label>Attachments</Label>
@@ -1663,6 +1833,30 @@ export default function GaKaNotesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(previewUrl)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewUrl((prev) => {
+              if (prev) window.URL.revokeObjectURL(prev)
+              return null
+            })
+            setPreviewTitle(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewTitle || "Attachment preview"}</DialogTitle>
+          </DialogHeader>
+          {previewUrl ? (
+            <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-2">
+              <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-[66vh] w-auto object-contain" />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -1685,8 +1879,9 @@ export default function GaKaNotesPage() {
                     value={taskPriority} 
                     onValueChange={(v) => {
                       // Reset to NORMAL if switching between project/non-project modes and current value is invalid
-                      const isValid = availablePriorityOptions.includes(v as any)
-                      setTaskPriority(isValid ? (v as TaskTypeOption) : "NORMAL")
+                      const nextValue = v as TaskTypeOption
+                      const isValid = availablePriorityOptions.includes(nextValue)
+                      setTaskPriority(isValid ? nextValue : "NORMAL")
                     }}
                   >
                     <SelectTrigger>
