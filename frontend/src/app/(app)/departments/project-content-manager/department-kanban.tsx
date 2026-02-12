@@ -428,6 +428,17 @@ function formatDate(value?: string | null) {
   return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
 }
 
+function formatDateOnly(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
+
 function todayInputValue() {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
@@ -786,6 +797,26 @@ function systemFrequencyShortLabel(freq?: SystemTaskTemplate["frequency"] | stri
   }
 }
 
+function systemFrequencyReportLabel(freq?: SystemTaskTemplate["frequency"] | string | null) {
+  if (!freq) return "-"
+  switch (freq) {
+    case "DAILY":
+      return "Daily"
+    case "WEEKLY":
+      return "Weekly"
+    case "MONTHLY":
+      return "Monthly"
+    case "YEARLY":
+      return "Yearly"
+    case "3_MONTHS":
+      return "3 months"
+    case "6_MONTHS":
+      return "6 months"
+    default:
+      return String(freq)
+  }
+}
+
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
@@ -939,6 +970,11 @@ function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
   if (normalized === "LOW" || normalized === "MEDIUM") return "NORMAL"
   if (normalized === "NORMAL" || normalized === "HIGH") return normalized
   return "NORMAL"
+}
+
+function reportPriorityLabel(priority?: TaskPriority | string | null) {
+  if (!priority) return "-"
+  return PRIORITY_LABELS[normalizePriority(priority)]
 }
 
 function gaNoteTaskDefaultTitle(note: string) {
@@ -1481,8 +1517,55 @@ export default function DepartmentKanban() {
         const userFromMap = userMap.get(userId)
         if (userFromMap) return assigneeLabel(userFromMap)
         const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
-        return assigneeFromArray?.full_name || assigneeFromArray?.username || "Unknown"
-      })
+      return assigneeFromArray?.full_name || assigneeFromArray?.username || "Unknown"
+    })
+    },
+    [userMap]
+  )
+  const taskAssigneeInitials = React.useCallback(
+    (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      return Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          const label = userFromMap
+            ? assigneeLabel(userFromMap)
+            : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+          const value = initials(label)
+          return { id: userId, label, value }
+        })
+        .filter((item) => item.value && item.value !== "-")
+    },
+    [userMap]
+  )
+  const systemAssigneeInitials = React.useCallback(
+    (template: SystemTaskTemplate) => {
+      const ids = new Set<string>()
+      if (template.assignees?.length) {
+        for (const assignee of template.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      } else if (template.default_assignee_id) {
+        ids.add(template.default_assignee_id)
+      }
+      return Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          const assigneeFromArray = template.assignees?.find((a) => a.id === userId)
+          const label = userFromMap
+            ? assigneeLabel(userFromMap)
+            : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
+          const value = initials(label)
+          return { id: userId, label, value }
+        })
+        .filter((item) => item.value && item.value !== "-")
     },
     [userMap]
   )
@@ -1761,6 +1844,59 @@ export default function DepartmentKanban() {
     },
     [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
   )
+  const systemOccurrenceStatusByTemplate = React.useMemo(() => {
+    const map = new Map<string, string>()
+    const addIfMissing = (templateId: string | null | undefined, status?: string | null) => {
+      if (!templateId || !status) return
+      if (!map.has(templateId)) map.set(templateId, status)
+    }
+
+    if (selectedUserId !== "__all__") {
+      if (dailyReport?.system_today) {
+        for (const occ of dailyReport.system_today) {
+          addIfMissing(occ.template_id, occ.status)
+        }
+      }
+      if (dailyReport?.system_overdue) {
+        for (const occ of dailyReport.system_overdue) {
+          addIfMissing(occ.template_id, occ.status)
+        }
+      }
+      return map
+    }
+
+    const statusByTemplate = new Map<string, string[]>()
+    const pushStatus = (templateId: string | null | undefined, status?: string | null) => {
+      if (!templateId || !status) return
+      const existing = statusByTemplate.get(templateId) || []
+      existing.push(status)
+      statusByTemplate.set(templateId, existing)
+    }
+
+    for (const report of allUsersDailyReports.values()) {
+      for (const occ of report.system_today || []) {
+        pushStatus(occ.template_id, occ.status)
+      }
+      for (const occ of report.system_overdue || []) {
+        pushStatus(occ.template_id, occ.status)
+      }
+    }
+
+    const aggregate = (statuses: string[]) => {
+      if (!statuses.length) return null
+      if (statuses.some((status) => status === "OPEN")) return "OPEN"
+      if (statuses.some((status) => status === "NOT_DONE")) return "NOT_DONE"
+      if (statuses.some((status) => status === "SKIPPED")) return "SKIPPED"
+      if (statuses.every((status) => status === "DONE")) return "DONE"
+      return statuses[0]
+    }
+
+    for (const [templateId, statuses] of statusByTemplate) {
+      const result = aggregate(statuses)
+      if (result) map.set(templateId, result)
+    }
+    return map
+  }, [allUsersDailyReports, dailyReport?.system_overdue, dailyReport?.system_today, selectedUserId])
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
@@ -2924,19 +3060,6 @@ export default function DepartmentKanban() {
         rows.push({ ...row, userName, userInitials })
       }
     }
-    // Sort by LL (typeLabel), NLL (subtype), and T/Y/O (tyo)
-    rows.sort((a, b) => {
-      // First sort by typeLabel (LL)
-      if (a.typeLabel !== b.typeLabel) {
-        return a.typeLabel.localeCompare(b.typeLabel)
-      }
-      // Then by subtype (NLL)
-      if (a.subtype !== b.subtype) {
-        return a.subtype.localeCompare(b.subtype)
-      }
-      // Finally by tyo (T/Y/O)
-      return a.tyo.localeCompare(b.tyo)
-    })
     return rows
   }, [allTodayPrintBaseUsers, allUsersDailyReports])
 
@@ -2957,33 +3080,6 @@ export default function DepartmentKanban() {
       }
     })
   }, [projectTasks, projects])
-  const todayProjectTaskGroups = React.useMemo(() => {
-    const map = new Map<string, Task[]>()
-    for (const task of todayProjectTasks) {
-      if (!task.project_id) continue
-      const list = map.get(task.project_id) || []
-      list.push(task)
-      map.set(task.project_id, list)
-    }
-    return Array.from(map.entries()).map(([projectId, tasks]) => {
-      const project = projects.find((p) => p.id === projectId) || null
-      const meta = project ? null : (projectMetaLookup.get(projectId) || null)
-      const projectTitle = project?.title || project?.name || meta?.title || "Project"
-      const projectDepartmentId = project?.department_id || meta?.department_id || null
-      const projectDepartment = projectDepartmentId
-        ? departments.find((d) => d.id === projectDepartmentId) || null
-        : null
-      const name =
-        projectDepartment && department?.id && projectDepartment.id !== department.id
-          ? `${projectTitle} — ${projectDepartment.name}`
-          : projectTitle
-      return {
-        id: projectId,
-        name,
-        tasks,
-      }
-    })
-  }, [todayProjectTasks, projects, projectMetaLookup, departments, department?.id])
 
   const counts = React.useMemo(
     () => ({
@@ -5037,20 +5133,6 @@ export default function DepartmentKanban() {
                 ) : null}
               </div>
             </div>
-            <div className="grid gap-4 md:grid-cols-5">
-              {[
-                { label: "PROJECT TASKS", value: todayProjectTasks.length },
-                { label: "GA NOTES", value: todayOpenNotes.length },
-                { label: "INTERNAL NOTES", value: todayGroupedInternalNotes.length },
-                { label: "FAST TASKS", value: todayNoProjectTasks.length },
-                { label: "SYSTEM TASKS", value: todaySystemTasks.length },
-              ].map((stat) => (
-                <Card key={stat.label} className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</div>
-                  <div className="mt-2 text-3xl font-bold text-slate-900">{stat.value}</div>
-                </Card>
-              ))}
-            </div>
 
             {viewMode === "mine" && showDailyUserReport ? (
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
@@ -5332,318 +5414,258 @@ export default function DepartmentKanban() {
               </Card>
             ) : null}
             <div className="space-y-4">
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">PROJECT TASKS</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todayProjectTasks.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Due today</div>
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
+                    <div className="text-xs text-slate-500 mt-1">Tasks scheduled for today.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todayProjectTasks.length}</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayProjectTaskGroups.length ? (
-                    <div className="space-y-3">
-                      {todayProjectTaskGroups.map((group) => (
-                        <div key={group.id}>
-                          <div className="text-xs font-semibold text-slate-700">{group.name}</div>
-                          <div className="mt-2 space-y-2">
-                            {group.tasks.map((task) => {
-                              const assigneeList = taskAssigneeLabels(task)
-                              const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "MEETINGS"
-                              const priorityValue = normalizePriority(task.priority)
-                              return (
-                                <Link
-                                  key={task.id}
-                                  href={`/tasks/${task.id}`}
-                                  className="block rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm transition hover:bg-slate-50"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                      {task.status || "TODO"}
-                                    </Badge>
-                                    <Badge className="bg-sky-500 text-white border-0 text-xs shadow-sm">
-                                      {phaseLabel}
-                                    </Badge>
-                                    <Badge
-                                      variant="outline"
-                                      className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                                    >
-                                      {PRIORITY_LABELS[priorityValue]}
-                                    </Badge>
-                                    <div className="font-medium text-slate-800">{task.title}</div>
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    <span className="font-medium text-slate-700">{group.name}</span>
-                                    {assigneeList.length ? <span className="text-slate-400"> • </span> : null}
-                                    {assigneeList.length ? <span>{assigneeList.join(", ")}</span> : null}
-                                  </div>
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">No project tasks today.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-sky-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">GA NOTES</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todayOpenNotes.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Quick notes</div>
-                </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayOpenNotes.length ? (
-                    <div className="space-y-2">
-                      {todayOpenNotes.map((note) => {
-                        const priorityValue = normalizePriority(note.priority)
-                        return (
-                          <div
-                            key={note.id}
-                            className="rounded-lg border border-slate-200 border-l-4 border-sky-500 bg-white px-3 py-2 text-sm"
+                {todayProjectTasks.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[1200px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["NR", "PROJECT TITLE", "PHASE", "TASK TITLE", "DESCRIPTION", "ASSIGNED", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
                           >
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                {note.note_type || "GA"}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                              >
-                                {PRIORITY_LABELS[priorityValue]}
-                              </Badge>
-                              <div className="font-medium">{note.content}</div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No open notes today.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-indigo-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">INTERNAL NOTES</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todayGroupedInternalNotes.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Team updates</div>
-                </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayGroupedInternalNotes.length ? (
-                    <div className="space-y-2">
-                      {todayGroupedInternalNotes.map((group) => {
-                        const note = group.note
-                        const fromUser = users.find((u) => u.id === note.from_user_id) || null
-                        const fromLabel = fromUser?.full_name || fromUser?.username || "Unknown user"
-                        const toInitials = group.toUserIds
-                          .map((id) => {
-                            const toUser = userMap.get(id)
-                            const toLabel = toUser?.full_name || toUser?.username || "Unknown user"
-                            return initials(toLabel)
-                          })
-                          .join(", ")
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {todayProjectTasks.map((task, index) => {
+                        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+                        const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
+                        const projectTitle = project?.title || project?.name || meta?.title || "-"
+                        const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
+                        const assignees = taskAssigneeInitials(task)
                         return (
-                          <div
-                            key={note.id}
-                            className="rounded-lg border border-slate-200 border-l-4 border-indigo-500 bg-white px-3 py-2 text-sm"
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className="font-medium text-slate-800">{note.title}</div>
-                              {group.notes.every((n) => n.is_done) ? (
-                                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">
-                                  Done
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-600">{note.description || "-"}</div>
-                            <div className="mt-1 text-[11px] text-slate-500">
-                              From {initials(fromLabel)} to {toInitials || "-"}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">No internal notes today.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">FAST TASKS</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todayNoProjectTasks.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Ad-hoc tasks</div>
-                </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayNoProjectTasks.length ? (
-                    <div className="space-y-2">
-                      {todayNoProjectTasks.map((task) => {
-                        const typeLabel = noProjectTypeLabel(task)
-                        const statusValue = taskStatusValue(task)
-                        const isCompleted = statusValue === "DONE"
-                        // Collect all assignees: from assigned_to and assignees array
-                        const assigneeIds = new Set<string>()
-                        if (task.assigned_to) {
-                          assigneeIds.add(task.assigned_to)
-                        }
-                        if (task.assignees) {
-                          for (const assignee of task.assignees) {
-                            if (assignee.id) {
-                              assigneeIds.add(assignee.id)
-                            }
-                          }
-                        }
-                        return (
-                          <Link
-                            key={task.id}
-                            href={`/tasks/${task.id}`}
-                            className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
-                              ? "border-green-500 bg-green-50/30 opacity-75"
-                              : "border-blue-500 bg-white"
-                              }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                {task.ga_note_origin_id && (task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal) && (
-                                  <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
-                                    GA
-                                  </Badge>
-                                )}
-                                <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-xs">
-                                  {typeLabel}
-                                </Badge>
-                                <div className={`font-medium ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                  {task.title}
-                                </div>
-                                <Badge className={`border text-xs ${statusBadgeClasses(statusValue)}`}>
-                                  {reportStatusLabel(statusValue)}
-                                </Badge>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                {Array.from(assigneeIds).map((userId) => {
-                                  const userFromMap = userMap.get(userId)
-                                  const assigneeFromArray = task.assignees?.find(a => a.id === userId)
-                                  const label = userFromMap
-                                    ? assigneeLabel(userFromMap)
-                                    : (assigneeFromArray?.full_name || assigneeFromArray?.username || "-")
-                                  return (
+                          <TableRow key={task.id}>
+                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
+                            <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
+                            <TableCell>{phaseLabel}</TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
+                            <TableCell>
+                              {assignees.length ? (
+                                <div className="flex items-center gap-1">
+                                  {assignees.map((item) => (
                                     <div
-                                      key={userId}
+                                      key={item.id}
                                       className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
-                                      title={label}
+                                      title={item.label}
                                     >
-                                      {initials(label)}
+                                      {item.value}
                                     </div>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          </Link>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                              {reportStatusLabel(taskStatusValue(task))}
+                            </TableCell>
+                            <TableCell>{reportPriorityLabel(task.priority)}</TableCell>
+                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                          </TableRow>
                         )
                       })}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">No tasks today.</div>
-                  )}
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No project tasks today.</div>
+                )}
+              </Card>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-blue-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">SYSTEM TASKS</div>
-                  <span className="absolute right-3 top-3 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {todaySystemTasks.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Scheduled</div>
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Fast Tasks</div>
+                    <div className="text-xs text-slate-500 mt-1">Ad-hoc tasks due today.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todayNoProjectTasks.length}</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todaySystemTasks.length ? (
-                    <div className="space-y-2">
-                      {todaySystemTasks.map((task) => {
-                        const priorityValue = normalizePriority(task.priority)
-                        const description = task.description?.trim() || ""
-                        const isExpanded = Boolean(expandedSystemDescriptions[task.id])
-                        const { text, truncated } = truncateDescription(description)
-                        const displayText = description ? (isExpanded ? description : text) : "-"
-                        return (
-                          <div
-                            key={task.id}
-                            className="rounded-lg border border-slate-200 border-l-4 border-blue-500 bg-white px-3 py-2 text-sm"
+                {todayNoProjectTasks.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[900px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["NR", "TYPE", "TASK TITLE", "ASSIGNED", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
                           >
-                            <div className="flex items-center gap-2">
-                              <div className="font-medium text-slate-800">{task.title}</div>
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${PRIORITY_BADGE_STYLES[priorityValue]}`}
-                              >
-                                {PRIORITY_LABELS[priorityValue]}
-                              </Badge>
-                            </div>
-                            <div className="mt-1 text-xs text-slate-600">
-                              {displayText}
-                              {description && truncated ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSystemDescription(task.id)}
-                                  className="ml-2 text-[11px] font-semibold text-amber-700 hover:underline"
-                                >
-                                  {isExpanded ? "Show less" : "Read more"}
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {todayNoProjectTasks.map((task, index) => {
+                        const assignees = taskAssigneeInitials(task)
+                        return (
+                          <TableRow key={task.id}>
+                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
+                            <TableCell>{noProjectTypeLabel(task)}</TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell>
+                              {assignees.length ? (
+                                <div className="flex items-center gap-1">
+                                  {assignees.map((item) => (
+                                    <div
+                                      key={item.id}
+                                      className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                      title={item.label}
+                                    >
+                                      {item.value}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                              {reportStatusLabel(taskStatusValue(task))}
+                            </TableCell>
+                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                          </TableRow>
                         )
                       })}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">No system tasks today.</div>
-                  )}
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No fast tasks today.</div>
+                )}
+              </Card>
 
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row max-w-5xl">
-                <div className="relative w-full rounded-xl bg-white border border-slate-200 border-l-4 border-slate-500 p-4 text-slate-700 md:w-48 md:shrink-0">
-                  <div className="text-sm font-semibold">EXTERNAL MEETINGS</div>
-                  <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                    {todayMeetings.length}
-                  </span>
-                  <div className="mt-2 text-xs text-slate-500">Today</div>
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">System Tasks</div>
+                    <div className="text-xs text-slate-500 mt-1">Scheduled system tasks for today.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todaySystemTasks.length}</div>
                 </div>
-                <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
-                  {todayMeetings.length ? (
-                    <div className="space-y-2">
+                {todaySystemTasks.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[900px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["NR", "FREQUENCY", "TASK TITLE", "ASSIGNED", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {todaySystemTasks.map((task, index) => {
+                        const templateId = task.template_id || task.id
+                        const statusValue = templateId ? systemOccurrenceStatusByTemplate.get(templateId) : null
+                        const statusLabel = formatSystemOccurrenceStatus(statusValue)
+                        const assignees = systemAssigneeInitials(task)
+                        const priorityValue = normalizePriority(task.priority)
+                        return (
+                          <TableRow key={task.id}>
+                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
+                            <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title || "-"}
+                            </TableCell>
+                            <TableCell>
+                              {assignees.length ? (
+                                <div className="flex items-center gap-1">
+                                  {assignees.map((item) => (
+                                    <div
+                                      key={item.id}
+                                      className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                      title={item.label}
+                                    >
+                                      {item.value}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell>{task.finish_period || "-"}</TableCell>
+                            <TableCell>{statusLabel}</TableCell>
+                            <TableCell>{PRIORITY_LABELS[priorityValue]}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No system tasks today.</div>
+                )}
+              </Card>
+
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">External Meetings</div>
+                    <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todayMeetings.length}</div>
+                </div>
+                {todayMeetings.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[520px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["MEETING TITLE", "MEETING DATE"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {todayMeetings.map((meeting) => (
-                        <div
-                          key={meeting.id}
-                          className="rounded-lg border border-slate-200 border-l-4 border-slate-500 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="font-medium">{formatMeetingLabel(meeting)}</div>
-                          {meeting.project_id ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {projects.find((p) => p.id === meeting.project_id)?.title || "Project"}
-                            </div>
-                          ) : null}
-                        </div>
+                        <TableRow key={meeting.id}>
+                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                            {meeting.title || "Meeting"}
+                          </TableCell>
+                          <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                        </TableRow>
                       ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No meetings today.</div>
-                  )}
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No meetings today.</div>
+                )}
+              </Card>
             </div>
           </div>
         ) : null}

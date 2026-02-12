@@ -762,6 +762,10 @@ export default function ProjectPage() {
     return user.department_id === project.department_id
   }, [user, project?.department_id])
 
+  const canUncheckTaskChecklist = React.useMemo(() => {
+    return user?.role === "ADMIN" || user?.role === "MANAGER"
+  }, [user?.role])
+
   const loadTaskChecklist = React.useCallback(
     async (taskId: string) => {
       setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
@@ -867,7 +871,7 @@ export default function ProjectPage() {
   const toggleTaskChecklistItem = async (taskId: string, item: ChecklistItem, checked: boolean) => {
     if (!canEditTaskChecklist) return
     const previousChecked = Boolean(item.is_checked)
-    if (previousChecked && !checked) return
+    if (previousChecked && !checked && !canUncheckTaskChecklist) return
     if (previousChecked === checked) return
     setTaskChecklists((prev) => {
       const checklist = prev[taskId]
@@ -3858,7 +3862,11 @@ export default function ProjectPage() {
                                     onCheckedChange={(checked) =>
                                       void toggleTaskChecklistItem(task.id, item, checked === true)
                                     }
-                                    disabled={!canEditTaskChecklist || taskChecklistItemBusy[item.id]}
+                                    disabled={
+                                      !canEditTaskChecklist ||
+                                      taskChecklistItemBusy[item.id] ||
+                                      (item.is_checked && !canUncheckTaskChecklist)
+                                    }
                                   />
                                   <div className={item.is_checked ? "text-muted-foreground line-through flex-1" : "text-slate-700 flex-1"}>
                                     {item.title || "-"}

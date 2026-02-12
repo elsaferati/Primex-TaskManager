@@ -7,8 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 import type { Department, Project, TaskStatus, User } from "@/lib/types"
+import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
+
+type PreviewType = "fast" | "system" | "project"
+
+type PreviewResponse = {
+  headers: string[]
+  rows: string[][]
+  total?: number
+  truncated?: boolean
+}
 
 export default function ReportsPage() {
   const { user, apiFetch } = useAuth()
@@ -27,6 +38,25 @@ export default function ReportsPage() {
   const [statusId, setStatusId] = React.useState(ALL_STATUSES_VALUE)
   const [plannedFrom, setPlannedFrom] = React.useState("")
   const [plannedTo, setPlannedTo] = React.useState("")
+  const [previewType, setPreviewType] = React.useState<PreviewType>("fast")
+  const [previewData, setPreviewData] = React.useState<PreviewResponse | null>(null)
+  const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [previewError, setPreviewError] = React.useState<string | null>(null)
+  const statusColumnIndex = React.useMemo(() => {
+    if (!previewData?.headers?.length) return -1
+    return previewData.headers.findIndex(
+      (header) => header.trim().toLowerCase() === "status"
+    )
+  }, [previewData?.headers])
+
+  const getStatusCellClass = (value: string) => {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) return ""
+    if (normalized === "completed") return weeklyPlanStatusBgClass("DONE")
+    if (normalized === "pending") return weeklyPlanStatusBgClass("TODO")
+    if (normalized === "in progress") return weeklyPlanStatusBgClass("IN_PROGRESS")
+    return weeklyPlanStatusBgClass(value)
+  }
 
   const getFilenameFromDisposition = (disposition: string | null) => {
     if (!disposition) return null
@@ -56,18 +86,40 @@ export default function ReportsPage() {
     if (user) void boot()
   }, [apiFetch, user])
 
-  const downloadFastTasks = async () => {
-    const qs = new URLSearchParams()
-    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-      qs.set("department_id", departmentId)
-    } else if (user?.department_id) {
-      qs.set("department_id", user.department_id)
-    }
-    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
-    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
-    if (plannedFrom) qs.set("planned_from", plannedFrom)
-    if (plannedTo) qs.set("planned_to", plannedTo)
+  const buildReportParams = React.useCallback(
+    (options: { includeProject?: boolean } = {}) => {
+      const qs = new URLSearchParams()
+      if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+        qs.set("department_id", departmentId)
+      } else if (user?.department_id) {
+        qs.set("department_id", user.department_id)
+      }
+      if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+      if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
+      if (options.includeProject && projectId && projectId !== ALL_PROJECTS_VALUE) {
+        qs.set("project_id", projectId)
+      }
+      if (plannedFrom) qs.set("planned_from", plannedFrom)
+      if (plannedTo) qs.set("planned_to", plannedTo)
+      return qs
+    },
+    [
+      departmentId,
+      plannedFrom,
+      plannedTo,
+      projectId,
+      statusId,
+      user,
+      userId,
+      ALL_DEPARTMENTS_VALUE,
+      ALL_USERS_VALUE,
+      ALL_PROJECTS_VALUE,
+      ALL_STATUSES_VALUE,
+    ]
+  )
 
+  const downloadFastTasks = async () => {
+    const qs = buildReportParams()
     const res = await apiFetch(`/exports/fast-tasks.xlsx?${qs.toString()}`)
     if (!res.ok) return
     const blob = await res.blob()
@@ -84,17 +136,7 @@ export default function ReportsPage() {
   }
 
   const downloadSystemTasks = async () => {
-    const qs = new URLSearchParams()
-    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-      qs.set("department_id", departmentId)
-    } else if (user?.department_id) {
-      qs.set("department_id", user.department_id)
-    }
-    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
-    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
-    if (plannedFrom) qs.set("planned_from", plannedFrom)
-    if (plannedTo) qs.set("planned_to", plannedTo)
-
+    const qs = buildReportParams()
     const res = await apiFetch(`/exports/system-tasks.xlsx?${qs.toString()}`)
     if (!res.ok) return
     const blob = await res.blob()
@@ -111,20 +153,10 @@ export default function ReportsPage() {
   }
 
   const downloadProjectTasks = async () => {
-    const qs = new URLSearchParams()
     const selectedProject = projects.find((p) => p.id === projectId)
     const projectLabel = selectedProject ? selectedProject.name || selectedProject.title : null
     const reportTitle = projectLabel ? `${projectLabel} TASKS` : "PROJECT TASKS"
-    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-      qs.set("department_id", departmentId)
-    } else if (user?.department_id) {
-      qs.set("department_id", user.department_id)
-    }
-    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
-    if (projectId && projectId !== ALL_PROJECTS_VALUE) qs.set("project_id", projectId)
-    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
-    if (plannedFrom) qs.set("planned_from", plannedFrom)
-    if (plannedTo) qs.set("planned_to", plannedTo)
+    const qs = buildReportParams({ includeProject: true })
     qs.set("standard", "true")
     qs.set("title", reportTitle)
 
@@ -142,6 +174,65 @@ export default function ReportsPage() {
     a.remove()
     URL.revokeObjectURL(url)
   }
+
+  React.useEffect(() => {
+    if (!user) return
+    let active = true
+    const controller = new AbortController()
+    const loadPreview = async () => {
+      setPreviewLoading(true)
+      setPreviewError(null)
+      try {
+        const qs = buildReportParams({ includeProject: previewType === "project" })
+        qs.set("limit", "200")
+        const endpoint =
+          previewType === "fast"
+            ? "/exports/fast-tasks-preview"
+            : previewType === "system"
+              ? "/exports/system-tasks-preview"
+              : "/exports/project-tasks-preview"
+        const res = await apiFetch(`${endpoint}?${qs.toString()}`, { signal: controller.signal })
+        if (!res.ok) {
+          let detail = ""
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload?.detail) detail = payload.detail
+          } catch {
+            try {
+              detail = await res.text()
+            } catch {
+              detail = ""
+            }
+          }
+          const suffix = detail ? ` (${detail})` : ""
+          if (active) setPreviewError(`Unable to load preview. [${res.status}]${suffix}`)
+          return
+        }
+        const data = (await res.json()) as PreviewResponse
+        if (active) setPreviewData(data)
+      } catch (err) {
+        if (active) setPreviewError("Unable to load preview.")
+      } finally {
+        if (active) setPreviewLoading(false)
+      }
+    }
+    void loadPreview()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [
+    apiFetch,
+    buildReportParams,
+    plannedFrom,
+    plannedTo,
+    previewType,
+    projectId,
+    statusId,
+    user,
+    userId,
+    departmentId,
+  ])
 
   if (!user) {
     return <div className="text-sm text-muted-foreground">Forbidden.</div>
@@ -254,6 +345,75 @@ export default function ReportsPage() {
               Download Project Tasks XLSX
             </Button>
           </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Preview table</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-2">
+              <Label>Preview type</Label>
+              <Select value={previewType} onValueChange={(value) => setPreviewType(value as PreviewType)}>
+                <SelectTrigger className="min-w-[180px]">
+                  <SelectValue placeholder="Select preview" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fast">Fast tasks</SelectItem>
+                  <SelectItem value="system">System tasks</SelectItem>
+                  <SelectItem value="project">Project tasks</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {previewData?.total ? (
+              <div className="text-xs text-muted-foreground">
+                Showing {previewData.rows.length} of {previewData.total}
+                {previewData.truncated ? " (preview limit)" : ""}
+              </div>
+            ) : null}
+          </div>
+          {previewLoading ? (
+            <div className="text-sm text-muted-foreground">Loading preview…</div>
+          ) : previewError ? (
+            <div className="text-sm text-destructive">{previewError}</div>
+          ) : previewData?.rows?.length ? (
+            <Table
+              containerClassName="max-h-[420px] overflow-auto rounded-none border-2 border-slate-400 bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]"
+              className="border-collapse text-[11px]"
+            >
+              <TableHeader>
+                <TableRow className="border-0">
+                  {previewData.headers.map((header) => (
+                    <TableHead
+                      key={header}
+                      className="sticky top-0 z-10 border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-700"
+                    >
+                      {header}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewData.rows.map((row, rowIndex) => (
+                  <TableRow key={`${rowIndex}-${row[0] || "row"}`} className="border-0">
+                    {row.map((cell, cellIndex) => (
+                      <TableCell
+                        key={`${rowIndex}-${cellIndex}`}
+                        className={`border border-slate-300 px-2 py-1 align-top text-[11px] text-slate-800 ${
+                          cellIndex === statusColumnIndex ? getStatusCellClass(cell) : ""
+                        }`}
+                      >
+                        {cell}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-sm text-muted-foreground">No rows match the current filters.</div>
+          )}
         </CardContent>
       </Card>
     </div>
