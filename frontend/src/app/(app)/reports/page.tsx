@@ -28,6 +28,14 @@ export default function ReportsPage() {
   const [plannedFrom, setPlannedFrom] = React.useState("")
   const [plannedTo, setPlannedTo] = React.useState("")
 
+  const getFilenameFromDisposition = (disposition: string | null) => {
+    if (!disposition) return null
+    const filenameStarMatch = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+    if (filenameStarMatch?.[1]) return decodeURIComponent(filenameStarMatch[1])
+    const filenameMatch = disposition.match(/filename\s*=\s*\"?([^\";]+)\"?/i)
+    return filenameMatch?.[1] ?? null
+  }
+
   React.useEffect(() => {
     const boot = async () => {
       const [dRes, uRes, pRes, sRes] = await Promise.all([
@@ -66,6 +74,31 @@ export default function ReportsPage() {
     const a = document.createElement("a")
     a.href = url
     a.download = `tasks_export.${ext}`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadFastTasks = async () => {
+    const qs = new URLSearchParams()
+    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+      qs.set("department_id", departmentId)
+    }
+    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
+    if (plannedFrom) qs.set("planned_from", plannedFrom)
+    if (plannedTo) qs.set("planned_to", plannedTo)
+
+    const res = await apiFetch(`/exports/fast-tasks.xlsx?${qs.toString()}`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    const downloadName =
+      getFilenameFromDisposition(res.headers.get("content-disposition")) ?? "FAST_TASKS.xlsx"
+    a.download = downloadName
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -173,6 +206,9 @@ export default function ReportsPage() {
             </Button>
             <Button variant="outline" onClick={() => void download("pdf")}>
               Download PDF summary
+            </Button>
+            <Button variant="outline" onClick={() => void downloadFastTasks()}>
+              Download Fast Tasks XLSX
             </Button>
           </div>
         </CardContent>
