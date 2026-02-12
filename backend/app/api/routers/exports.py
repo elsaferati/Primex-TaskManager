@@ -133,6 +133,17 @@ def _strip_html(value: str | None) -> str:
     return re.sub(r"<[^>]+>", "", value).strip()
 
 
+def _strip_html_keep_breaks(value: str | None) -> str:
+    if not value:
+        return ""
+    text = re.sub(r"(?i)<br\s*/?>", "\n", value)
+    text = re.sub(r"(?i)</p\s*>", "\n", text)
+    text = re.sub(r"(?i)</div\s*>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.strip()
+
+
 def _priority_label(value: str | None) -> str:
     normalized = value.upper() if value else "NORMAL"
     return "H" if normalized == "HIGH" else "N"
@@ -2489,7 +2500,7 @@ async def export_system_tasks_xlsx(
             department_label,
             task.finish_period or "",
             task.title,
-            _strip_html(task.description),
+            _strip_html_keep_breaks(task.description),
             assignee_label,
             details_value,
             bz_me_value,
