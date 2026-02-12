@@ -1367,43 +1367,6 @@ export default function DepartmentKanban() {
           }
         }
 
-        const existingKeys = new Set(
-          items.map((item) => `${item.day || ""}|${(item.title || "").trim().toLowerCase()}`)
-        )
-        const slotOrder = Object.keys(INTERNAL_MEETING.slots) as Array<
-          keyof typeof INTERNAL_MEETING.slots
-        >
-        let position = 0
-        const seedPromises: Promise<Response>[] = []
-        for (const slot of slotOrder) {
-          for (const title of INTERNAL_MEETING.slots[slot].items) {
-            position += 1
-            const key = `${slot}|${title.trim().toLowerCase()}`
-            if (existingKeys.has(key)) continue
-            seedPromises.push(
-              apiFetch("/checklist-items", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  checklist_id: selected.id,
-                  item_type: "CHECKBOX",
-                  path: "INTERNAL_MEETINGS",
-                  day: slot,
-                  title,
-                  is_checked: false,
-                  position,
-                }),
-              })
-            )
-          }
-        }
-        if (seedPromises.length) {
-          await Promise.all(seedPromises)
-          const reloadRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
-          if (reloadRes.ok) {
-            items = (await reloadRes.json()) as ChecklistItem[]
-          }
-        }
         if (cancelled) return
         setInternalMeetingItems(items)
       } catch (error) {
