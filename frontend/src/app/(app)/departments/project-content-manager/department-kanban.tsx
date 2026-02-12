@@ -6902,7 +6902,7 @@ export default function DepartmentKanban() {
                     checked={showDoneInternalNotes}
                     onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
                   />
-                  <span>Show Done</span>
+                  <span>Show Done (last 7 days)</span>
                 </label>
                 {viewMode === "department" ? (
                   <Select value={selectedUserId} onValueChange={setSelectedUserId}>
