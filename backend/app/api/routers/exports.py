@@ -16,7 +16,8 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -110,6 +111,14 @@ def _initials_filename(label: str | None) -> str:
 
 def _format_excel_date(d: date) -> str:
     return f"{d.day:02d}-{d.month:02d}-{d.year}"
+
+
+def _format_excel_datetime(value: date | datetime | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return _format_excel_date(value.date())
+    return _format_excel_date(value)
 
 
 def _day_code(d: date) -> str:
@@ -808,6 +817,235 @@ async def export_tasks_xlsx(
         filename = f"{file_title} {filename_date}_{user_initials}.xlsx".replace("__", "_")
     else:
         filename = f"TASKS_{filename_date}_{_initials_compact(user.full_name or user.username or '') or 'USER'}.xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/fast-tasks.xlsx")
+async def export_fast_tasks_xlsx(
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    status_id: uuid.UUID | None = None,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_manager_or_admin(user)
+
+    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+
+    assigned_user = aliased(User)
+    created_user = aliased(User)
+    status_name: str | None = None
+    if status_id is not None:
+        status_row = (await db.execute(select(TaskStatus).where(TaskStatus.id == status_id))).scalar_one_or_none()
+        if status_row is not None:
+            status_name = status_row.name
+
+    stmt = (
+        select(Task, Department, assigned_user, created_user)
+        .outerjoin(Department, Task.department_id == Department.id)
+        .outerjoin(assigned_user, Task.assigned_to == assigned_user.id)
+        .outerjoin(created_user, Task.created_by == created_user.id)
+        .where(
+            or_(
+                Task.is_bllok.is_(True),
+                Task.is_1h_report.is_(True),
+                Task.is_personal.is_(True),
+                Task.is_r1.is_(True),
+                Task.fast_task_group_id.is_not(None),
+            )
+        )
+        .where(Task.system_template_origin_id.is_(None))
+        .where(Task.project_id.is_(None))
+        .where(Task.internal_notes.is_(None))
+        .where(Task.status != "DONE")
+    )
+
+    if not is_admin:
+        if user.department_id is None:
+            rows = []
+        else:
+            stmt = stmt.where(Task.department_id == user.department_id)
+    else:
+        if department_id:
+            ensure_department_access(user, department_id)
+            stmt = stmt.where(Task.department_id == department_id)
+
+    if user_id:
+        stmt = stmt.where(Task.assigned_to == user_id)
+    if status_name:
+        stmt = stmt.where(Task.status == status_name)
+    if planned_from:
+        stmt = stmt.where(func.date(Task.start_date) >= planned_from)
+    if planned_to:
+        stmt = stmt.where(func.date(Task.start_date) <= planned_to)
+
+    sort_key = case(
+        (Task.is_bllok.is_(True), 1),
+        (Task.is_1h_report.is_(True), 2),
+        (Task.is_r1.is_(True), 3),
+        (Task.is_personal.is_(True), 4),
+        else_=5,
+    )
+
+    if not (not is_admin and user.department_id is None):
+        rows = (await db.execute(stmt.order_by(sort_key.asc(), Task.created_at.desc()))).all()
+
+    headers = [
+        "NR",
+        "TITLE",
+        "DESCRIPTION",
+        "DEP",
+        "PUNOI",
+        "CREATED BY",
+        "GA NOTE ORIGIN",
+        "STATUS",
+        "PRIORITY",
+        "CREATION DATE",
+        "START DATE",
+        "DUE DATE",
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}.{today.month:02d}.{str(today.year)[-2:]}"
+    initials_value = _initials_compact(user.full_name or user.username or "") or "USER"
+    title_text = f"FAST TASKS_{filename_date}_{initials_value}"
+    ws.title = "Fast Tasks"
+
+    last_col = len(headers)
+
+    # Row 1: Title (merged)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_text)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+
+    header_row = 4
+    data_row = header_row + 1
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header.upper())
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    status_fills = {
+        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+    }
+
+    for idx, (task, department, assigned, created) in enumerate(rows, start=1):
+        values = [
+            idx,
+            task.title or "",
+            _strip_html(task.description) or "",
+            (department.code if department else ""),
+            _initials_compact((assigned.full_name or assigned.username) if assigned else ""),
+            _initials_compact((created.full_name or created.username) if created else ""),
+            "Yes" if task.ga_note_origin_id else "No",
+            task.status or "",
+            (task.priority or "").upper(),
+            _format_excel_datetime(task.created_at),
+            _format_excel_datetime(task.start_date),
+            _format_excel_datetime(task.due_date),
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+            if col_idx == 8:
+                normalized_status = (str(value) if value is not None else "").upper().replace(" ", "_")
+                fill = status_fills.get(normalized_status)
+                if fill:
+                    cell.fill = fill
+        data_row += 1
+
+    last_row = data_row - 1
+
+    widths = {
+        1: 5,    # NR
+        2: 36,   # TITLE
+        3: 44,   # DESCRIPTION
+        4: 8,    # DEP
+        5: 6,    # PUNOI
+        6: 8,    # CREATED BY
+        7: 12,   # GA NOTE ORIGIN
+        8: 12,   # STATUS
+        9: 10,   # PRIORITY
+        10: 16,  # CREATION DATE
+        11: 14,  # START DATE
+        12: 14,  # DUE DATE
+    }
+    for col_idx in range(1, last_col + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P of &N"
+    ws.oddFooter.right.text = initials_value
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.border = Border(
+                left=thick if c == 1 else thin,
+                right=thick if c == last_col else thin,
+                top=thick if r == header_row else thin,
+                bottom=thick if r == last_row else thin,
+            )
+
+    for r in range(1, last_row + 1):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            if cell.alignment is None:
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            else:
+                cell.alignment = Alignment(
+                    horizontal=cell.alignment.horizontal or "left",
+                    vertical="bottom",
+                    wrap_text=True,
+                    readingOrder=1,
+                )
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    filename = f"{title_text}.xlsx".replace("__", "_")
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
