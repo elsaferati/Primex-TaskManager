@@ -1019,6 +1019,15 @@ export default function GaKaNotesPage() {
       if (aggregatedStatus === "UNKNOWN") return false
       return aggregatedStatus === taskStatusFilter
     }
+    const taskDoneBucket = (note: GaNote) => {
+      const taskInfo = noteTaskInfo.get(note.id)
+      if (!taskInfo) return 0
+      const aggregatedStatus =
+        taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
+          ? aggregateTaskStatus(taskInfo.taskStatuses)
+          : normalizeTaskStatus(taskInfo?.taskStatus)
+      return aggregatedStatus === "DONE" ? 1 : 0
+    }
     const sorted = [...notes]
       .filter(withinRange)
       .filter(matchesNoteType)
@@ -1029,6 +1038,12 @@ export default function GaKaNotesPage() {
         const bIsClosed = b.status === "CLOSED"
         if (aIsClosed !== bIsClosed) {
           return aIsClosed ? 1 : -1 // Closed notes go to the end
+        }
+        // Then, move DONE tasks after non-done tasks
+        const aBucket = taskDoneBucket(a)
+        const bBucket = taskDoneBucket(b)
+        if (aBucket !== bBucket) {
+          return aBucket - bBucket
         }
         // Then sort by creation date (newest first) within each group
         const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
