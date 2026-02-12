@@ -1743,6 +1743,15 @@ async def update_checklist_item(
                 ).scalar_one_or_none()
                 if task_project and task_project.department_id is not None:
                     ensure_department_access(user, task_project.department_id)
+                if (
+                    payload.is_checked is False
+                    and item.is_checked is True
+                    and user.role not in ("ADMIN", "MANAGER")
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Only admins and managers can uncheck subtasks",
+                    )
 
     # Update fields
     if payload.item_type is not None:

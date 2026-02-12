@@ -75,8 +75,6 @@ async def list_checklists(
             project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
             if project is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-            if project.department_id is not None:
-                ensure_department_access(user, project.department_id)
         stmt = stmt.where(Checklist.task_id == task_id)
     elif project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()

@@ -328,32 +328,7 @@ PUNIMI_PATH = "punimi"
 CONTROL_KO1_KO2_PATH = "control ko1/ko2"
 FINALIZATION_PATH = "finalization"
 
-# Internal meetings (created as a global checklist by group_key, plus CHECKBOX items)
-INTERNAL_MEETINGS_PATH = "INTERNAL_MEETINGS"
-
-DEV_INTERNAL_MEETING_GROUP_KEY = "development_internal_meetings"
-PCM_INTERNAL_MEETING_GROUP_KEY = "pcm_internal_meetings"
-
-INTERNAL_MEETING_TITLE = "Pikat e diskutimit (Zhvillim M1, M2, M3)"
-INTERNAL_MEETING_SLOTS: dict[str, list[str]] = {
-    "M1": [
-        "A ka mungesa, a ndryshon plani per sot?",
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "A ka e-mails te reja ne IT?",
-        "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
-        "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
-    ],
-    "M2": [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
-        "Cka mbetet per PM?",
-    ],
-    "M3": [
-        "A ka shenime GA/KA ne grupe/Trello?",
-        "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
-        "Cka kemi me punu neser?",
-    ],
-}
+## Internal meetings seeding removed per request.
 
 # Common meetings (board/staff) used by Common view (STAFF/GA + BORD/GA dropdowns)
 COMMON_MEETING_TEMPLATES: list[dict] = [
@@ -587,7 +562,7 @@ COMMON_MEETING_TEMPLATES: list[dict] = [
 async def seed() -> None:
     print("Starting seed process...")
     async with SessionLocal() as db:
-        seed_internal_meetings = _env_bool("SEED_INTERNAL_MEETINGS", default=True)
+        # Internal meetings seeding removed per request.
         seed_common_meeting_templates = _env_bool("SEED_COMMON_MEETING_TEMPLATES", default=True)
         seed_mst_checklists = _env_bool("SEED_MST_CHECKLISTS", default=False)
         seed_gd_checklists = _env_bool("SEED_GD_CHECKLISTS", default=False)
@@ -667,60 +642,7 @@ async def seed() -> None:
             await db.commit()
             print("Common meeting templates seeded.")
 
-        # --- Seed Internal Meetings (global by group_key) ---
-        if seed_internal_meetings:
-            async def ensure_internal_meeting(group_key: str) -> None:
-                checklist = (
-                    await db.execute(select(Checklist).where(Checklist.group_key == group_key))
-                ).scalar_one_or_none()
-                if checklist is None:
-                    checklist = Checklist(
-                        title=INTERNAL_MEETING_TITLE,
-                        note=INTERNAL_MEETING_TITLE,
-                        group_key=group_key,
-                        position=0,
-                    )
-                    db.add(checklist)
-                    await db.flush()
-
-                existing_items = (
-                    await db.execute(
-                        select(ChecklistItem).where(
-                            ChecklistItem.checklist_id == checklist.id,
-                            ChecklistItem.path == INTERNAL_MEETINGS_PATH,
-                        )
-                    )
-                ).scalars().all()
-
-                existing_keys = {
-                    f"{(i.day or '').strip()}|{(i.title or '').strip().lower()}"
-                    for i in existing_items
-                }
-                max_position = max((i.position for i in existing_items), default=0)
-                position = max_position
-
-                for slot, titles in INTERNAL_MEETING_SLOTS.items():
-                    for title in titles:
-                        key = f"{slot}|{title.strip().lower()}"
-                        if key in existing_keys:
-                            continue
-                        position += 1
-                        db.add(
-                            ChecklistItem(
-                                checklist_id=checklist.id,
-                                item_type=ChecklistItemType.CHECKBOX,
-                                position=position,
-                                path=INTERNAL_MEETINGS_PATH,
-                                day=slot,
-                                title=title,
-                                is_checked=False,
-                            )
-                        )
-
-            await ensure_internal_meeting(DEV_INTERNAL_MEETING_GROUP_KEY)
-            await ensure_internal_meeting(PCM_INTERNAL_MEETING_GROUP_KEY)
-            await db.commit()
-            print("Internal meetings checklists seeded.")
+        # --- Internal Meetings seeding removed per request. ---
 
         pcm_department = next((dept for dept in departments if dept.name == "Project Content Manager"), None)
         if pcm_department:
