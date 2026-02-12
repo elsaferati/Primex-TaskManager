@@ -2415,19 +2415,19 @@ export default function DepartmentKanban() {
         })
       }
 
-      // Process tasks from API response
-      const allTasks = [
-        ...(report.tasks_today || []).map((item) => item.task),
-        ...(report.tasks_overdue || []).map((item) => item.task),
-      ]
+      // Process tasks from API response (guard against missing task payloads)
+      const allTaskItems = [...(report.tasks_today || []), ...(report.tasks_overdue || [])].filter(
+        (item): item is { task: Task; project_title?: string | null } => Boolean(item?.task)
+      )
       const projectTitleByTaskId = new Map<string, string>()
-      for (const item of [...(report.tasks_today || []), ...(report.tasks_overdue || [])]) {
+      for (const item of allTaskItems) {
         if (item.project_title) {
           projectTitleByTaskId.set(item.task.id, item.project_title)
         }
       }
 
-      for (const task of allTasks) {
+      for (const item of allTaskItems) {
+        const task = item.task
         const startDate = task.start_date ? toDate(task.start_date) : null
         const dueDate = task.due_date ? toDate(task.due_date) : null
         const isProject = Boolean(task.project_id)
