@@ -1008,7 +1008,7 @@ export default function GaKaNotesPage() {
       if (taskStatusFilter === "open") return note.status !== "CLOSED"
       if (taskStatusFilter === "closed") return note.status === "CLOSED"
       const hasTask = note.is_converted_to_task === true || noteTaskInfo.has(note.id)
-      if (taskStatusFilter === "notes") return !hasTask
+      if (taskStatusFilter === "notes") return !hasTask && note.status !== "CLOSED"
       if (taskStatusFilter === "tasks") return hasTask
       const taskInfo = noteTaskInfo.get(note.id)
       if (!taskInfo) return false
