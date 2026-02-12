@@ -82,6 +82,14 @@ class AllTasksReportExportIn(BaseModel):
     usersInitials: str | None = None
     rows: list[AllTasksReportRowIn]
 
+
+class ExportPreviewOut(BaseModel):
+    headers: list[str]
+    rows: list[list[str]]
+    total: int | None = None
+    truncated: bool = False
+
+
 DATE_LABEL_RE = re.compile(r"Date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 DATE_RANGE_RE = re.compile(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -192,6 +200,21 @@ def _fast_task_badge(task) -> str:
     if task.fast_task_type:
         return task.fast_task_type
     return ""
+
+
+def _normalize_preview_value(value: object | None) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, str):
+        return value if value.strip() else "-"
+    return str(value)
+
+
+def _apply_preview_limit(rows: list[list[str]], limit: int | None) -> tuple[list[list[str]], int, bool]:
+    total = len(rows)
+    if not limit or limit <= 0 or total <= limit:
+        return rows, total, False
+    return rows[:limit], total, True
 
 
 def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: bool, day_date: date) -> list[dict[str, str | None]]:
@@ -886,6 +909,60 @@ async def export_tasks_xlsx(
     )
 
 
+@router.get("/project-tasks-preview", response_model=ExportPreviewOut)
+async def preview_project_tasks(
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+    status_id: uuid.UUID | None = None,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
+    limit: int | None = 200,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+    tasks = await _query_tasks(
+        db=db,
+        user=user,
+        department_id=department_id,
+        user_id=user_id,
+        project_id=project_id,
+        status_id=status_id,
+        planned_from=planned_from,
+        planned_to=planned_to,
+    )
+    status_map, user_map = await _maps(db, tasks)
+    rows: list[list[str]] = []
+    for idx, t in enumerate(tasks, start=1):
+        status_label = status_map.get(t.status_id, "") if hasattr(t, "status_id") else getattr(t, "status", "") or ""
+        priority_value = getattr(t, "priority", "") or ""
+        due_value = ""
+        due_dt = getattr(t, "due_date", None)
+        if due_dt:
+            try:
+                due_value = due_dt.date().isoformat()
+            except Exception:
+                due_value = str(due_dt)
+        assignee_name = ""
+        assignee_id = getattr(t, "assigned_to_user_id", None) or getattr(t, "assigned_to", None)
+        if assignee_id:
+            assignee_name = user_map.get(assignee_id, "") or ""
+        row_values = [
+            str(idx),
+            _normalize_preview_value(getattr(t, "title", "") or ""),
+            _normalize_preview_value(status_label),
+            _normalize_preview_value(str(priority_value).upper() if priority_value else ""),
+            _normalize_preview_value(due_value),
+            _normalize_preview_value(_initials_compact(assignee_name)),
+        ]
+        rows.append(row_values)
+
+    headers = ["NR", "TASK TITLE", "STATUS", "PRIORITY", "DUE DATE", "PUNOI"]
+    limited_rows, total, truncated = _apply_preview_limit(rows, limit)
+    return ExportPreviewOut(headers=headers, rows=limited_rows, total=total, truncated=truncated)
+
+
 @router.get("/fast-tasks.xlsx")
 async def export_fast_tasks_xlsx(
     department_id: uuid.UUID | None = None,
@@ -1117,6 +1194,129 @@ async def export_fast_tasks_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+
+@router.get("/fast-tasks-preview", response_model=ExportPreviewOut)
+async def preview_fast_tasks(
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    status_id: uuid.UUID | None = None,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
+    limit: int | None = 200,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+
+    if not is_admin and department_id is None:
+        department_id = user.department_id
+
+    assigned_user = aliased(User)
+    created_user = aliased(User)
+    status_name: str | None = None
+    if status_id is not None:
+        status_row = (await db.execute(select(TaskStatus).where(TaskStatus.id == status_id))).scalar_one_or_none()
+        if status_row is not None:
+            status_name = status_row.name
+
+    stmt = (
+        select(Task, Department, assigned_user, created_user)
+        .outerjoin(Department, Task.department_id == Department.id)
+        .outerjoin(assigned_user, Task.assigned_to == assigned_user.id)
+        .outerjoin(created_user, Task.created_by == created_user.id)
+        .where(
+            or_(
+                Task.is_bllok.is_(True),
+                Task.is_1h_report.is_(True),
+                Task.is_personal.is_(True),
+                Task.is_r1.is_(True),
+                Task.fast_task_group_id.is_not(None),
+            )
+        )
+        .where(Task.system_template_origin_id.is_(None))
+        .where(Task.project_id.is_(None))
+        .where(Task.internal_notes.is_(None))
+        .where(Task.status != "DONE")
+    )
+
+    if not is_admin:
+        if user.department_id is None:
+            rows: list[list[str]] = []
+            headers = [
+                "NR",
+                "TITLE",
+                "DESCRIPTION",
+                "DEP",
+                "PUNOI",
+                "CREATED BY",
+                "GA NOTE ORIGIN",
+                "STATUS",
+                "PRIORITY",
+                "CREATION DATE",
+                "START DATE",
+                "DUE DATE",
+            ]
+            return ExportPreviewOut(headers=headers, rows=rows, total=0, truncated=False)
+        stmt = stmt.where(Task.department_id == user.department_id)
+    else:
+        if department_id:
+            ensure_department_access(user, department_id)
+            stmt = stmt.where(Task.department_id == department_id)
+
+    if user_id:
+        stmt = stmt.where(Task.assigned_to == user_id)
+    if status_name:
+        stmt = stmt.where(Task.status == status_name)
+    if planned_from:
+        stmt = stmt.where(func.date(Task.start_date) >= planned_from)
+    if planned_to:
+        stmt = stmt.where(func.date(Task.start_date) <= planned_to)
+
+    sort_key = case(
+        (Task.is_bllok.is_(True), 1),
+        (Task.is_1h_report.is_(True), 2),
+        (Task.is_r1.is_(True), 3),
+        (Task.is_personal.is_(True), 4),
+        else_=5,
+    )
+
+    rows_raw = (await db.execute(stmt.order_by(sort_key.asc(), Task.created_at.desc()))).all()
+    rows: list[list[str]] = []
+    for idx, (task, department, assigned, created) in enumerate(rows_raw, start=1):
+        values = [
+            str(idx),
+            _normalize_preview_value(task.title or ""),
+            _normalize_preview_value(_strip_html(task.description) or ""),
+            _normalize_preview_value(department.code if department else ""),
+            _normalize_preview_value(_initials_compact((assigned.full_name or assigned.username) if assigned else "")),
+            _normalize_preview_value(_initials_compact((created.full_name or created.username) if created else "")),
+            _normalize_preview_value("Yes" if task.ga_note_origin_id else "No"),
+            _normalize_preview_value(task.status or ""),
+            _normalize_preview_value((task.priority or "").upper()),
+            _normalize_preview_value(_format_excel_datetime(task.created_at)),
+            _normalize_preview_value(_format_excel_datetime(task.start_date)),
+            _normalize_preview_value(_format_excel_datetime(task.due_date)),
+        ]
+        rows.append(values)
+
+    headers = [
+        "NR",
+        "TITLE",
+        "DESCRIPTION",
+        "DEP",
+        "PUNOI",
+        "CREATED BY",
+        "GA NOTE ORIGIN",
+        "STATUS",
+        "PRIORITY",
+        "CREATION DATE",
+        "START DATE",
+        "DUE DATE",
+    ]
+    limited_rows, total, truncated = _apply_preview_limit(rows, limit)
+    return ExportPreviewOut(headers=headers, rows=limited_rows, total=total, truncated=truncated)
 
 @router.post("/all-tasks-report.xlsx")
 async def export_all_tasks_report_xlsx(
@@ -1918,18 +2118,23 @@ async def export_daily_report_xlsx(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if user.role == UserRole.STAFF:
-        department_id = user.department_id
-        user_id = user.id
-        all_users = False
-
     if department_id is not None:
         ensure_department_access(user, department_id)
     elif user.role != UserRole.ADMIN:
         department_id = user.department_id
 
-    if user_id is None:
-        user_id = user.id
+    target_user: User | None = None
+    if not all_users:
+        target_user_id = user_id or user.id
+        target_user = (
+            await db.execute(select(User).where(User.id == target_user_id))
+        ).scalar_one_or_none()
+        if target_user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if department_id is not None and target_user.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        if user.role == UserRole.STAFF and user.department_id is None and target_user.id != user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     rows: list[list[str]] = []
     users_for_export: list[User] = []
@@ -1944,11 +2149,7 @@ async def export_daily_report_xlsx(
             )
         ).scalars().all()
     else:
-        users_for_export = [
-            (
-                await db.execute(select(User).where(User.id == user_id))
-            ).scalar_one()
-        ]
+        users_for_export = [target_user] if target_user is not None else []
 
     for member in users_for_export:
         member_rows = await _daily_report_rows_for_user(
@@ -2109,7 +2310,7 @@ async def export_daily_report_xlsx(
             db=db,
             day=day,
             department_id=department_id,
-            user_id=user_id,
+            user_id=users_for_export[0].id,
         )
         last_data_row = last_row
         ga_section_row = last_data_row + 2
@@ -2512,6 +2713,279 @@ async def export_system_tasks_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
+
+
+@router.get("/system-tasks-preview", response_model=ExportPreviewOut)
+async def preview_system_tasks(
+    active_only: bool = True,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    status_id: uuid.UUID | None = None,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
+    limit: int | None = 200,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+
+    status_name: str | None = None
+    if status_id is not None:
+        status_row = (await db.execute(select(TaskStatus).where(TaskStatus.id == status_id))).scalar_one_or_none()
+        if status_row is not None:
+            status_name = status_row.name
+
+    template_stmt = select(SystemTaskTemplate)
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+        template_stmt = template_stmt.where(
+            or_(
+                and_(
+                    SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
+                    SystemTaskTemplate.department_id == department_id,
+                ),
+                SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
+                SystemTaskTemplate.scope == SystemTaskScope.GA.value,
+            )
+        )
+    elif not is_admin:
+        if user.department_id is None:
+            if user.role != UserRole.MANAGER:
+                return ExportPreviewOut(headers=[], rows=[], total=0, truncated=False)
+        else:
+            template_stmt = template_stmt.where(
+                or_(
+                    SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
+                    SystemTaskTemplate.scope == SystemTaskScope.GA.value,
+                    and_(
+                        SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
+                        SystemTaskTemplate.department_id == user.department_id,
+                    ),
+                )
+            )
+
+    templates = (await db.execute(template_stmt.order_by(SystemTaskTemplate.title))).scalars().all()
+    if not templates:
+        headers = [
+            "NR",
+            "PRIO",
+            "LL",
+            "DEP",
+            "AM/PM",
+            "TITULLI",
+            "PERSHKRIMI",
+            "USER",
+            "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
+            "BZ ME",
+            "KOHA BZ",
+        ]
+        return ExportPreviewOut(headers=headers, rows=[], total=0, truncated=False)
+
+    template_assignee_ids_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    template_assignee_user_ids: set[uuid.UUID] = set()
+    for tmpl in templates:
+        raw_ids = list(getattr(tmpl, "assignee_ids", None) or [])
+        if tmpl.default_assignee_id and tmpl.default_assignee_id not in raw_ids:
+            raw_ids.append(tmpl.default_assignee_id)
+        if raw_ids:
+            seen: set[uuid.UUID] = set()
+            deduped: list[uuid.UUID] = []
+            for uid in raw_ids:
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                deduped.append(uid)
+            template_assignee_ids_map[tmpl.id] = deduped
+            template_assignee_user_ids.update(deduped)
+
+    template_assignee_initials_map: dict[uuid.UUID, str] = {}
+    if template_assignee_user_ids:
+        template_assignee_users = (
+            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+        ).scalars().all()
+        template_assignee_initials_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
+        }
+
+    template_ids = [t.id for t in templates]
+    task_stmt = (
+        select(Task, SystemTaskTemplate)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.system_template_origin_id.in_(template_ids))
+    )
+    if active_only:
+        task_stmt = task_stmt.where(Task.is_active.is_(True))
+    if department_id is not None:
+        task_stmt = task_stmt.where(Task.department_id == department_id)
+    if user_id is not None:
+        assignee_subq = select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id)
+        task_stmt = task_stmt.where(or_(Task.assigned_to == user_id, Task.id.in_(assignee_subq)))
+    if status_name:
+        task_stmt = task_stmt.where(Task.status == status_name)
+    if planned_from:
+        task_stmt = task_stmt.where(func.date(Task.start_date) >= planned_from)
+    if planned_to:
+        task_stmt = task_stmt.where(func.date(Task.start_date) <= planned_to)
+    task_rows = (await db.execute(task_stmt.order_by(Task.created_at.desc()))).all()
+    dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
+    for task, tmpl in task_rows:
+        prev = dedup.get(tmpl.id)
+        if prev is None or (task.created_at and prev[0].created_at and task.created_at > prev[0].created_at):
+            dedup[tmpl.id] = (task, tmpl)
+    task_rows = list(dedup.values())
+
+    task_ids = [task.id for task, _ in task_rows]
+    assignee_map: dict[uuid.UUID, list[str]] = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        assignee_rows = (
+            await db.execute(
+                select(TaskAssignee.task_id, User)
+                .join(User, TaskAssignee.user_id == User.id)
+                .where(TaskAssignee.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_row in assignee_rows:
+            label = user_row.full_name or user_row.username or ""
+            if label:
+                assignee_map.setdefault(task_id, []).append(label)
+
+    fallback_ids = [
+        task.assigned_to
+        for task, _ in task_rows
+        if task.assigned_to is not None and not assignee_map.get(task.id)
+    ]
+    fallback_map: dict[uuid.UUID, str] = {}
+    if fallback_ids:
+        fallback_users = (
+            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+        ).scalars().all()
+        fallback_map = {u.id: (u.full_name or u.username or "") for u in fallback_users}
+
+    task_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        alignment_rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, alignment_user_id in alignment_rows:
+            task_alignment_map.setdefault(task_id, []).append(alignment_user_id)
+
+    template_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_ids:
+        template_alignment_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+                .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+            )
+        ).all()
+        for template_id, alignment_user_id in template_alignment_rows:
+            template_alignment_map.setdefault(template_id, []).append(alignment_user_id)
+
+    department_ids = {template.department_id for _, template in task_rows if template.department_id}
+    department_map: dict[uuid.UUID, str] = {}
+    if department_ids:
+        departments = (
+            await db.execute(select(Department).where(Department.id.in_(department_ids)))
+        ).scalars().all()
+        department_map = {d.id: d.name for d in departments}
+
+    alignment_user_ids: set[uuid.UUID] = set()
+    for task, template in task_rows:
+        ids = task_alignment_map.get(task.id) or []
+        if not ids:
+            ids = template_alignment_map.get(template.id) or []
+        for alignment_user_id in ids:
+            alignment_user_ids.add(alignment_user_id)
+    alignment_user_map: dict[uuid.UUID, str] = {}
+    if alignment_user_ids:
+        alignment_users = (
+            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+        ).scalars().all()
+        alignment_user_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in alignment_users
+        }
+
+    headers = [
+        "NR",
+        "PRIO",
+        "LL",
+        "DEP",
+        "AM/PM",
+        "TITULLI",
+        "PERSHKRIMI",
+        "USER",
+        "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
+        "BZ ME",
+        "KOHA BZ",
+    ]
+
+    rows: list[list[str]] = []
+    for idx, (task, template) in enumerate(task_rows, start=1):
+        template_assignee_ids = template_assignee_ids_map.get(template.id, [])
+        assignee_initials = [
+            template_assignee_initials_map.get(uid, "") for uid in template_assignee_ids
+        ]
+        assignee_label = ", ".join([initials for initials in assignee_initials if initials])
+        if not assignee_label:
+            assignees = assignee_map.get(task.id, [])
+            if not assignees and task.assigned_to in fallback_map:
+                assignees = [fallback_map[task.assigned_to]]
+            fallback_initials = [(_initials(name) if name else "") for name in assignees]
+            assignee_label = ", ".join([initials for initials in fallback_initials if initials])
+        if template.department_id and template.department_id in department_map:
+            department_label = _department_short(department_map[template.department_id])
+        elif template.scope == "GA":
+            department_label = "GA"
+        else:
+            department_label = "ALL"
+        note_values = _parse_internal_notes(template.internal_notes)
+        regj_value = note_values.get("REGJ", "") or "-"
+        path_value = note_values.get("PATH", "") or "-"
+        check_value = note_values.get("CHECKLISTA", "") or note_values.get("CHECK", "") or "-"
+        training_value = note_values.get("TRAINING", "") or "-"
+        bz_group_value = note_values.get("BZ GROUP", "") or "-"
+        if all(value == "-" for value in [regj_value, path_value, check_value, training_value, bz_group_value]):
+            details_value = ""
+        else:
+            details_value = "\n".join(
+                [
+                    f"1.REGJ: {regj_value}",
+                    f"2.PATH: {path_value}",
+                    f"3.CHECKLISTA: {check_value}",
+                    f"4.TRAINING: {training_value}",
+                    f"5.BZ GROUP: {bz_group_value}",
+                ]
+            )
+        alignment_ids = task_alignment_map.get(task.id) or []
+        if not alignment_ids:
+            alignment_ids = template_alignment_map.get(template.id) or []
+        bz_me_labels = [alignment_user_map.get(alignment_user_id, "") for alignment_user_id in alignment_ids]
+        bz_me_value = ", ".join([label for label in bz_me_labels if label])
+        alignment_time = getattr(template, "alignment_time", None)
+        bz_time_value = ""
+        if alignment_time:
+            alignment_time_str = str(alignment_time)
+            bz_time_value = alignment_time_str[:5]
+        values = [
+            str(idx),
+            _normalize_preview_value(_priority_label(template.priority)),
+            _normalize_preview_value(_frequency_label(template.frequency)),
+            _normalize_preview_value(department_label),
+            _normalize_preview_value(task.finish_period or ""),
+            _normalize_preview_value(task.title),
+            _normalize_preview_value(_strip_html(task.description)),
+            _normalize_preview_value(assignee_label),
+            _normalize_preview_value(details_value),
+            _normalize_preview_value(bz_me_value),
+            _normalize_preview_value(bz_time_value),
+        ]
+        rows.append(values)
+
+    limited_rows, total, truncated = _apply_preview_limit(rows, limit)
+    return ExportPreviewOut(headers=headers, rows=limited_rows, total=total, truncated=truncated)
 
 
 @router.get("/common.xlsx")

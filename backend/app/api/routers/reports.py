@@ -45,6 +45,72 @@ from app.services.daily_report_logic import (
 router = APIRouter()
 
 
+def _resolve_effective_department_id(
+    *,
+    current_user: User,
+    requested_department_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    if requested_department_id is not None:
+        ensure_department_access(current_user, requested_department_id)
+        return requested_department_id
+    if current_user.role != UserRole.ADMIN:
+        return current_user.department_id
+    return None
+
+
+def _resolve_target_user_id(
+    *,
+    requested_user_id: uuid.UUID | None,
+    current_user_id: uuid.UUID,
+) -> uuid.UUID:
+    return requested_user_id or current_user_id
+
+
+def _enforce_daily_report_target_scope(
+    *,
+    current_user: User,
+    effective_department_id: uuid.UUID | None,
+    target_user: User,
+) -> None:
+    if effective_department_id is not None and target_user.department_id != effective_department_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Staff without a department must remain self-scoped.
+    if (
+        current_user.role == UserRole.STAFF
+        and current_user.department_id is None
+        and target_user.id != current_user.id
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def _resolve_daily_report_scope(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    requested_department_id: uuid.UUID | None,
+    requested_user_id: uuid.UUID | None,
+) -> tuple[uuid.UUID | None, uuid.UUID]:
+    effective_department_id = _resolve_effective_department_id(
+        current_user=current_user,
+        requested_department_id=requested_department_id,
+    )
+    target_user_id = _resolve_target_user_id(
+        requested_user_id=requested_user_id,
+        current_user_id=current_user.id,
+    )
+    target_user = (
+        await db.execute(select(User).where(User.id == target_user_id))
+    ).scalar_one_or_none()
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    _enforce_daily_report_target_scope(
+        current_user=current_user,
+        effective_department_id=effective_department_id,
+        target_user=target_user,
+    )
+    return effective_department_id, target_user.id
+
+
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
     return TaskAssigneeOut(
         id=user.id,
@@ -160,17 +226,12 @@ async def daily_report(
     - tasks from previous days not completed (late X days, show original planned date)
     - system tasks: per-occurrence status (OPEN / DONE / NOT_DONE / SKIPPED), with late logic
     """
-    if user.role == UserRole.STAFF:
-        department_id = user.department_id
-        user_id = user.id
-
-    if department_id is not None:
-        ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
-        department_id = user.department_id
-
-    if user_id is None:
-        user_id = user.id
+    department_id, user_id = await _resolve_daily_report_scope(
+        db=db,
+        current_user=user,
+        requested_department_id=department_id,
+        requested_user_id=user_id,
+    )
 
     # --- Regular tasks (non-system) ---
     dept_code = await _department_code_for_id(db, department_id)
