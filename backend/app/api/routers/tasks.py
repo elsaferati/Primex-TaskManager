@@ -118,6 +118,22 @@ def _compute_status_from_completed(total: int | None, completed: int) -> TaskSta
     return TaskStatus.DONE
 
 
+_GA_NOTE_VALID_STATUSES = {
+    TaskStatus.TODO.value,
+    TaskStatus.IN_PROGRESS.value,
+    TaskStatus.DONE.value,
+}
+
+
+def _normalize_ga_note_task_status(value: str | TaskStatus | None) -> TaskStatus:
+    if not value:
+        return TaskStatus.TODO
+    raw = value.value if isinstance(value, TaskStatus) else str(value).strip()
+    if raw in _GA_NOTE_VALID_STATUSES:
+        return TaskStatus(raw)
+    return TaskStatus.TODO
+
+
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
     return TaskAssigneeOut(
         id=user.id,
@@ -552,6 +568,8 @@ async def create_task(
     }
 
     status_value = payload.status or TaskStatus.TODO
+    if payload.ga_note_origin_id is not None:
+        status_value = _normalize_ga_note_task_status(status_value)
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
 
@@ -1217,6 +1235,12 @@ async def update_task(
     
     if not can_edit:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    if task.ga_note_origin_id is not None:
+        normalized_status = _normalize_ga_note_task_status(task.status)
+        current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status).strip()
+        if current_status != normalized_status.value:
+            task.status = normalized_status
     
     # For system task status updates, allow admins and managers to bypass department check
     is_system_task_status_update = (
