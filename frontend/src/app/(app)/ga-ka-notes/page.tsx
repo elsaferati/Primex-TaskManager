@@ -197,7 +197,9 @@ export default function GaKaNotesPage() {
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
   const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
-  const [voiceMode, setVoiceMode] = React.useState<"browser" | "cloud">("browser")
+  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("en")
+  const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
+  const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
 
   const {
     isSupported: isVoiceSupported,
@@ -206,7 +208,7 @@ export default function GaKaNotesPage() {
     stop: stopVoice,
     toggle: toggleVoice,
   } = useSpeechDictation({
-    lang: "en-US",
+    lang: speechLang,
     onFinalText: (text) => {
       const finalText = text.trim()
       if (!finalText) return
@@ -227,7 +229,7 @@ export default function GaKaNotesPage() {
     toggle: toggleCloud,
   } = useCloudDictation({
     apiFetch,
-    lang: "en-US",
+    lang: cloudLang,
     onFinalText: (text) => {
       const finalText = text.trim()
       if (!finalText) return
@@ -240,16 +242,12 @@ export default function GaKaNotesPage() {
     },
   })
 
+  const voiceMode = isVoiceSupported ? "browser" : isCloudSupported ? "cloud" : "none"
+
   React.useEffect(() => {
     if (posting && isVoiceListening) stopVoice()
     if (posting && isCloudRecording) stopCloud()
   }, [isCloudRecording, isVoiceListening, posting, stopCloud, stopVoice])
-
-  React.useEffect(() => {
-    if (!isVoiceSupported && isCloudSupported) {
-      setVoiceMode("cloud")
-    }
-  }, [isCloudSupported, isVoiceSupported])
 
   React.useEffect(() => {
     if (voiceMode === "browser" && isCloudRecording) stopCloud()
@@ -258,24 +256,11 @@ export default function GaKaNotesPage() {
 
   const handleVoiceToggle = () => {
     if (voiceMode === "browser") {
-      if (isVoiceSupported) {
-        toggleVoice()
-        return
-      }
-      if (isCloudSupported) {
-        toggleCloud()
-        return
-      }
-      toast.error("Voice dictation not supported in this browser")
-      return
-    }
-
-    if (isCloudSupported) {
-      toggleCloud()
-      return
-    }
-    if (isVoiceSupported) {
       toggleVoice()
+      return
+    }
+    if (voiceMode === "cloud") {
+      toggleCloud()
       return
     }
     toast.error("Voice dictation not supported in this browser")
@@ -538,6 +523,14 @@ export default function GaKaNotesPage() {
     } catch {
       toast.error("Failed to open file")
     }
+  }
+
+  const handleVoiceLanguageChange = (value: string) => {
+    if (value !== "en" && value !== "sq") return
+    if (value === voiceLanguage) return
+    if (isVoiceListening) stopVoice()
+    if (isCloudRecording) stopCloud()
+    setVoiceLanguage(value)
   }
 
   React.useEffect(() => {
@@ -1087,49 +1080,32 @@ export default function GaKaNotesPage() {
           <CardTitle className="text-sm">New Note</CardTitle>
           <CardAction>
             <div className="flex items-center gap-2">
-              <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 p-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={voiceMode === "browser" ? "default" : "ghost"}
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setVoiceMode("browser")}
-                  disabled={!isVoiceSupported}
-                  title={isVoiceSupported ? "Use browser dictation" : "Browser dictation not supported"}
-                >
-                  Browser
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={voiceMode === "cloud" ? "default" : "ghost"}
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setVoiceMode("cloud")}
-                  disabled={!isCloudSupported}
-                  title={isCloudSupported ? "Use cloud dictation" : "Cloud dictation not supported"}
-                >
-                  Cloud
-                </Button>
-              </div>
+              <Select value={voiceLanguage} onValueChange={handleVoiceLanguageChange}>
+                <SelectTrigger className="h-8 w-[130px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="sq">Albanian</SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 className="h-8 gap-2"
                 onClick={handleVoiceToggle}
-                disabled={(!isVoiceSupported && !isCloudSupported) || (voiceMode === "cloud" && isCloudTranscribing)}
+                disabled={voiceMode === "none" || (voiceMode === "cloud" && isCloudTranscribing)}
                 title={
                   voiceMode === "browser"
-                    ? isVoiceSupported
-                      ? isVoiceListening
-                        ? "Stop voice dictation"
-                        : "Start voice dictation"
-                      : "Browser dictation not supported"
-                    : isCloudSupported
+                    ? isVoiceListening
+                      ? "Stop voice dictation"
+                      : "Start voice dictation"
+                    : voiceMode === "cloud"
                       ? isCloudRecording
                         ? "Stop cloud dictation"
                         : "Start cloud dictation"
-                      : "Cloud dictation not supported"
+                      : "Voice dictation not supported"
                 }
               >
                 {voiceMode === "cloud" ? (
@@ -1149,6 +1125,9 @@ export default function GaKaNotesPage() {
                     ? "Stop"
                     : "Voice"}
               </Button>
+              {voiceMode === "cloud" ? (
+                <span className="text-[11px] text-slate-500">Cloud fallback</span>
+              ) : null}
             </div>
           </CardAction>
         </CardHeader>
