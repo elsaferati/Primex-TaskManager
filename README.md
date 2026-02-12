@@ -27,6 +27,7 @@ copy .env.example .env
 Edit `backend/.env`:
 - `DATABASE_URL` must be `postgresql+asyncpg://...`
 - Set `JWT_SECRET`
+- Optional for cloud dictation: `OPENAI_API_KEY`, `SPEECH_MAX_FILE_MB` (default 20)
 
 Install deps:
 ```powershell

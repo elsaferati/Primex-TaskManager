@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
@@ -194,6 +195,9 @@ export default function GaKaNotesPage() {
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
+  const [voiceMode, setVoiceMode] = React.useState<"browser" | "cloud">("browser")
 
   const {
     isSupported: isVoiceSupported,
@@ -215,10 +219,67 @@ export default function GaKaNotesPage() {
     },
   })
 
+  const {
+    isSupported: isCloudSupported,
+    isRecording: isCloudRecording,
+    isTranscribing: isCloudTranscribing,
+    stop: stopCloud,
+    toggle: toggleCloud,
+  } = useCloudDictation({
+    apiFetch,
+    lang: "en-US",
+    onFinalText: (text) => {
+      const finalText = text.trim()
+      if (!finalText) return
+      setContent((prev) => {
+        const base = prev ?? ""
+        const needsSeparator = base.length > 0 && !/\s$/.test(base)
+        const separator = needsSeparator ? "\n" : ""
+        return `${base}${separator}${finalText}`
+      })
+    },
+  })
+
   React.useEffect(() => {
     if (posting && isVoiceListening) stopVoice()
-  }, [isVoiceListening, posting, stopVoice])
+    if (posting && isCloudRecording) stopCloud()
+  }, [isCloudRecording, isVoiceListening, posting, stopCloud, stopVoice])
 
+  React.useEffect(() => {
+    if (!isVoiceSupported && isCloudSupported) {
+      setVoiceMode("cloud")
+    }
+  }, [isCloudSupported, isVoiceSupported])
+
+  React.useEffect(() => {
+    if (voiceMode === "browser" && isCloudRecording) stopCloud()
+    if (voiceMode === "cloud" && isVoiceListening) stopVoice()
+  }, [isCloudRecording, isVoiceListening, stopCloud, stopVoice, voiceMode])
+
+  const handleVoiceToggle = () => {
+    if (voiceMode === "browser") {
+      if (isVoiceSupported) {
+        toggleVoice()
+        return
+      }
+      if (isCloudSupported) {
+        toggleCloud()
+        return
+      }
+      toast.error("Voice dictation not supported in this browser")
+      return
+    }
+
+    if (isCloudSupported) {
+      toggleCloud()
+      return
+    }
+    if (isVoiceSupported) {
+      toggleVoice()
+      return
+    }
+    toast.error("Voice dictation not supported in this browser")
+  }
 
 
   const loadDepartments = React.useCallback(async () => {
@@ -469,17 +530,23 @@ export default function GaKaNotesPage() {
       }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
-      const previewWindow = window.open(url, "_blank", "noopener,noreferrer")
-      if (!previewWindow) {
-        window.URL.revokeObjectURL(url)
-        toast.error("Popup blocked. Please allow popups to preview.")
-        return
-      }
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+      setPreviewTitle(attachment.original_filename || "Attachment preview")
+      setPreviewUrl((prev) => {
+        if (prev) window.URL.revokeObjectURL(prev)
+        return url
+      })
     } catch {
       toast.error("Failed to open file")
     }
   }
+
+  React.useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        window.URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
 
   const createNote = async () => {
     if (!content.trim()) {
@@ -1019,18 +1086,70 @@ export default function GaKaNotesPage() {
         <CardHeader>
           <CardTitle className="text-sm">New Note</CardTitle>
           <CardAction>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 gap-2"
-              onClick={toggleVoice}
-              disabled={!isVoiceSupported}
-              title={isVoiceSupported ? (isVoiceListening ? "Stop voice dictation" : "Start voice dictation") : "Voice dictation not supported in this browser"}
-            >
-              {isVoiceListening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              {isVoiceListening ? "Stop" : "Voice"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "browser" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setVoiceMode("browser")}
+                  disabled={!isVoiceSupported}
+                  title={isVoiceSupported ? "Use browser dictation" : "Browser dictation not supported"}
+                >
+                  Browser
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "cloud" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setVoiceMode("cloud")}
+                  disabled={!isCloudSupported}
+                  title={isCloudSupported ? "Use cloud dictation" : "Cloud dictation not supported"}
+                >
+                  Cloud
+                </Button>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-2"
+                onClick={handleVoiceToggle}
+                disabled={(!isVoiceSupported && !isCloudSupported) || (voiceMode === "cloud" && isCloudTranscribing)}
+                title={
+                  voiceMode === "browser"
+                    ? isVoiceSupported
+                      ? isVoiceListening
+                        ? "Stop voice dictation"
+                        : "Start voice dictation"
+                      : "Browser dictation not supported"
+                    : isCloudSupported
+                      ? isCloudRecording
+                        ? "Stop cloud dictation"
+                        : "Start cloud dictation"
+                      : "Cloud dictation not supported"
+                }
+              >
+                {voiceMode === "cloud" ? (
+                  isCloudRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />
+                ) : isVoiceListening ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+                {voiceMode === "cloud"
+                  ? isCloudRecording
+                    ? "Stop"
+                    : isCloudTranscribing
+                      ? "Transcribing"
+                      : "Voice"
+                  : isVoiceListening
+                    ? "Stop"
+                    : "Voice"}
+              </Button>
+            </div>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1044,8 +1163,18 @@ export default function GaKaNotesPage() {
             />
             {isVoiceListening ? (
               <div className="text-xs text-muted-foreground">
-                <span className="font-medium text-slate-700">Listening…</span>
+                <span className="font-medium text-slate-700">Listening...</span>
                 {voiceInterimText ? <span className="ml-2">{voiceInterimText}</span> : null}
+              </div>
+            ) : null}
+            {isCloudRecording ? (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-slate-700">Recording...</span>
+              </div>
+            ) : null}
+            {isCloudTranscribing ? (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-slate-700">Transcribing...</span>
               </div>
             ) : null}
           </div>
@@ -1701,6 +1830,30 @@ export default function GaKaNotesPage() {
               })}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(previewUrl)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewUrl((prev) => {
+              if (prev) window.URL.revokeObjectURL(prev)
+              return null
+            })
+            setPreviewTitle(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewTitle || "Attachment preview"}</DialogTitle>
+          </DialogHeader>
+          {previewUrl ? (
+            <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-2">
+              <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-[66vh] w-auto object-contain" />
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 
