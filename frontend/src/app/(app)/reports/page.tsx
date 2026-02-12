@@ -53,37 +53,15 @@ export default function ReportsPage() {
       if (pRes.ok) setProjects((await pRes.json()) as Project[])
       if (sRes.ok) setStatuses((await sRes.json()) as TaskStatus[])
     }
-    if (user?.role !== "STAFF") void boot()
+    if (user) void boot()
   }, [apiFetch, user])
-
-  const download = async (ext: "csv" | "xlsx" | "pdf") => {
-    const qs = new URLSearchParams()
-    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-      qs.set("department_id", departmentId)
-    }
-    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
-    if (projectId && projectId !== ALL_PROJECTS_VALUE) qs.set("project_id", projectId)
-    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
-    if (plannedFrom) qs.set("planned_from", plannedFrom)
-    if (plannedTo) qs.set("planned_to", plannedTo)
-
-    const res = await apiFetch(`/exports/tasks.${ext}?${qs.toString()}`)
-    if (!res.ok) return
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `tasks_export.${ext}`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-  }
 
   const downloadFastTasks = async () => {
     const qs = new URLSearchParams()
     if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
       qs.set("department_id", departmentId)
+    } else if (user?.department_id) {
+      qs.set("department_id", user.department_id)
     }
     if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
     if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
@@ -105,7 +83,67 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url)
   }
 
-  if (!user || user.role === "STAFF") {
+  const downloadSystemTasks = async () => {
+    const qs = new URLSearchParams()
+    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+      qs.set("department_id", departmentId)
+    } else if (user?.department_id) {
+      qs.set("department_id", user.department_id)
+    }
+    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
+    if (plannedFrom) qs.set("planned_from", plannedFrom)
+    if (plannedTo) qs.set("planned_to", plannedTo)
+
+    const res = await apiFetch(`/exports/system-tasks.xlsx?${qs.toString()}`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    const downloadName =
+      getFilenameFromDisposition(res.headers.get("content-disposition")) ?? "SYSTEM_TASKS.xlsx"
+    a.download = downloadName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadProjectTasks = async () => {
+    const qs = new URLSearchParams()
+    const selectedProject = projects.find((p) => p.id === projectId)
+    const projectLabel = selectedProject ? selectedProject.name || selectedProject.title : null
+    const reportTitle = projectLabel ? `${projectLabel} TASKS` : "PROJECT TASKS"
+    if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+      qs.set("department_id", departmentId)
+    } else if (user?.department_id) {
+      qs.set("department_id", user.department_id)
+    }
+    if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+    if (projectId && projectId !== ALL_PROJECTS_VALUE) qs.set("project_id", projectId)
+    if (statusId && statusId !== ALL_STATUSES_VALUE) qs.set("status_id", statusId)
+    if (plannedFrom) qs.set("planned_from", plannedFrom)
+    if (plannedTo) qs.set("planned_to", plannedTo)
+    qs.set("standard", "true")
+    qs.set("title", reportTitle)
+
+    const res = await apiFetch(`/exports/tasks.xlsx?${qs.toString()}`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    const downloadName =
+      getFilenameFromDisposition(res.headers.get("content-disposition")) ?? "PROJECT_TASKS.xlsx"
+    a.download = downloadName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  if (!user) {
     return <div className="text-sm text-muted-foreground">Forbidden.</div>
   }
 
@@ -162,7 +200,9 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_PROJECTS_VALUE}>All projects</SelectItem>
-                  {projects.map((p) => (
+                  {projects
+                    .filter((p) => (user.role === "ADMIN" ? true : p.department_id === user.department_id))
+                    .map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name || p.title}
                     </SelectItem>
@@ -179,7 +219,13 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value={ALL_STATUSES_VALUE}>All statuses</SelectItem>
                   {statuses
-                    .filter((s) => (user.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE ? s.department_id === departmentId : true))
+                    .filter((s) =>
+                      user.role === "ADMIN"
+                        ? departmentId && departmentId !== ALL_DEPARTMENTS_VALUE
+                          ? s.department_id === departmentId
+                          : true
+                        : s.department_id === user.department_id
+                    )
                     .map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
@@ -198,17 +244,14 @@ export default function ReportsPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => void download("csv")}>
-              Download CSV
-            </Button>
-            <Button variant="outline" onClick={() => void download("xlsx")}>
-              Download XLSX
-            </Button>
-            <Button variant="outline" onClick={() => void download("pdf")}>
-              Download PDF summary
-            </Button>
             <Button variant="outline" onClick={() => void downloadFastTasks()}>
               Download Fast Tasks XLSX
+            </Button>
+            <Button variant="outline" onClick={() => void downloadSystemTasks()}>
+              Download System Tasks XLSX
+            </Button>
+            <Button variant="outline" onClick={() => void downloadProjectTasks()}>
+              Download Project Tasks XLSX
             </Button>
           </div>
         </CardContent>

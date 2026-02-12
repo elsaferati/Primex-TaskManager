@@ -21,7 +21,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_reports_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
@@ -52,6 +52,7 @@ from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 from app.services.daily_report_logic import (
     DailyReportTyoMode,
+    _as_utc_date,
     completed_on_day,
     daily_report_tyo_label,
     planned_range_for_daily_report,
@@ -155,6 +156,7 @@ def _department_short(label: str) -> str:
         "DEVELOPMENT": "DEV",
         "GRAPHIC DESIGN": "GDS",
         "PRODUCT CONTENT": "PCM",
+        "PROJECT CONTENT MANAGER": "PCM",
     }.get(key, label)
 
 
@@ -355,7 +357,10 @@ async def _query_tasks(
 ) -> list[Task]:
     stmt = select(Task)
 
-    if user.role.value != "admin":
+    role_value = getattr(user.role, "value", None)
+    is_admin = user.role == UserRole.ADMIN or (isinstance(role_value, str) and role_value.upper() == "ADMIN")
+
+    if not is_admin:
         if user.department_id is None:
             return []
         stmt = stmt.where(Task.department_id == user.department_id)
@@ -364,22 +369,46 @@ async def _query_tasks(
         ensure_department_access(user, department_id)
         stmt = stmt.where(Task.department_id == department_id)
     if user_id:
-        stmt = stmt.where(Task.assigned_to_user_id == user_id)
+        if hasattr(Task, "assigned_to_user_id"):
+            stmt = stmt.where(Task.assigned_to_user_id == user_id)
+        else:
+            stmt = stmt.where(Task.assigned_to == user_id)
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)
     if status_id:
-        stmt = stmt.where(Task.status_id == status_id)
-    if planned_from:
-        stmt = stmt.where(Task.planned_for >= planned_from)
-    if planned_to:
-        stmt = stmt.where(Task.planned_for <= planned_to)
+        if hasattr(Task, "status_id"):
+            stmt = stmt.where(Task.status_id == status_id)
+        else:
+            status_row = (await db.execute(select(TaskStatus).where(TaskStatus.id == status_id))).scalar_one_or_none()
+            if status_row is not None:
+                stmt = stmt.where(Task.status == status_row.name)
+            else:
+                return []
+
+    planned_expr = None
+    if hasattr(Task, "planned_for"):
+        planned_expr = Task.planned_for
+    start_expr = func.date(Task.start_date) if hasattr(Task, "start_date") else None
+    due_expr = func.date(Task.due_date) if hasattr(Task, "due_date") else None
+    exprs = [e for e in (planned_expr, start_expr, due_expr) if e is not None]
+    if exprs:
+        planned_expr = exprs[0] if len(exprs) == 1 else func.coalesce(*exprs)
+        if planned_from:
+            stmt = stmt.where(planned_expr >= planned_from)
+        if planned_to:
+            stmt = stmt.where(planned_expr <= planned_to)
 
     return (await db.execute(stmt.order_by(Task.created_at.desc()))).scalars().all()
 
 
 async def _maps(db: AsyncSession, tasks: list[Task]) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str]]:
-    status_ids = {t.status_id for t in tasks}
-    user_ids = {t.assigned_to_user_id for t in tasks if t.assigned_to_user_id is not None}
+    status_ids = {getattr(t, "status_id", None) for t in tasks}
+    status_ids.discard(None)
+    user_ids = {getattr(t, "assigned_to_user_id", None) for t in tasks}
+    user_ids = {uid for uid in user_ids if uid is not None}
+    if not user_ids:
+        user_ids = {getattr(t, "assigned_to", None) for t in tasks}
+        user_ids = {uid for uid in user_ids if uid is not None}
     status_map: dict[uuid.UUID, str] = {}
     user_map: dict[uuid.UUID, str] = {}
 
@@ -395,20 +424,35 @@ async def _maps(db: AsyncSession, tasks: list[Task]) -> tuple[dict[uuid.UUID, st
 def _task_rows(tasks: list[Task], status_map: dict[uuid.UUID, str], user_map: dict[uuid.UUID, str]) -> list[list[str]]:
     rows: list[list[str]] = []
     for t in tasks:
+        planned_value = getattr(t, "planned_for", None)
+        if planned_value is None:
+            planned_value = getattr(t, "start_date", None) or getattr(t, "due_date", None)
+            if isinstance(planned_value, datetime):
+                planned_value = planned_value.date()
+        status_value = ""
+        status_id = getattr(t, "status_id", None)
+        if status_id:
+            status_value = status_map.get(status_id, "")
+        else:
+            status_value = getattr(t, "status", "") or ""
+        assigned_id = getattr(t, "assigned_to_user_id", None) or getattr(t, "assigned_to", None)
+        is_carried_over = bool(getattr(t, "is_carried_over", False))
+        carried_over_from = getattr(t, "carried_over_from", None)
+        reminder_enabled = bool(getattr(t, "reminder_enabled", False))
         rows.append(
             [
                 str(t.id),
                 t.title,
                 t.description or "",
-                t.task_type.value,
-                status_map.get(t.status_id, ""),
+                getattr(getattr(t, "task_type", None), "value", None) or getattr(t, "task_type", "") or "",
+                status_value,
                 str(t.department_id),
                 str(t.project_id),
-                user_map.get(t.assigned_to_user_id, "") if t.assigned_to_user_id else "",
-                t.planned_for.isoformat() if t.planned_for else "",
-                "yes" if t.is_carried_over else "no",
-                t.carried_over_from.isoformat() if t.carried_over_from else "",
-                "yes" if t.reminder_enabled else "no",
+                user_map.get(assigned_id, "") if assigned_id else "",
+                planned_value.isoformat() if planned_value else "",
+                "yes" if is_carried_over else "no",
+                carried_over_from.isoformat() if carried_over_from else "",
+                "yes" if reminder_enabled else "no",
                 t.created_at.isoformat() if t.created_at else "",
                 t.completed_at.isoformat() if t.completed_at else "",
             ]
@@ -611,7 +655,7 @@ async def export_tasks_csv(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
     tasks = await _query_tasks(
         db=db,
         user=user,
@@ -650,7 +694,7 @@ async def export_tasks_xlsx(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
     tasks = await _query_tasks(
         db=db,
         user=user,
@@ -701,6 +745,12 @@ async def export_tasks_xlsx(
                 readingOrder=1,
             )
 
+        status_fills = {
+            "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
+            "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
+            "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+        }
+
         # Data (simple table)
         # Use the same task list but present human-friendly columns
         # NOTE: This uses attributes already referenced elsewhere in this file, to avoid schema drift.
@@ -715,7 +765,7 @@ async def export_tasks_xlsx(
                 except Exception:
                     due_value = str(due_dt)
             assignee_name = ""
-            assignee_id = getattr(t, "assigned_to_user_id", None)
+            assignee_id = getattr(t, "assigned_to_user_id", None) or getattr(t, "assigned_to", None)
             if assignee_id:
                 assignee_name = user_map.get(assignee_id, "") or ""
             row_values = [
@@ -731,6 +781,11 @@ async def export_tasks_xlsx(
                 cell.alignment = Alignment(horizontal="left", vertical="bottom", readingOrder=1, wrap_text=False)
                 if col_idx == 1:
                     cell.font = Font(bold=True)
+                if col_idx == 3:
+                    normalized_status = (str(value) if value is not None else "").upper().replace(" ", "_")
+                    fill = status_fills.get(normalized_status)
+                    if fill:
+                        cell.fill = fill
             data_row += 1
 
         last_row = data_row - 1
@@ -780,12 +835,19 @@ async def export_tasks_xlsx(
         ws.firstFooter.center.text = ws.oddFooter.center.text
         ws.firstFooter.right.text = ws.oddFooter.right.text
 
-        # Thick outside border for header row
+        # Borders: thick outside, thin inside (entire table)
         thin = Side(style="thin", color="000000")
         thick = Side(style="medium", color="000000")
-        for c in range(1, last_col + 1):
-            cell = ws.cell(row=header_row, column=c)
-            cell.border = Border(left=thick, right=thick, top=thick, bottom=thick)
+        if last_row >= header_row:
+            for r in range(header_row, last_row + 1):
+                for c in range(1, last_col + 1):
+                    cell = ws.cell(row=r, column=c)
+                    cell.border = Border(
+                        left=thick if c == 1 else thin,
+                        right=thick if c == last_col else thin,
+                        top=thick if r == header_row else thin,
+                        bottom=thick if r == last_row else thin,
+                    )
 
         # Ensure all cells bottom-aligned (including blanks within used range)
         for r in range(1, last_row + 1):
@@ -834,9 +896,12 @@ async def export_fast_tasks_xlsx(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
 
     is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+
+    if not is_admin and department_id is None:
+        department_id = user.department_id
 
     assigned_user = aliased(User)
     created_user = aliased(User)
@@ -1058,7 +1123,7 @@ async def export_all_tasks_report_xlsx(
     payload: AllTasksReportExportIn,
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
 
     headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "PUNOI"]
     title_text = _safe_filename(payload.title or "ALL TASKS REPORT")
@@ -1219,7 +1284,7 @@ async def export_tasks_pdf(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
     tasks = await _query_tasks(
         db=db,
         user=user,
@@ -1568,13 +1633,36 @@ async def _daily_report_rows_for_user(
             dept_code=dept_code,
         ):
             continue
+
         planned_start, planned_end = planned_range_for_daily_report(task, dept_code)
         if planned_start is None or planned_end is None:
             continue
+
+        is_project_task = task.project_id is not None
+        if is_project_task:
+            # Match the UI daily report view:
+            # project tasks show only when due date is today/past (or completed today).
+            due_day = _as_utc_date(task.due_date)
+            if due_day is None:
+                continue
+            planned_start, planned_end = due_day, due_day
+
         planned_range_by_task_id[task.id] = (planned_start, planned_end)
+
         if completed_on_day(task.completed_at, day):
             tasks_today.append(task)
-        elif planned_start <= day <= planned_end:
+            continue
+
+        if is_project_task:
+            if planned_end <= day:
+                if planned_end == day:
+                    tasks_today.append(task)
+                else:
+                    tasks_overdue.append(task)
+            continue
+
+        # Fast tasks: show once their range has started.
+        if planned_start <= day <= planned_end:
             tasks_today.append(task)
         elif planned_end < day:
             tasks_overdue.append(task)
@@ -2096,12 +2184,37 @@ async def export_daily_report_xlsx(
 @router.get("/system-tasks.xlsx")
 async def export_system_tasks_xlsx(
     active_only: bool = True,
+    department_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    status_id: uuid.UUID | None = None,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    ensure_manager_or_admin(user)
+    ensure_reports_access(user)
+    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+
+    status_name: str | None = None
+    if status_id is not None:
+        status_row = (await db.execute(select(TaskStatus).where(TaskStatus.id == status_id))).scalar_one_or_none()
+        if status_row is not None:
+            status_name = status_row.name
+
     template_stmt = select(SystemTaskTemplate)
-    if user.role != UserRole.ADMIN:
+    if department_id is not None:
+        ensure_department_access(user, department_id)
+        template_stmt = template_stmt.where(
+            or_(
+                and_(
+                    SystemTaskTemplate.scope == SystemTaskScope.DEPARTMENT.value,
+                    SystemTaskTemplate.department_id == department_id,
+                ),
+                SystemTaskTemplate.scope == SystemTaskScope.ALL.value,
+                SystemTaskTemplate.scope == SystemTaskScope.GA.value,
+            )
+        )
+    elif not is_admin:
         if user.department_id is None:
             if user.role != UserRole.MANAGER:
                 return []
@@ -2155,6 +2268,17 @@ async def export_system_tasks_xlsx(
     )
     if active_only:
         task_stmt = task_stmt.where(Task.is_active.is_(True))
+    if department_id is not None:
+        task_stmt = task_stmt.where(Task.department_id == department_id)
+    if user_id is not None:
+        assignee_subq = select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id)
+        task_stmt = task_stmt.where(or_(Task.assigned_to == user_id, Task.id.in_(assignee_subq)))
+    if status_name:
+        task_stmt = task_stmt.where(Task.status == status_name)
+    if planned_from:
+        task_stmt = task_stmt.where(func.date(Task.start_date) >= planned_from)
+    if planned_to:
+        task_stmt = task_stmt.where(func.date(Task.start_date) <= planned_to)
     task_rows = (await db.execute(task_stmt.order_by(Task.created_at.desc()))).all()
     dedup: dict[uuid.UUID, tuple[Task, SystemTaskTemplate]] = {}
     for task, tmpl in task_rows:
@@ -2264,9 +2388,11 @@ async def export_system_tasks_xlsx(
     title_cell.font = Font(bold=True, size=16)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
+        cell.fill = header_fill
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
     col_widths = [len(header) for header in headers]
