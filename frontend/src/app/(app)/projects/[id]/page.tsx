@@ -377,7 +377,7 @@ export default function ProjectPage() {
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
-  const [taskAssigneeFilter, setTaskAssigneeFilter] = React.useState<string>(ME_FILTER)
+  const [taskAssigneeFilter, setTaskAssigneeFilter] = React.useState<string>(ALL_USERS_FILTER)
   const [departmentUsers, setDepartmentUsers] = React.useState<User[]>([])
   const [allUsers, setAllUsers] = React.useState<User[]>([])
   const [projectDepartmentName, setProjectDepartmentName] = React.useState<string | null>(null)
@@ -564,12 +564,6 @@ export default function ProjectPage() {
   const [isEditingProjectTitle, setIsEditingProjectTitle] = React.useState(false)
   const [projectTitleDraft, setProjectTitleDraft] = React.useState("")
   const [savingProjectTitle, setSavingProjectTitle] = React.useState(false)
-
-  React.useEffect(() => {
-    if (taskAssigneeFilter === ME_FILTER && user?.id) {
-      setTaskAssigneeFilter(user.id)
-    }
-  }, [taskAssigneeFilter, user?.id])
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
