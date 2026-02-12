@@ -150,6 +150,41 @@ def _frequency_label(value: str | None) -> str:
     }.get(normalized, value or "")
 
 
+_WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _system_task_schedule_label(template: SystemTaskTemplate) -> str:
+    frequency = (template.frequency or "").upper()
+
+    if frequency == "WEEKLY":
+        raw_days = list(template.days_of_week or [])
+        if not raw_days and template.day_of_week is not None:
+            raw_days = [template.day_of_week]
+        day_values: set[int] = set()
+        for raw in raw_days:
+            try:
+                day_value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= day_value <= 6:
+                day_values.add(day_value)
+        if not day_values:
+            return ""
+        return ", ".join(_WEEKDAY_LABELS[day] for day in sorted(day_values))
+
+    if frequency in {"MONTHLY", "3_MONTHS", "6_MONTHS"}:
+        day_of_month = template.day_of_month
+        if day_of_month is None:
+            return ""
+        if day_of_month == 0:
+            return "end_of_month"
+        if day_of_month == -1:
+            return "first_working_day"
+        return str(day_of_month)
+
+    return ""
+
+
 def _department_short(label: str) -> str:
     key = label.strip().upper()
     return {
@@ -2368,6 +2403,7 @@ async def export_system_tasks_xlsx(
         "NR",
         "PRIO",
         "LL",
+        "DITA",
         "DEP",
         "AM/\nPM",
         "TITULLI",
@@ -2444,10 +2480,12 @@ async def export_system_tasks_xlsx(
         if alignment_time:
             alignment_time_str = str(alignment_time)
             bz_time_value = alignment_time_str[:5]
+        schedule_value = _system_task_schedule_label(template)
         values = [
             idx,
             _priority_label(template.priority),
             _frequency_label(template.frequency),
+            schedule_value,
             department_label,
             task.finish_period or "",
             task.title,
