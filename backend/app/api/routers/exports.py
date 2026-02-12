@@ -18,6 +18,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -34,7 +35,6 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
-from app.models.task_assignee import TaskAssignee
 from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_status import TaskStatus
@@ -3127,6 +3127,47 @@ async def export_ga_notes_xlsx(
             stmt = stmt.where(GaNote.department_id == user.department_id)
     
     notes = (await db.execute(stmt)).scalars().all()
+
+    note_ids = [n.id for n in notes]
+    tasks = []
+    if note_ids:
+        tasks = (
+            await db.execute(
+                select(Task)
+                .options(selectinload(Task.assignees))
+                .where(Task.ga_note_origin_id.in_(note_ids))
+            )
+        ).scalars().all()
+
+    assignee_user_ids = set()
+    for task in tasks:
+        if task.assigned_to:
+            assignee_user_ids.add(task.assigned_to)
+        for assignee in task.assignees:
+            assignee_user_ids.add(assignee.user_id)
+
+    assignees_map = {}
+    if assignee_user_ids:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(assignee_user_ids)))
+        ).scalars().all()
+        assignees_map = {u.id: u for u in assignee_users}
+
+    note_task_info: dict[uuid.UUID, dict[str, object]] = {}
+    for task in tasks:
+        if not task.ga_note_origin_id:
+            continue
+        info = note_task_info.setdefault(
+            task.ga_note_origin_id,
+            {"assignee_ids": set(), "statuses": [], "has_task": True},
+        )
+        info["has_task"] = True
+        if task.status:
+            info["statuses"].append(task.status)
+        if task.assigned_to:
+            info["assignee_ids"].add(task.assigned_to)
+        for assignee in task.assignees:
+            info["assignee_ids"].add(assignee.user_id)
     
     # Get related data
     user_ids = {n.created_by for n in notes if n.created_by}
@@ -3171,10 +3212,47 @@ async def export_ga_notes_xlsx(
         if not dt:
             return "-"
         return dt.strftime("%d.%m, %I:%M %p")
+
+    def normalize_task_status(value: str | None) -> str:
+        if not value:
+            return "UNKNOWN"
+        normalized = re.sub(r"\s+", "_", value.strip().lower())
+        if normalized in {"todo", "to_do", "to-do", "to do"}:
+            return "TODO"
+        if normalized in {"in_progress", "in-progress", "in progress"}:
+            return "IN_PROGRESS"
+        if normalized in {"done"}:
+            return "DONE"
+        return "UNKNOWN"
+
+    def aggregate_task_status(statuses: list[str | None]) -> str:
+        normalized = []
+        for status in statuses:
+            value = normalize_task_status(status)
+            normalized.append(value if value != "UNKNOWN" else "TODO")
+        if not normalized:
+            return "UNKNOWN"
+        if all(status == "DONE" for status in normalized):
+            return "DONE"
+        if any(status == "IN_PROGRESS" for status in normalized):
+            return "IN_PROGRESS"
+        if any(status == "DONE" for status in normalized):
+            return "IN_PROGRESS"
+        return "TODO"
     
     # Build rows
-    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "DEP", "PRJK", "KRIJO DETYRE", "MBYLL SHENIM"]
+    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "PER", "DEP", "PRJK", "KRIJO DETYRE", "MBYLL SHENIM"]
     rows = []
+    row_shenimi_fills: list[PatternFill] = []
+
+    shenimi_fills = {
+        "CLOSED": PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid"),
+        "NO_TASK": PatternFill(start_color="BAE6FD", end_color="BAE6FD", fill_type="solid"),
+        "TODO": PatternFill(start_color="FBCFE8", end_color="FBCFE8", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FDE68A", end_color="FDE68A", fill_type="solid"),
+        "DONE": PatternFill(start_color="A7F3D0", end_color="A7F3D0", fill_type="solid"),
+        "UNKNOWN": PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid"),
+    }
     
     for idx, note in enumerate(notes, start=1):
         creator_initials = get_user_initials(note.created_by)
@@ -3184,22 +3262,52 @@ async def export_ga_notes_xlsx(
             p = projects_map[note.project_id]
             project_name = p.title or p.name or "Project"
         
-        task_status = "Task Created" if note.is_converted_to_task else "No Task"
+        task_info = note_task_info.get(note.id)
+        has_task = bool(note.is_converted_to_task or task_info)
+        task_status = "Task Created" if has_task else "No Task"
         note_status = "Closed" if note.status == GaNoteStatus.CLOSED else "Open"
+
+        assignee_initials: list[str] = []
+        if task_info:
+            assignee_ids = list(task_info["assignee_ids"])
+            for assignee_id in sorted(assignee_ids, key=lambda value: str(value)):
+                user_obj = assignees_map.get(assignee_id)
+                if not user_obj:
+                    continue
+                initials = _initials(user_obj.full_name or user_obj.username or "")
+                if initials and initials not in assignee_initials:
+                    assignee_initials.append(initials)
+        per_value = "-"
+        if note.is_converted_to_task and assignee_initials:
+            per_value = ", ".join(assignee_initials)
         
         # Clean content (remove HTML if any)
         content = _strip_html(note.content) if note.content else ""
+
+        if note.status == GaNoteStatus.CLOSED:
+            shenimi_fill = shenimi_fills["CLOSED"]
+        elif not has_task:
+            shenimi_fill = shenimi_fills["NO_TASK"]
+        else:
+            statuses = task_info["statuses"] if task_info else []
+            if len(statuses) > 1:
+                agg_status = aggregate_task_status(statuses)
+            else:
+                agg_status = normalize_task_status(statuses[0]) if statuses else "UNKNOWN"
+            shenimi_fill = shenimi_fills.get(agg_status, shenimi_fills["UNKNOWN"])
         
         rows.append([
             str(idx),
             content,
             format_note_date(note.created_at),
             creator_initials,
+            per_value,
             dept_abbrev,
             project_name,
             task_status,
             note_status,
         ])
+        row_shenimi_fills.append(shenimi_fill)
     
     # Create workbook
     wb = Workbook()
@@ -3235,12 +3343,16 @@ async def export_ga_notes_xlsx(
     # Data rows (starting from row 4)
     last_row = header_row + len(rows)
     for row_idx, row_data in enumerate(rows, start=header_row + 1):
+        row_offset = row_idx - (header_row + 1)
+        shenimi_fill = row_shenimi_fills[row_offset] if row_offset < len(row_shenimi_fills) else None
         for col_idx, value in enumerate(row_data, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
             # Bold for NR column
             if col_idx == 1:
                 cell.font = Font(bold=True)
+            if col_idx == 2 and shenimi_fill:
+                cell.fill = shenimi_fill
             # Thick outside borders
             left_border = thick if col_idx == 1 else thin
             right_border = thick if col_idx == last_col else thin
@@ -3249,14 +3361,15 @@ async def export_ga_notes_xlsx(
             cell.border = Border(left=left_border, right=right_border, top=top_border, bottom=bottom_border)
     
     # Column widths
-    ws.column_dimensions["A"].width = 5  # NR
+    ws.column_dimensions["A"].width = 5   # NR
     ws.column_dimensions["B"].width = 50  # SHENIMI
     ws.column_dimensions["C"].width = 18  # DATA,ORA
     ws.column_dimensions["D"].width = 8   # NGA
-    ws.column_dimensions["E"].width = 8   # DEP
-    ws.column_dimensions["F"].width = 20  # PRJK
-    ws.column_dimensions["G"].width = 15  # KRIJO DETYRE
-    ws.column_dimensions["H"].width = 15  # MBYLL SHENIM
+    ws.column_dimensions["E"].width = 9   # PER
+    ws.column_dimensions["F"].width = 8   # DEP
+    ws.column_dimensions["G"].width = 20  # PRJK
+    ws.column_dimensions["H"].width = 15  # KRIJO DETYRE
+    ws.column_dimensions["I"].width = 15  # MBYLL SHENIM
     
     # Freeze panes: freeze column A (NR) and header row
     ws.freeze_panes = "B5"

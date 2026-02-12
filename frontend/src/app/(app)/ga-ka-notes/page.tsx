@@ -1571,7 +1571,10 @@ export default function GaKaNotesPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                disabled={hasTask}
+                                aria-disabled={hasTask}
+                                title={hasTask ? "Close disabled when task exists" : "Close"}
+                                className={`h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 ${hasTask ? "opacity-50 cursor-not-allowed" : ""}`}
                                 onClick={() => void closeNote(note.id)}
                               >
                                 Close
