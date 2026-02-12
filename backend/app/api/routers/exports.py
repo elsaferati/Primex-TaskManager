@@ -2121,6 +2121,32 @@ async def export_system_tasks_xlsx(
     if not templates:
         return []
 
+    template_assignee_ids_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    template_assignee_user_ids: set[uuid.UUID] = set()
+    for tmpl in templates:
+        raw_ids = list(getattr(tmpl, "assignee_ids", None) or [])
+        if tmpl.default_assignee_id and tmpl.default_assignee_id not in raw_ids:
+            raw_ids.append(tmpl.default_assignee_id)
+        if raw_ids:
+            seen: set[uuid.UUID] = set()
+            deduped: list[uuid.UUID] = []
+            for uid in raw_ids:
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                deduped.append(uid)
+            template_assignee_ids_map[tmpl.id] = deduped
+            template_assignee_user_ids.update(deduped)
+
+    template_assignee_initials_map: dict[uuid.UUID, str] = {}
+    if template_assignee_user_ids:
+        template_assignee_users = (
+            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+        ).scalars().all()
+        template_assignee_initials_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
+        }
+
     template_ids = [t.id for t in templates]
     task_stmt = (
         select(Task, SystemTaskTemplate)
@@ -2246,11 +2272,17 @@ async def export_system_tasks_xlsx(
     col_widths = [len(header) for header in headers]
 
     for idx, (task, template) in enumerate(task_rows, start=1):
-        assignees = assignee_map.get(task.id, [])
-        if not assignees and task.assigned_to in fallback_map:
-            assignees = [fallback_map[task.assigned_to]]
-        assignee_initials = [(_initials(name) if name else "") for name in assignees]
+        template_assignee_ids = template_assignee_ids_map.get(template.id, [])
+        assignee_initials = [
+            template_assignee_initials_map.get(uid, "") for uid in template_assignee_ids
+        ]
         assignee_label = ", ".join([initials for initials in assignee_initials if initials])
+        if not assignee_label:
+            assignees = assignee_map.get(task.id, [])
+            if not assignees and task.assigned_to in fallback_map:
+                assignees = [fallback_map[task.assigned_to]]
+            fallback_initials = [(_initials(name) if name else "") for name in assignees]
+            assignee_label = ", ".join([initials for initials in fallback_initials if initials])
         row_idx = data_row + idx - 1
         if template.department_id and template.department_id in department_map:
             department_label = _department_short(department_map[template.department_id])

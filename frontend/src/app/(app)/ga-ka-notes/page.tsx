@@ -62,6 +62,7 @@ const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "DONE" | "UNKNOWN"
+type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 
 function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   if (!value) return "UNKNOWN"
@@ -163,9 +164,8 @@ export default function GaKaNotesPage() {
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
-  const [statusFilter, setStatusFilter] = React.useState<"all" | "open" | "closed">("all")
   const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
-  const [taskFilter, setTaskFilter] = React.useState<"all" | "with_tasks" | "without_tasks">("all")
+  const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
@@ -999,27 +999,30 @@ export default function GaKaNotesPage() {
       const created = note.created_at ? new Date(note.created_at).getTime() : 0
       return created >= weekAgo
     }
-    const matchesStatus = (note: GaNote) => {
-      if (statusFilter === "all") return true
-      if (statusFilter === "open") return note.status !== "CLOSED"
-      if (statusFilter === "closed") return note.status === "CLOSED"
-      return true
-    }
     const matchesNoteType = (note: GaNote) => {
       if (noteTypeFilter === "all") return true
       return note.note_type === noteTypeFilter
     }
-    const matchesTaskFilter = (note: GaNote) => {
-      if (taskFilter === "all") return true
-      if (taskFilter === "with_tasks") return note.is_converted_to_task === true
-      if (taskFilter === "without_tasks") return note.is_converted_to_task === false
-      return true
+    const matchesTaskStatusFilter = (note: GaNote) => {
+      if (taskStatusFilter === "all") return true
+      if (taskStatusFilter === "open") return note.status !== "CLOSED"
+      if (taskStatusFilter === "closed") return note.status === "CLOSED"
+      const hasTask = note.is_converted_to_task === true || noteTaskInfo.has(note.id)
+      if (taskStatusFilter === "notes") return !hasTask
+      if (taskStatusFilter === "tasks") return hasTask
+      const taskInfo = noteTaskInfo.get(note.id)
+      if (!taskInfo) return false
+      const aggregatedStatus =
+        taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
+          ? aggregateTaskStatus(taskInfo.taskStatuses)
+          : normalizeTaskStatus(taskInfo?.taskStatus)
+      if (aggregatedStatus === "UNKNOWN") return false
+      return aggregatedStatus === taskStatusFilter
     }
     const sorted = [...notes]
       .filter(withinRange)
-      .filter(matchesStatus)
       .filter(matchesNoteType)
-      .filter(matchesTaskFilter)
+      .filter(matchesTaskStatusFilter)
       .sort((a, b) => {
         // First, sort by status: open notes first, closed notes last
         const aIsClosed = a.status === "CLOSED"
@@ -1033,7 +1036,7 @@ export default function GaKaNotesPage() {
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, rangeFilter, statusFilter, noteTypeFilter, taskFilter])
+  }, [notes, rangeFilter, noteTypeFilter, taskStatusFilter, noteTaskInfo])
 
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
@@ -1213,18 +1216,6 @@ export default function GaKaNotesPage() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | "open" | "closed")}>
-                <SelectTrigger className="h-9 w-[140px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
               <Select value={noteTypeFilter} onValueChange={(v) => setNoteTypeFilter(v as "all" | "GA" | "KA")}>
                 <SelectTrigger className="h-9 w-[120px]">
                   <SelectValue placeholder="Type" />
@@ -1237,14 +1228,46 @@ export default function GaKaNotesPage() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Select value={taskFilter} onValueChange={(v) => setTaskFilter(v as "all" | "with_tasks" | "without_tasks")}>
-                <SelectTrigger className="h-9 w-[140px]">
-                  <SelectValue placeholder="Tasks" />
+              <Select
+                value={taskStatusFilter}
+                onValueChange={(v) => setTaskStatusFilter(v as TaskStatusFilter)}
+              >
+                <SelectTrigger className="h-9 w-[180px]">
+                  <SelectValue placeholder="Tasks/Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Notes</SelectItem>
-                  <SelectItem value="with_tasks">Tasks</SelectItem>
-                  <SelectItem value="without_tasks">Notes</SelectItem>
+                  <SelectItem value="all">All Tasks/Notes</SelectItem>
+                  <SelectItem value="tasks">Tasks</SelectItem>
+                  <SelectItem
+                    value="notes"
+                    className="bg-sky-100 text-sky-900 focus:bg-sky-200 focus:text-sky-900"
+                  >
+                    Notes
+                  </SelectItem>
+                  <SelectItem
+                    value="closed"
+                    className="bg-slate-200 text-slate-800 focus:bg-slate-300 focus:text-slate-900"
+                  >
+                    Closed
+                  </SelectItem>
+                  <SelectItem
+                    value="TODO"
+                    className="bg-pink-100 text-pink-900 focus:bg-pink-200 focus:text-pink-900"
+                  >
+                    To do
+                  </SelectItem>
+                  <SelectItem
+                    value="IN_PROGRESS"
+                    className="bg-amber-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
+                  >
+                    In progress
+                  </SelectItem>
+                  <SelectItem
+                    value="DONE"
+                    className="bg-emerald-100 text-emerald-900 focus:bg-emerald-200 focus:text-emerald-900"
+                  >
+                    Done
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
