@@ -32,6 +32,7 @@ type PriorityItem = { project: string; date: string; assignees: string[] }
 type SwimlaneCell = {
   title: string
   subtitle?: string
+  dateLabel?: string
   accentClass?: string
   assignees?: string[]
   placeholder?: boolean
@@ -1455,6 +1456,24 @@ export default function CommonViewPage() {
       .map((u) => u.full_name || u.username || "Unknown")
   }, [users])
 
+  const isMultiDate = selectedDates.size > 1
+
+  const sortByDate = React.useCallback(
+    <T,>(
+      items: T[],
+      getDateKey: (item: T) => string,
+      getTitle: (item: T) => string
+    ) => {
+      return [...items].sort((a, b) => {
+        const aDate = getDateKey(a)
+        const bDate = getDateKey(b)
+        if (aDate !== bDate) return aDate.localeCompare(bDate)
+        return getTitle(a).localeCompare(getTitle(b))
+      })
+    },
+    []
+  )
+
   // Handlers
   const toggleDay = (iso: string) => {
     setSelectedDates((prev) => {
@@ -2081,9 +2100,10 @@ export default function CommonViewPage() {
     [isAdmin, apiFetch, commonDepartmentId]
   )
 
-  const buildSwimlaneCells = (items: SwimlaneCell[]) => {
+  const buildSwimlaneCells = (items: SwimlaneCell[], targetCount: number) => {
     const baseItems = items.length ? items : [{ title: "No data available.", placeholder: true }]
-    const totalCells = Math.max(3, Math.ceil(baseItems.length / 3) * 3)
+    const minimumCells = Math.max(3, Math.ceil(baseItems.length / 3) * 3)
+    const totalCells = Math.max(minimumCells, targetCount)
     return [
       ...baseItems,
       ...Array.from({ length: totalCells - baseItems.length }, () => null),
@@ -2092,19 +2112,31 @@ export default function CommonViewPage() {
 
 
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
-    const lateItems: SwimlaneCell[] = filtered.late.map((x) => ({
+    const lateSource = isMultiDate
+      ? sortByDate(filtered.late, (x) => x.date, (x) => x.person)
+      : filtered.late
+    const lateItems: SwimlaneCell[] = lateSource.map((x) => ({
       title: x.person,
       subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent delay",
       entryId: x.entryId,
     }))
-    const absentItems: SwimlaneCell[] = filtered.absent.map((x) => ({
+
+    const absentSource = isMultiDate
+      ? sortByDate(filtered.absent, (x) => x.date, (x) => x.person)
+      : filtered.absent
+    const absentItems: SwimlaneCell[] = absentSource.map((x) => ({
       title: x.person,
       subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent absence",
       entryId: x.entryId,
     }))
-    const leaveItems: SwimlaneCell[] = filtered.leave.map((x) => {
+    const leaveSource = isMultiDate
+      ? sortByDate(filtered.leave, (x) => x.startDate, (x) => x.person)
+      : filtered.leave
+    const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
         ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
@@ -2115,57 +2147,98 @@ export default function CommonViewPage() {
       return {
         title: x.person,
         subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel,
         accentClass: "swimlane-accent leave",
         entryId: x.entryId,
       }
     })
-    const blockedItems: SwimlaneCell[] = filtered.blocked.map((x) => ({
+
+    const blockedSource = isMultiDate
+      ? sortByDate(filtered.blocked, (x) => x.date, (x) => x.title)
+      : filtered.blocked
+    const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent blocked",
     }))
-    const oneHItems: SwimlaneCell[] = filtered.oneH.map((x) => ({
+
+    const oneHSource = isMultiDate
+      ? sortByDate(filtered.oneH, (x) => x.date, (x) => x.title)
+      : filtered.oneH
+    const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent oneh",
     }))
-    const personalItems: SwimlaneCell[] = filtered.personal.map((x) => ({
+
+    const personalSource = isMultiDate
+      ? sortByDate(filtered.personal, (x) => x.date, (x) => x.title)
+      : filtered.personal
+    const personalItems: SwimlaneCell[] = personalSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent personal",
     }))
-    const externalItems: SwimlaneCell[] = filtered.external.map((x) => ({
+
+    const externalSource = isMultiDate
+      ? sortByDate(filtered.external, (x) => x.date, (x) => x.title)
+      : filtered.external
+    const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)} - ${x.platform}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent external",
     }))
-    const r1Items: SwimlaneCell[] = filtered.r1.map((x) => ({
+
+    const r1Source = isMultiDate
+      ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
+      : filtered.r1
+    const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent r1",
     }))
-    const problemItems: SwimlaneCell[] = filtered.problems.map((x) => ({
+
+    const problemSource = isMultiDate
+      ? sortByDate(filtered.problems, (x) => x.date, (x) => x.title)
+      : filtered.problems
+    const problemItems: SwimlaneCell[] = problemSource.map((x) => ({
       title: x.title,
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent problem",
       entryId: x.entryId,
     }))
-    const feedbackItems: SwimlaneCell[] = filtered.feedback.map((x) => ({
+
+    const feedbackSource = isMultiDate
+      ? sortByDate(filtered.feedback, (x) => x.date, (x) => x.title)
+      : filtered.feedback
+    const feedbackItems: SwimlaneCell[] = feedbackSource.map((x) => ({
       title: x.title,
       subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent feedback",
       entryId: x.entryId,
     }))
-    const priorityItems: SwimlaneCell[] = filtered.priority.map((p, idx) => ({
+
+    const prioritySource = isMultiDate
+      ? sortByDate(filtered.priority, (x) => x.date, (x) => x.project)
+      : filtered.priority
+    const priorityItems: SwimlaneCell[] = prioritySource.map((p, idx) => ({
       title: p.project,
       assignees: p.assignees,
       accentClass: "swimlane-accent priority",
       number: idx + 1,
+      dateLabel: formatDateHuman(p.date),
     }))
 
     return [
@@ -2258,7 +2331,16 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered])
+  }, [filtered, isMultiDate, sortByDate])
+
+  const swimlaneColumnCount = React.useMemo(() => {
+    if (!swimlaneRows.length) return 3
+    const counts = swimlaneRows.map((row) => {
+      const length = row.items.length || 1
+      return Math.max(3, Math.ceil(length / 3) * 3)
+    })
+    return Math.max(...counts)
+  }, [swimlaneRows])
 
   // Organize data by day for table view
   const tableDataByDay = React.useMemo(() => {
@@ -2633,6 +2715,7 @@ export default function CommonViewPage() {
           --priority-accent: #d97706;
           --cell-bg: #ffffff;
           --cell-tint: #f9fafb;
+          --swim-col-width: 280px;
         }
         
         /* Modern Header */
@@ -2927,25 +3010,28 @@ export default function CommonViewPage() {
           }
             .swimlane-title-row {
               display: flex !important;
+              flex-direction: column !important;
               align-items: flex-start !important;
-              justify-content: space-between !important;
-              gap: 8px !important;
+              gap: 6px !important;
               width: 100% !important;
-              padding-right: 60px !important;
+              padding-right: 0 !important;
             }
-          .swimlane-title {
-            flex: 1 1 auto !important;
-            min-width: 0 !important;
-          }
+            .swimlane-title {
+              flex: 1 1 auto !important;
+              min-width: 0 !important;
+              width: 100% !important;
+            }
+            .swimlane-date {
+              font-size: 12px !important;
+              color: var(--swim-muted) !important;
+              line-height: 1.2 !important;
+            }
             .swimlane-assignees {
               display: flex !important;
-              position: absolute !important;
-              top: 6px !important;
-              right: 6px !important;
               gap: 6px !important;
-              flex-wrap: nowrap !important;
+              flex-wrap: wrap !important;
               align-items: center !important;
-              justify-content: flex-end !important;
+              justify-content: flex-start !important;
               margin-left: 0 !important;
               flex-shrink: 0 !important;
               z-index: 2 !important;
@@ -3266,7 +3352,7 @@ export default function CommonViewPage() {
           right: 8px;
           display: flex;
           gap: 4px;
-          z-index: 2;
+          z-index: 10;
         }
         .swimlane-row-nav button {
           background: #f8fafc;
@@ -3294,9 +3380,11 @@ export default function CommonViewPage() {
           padding-bottom: 6px;
           scroll-behavior: smooth;
           scrollbar-gutter: stable;
-          padding-right: 40px;
+          padding-right: 70px;
           scrollbar-width: none;
           -ms-overflow-style: none;
+          position: relative;
+          z-index: 1;
         }
         .swimlane-content-scroll::-webkit-scrollbar {
           display: none;
@@ -3304,10 +3392,11 @@ export default function CommonViewPage() {
         .swimlane-content {
           flex: 1;
           display: grid;
-          grid-template-columns: repeat(3, minmax(220px, 1fr));
+          grid-template-columns: repeat(3, var(--swim-col-width));
           grid-auto-flow: column;
-          grid-auto-columns: minmax(220px, 1fr);
-          min-width: 660px;
+          grid-auto-columns: var(--swim-col-width);
+          min-width: calc(var(--swim-col-width) * 3);
+          width: max-content;
         }
         .swimlane-delete {
           position: absolute;
@@ -3335,13 +3424,13 @@ export default function CommonViewPage() {
           box-shadow: none;
         }
         .swimlane-cell {
-          padding: 12px 70px 12px 14px;
+          padding: 12px 44px 12px 14px;
           border-right: 1px solid var(--swim-border);
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 4px;
           color: var(--swim-text);
           background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
@@ -3359,17 +3448,23 @@ export default function CommonViewPage() {
         }
         .swimlane-title-row {
           display: flex;
+          flex-direction: column;
           align-items: flex-start;
-          justify-content: space-between;
-          gap: 8px;
+          gap: 6px;
           width: 100%;
-          padding-right: 70px;
+          padding-right: 0;
         }
         .swimlane-title {
           flex: 1 1 auto;
           min-width: 0;
           font-weight: 700;
           font-size: 14px;
+          width: 100%;
+        }
+        .swimlane-date {
+          font-size: 12px;
+          color: var(--swim-muted);
+          line-height: 1.2;
         }
         .swimlane-subtitle {
           font-size: 12px;
@@ -3401,14 +3496,11 @@ export default function CommonViewPage() {
         }
         .swimlane-assignees {
           display: flex;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
           gap: 6px;
           align-items: center;
-          justify-content: flex-end;
+          justify-content: flex-start;
           margin-left: 0;
-          position: absolute;
-          top: 10px;
-          right: 36px;
           z-index: 2;
         }
         .swimlane-avatar {
@@ -3429,6 +3521,8 @@ export default function CommonViewPage() {
           white-space: nowrap;
           word-break: keep-all;
           overflow-wrap: normal;
+          position: relative;
+          z-index: 1;
         }
         
         /* Week Table View - Shows when all days are selected */
@@ -5674,7 +5768,7 @@ export default function CommonViewPage() {
             {swimlaneRows
               .filter((row) => showCard(row.id))
               .map((row) => {
-                const cells = buildSwimlaneCells(row.items)
+                const cells = buildSwimlaneCells(row.items, swimlaneColumnCount)
                 return (
                   <div key={row.id} className="swimlane-row">
                     <div className={row.headerClass}>
@@ -5717,10 +5811,6 @@ export default function CommonViewPage() {
                                   </button>
                                 ) : null}
                                 <div className="swimlane-title-row">
-                                  <div className="swimlane-title">
-                                    {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
-                                    {stripInitialsPrefix(cell.title)}
-                                  </div>
                                   {!cell.placeholder && cell.assignees?.length ? (
                                     <div className="swimlane-assignees">
                                       {cell.assignees.map((name) => (
@@ -5730,8 +5820,14 @@ export default function CommonViewPage() {
                                       ))}
                                     </div>
                                   ) : null}
+                                  <div className="swimlane-title">
+                                    {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
+                                    {stripInitialsPrefix(cell.title)}
+                                  </div>
+                                  {cell.dateLabel ? (
+                                    <div className="swimlane-date">{cell.dateLabel}</div>
+                                  ) : null}
                                 </div>
-                                {cell.subtitle ? <div className="swimlane-subtitle">{cell.subtitle}</div> : null}
                               </div>
                             ) : (
                               <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
