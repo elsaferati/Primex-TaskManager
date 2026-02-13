@@ -18,6 +18,7 @@ type AuthContextValue = {
 const AuthContext = React.createContext<AuthContextValue | null>(null)
 
 const ACCESS_TOKEN_KEY = "primex_access_token"
+const LOGOUT_AT_KEY = "primex_logout_at"
 const FETCH_TIMEOUT_MS = 8000
 // Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
@@ -31,6 +32,20 @@ function setStoredToken(token: string | null) {
   if (typeof window === "undefined") return
   if (!token) window.localStorage.removeItem(ACCESS_TOKEN_KEY)
   else window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
+}
+
+function getStoredLogoutAt(): number | null {
+  if (typeof window === "undefined") return null
+  const raw = window.localStorage.getItem(LOGOUT_AT_KEY)
+  if (!raw) return null
+  const value = Number(raw)
+  return Number.isNaN(value) ? null : value
+}
+
+function setStoredLogoutAt(timestampMs: number | null) {
+  if (typeof window === "undefined") return
+  if (!timestampMs) window.localStorage.removeItem(LOGOUT_AT_KEY)
+  else window.localStorage.setItem(LOGOUT_AT_KEY, String(timestampMs))
 }
 
 /**
@@ -99,6 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = React.useState<string | null>(null)
   const [user, setUser] = React.useState<User | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const logoutInProgressRef = React.useRef(false)
 
   React.useEffect(() => {
     const boot = async () => {
@@ -112,6 +128,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const me = await fetchMe(existing)
         setToken(existing)
         setUser(me)
+        if (getStoredLogoutAt() == null) {
+          setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
+        }
       } catch {
         const refreshed = await refreshAccessToken()
         if (refreshed) {
@@ -120,6 +139,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setStoredToken(refreshed)
             setToken(refreshed)
             setUser(me)
+            if (getStoredLogoutAt() == null) {
+              setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
+            }
           } catch {
             setStoredToken(null)
             setToken(null)
@@ -187,6 +209,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     return () => ws.close()
   }, [token, user])
+
+  React.useEffect(() => {
+    if (!token || !user) return
+    const checkLogoutSession = async () => {
+      if (logoutInProgressRef.current) return
+      const logoutAt = getStoredLogoutAt()
+      if (!logoutAt) return
+      if (Date.now() >= logoutAt) {
+        logoutInProgressRef.current = true
+        toast("Session ended", {
+          description: "You have been logged out.",
+        })
+        await logout()
+      }
+    }
+
+    void checkLogoutSession()
+    const interval = setInterval(() => {
+      void checkLogoutSession()
+    }, 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [token, user, logout])
 
   const apiFetch = React.useCallback(
     async (path: string, init: RequestInit = {}) => {
@@ -270,6 +315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStoredToken(data.access_token)
     setToken(data.access_token)
     setUser(me)
+    setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
   }, [])
 
   const logout = React.useCallback(async () => {
@@ -279,6 +325,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     setStoredToken(null)
+    setStoredLogoutAt(null)
     setToken(null)
     setUser(null)
   }, [])
