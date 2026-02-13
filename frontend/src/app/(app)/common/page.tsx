@@ -20,7 +20,17 @@ type CommonType =
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
-type LeaveItem = { entryId?: string; person: string; startDate: string; endDate: string; fullDay: boolean; from?: string; to?: string; note?: string }
+type LeaveItem = {
+  entryId?: string
+  person: string
+  startDate: string
+  endDate: string
+  fullDay: boolean
+  from?: string
+  to?: string
+  note?: string
+  isAllUsers?: boolean
+}
 type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type OneHItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
@@ -92,6 +102,11 @@ type MeetingChecklist = {
   }[]
 }
 
+
+const ALL_USERS_VALUE = "__all__"
+const ALL_USERS_LABEL = "All users"
+const ALL_USERS_INITIALS = "ALL"
+const ALL_USERS_MARKER = "[ALL_USERS]"
 
 const initials = (name: string) => {
   const cleaned = name.trim()
@@ -996,6 +1011,10 @@ export default function CommonViewPage() {
               let from = ""
               let to = ""
               let note = e.description || ""
+              const isAllUsers = note.includes(ALL_USERS_MARKER)
+              if (isAllUsers) {
+                note = note.replace(ALL_USERS_MARKER, "").trim()
+              }
               const dateMatches = note.match(/\d{4}-\d{2}-\d{2}/g) || []
               
               // Parse date range
@@ -1041,6 +1060,7 @@ export default function CommonViewPage() {
                 from: from || undefined,
                 to: to || undefined,
                 note: note || undefined,
+                isAllUsers,
               })
             } else if (e.category === "Blocks") {
               allData.blocked.push({
@@ -1781,9 +1801,11 @@ export default function CommonViewPage() {
       else if (formType === "problem") category = "Problems"
       else category = "Requests"
 
+      const isAllUsersLeave = formType === "leave" && formPerson === ALL_USERS_VALUE
+
       // Find the user by name if person is selected
       let assignedUserId: string | null = null
-      if (formPerson && formType !== "feedback") {
+      if (formPerson && formType !== "feedback" && !isAllUsersLeave) {
         const selectedUser = users.find(
           (u) =>
             u.full_name === formPerson ||
@@ -1823,22 +1845,51 @@ export default function CommonViewPage() {
         description = description ? `${description}\nDate: ${formDate}` : `Date: ${formDate}`
       }
 
-      // Create the entry
-      const res = await apiFetch("/common-entries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      if (isAllUsersLeave) {
+        const activeUsers = users.filter((u) => u.is_active)
+        const descriptionWithMarker = description
+          ? `${description}\n${ALL_USERS_MARKER}`
+          : ALL_USERS_MARKER
+        const payloadBase = {
           category,
-          title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
-          description: description || null,
+          description: descriptionWithMarker || null,
           entry_date: formDate || null,
-          assigned_to_user_id: assignedUserId || null,
-        }),
-      })
+        }
+        const results = await Promise.all(
+          activeUsers.map((u) =>
+            apiFetch("/common-entries", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...payloadBase,
+                title: u.full_name || u.username || u.email || "Untitled",
+                assigned_to_user_id: u.id,
+              }),
+            })
+          )
+        )
+        if (results.every((r) => r.ok)) {
+          // Trigger a reload
+          window.location.reload()
+        }
+      } else {
+        // Create the entry
+        const res = await apiFetch("/common-entries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category,
+            title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
+            description: description || null,
+            entry_date: formDate || null,
+            assigned_to_user_id: assignedUserId || null,
+          }),
+        })
 
-      if (res.ok) {
-        // Trigger a reload
-        window.location.reload()
+        if (res.ok) {
+          // Trigger a reload
+          window.location.reload()
+        }
       }
       closeModal()
     } catch (err) {
@@ -2615,9 +2666,34 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent absence",
       entryId: x.entryId,
     }))
-    const leaveSource = isMultiDate
+    const rawLeaveSource = isMultiDate
       ? sortByDate(filtered.leave, (x) => x.startDate, (x) => x.person)
       : filtered.leave
+    const leaveAllUsersSeen = new Set<string>()
+    const leaveSource: LeaveItem[] = rawLeaveSource.reduce((acc, x) => {
+      if (!x.isAllUsers) {
+        acc.push(x)
+        return acc
+      }
+      const key = [
+        x.startDate,
+        x.endDate,
+        x.fullDay ? "1" : "0",
+        x.from || "",
+        x.to || "",
+        x.note || "",
+      ].join("|")
+      if (leaveAllUsersSeen.has(key)) {
+        return acc
+      }
+      leaveAllUsersSeen.add(key)
+      acc.push({
+        ...x,
+        person: ALL_USERS_INITIALS,
+        entryId: undefined,
+      })
+      return acc
+    }, [] as LeaveItem[])
     const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
@@ -2751,7 +2827,7 @@ export default function CommonViewPage() {
       {
         id: "leave",
         label: "PV/FESTE",
-        count: filtered.leave.length,
+        count: leaveSource.length,
         headerClass: "swimlane-header leave",
         badgeClass: "swimlane-badge leave",
         items: leaveItems,
@@ -6896,7 +6972,11 @@ export default function CommonViewPage() {
                 className="input"
                 value={formType}
                 onChange={(e) => {
-                  setFormType(e.target.value as any)
+                  const nextType = e.target.value as any
+                  setFormType(nextType)
+                  if (nextType !== "leave" && formPerson === ALL_USERS_VALUE) {
+                    setFormPerson("")
+                  }
                 }}
                 required
                 >
@@ -6917,6 +6997,9 @@ export default function CommonViewPage() {
                       required
                     >
                       <option value="">--</option>
+                      {formType === "leave" ? (
+                        <option value={ALL_USERS_VALUE}>{ALL_USERS_LABEL}</option>
+                      ) : null}
                       {users.map((u) => (
                         <option key={u.id} value={u.full_name || u.username || u.email}>
                           {u.full_name || u.username || u.email}
