@@ -84,6 +84,24 @@ def _as_utc_date(value: datetime | date | None) -> date | None:
     return value
 
 
+def business_days_between(start_day: date, end_day: date) -> int:
+    """
+    Count business days between two dates, excluding Saturdays and Sundays.
+    The count is for the open/closed interval (start_day, end_day].
+    """
+    if end_day <= start_day:
+        return 0
+    total_days = (end_day - start_day).days
+    full_weeks, remainder = divmod(total_days, 7)
+    weekdays = full_weeks * 5
+    start_weekday = start_day.weekday()  # Monday=0 ... Sunday=6
+    for offset in range(1, remainder + 1):
+        day_idx = (start_weekday + offset) % 7
+        if day_idx < 5:
+            weekdays += 1
+    return weekdays
+
+
 def planned_range_for_daily_report(task, dept_code: str | None) -> tuple[date | None, date | None]:
     due_dt = getattr(task, "due_date", None)
     if due_dt is None:
@@ -161,7 +179,7 @@ def daily_report_tyo_label(
         if report_day == due_day:
             return "T"
 
-    late_days = (report_day - due_day).days
+    late_days = business_days_between(due_day, report_day)
     if late_days == 1:
         return "Y"
     if late_days >= 2:

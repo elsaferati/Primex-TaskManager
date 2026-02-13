@@ -39,6 +39,7 @@ from app.services.daily_report_logic import (
     completed_on_day,
     planned_range_for_daily_report,
     task_is_visible_to_user,
+    business_days_between,
 )
 
 
@@ -335,7 +336,7 @@ async def daily_report(
                 )
             )
         elif planned_end < day:
-            late_days = (day - planned_end).days
+            late_days = business_days_between(planned_end, day)
             tasks_overdue.append(
                 DailyReportTaskItem(
                     task=_task_to_out(t, assignee_out_map.get(t.id, [])),
@@ -409,7 +410,7 @@ async def daily_report(
 
     system_overdue: list[DailyReportSystemOccurrence] = []
     for occ, tmpl in occ_overdue_rows:
-        late_days = (day - occ.occurrence_date).days
+        late_days = business_days_between(occ.occurrence_date, day)
         system_overdue.append(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
