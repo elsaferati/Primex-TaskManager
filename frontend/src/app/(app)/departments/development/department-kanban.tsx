@@ -1360,6 +1360,20 @@ export default function DepartmentKanban() {
         setInternalMeetingChecklistId(selected.id)
         let items = selected.items || []
 
+        try {
+          await apiFetch("/internal-meeting-sessions/ensure", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ checklist_id: selected.id }),
+          })
+          const refreshedRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
+          if (refreshedRes.ok) {
+            items = (await refreshedRes.json()) as ChecklistItem[]
+          }
+        } catch (error) {
+          console.error("Failed to ensure internal meeting session", error)
+        }
+
         // Delete only the test item "dssdgsdg" if it exists
         const itemsToDelete = ["dssdgsdg"]
         const deletePromises: Promise<Response>[] = []

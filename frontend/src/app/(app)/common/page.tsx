@@ -703,9 +703,37 @@ export default function CommonViewPage() {
           apiFetch("/checklists?group_key=staff&include_items=true"),
         ])
         if (!boardRes?.ok && !staffRes?.ok) return
-        const boardData = boardRes?.ok ? ((await boardRes.json()) as MeetingChecklist[]) : []
-        const staffData = staffRes?.ok ? ((await staffRes.json()) as MeetingChecklist[]) : []
-        const data = [...boardData, ...staffData]
+        let boardData = boardRes?.ok ? ((await boardRes.json()) as MeetingChecklist[]) : []
+        let staffData = staffRes?.ok ? ((await staffRes.json()) as MeetingChecklist[]) : []
+        let data = [...boardData, ...staffData]
+
+        const checklistIds = data.map((checklist) => checklist.id)
+        if (checklistIds.length) {
+          await Promise.allSettled(
+            checklistIds.map((checklistId) =>
+              apiFetch("/internal-meeting-sessions/ensure", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ checklist_id: checklistId }),
+              })
+            )
+          )
+
+          const [boardResRefresh, staffResRefresh] = await Promise.all([
+            apiFetch("/checklists?group_key=board&include_items=true"),
+            apiFetch("/checklists?group_key=staff&include_items=true"),
+          ])
+          if (boardResRefresh?.ok || staffResRefresh?.ok) {
+            boardData = boardResRefresh?.ok
+              ? ((await boardResRefresh.json()) as MeetingChecklist[])
+              : boardData
+            staffData = staffResRefresh?.ok
+              ? ((await staffResRefresh.json()) as MeetingChecklist[])
+              : staffData
+            data = [...boardData, ...staffData]
+          }
+        }
+
         const templates = data
           .slice()
           .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))

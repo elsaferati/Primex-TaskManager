@@ -6,6 +6,9 @@ from app.celery_app import celery_app
 from app.jobs.carryover import run_carryover as _run_carryover
 from app.jobs.ga_notes_cleanup import cleanup_old_closed_ga_notes as _cleanup_old_closed_ga_notes
 from app.jobs.internal_notes_cleanup import cleanup_old_done_internal_notes as _cleanup_old_done_internal_notes
+from app.jobs.internal_meeting_sessions import (
+    reset_expired_internal_meeting_sessions as _reset_expired_internal_meeting_sessions,
+)
 from app.jobs.overdue import process_overdue as _process_overdue
 from app.jobs.reminders import process_reminders as _process_reminders
 from app.jobs.system_tasks import generate_system_tasks as _generate_system_tasks
@@ -39,4 +42,9 @@ def cleanup_old_closed_ga_notes() -> int:
 @celery_app.task(name="app.celery_tasks.cleanup_old_done_internal_notes")
 def cleanup_old_done_internal_notes() -> int:
     return asyncio.run(_cleanup_old_done_internal_notes())
+
+
+@celery_app.task(name="app.celery_tasks.reset_expired_internal_meeting_sessions")
+def reset_expired_internal_meeting_sessions() -> int:
+    return asyncio.run(_reset_expired_internal_meeting_sessions())
 

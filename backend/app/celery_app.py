@@ -43,5 +43,9 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.cleanup_old_done_internal_notes",
         "schedule": crontab(minute=30, hour=2),  # Run daily at 2:30 AM UTC
     },
+    "reset-expired-internal-meeting-sessions": {
+        "task": "app.celery_tasks.reset_expired_internal_meeting_sessions",
+        "schedule": crontab(minute="*/15"),
+    },
 }
 
