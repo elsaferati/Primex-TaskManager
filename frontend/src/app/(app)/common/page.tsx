@@ -30,6 +30,7 @@ type LeaveItem = {
   to?: string
   note?: string
   isAllUsers?: boolean
+  userId?: string
 }
 type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type OneHItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
@@ -50,6 +51,7 @@ type SwimlaneCell = {
   placeholder?: boolean
   entryId?: string
   number?: number
+  entryDate?: string
 }
 type SwimlaneRow = {
   id: CommonType
@@ -1061,6 +1063,7 @@ export default function CommonViewPage() {
                 to: to || undefined,
                 note: note || undefined,
                 isAllUsers,
+                userId: e.assigned_to_user_id || e.created_by_user_id,
               })
             } else if (e.category === "Blocks") {
               allData.blocked.push({
@@ -1504,15 +1507,32 @@ export default function CommonViewPage() {
 
   // Filtered data
   const filtered = React.useMemo(() => {
-    const late = commonData.late.filter((x) => inSelectedDates(x.date))
-    const absent = commonData.absent.filter((x) => inSelectedDates(x.date))
-    const leave = commonData.leave.filter((x) =>
-      selectedDates.size ? Array.from(selectedDates).some((d) => leaveCovers(x, d)) : true
-    )
-    const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date))
-    const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date))
-    const personal = commonData.personal.filter((x) => inSelectedDates(x.date))
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
+    const activeUserIds = users.filter((u) => u.is_active).map((u) => u.id)
+    const fullyCoveredDates = new Set<string>()
+    if (activeUserIds.length) {
+      for (const dateStr of datesToUse) {
+        const coveredUsers = new Set(
+          commonData.leave
+            .filter((x) => x.userId && leaveCovers(x, dateStr))
+            .map((x) => x.userId as string)
+        )
+        if (coveredUsers.size >= activeUserIds.length) {
+          fullyCoveredDates.add(dateStr)
+        }
+      }
+    }
+
+    const late = commonData.late.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const absent = commonData.absent.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const leave = commonData.leave.filter((x) => {
+      const visibleDates = datesToUse.filter((d) => d >= x.startDate && d <= x.endDate)
+      if (!visibleDates.length) return false
+      return visibleDates.some((d) => !fullyCoveredDates.has(d))
+    })
+    const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const personal = commonData.personal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const getMeetingOwnerName = (meeting: Meeting) => {
       const ownerUser = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
       return ownerUser?.full_name || ownerUser?.username || "Unknown"
@@ -1611,14 +1631,32 @@ export default function CommonViewPage() {
         })
       }
     }
-    const r1 = commonData.r1.filter((x) => inSelectedDates(x.date))
-    const problems = commonData.problems.filter((x) => inSelectedDates(x.date))
-    const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date))
+    const filteredExternal = external.filter((x) => !fullyCoveredDates.has(x.date))
+    const filteredInternal = internal.filter((x) => !fullyCoveredDates.has(x.date))
+    const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const problems = commonData.problems.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
 
-    return { late, absent, leave, blocked, oneH, personal, external, internal, r1, problems, feedback, priority }
+    const filteredPriority = priority.filter((p) => !fullyCoveredDates.has(p.date))
+
+    return {
+      late,
+      absent,
+      leave,
+      blocked,
+      oneH,
+      personal,
+      external: filteredExternal,
+      internal: filteredInternal,
+      r1,
+      problems,
+      feedback,
+      priority: filteredPriority,
+      fullyCoveredDates,
+    }
   }, [commonData, selectedDates, externalMeetings, internalMeetings, users, weekISOs, departments])
 
   // Common people for priority (from users)
@@ -1921,6 +1959,43 @@ export default function CommonViewPage() {
       }
     },
     [apiFetch, isAdmin]
+  )
+
+  const deleteAllUsersLeaveForDay = React.useCallback(
+    async (dayIso: string) => {
+      if (!isAdmin) return
+      const confirmed = window.confirm(
+        "Delete ALL annual leave entries for this day? This removes annual leave for every user on this day."
+      )
+      if (!confirmed) return
+      try {
+        const entryIdsMarked = Array.from(
+          new Set(
+            commonData.leave
+              .filter((x) => x.isAllUsers && x.entryId && leaveCovers(x, dayIso))
+              .map((x) => x.entryId as string)
+          )
+        )
+        const entryIdsFallback = Array.from(
+          new Set(
+            commonData.leave
+              .filter((x) => x.entryId && leaveCovers(x, dayIso))
+              .map((x) => x.entryId as string)
+          )
+        )
+        const entryIds = entryIdsMarked.length ? entryIdsMarked : entryIdsFallback
+        if (!entryIds.length) return
+        const results = await Promise.all(
+          entryIds.map((entryId) => apiFetch(`/common-entries/${entryId}`, { method: "DELETE" }))
+        )
+        if (results.every((r) => r?.ok)) {
+          window.location.reload()
+        }
+      } catch (err) {
+        console.error("Failed to delete all-users annual leave entries", err)
+      }
+    },
+    [apiFetch, commonData.leave, isAdmin]
   )
 
   const toggleChecklistItem = React.useCallback(
@@ -2694,6 +2769,27 @@ export default function CommonViewPage() {
       })
       return acc
     }, [] as LeaveItem[])
+    const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
+    const syntheticAllUsers = datesToUse
+      .filter((d) => filtered.fullyCoveredDates.has(d))
+      .map((d) => ({
+        person: ALL_USERS_INITIALS,
+        startDate: d,
+        endDate: d,
+        fullDay: true,
+        isAllUsers: true,
+      }))
+    const syntheticKeys = new Set<string>(
+      leaveSource.map((x) =>
+        [x.startDate, x.endDate, x.fullDay ? "1" : "0", x.from || "", x.to || "", x.note || "", x.person].join("|")
+      )
+    )
+    for (const item of syntheticAllUsers) {
+      const key = [item.startDate, item.endDate, "1", "", "", "", item.person].join("|")
+      if (syntheticKeys.has(key)) continue
+      syntheticKeys.add(key)
+      leaveSource.push(item)
+    }
     const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
@@ -2708,6 +2804,7 @@ export default function CommonViewPage() {
         dateLabel,
         accentClass: "swimlane-accent leave",
         entryId: x.entryId,
+        entryDate: x.startDate,
       }
     })
 
@@ -2905,7 +3002,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, isMultiDate, sortByDate])
+  }, [filtered, isMultiDate, sortByDate, selectedDates, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
@@ -2936,6 +3033,31 @@ export default function CommonViewPage() {
     }> = {}
     
     weekISOs.forEach((iso) => {
+      if (filtered.fullyCoveredDates.has(iso)) {
+        dataByDay[iso] = {
+          late: [],
+          absent: [],
+          leave: [
+            {
+              person: ALL_USERS_INITIALS,
+              startDate: iso,
+              endDate: iso,
+              fullDay: true,
+              isAllUsers: true,
+            },
+          ],
+          blocked: [],
+          oneH: [],
+          personal: [],
+          external: [],
+          internal: [],
+          r1: [],
+          problems: [],
+          feedback: [],
+          priority: [],
+        }
+        return
+      }
       dataByDay[iso] = {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
@@ -6716,6 +6838,17 @@ export default function CommonViewPage() {
                                   ×
                                 </button>
                               ) : null}
+                              {isAdmin && e.isAllUsers ? (
+                                <button
+                                  type="button"
+                                  className="week-table-delete week-table-delete-red"
+                                  onClick={() => deleteAllUsersLeaveForDay(e.startDate)}
+                                  aria-label="Delete all-users entries"
+                                  title="Delete all users"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
                             </div>
                           )
                         })
@@ -6906,6 +7039,21 @@ export default function CommonViewPage() {
                                     onClick={() => deleteCommonEntry(cell.entryId)}
                                     aria-label="Delete entry"
                                     title="Delete"
+                                  >
+                                    ×
+                                  </button>
+                                ) : null}
+                                {!cell.placeholder &&
+                                row.id === "leave" &&
+                                cell.title === ALL_USERS_INITIALS &&
+                                cell.entryDate &&
+                                isAdmin ? (
+                                  <button
+                                    type="button"
+                                    className="swimlane-delete"
+                                    onClick={() => deleteAllUsersLeaveForDay(cell.entryDate)}
+                                    aria-label="Delete all-users entries"
+                                    title="Delete all users"
                                   >
                                     ×
                                   </button>
