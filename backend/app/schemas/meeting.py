@@ -12,6 +12,7 @@ class MeetingOut(BaseModel):
     platform: str | None = None
     starts_at: datetime | None = None
     meeting_url: str | None = None
+    meeting_type: str
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
     recurrence_days_of_month: list[int] | None = None
@@ -28,6 +29,7 @@ class MeetingCreate(BaseModel):
     platform: str | None = None
     starts_at: datetime | None = None
     meeting_url: str | None = None
+    meeting_type: str | None = None
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
     recurrence_days_of_month: list[int] | None = None
@@ -41,6 +43,7 @@ class MeetingUpdate(BaseModel):
     platform: str | None = None
     starts_at: datetime | None = None
     meeting_url: str | None = None
+    meeting_type: str | None = None
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
     recurrence_days_of_month: list[int] | None = None

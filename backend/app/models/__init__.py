@@ -11,6 +11,7 @@ from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
+from app.models.internal_meeting_session import InternalMeetingSession
 from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
@@ -54,6 +55,7 @@ __all__ = [
     "GaNoteAttachment",
     "Holiday",
     "InternalNote",
+    "InternalMeetingSession",
     "Meeting",
     "MicrosoftToken",
     "Notification",
