@@ -537,6 +537,22 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function formatMeetingDateTime(meeting: Meeting): string {
+  if (!meeting.starts_at) return "-"
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return "-"
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const dateLabel = sameDay
+    ? "Today"
+    : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return `${dateLabel} ${timeLabel}`
+}
+
 function startOfWeekMonday(date: Date) {
   const day = date.getDay()
   const diff = (day + 6) % 7
@@ -2724,6 +2740,11 @@ export default function DepartmentKanban() {
     const run = async () => {
       if (activeTab !== "all") {
         setDailyReport(null)
+        return
+      }
+      if (viewMode === "department" && selectedUserId === "__all__") {
+        setDailyReport(null)
+        setLoadingDailyReport(false)
         return
       }
       const targetUserId =
