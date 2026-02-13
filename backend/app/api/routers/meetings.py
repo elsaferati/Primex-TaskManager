@@ -23,6 +23,7 @@ async def list_meetings(
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     include_all_departments: bool = False,
+    meeting_type: str | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[MeetingOut]:
@@ -45,6 +46,8 @@ async def list_meetings(
         if not include_all_departments:
             ensure_department_access(user, department_id)
         stmt = stmt.where(Meeting.department_id == department_id)
+    if meeting_type is not None:
+        stmt = stmt.where(Meeting.meeting_type == meeting_type)
 
     meetings = (await db.execute(stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()
     
@@ -65,6 +68,7 @@ async def list_meetings(
             platform=m.platform,
             starts_at=m.starts_at,
             meeting_url=m.meeting_url,
+            meeting_type=m.meeting_type,
             recurrence_type=m.recurrence_type,
             recurrence_days_of_week=m.recurrence_days_of_week,
             recurrence_days_of_month=m.recurrence_days_of_month,
@@ -111,6 +115,7 @@ async def create_meeting(
         platform=payload.platform,
         starts_at=payload.starts_at,
         meeting_url=payload.meeting_url,
+        meeting_type=payload.meeting_type or "external",
         recurrence_type=payload.recurrence_type,
         recurrence_days_of_week=payload.recurrence_days_of_week,
         recurrence_days_of_month=payload.recurrence_days_of_month,
@@ -140,6 +145,7 @@ async def create_meeting(
         platform=meeting.platform,
         starts_at=meeting.starts_at,
         meeting_url=meeting.meeting_url,
+        meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
@@ -176,6 +182,8 @@ async def update_meeting(
         meeting.starts_at = payload.starts_at
     if "meeting_url" in payload_dict:
         meeting.meeting_url = payload.meeting_url
+    if "meeting_type" in payload_dict and payload.meeting_type is not None:
+        meeting.meeting_type = payload.meeting_type
     if "recurrence_type" in payload_dict:
         # If recurrence_type is None/null, clear all recurrence fields
         meeting.recurrence_type = payload.recurrence_type
@@ -237,6 +245,7 @@ async def update_meeting(
         platform=meeting.platform,
         starts_at=meeting.starts_at,
         meeting_url=meeting.meeting_url,
+        meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,

@@ -12,6 +12,7 @@ type CommonType =
   | "oneH"
   | "personal"
   | "external"
+  | "internal"
   | "r1"
   | "problem"
   | "feedback"
@@ -23,7 +24,8 @@ type LeaveItem = { entryId?: string; person: string; startDate: string; endDate:
 type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type OneHItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
-type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[] }
+type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
+type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
 type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
@@ -303,6 +305,7 @@ export default function CommonViewPage() {
     oneH: [] as OneHItem[],
     personal: [] as PersonalItem[],
     external: [] as ExternalItem[],
+    internal: [] as InternalItem[],
     r1: [] as R1Item[],
     problems: [] as ProblemItem[],
     feedback: [] as FeedbackItem[],
@@ -347,6 +350,18 @@ export default function CommonViewPage() {
   const [externalMeetingRecurrenceMonth, setExternalMeetingRecurrenceMonth] = React.useState("1")
   const [externalMeetingRecurrenceDay, setExternalMeetingRecurrenceDay] = React.useState("1")
   const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
+  const [internalMeetingsOpen, setInternalMeetingsOpen] = React.useState(false)
+  const [internalMeetings, setInternalMeetings] = React.useState<Meeting[]>([])
+  const [internalMeetingTitle, setInternalMeetingTitle] = React.useState("")
+  const [internalMeetingPlatform, setInternalMeetingPlatform] = React.useState("")
+  const [internalMeetingStartsAt, setInternalMeetingStartsAt] = React.useState("")
+  const [internalMeetingStartTime, setInternalMeetingStartTime] = React.useState("")
+  const [internalMeetingRecurrenceType, setInternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
+  const [internalMeetingRecurrenceDaysOfWeek, setInternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [internalMeetingRecurrenceDaysOfMonth, setInternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
+  const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
+  const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
@@ -363,6 +378,22 @@ export default function CommonViewPage() {
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
+  const [showInternalWeekendDays, setShowInternalWeekendDays] = React.useState(false)
+  const [creatingInternalMeeting, setCreatingInternalMeeting] = React.useState(false)
+  const [editingInternalMeetingId, setEditingInternalMeetingId] = React.useState<string | null>(null)
+  const [editingInternalMeetingTitle, setEditingInternalMeetingTitle] = React.useState("")
+  const [editingInternalMeetingPlatform, setEditingInternalMeetingPlatform] = React.useState("")
+  const [editingInternalMeetingStartsAt, setEditingInternalMeetingStartsAt] = React.useState("")
+  const [editingInternalMeetingStartTime, setEditingInternalMeetingStartTime] = React.useState("")
+  const [editingInternalMeetingRecurrenceType, setEditingInternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
+  const [editingInternalMeetingRecurrenceDaysOfWeek, setEditingInternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
+  const [editingInternalMeetingRecurrenceDaysOfMonth, setEditingInternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
+  const [editingInternalMeetingRecurrenceMonth, setEditingInternalMeetingRecurrenceMonth] = React.useState("1")
+  const [editingInternalMeetingRecurrenceDay, setEditingInternalMeetingRecurrenceDay] = React.useState("1")
+  const [editingInternalMeetingDepartmentId, setEditingInternalMeetingDepartmentId] = React.useState("")
+  const [showInternalEditWeekendDays, setShowInternalEditWeekendDays] = React.useState(false)
+  const [updatingInternalMeeting, setUpdatingInternalMeeting] = React.useState(false)
+  const [deletingInternalMeetingId, setDeletingInternalMeetingId] = React.useState<string | null>(null)
   const [externalMeetingChecklist, setExternalMeetingChecklist] = React.useState<MeetingChecklist | null>(null)
   const [externalMeetingChecklistItems, setExternalMeetingChecklistItems] = React.useState<
     Map<string, boolean>
@@ -480,6 +511,10 @@ export default function CommonViewPage() {
     () => departments.find((d) => d.id === externalMeetingDepartmentId) || null,
     [departments, externalMeetingDepartmentId]
   )
+  const internalMeetingDepartment = React.useMemo(
+    () => departments.find((d) => d.id === internalMeetingDepartmentId) || null,
+    [departments, internalMeetingDepartmentId]
+  )
   const externalMeetingsSorted = React.useMemo(() => {
     return [...externalMeetings].sort((a, b) => {
       const aDate = a.starts_at || a.created_at
@@ -489,6 +524,15 @@ export default function CommonViewPage() {
       return bTime - aTime
     })
   }, [externalMeetings])
+  const internalMeetingsSorted = React.useMemo(() => {
+    return [...internalMeetings].sort((a, b) => {
+      const aDate = a.starts_at || a.created_at
+      const bDate = b.starts_at || b.created_at
+      const aTime = aDate ? new Date(aDate).getTime() : 0
+      const bTime = bDate ? new Date(bDate).getTime() : 0
+      return bTime - aTime
+    })
+  }, [internalMeetings])
   const userById = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   
   const reloadExternalChecklist = React.useCallback(async () => {
@@ -645,6 +689,7 @@ export default function CommonViewPage() {
   }, [externalMeetingsOpen])
 
   const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
+  const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
 
   React.useEffect(() => {
     let mounted = true
@@ -732,6 +777,16 @@ export default function CommonViewPage() {
       setExternalMeetingDepartmentId(departments[0].id)
     }
   }, [departments, externalMeetingDepartmentId, user?.department_id])
+  React.useEffect(() => {
+    if (internalMeetingDepartmentId) return
+    if (user?.department_id) {
+      setInternalMeetingDepartmentId(user.department_id)
+      return
+    }
+    if (departments.length) {
+      setInternalMeetingDepartmentId(departments[0].id)
+    }
+  }, [departments, internalMeetingDepartmentId, user?.department_id])
 
   // Load data on mount
   React.useEffect(() => {
@@ -747,6 +802,7 @@ export default function CommonViewPage() {
           oneH: [] as OneHItem[],
           personal: [] as PersonalItem[],
           external: [] as ExternalItem[],
+          internal: [] as InternalItem[],
           r1: [] as R1Item[],
           problems: [] as ProblemItem[],
           feedback: [] as FeedbackItem[],
@@ -1308,36 +1364,65 @@ export default function CommonViewPage() {
           allData.priority = expandedPriority
         }
 
-        // Show all external meetings for all users in common view
-        const meetingsEndpoint = commonDepartmentId
+        // Show all external/internal meetings for all users in common view
+        const meetingsEndpointBase = commonDepartmentId
           ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
           : "/meetings?include_all_departments=true"
 
-        const meetingsRes = await apiFetch(meetingsEndpoint)
-        if (meetingsRes?.ok) {
-          const meetings = (await meetingsRes.json()) as Meeting[]
+        const [externalMeetingsRes, internalMeetingsRes] = await Promise.all([
+          apiFetch(`${meetingsEndpointBase}&meeting_type=external`),
+          apiFetch(`${meetingsEndpointBase}&meeting_type=internal`),
+        ])
+
+        if (externalMeetingsRes?.ok) {
+          const meetings = (await externalMeetingsRes.json()) as Meeting[]
           if (mounted) setExternalMeetings(meetings)
-            for (const meeting of meetings) {
-              const resolvedDate = resolveExternalMeetingDate(meeting)
-              const createdAt = new Date(meeting.created_at)
-              const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
-              const dateSource = resolvedDate ?? validCreatedAt
-              if (!dateSource) continue
+          for (const meeting of meetings) {
+            const resolvedDate = resolveExternalMeetingDate(meeting)
+            const createdAt = new Date(meeting.created_at)
+            const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
+            const dateSource = resolvedDate ?? validCreatedAt
+            if (!dateSource) continue
 
-              const ownerUser = meeting.created_by
-                ? loadedUsers.find((u) => u.id === meeting.created_by)
-                : null
-              const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
+            const ownerUser = meeting.created_by
+              ? loadedUsers.find((u) => u.id === meeting.created_by)
+              : null
+            const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
-              allData.external.push({
-                title: meeting.title || "External meeting",
-                date: toISODate(dateSource),
-                time: resolvedDate ? formatTime(resolvedDate) : "TBD",
-                platform: meeting.platform?.trim() || "TBD",
-                owner: ownerName,
-              })
-            }
+            allData.external.push({
+              title: meeting.title || "External meeting",
+              date: toISODate(dateSource),
+              time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+              platform: meeting.platform?.trim() || "TBD",
+              owner: ownerName,
+            })
           }
+        }
+
+        if (internalMeetingsRes?.ok) {
+          const meetings = (await internalMeetingsRes.json()) as Meeting[]
+          if (mounted) setInternalMeetings(meetings)
+          for (const meeting of meetings) {
+            const resolvedDate = resolveExternalMeetingDate(meeting)
+            const createdAt = new Date(meeting.created_at)
+            const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
+            const dateSource = resolvedDate ?? validCreatedAt
+            if (!dateSource) continue
+
+            const ownerUser = meeting.created_by
+              ? loadedUsers.find((u) => u.id === meeting.created_by)
+              : null
+            const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
+
+            allData.internal.push({
+              title: meeting.title || "Internal meeting",
+              date: toISODate(dateSource),
+              time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+              platform: meeting.platform?.trim() || "TBD",
+              owner: ownerName,
+            })
+          }
+        }
 
         // Single state update with all data
         if (mounted) {
@@ -1384,6 +1469,10 @@ export default function CommonViewPage() {
       const ownerUser = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
       return ownerUser?.full_name || ownerUser?.username || "Unknown"
     }
+    const getMeetingDepartmentName = (meeting: Meeting) => {
+      const department = departments.find((d) => d.id === meeting.department_id)
+      return department?.name || "Department TBD"
+    }
     const getMeetingTimeLabel = (meeting: Meeting, date: Date | null) => {
       if (!meeting.starts_at) return "TBD"
       if (date) return formatTime(date)
@@ -1411,6 +1500,7 @@ export default function CommonViewPage() {
     const external: ExternalItem[] = []
     for (const meeting of externalMeetings) {
       const ownerName = getMeetingOwnerName(meeting)
+      const departmentName = getMeetingDepartmentName(meeting)
       const platform = meeting.platform?.trim() || "TBD"
       if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
         const timeLabel = getMeetingTimeLabel(meeting, null)
@@ -1422,6 +1512,7 @@ export default function CommonViewPage() {
             time: timeLabel,
             platform,
             owner: ownerName,
+            department: departmentName,
           })
         }
       } else {
@@ -1435,6 +1526,40 @@ export default function CommonViewPage() {
           time: getMeetingTimeLabel(meeting, resolvedDate),
           platform,
           owner: ownerName,
+          department: departmentName,
+        })
+      }
+    }
+    const internal: InternalItem[] = []
+    for (const meeting of internalMeetings) {
+      const ownerName = getMeetingOwnerName(meeting)
+      const departmentName = getMeetingDepartmentName(meeting)
+      const platform = meeting.platform?.trim() || "TBD"
+      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
+        const timeLabel = getMeetingTimeLabel(meeting, null)
+        for (const dateStr of datesToUse) {
+          if (!meetingOccursOnDate(meeting, dateStr)) continue
+          internal.push({
+            title: meeting.title || "Internal meeting",
+            date: dateStr,
+            time: timeLabel,
+            platform,
+            owner: ownerName,
+            department: departmentName,
+          })
+        }
+      } else {
+        const resolvedDate = resolveExternalMeetingDate(meeting)
+        if (!resolvedDate) continue
+        const dateStr = toISODate(resolvedDate)
+        if (!inSelectedDates(dateStr)) continue
+        internal.push({
+          title: meeting.title || "Internal meeting",
+          date: dateStr,
+          time: getMeetingTimeLabel(meeting, resolvedDate),
+          platform,
+          owner: ownerName,
+          department: departmentName,
         })
       }
     }
@@ -1445,8 +1570,8 @@ export default function CommonViewPage() {
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
 
-    return { late, absent, leave, blocked, oneH, personal, external, r1, problems, feedback, priority }
-  }, [commonData, selectedDates, externalMeetings, users, weekISOs])
+    return { late, absent, leave, blocked, oneH, personal, external, internal, r1, problems, feedback, priority }
+  }, [commonData, selectedDates, externalMeetings, internalMeetings, users, weekISOs, departments])
 
   // Common people for priority (from users)
   const commonPeople = React.useMemo(() => {
@@ -1813,6 +1938,7 @@ export default function CommonViewPage() {
         title: externalMeetingTitle.trim(),
         platform: externalMeetingPlatform.trim() || null,
         starts_at: startsAt,
+        meeting_type: "external",
         recurrence_type: externalMeetingRecurrenceType === "none" ? null : externalMeetingRecurrenceType,
         recurrence_days_of_week:
           externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length > 0
@@ -2003,6 +2129,7 @@ export default function CommonViewPage() {
         title: editingExternalMeetingTitle.trim(),
         platform: editingExternalMeetingPlatform.trim() || null,
         starts_at: startsAt,
+        meeting_type: "external",
         recurrence_type: editingExternalMeetingRecurrenceType === "none" ? null : editingExternalMeetingRecurrenceType,
         recurrence_days_of_week:
           editingExternalMeetingRecurrenceType === "weekly" && editingExternalMeetingRecurrenceDaysOfWeek.length > 0
@@ -2032,11 +2159,10 @@ export default function CommonViewPage() {
       )
       cancelEditExternalMeeting()
       // Reload external meetings to update the list
-      const meetingsRes = await apiFetch(
-        commonDepartmentId
-          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
-          : "/meetings?include_all_departments=true"
-      )
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=external`)
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setExternalMeetings(meetings)
@@ -2081,11 +2207,10 @@ export default function CommonViewPage() {
         }
         setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
         // Reload external meetings to update the list
-      const meetingsRes = await apiFetch(
-        commonDepartmentId
+        const meetingsBase = commonDepartmentId
           ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
           : "/meetings?include_all_departments=true"
-      )
+        const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=external`)
         if (meetingsRes?.ok) {
           const meetings = (await meetingsRes.json()) as Meeting[]
           setExternalMeetings(meetings)
@@ -2095,6 +2220,335 @@ export default function CommonViewPage() {
         alert("Failed to delete meeting. Please try again.")
       } finally {
         setDeletingExternalMeetingId(null)
+      }
+    },
+    [isAdmin, apiFetch, commonDepartmentId]
+  )
+
+  const submitInternalMeeting = React.useCallback(async () => {
+    if (!internalMeetingTitle.trim()) return
+    const departmentId = internalMeetingDepartmentId || user?.department_id
+    if (!departmentId) {
+      console.error("Department is required to create a meeting.")
+      return
+    }
+    setCreatingInternalMeeting(true)
+    try {
+      let startsAt: string | null = null
+      if (internalMeetingRecurrenceType === "none") {
+        startsAt = internalMeetingStartsAt ? new Date(internalMeetingStartsAt).toISOString() : null
+      } else {
+        if (!internalMeetingStartTime) {
+          alert("Time is required for recurring meetings.")
+          return
+        }
+        if (internalMeetingRecurrenceType === "weekly" && internalMeetingRecurrenceDaysOfWeek.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (internalMeetingRecurrenceType === "monthly" && internalMeetingRecurrenceDaysOfMonth.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (internalMeetingRecurrenceType === "yearly") {
+          if (!internalMeetingRecurrenceMonth || !internalMeetingRecurrenceDay) {
+            alert("Select month and date.")
+            return
+          }
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: internalMeetingRecurrenceType,
+          daysOfWeek: internalMeetingRecurrenceDaysOfWeek,
+          daysOfMonth:
+            internalMeetingRecurrenceType === "yearly"
+              ? [Number(internalMeetingRecurrenceDay)]
+              : internalMeetingRecurrenceDaysOfMonth,
+          timeValue: internalMeetingStartTime,
+          monthOfYear:
+            internalMeetingRecurrenceType === "yearly"
+              ? Math.max(0, Math.min(11, Number(internalMeetingRecurrenceMonth) - 1))
+              : undefined,
+        })
+        if (!next) {
+          alert("Failed to compute next occurrence.")
+          return
+        }
+        startsAt = next.toISOString()
+      }
+      const payload = {
+        title: internalMeetingTitle.trim(),
+        platform: internalMeetingPlatform.trim() || null,
+        starts_at: startsAt,
+        meeting_type: "internal",
+        recurrence_type: internalMeetingRecurrenceType === "none" ? null : internalMeetingRecurrenceType,
+        recurrence_days_of_week:
+          internalMeetingRecurrenceType === "weekly" && internalMeetingRecurrenceDaysOfWeek.length > 0
+            ? internalMeetingRecurrenceDaysOfWeek
+            : null,
+        recurrence_days_of_month:
+          internalMeetingRecurrenceType === "monthly" && internalMeetingRecurrenceDaysOfMonth.length > 0
+            ? internalMeetingRecurrenceDaysOfMonth
+            : internalMeetingRecurrenceType === "yearly" && internalMeetingRecurrenceDay
+              ? [Number(internalMeetingRecurrenceDay)]
+              : null,
+        department_id: departmentId,
+        project_id: null,
+      }
+      const res = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res?.ok) {
+        console.error("Failed to create meeting", res?.status)
+        return
+      }
+      const created = (await res.json()) as Meeting
+      setInternalMeetings((prev) => [created, ...prev])
+      const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
+      const dateSource = created.starts_at ? new Date(created.starts_at) : new Date(created.created_at)
+      const safeDate = Number.isNaN(dateSource.getTime()) ? new Date() : dateSource
+      setCommonData((prev) => ({
+        ...prev,
+        internal: [
+          ...prev.internal,
+          {
+            title: created.title || "Internal meeting",
+            date: toISODate(safeDate),
+            time: created.starts_at ? formatTime(safeDate) : "TBD",
+            platform: created.platform?.trim() || "TBD",
+            owner: ownerName,
+          },
+        ],
+      }))
+      setInternalMeetingTitle("")
+      setInternalMeetingPlatform("")
+      setInternalMeetingStartsAt("")
+      setInternalMeetingStartTime("")
+      setInternalMeetingRecurrenceType("none")
+      setInternalMeetingRecurrenceDaysOfWeek([])
+      setInternalMeetingRecurrenceDaysOfMonth([])
+      setInternalMeetingRecurrenceMonth("1")
+      setInternalMeetingRecurrenceDay("1")
+    } finally {
+      setCreatingInternalMeeting(false)
+    }
+  }, [
+    apiFetch,
+    internalMeetingTitle,
+    internalMeetingPlatform,
+    internalMeetingStartsAt,
+    internalMeetingStartTime,
+    internalMeetingRecurrenceType,
+    internalMeetingRecurrenceDaysOfWeek,
+    internalMeetingRecurrenceDaysOfMonth,
+    internalMeetingRecurrenceMonth,
+    internalMeetingRecurrenceDay,
+    internalMeetingDepartmentId,
+    user?.department_id,
+    user?.email,
+    user?.full_name,
+    user?.username,
+    formatTime,
+    toISODate,
+  ])
+
+  const canEditInternalMeeting = React.useCallback((meeting: Meeting) => {
+    if (!user) return false
+    if (isAdmin || isManager) return true
+    if (meeting.created_by && meeting.created_by === user.id) return true
+    return false
+  }, [user, isAdmin, isManager])
+
+  const startEditInternalMeeting = React.useCallback((meeting: Meeting) => {
+    if (!canEditInternalMeeting(meeting)) return
+    setEditingInternalMeetingId(meeting.id)
+    setEditingInternalMeetingTitle(meeting.title || "")
+    setEditingInternalMeetingPlatform(meeting.platform || "")
+    if (meeting.starts_at) {
+      const date = new Date(meeting.starts_at)
+      const localDateTime = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+        .toISOString()
+        .slice(0, 16)
+      setEditingInternalMeetingStartsAt(localDateTime)
+      setEditingInternalMeetingStartTime(toMeetingTimeValue(meeting.starts_at))
+    } else {
+      setEditingInternalMeetingStartsAt("")
+      setEditingInternalMeetingStartTime("")
+    }
+    setEditingInternalMeetingRecurrenceType(
+      (meeting.recurrence_type as "none" | "weekly" | "monthly" | "yearly") || "none"
+    )
+    setEditingInternalMeetingRecurrenceDaysOfWeek(meeting.recurrence_days_of_week || [])
+    setEditingInternalMeetingRecurrenceDaysOfMonth(meeting.recurrence_days_of_month || [])
+    if (meeting.starts_at) {
+      const startDate = new Date(meeting.starts_at)
+      if (!Number.isNaN(startDate.getTime())) {
+        setEditingInternalMeetingRecurrenceMonth(String(startDate.getMonth() + 1))
+        setEditingInternalMeetingRecurrenceDay(String(startDate.getDate()))
+      }
+    }
+    setShowInternalEditWeekendDays(
+      (meeting.recurrence_days_of_week || []).some((day) => day >= 5)
+    )
+    setEditingInternalMeetingDepartmentId(meeting.department_id || "")
+  }, [canEditInternalMeeting])
+
+  const cancelEditInternalMeeting = React.useCallback(() => {
+    setEditingInternalMeetingId(null)
+    setEditingInternalMeetingTitle("")
+    setEditingInternalMeetingPlatform("")
+    setEditingInternalMeetingStartsAt("")
+    setEditingInternalMeetingStartTime("")
+    setEditingInternalMeetingRecurrenceType("none")
+    setEditingInternalMeetingRecurrenceDaysOfWeek([])
+    setEditingInternalMeetingRecurrenceDaysOfMonth([])
+    setEditingInternalMeetingRecurrenceMonth("1")
+    setEditingInternalMeetingRecurrenceDay("1")
+    setEditingInternalMeetingDepartmentId("")
+    setShowInternalEditWeekendDays(false)
+  }, [])
+
+  const saveInternalMeeting = React.useCallback(async () => {
+    if (!editingInternalMeetingId || !editingInternalMeetingTitle.trim()) return
+    setUpdatingInternalMeeting(true)
+    try {
+      let startsAt: string | null = null
+      if (editingInternalMeetingRecurrenceType === "none") {
+        startsAt = editingInternalMeetingStartsAt
+          ? new Date(editingInternalMeetingStartsAt).toISOString()
+          : null
+      } else {
+        if (!editingInternalMeetingStartTime) {
+          alert("Time is required for recurring meetings.")
+          return
+        }
+        if (editingInternalMeetingRecurrenceType === "weekly" && editingInternalMeetingRecurrenceDaysOfWeek.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (editingInternalMeetingRecurrenceType === "monthly" && editingInternalMeetingRecurrenceDaysOfMonth.length === 0) {
+          alert("Select at least one day.")
+          return
+        }
+        if (editingInternalMeetingRecurrenceType === "yearly") {
+          if (!editingInternalMeetingRecurrenceMonth || !editingInternalMeetingRecurrenceDay) {
+            alert("Select month and date.")
+            return
+          }
+        }
+        const next = computeNextOccurrenceDate({
+          recurrenceType: editingInternalMeetingRecurrenceType,
+          daysOfWeek: editingInternalMeetingRecurrenceDaysOfWeek,
+          daysOfMonth:
+            editingInternalMeetingRecurrenceType === "yearly"
+              ? [Number(editingInternalMeetingRecurrenceDay)]
+              : editingInternalMeetingRecurrenceDaysOfMonth,
+          timeValue: editingInternalMeetingStartTime,
+          monthOfYear:
+            editingInternalMeetingRecurrenceType === "yearly"
+              ? Math.max(0, Math.min(11, Number(editingInternalMeetingRecurrenceMonth) - 1))
+              : undefined,
+        })
+        if (!next) {
+          alert("Failed to compute next occurrence.")
+          return
+        }
+        startsAt = next.toISOString()
+      }
+      const payload = {
+        title: editingInternalMeetingTitle.trim(),
+        platform: editingInternalMeetingPlatform.trim() || null,
+        starts_at: startsAt,
+        meeting_type: "internal",
+        recurrence_type: editingInternalMeetingRecurrenceType === "none" ? null : editingInternalMeetingRecurrenceType,
+        recurrence_days_of_week:
+          editingInternalMeetingRecurrenceType === "weekly" && editingInternalMeetingRecurrenceDaysOfWeek.length > 0
+            ? editingInternalMeetingRecurrenceDaysOfWeek
+            : null,
+        recurrence_days_of_month:
+          editingInternalMeetingRecurrenceType === "monthly" && editingInternalMeetingRecurrenceDaysOfMonth.length > 0
+            ? editingInternalMeetingRecurrenceDaysOfMonth
+            : editingInternalMeetingRecurrenceType === "yearly" && editingInternalMeetingRecurrenceDay
+              ? [Number(editingInternalMeetingRecurrenceDay)]
+              : null,
+        department_id: editingInternalMeetingDepartmentId || null,
+      }
+      const res = await apiFetch(`/meetings/${editingInternalMeetingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res?.ok) {
+        console.error("Failed to update meeting", res?.status)
+        alert("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
+        return
+      }
+      const updated = (await res.json()) as Meeting
+      setInternalMeetings((prev) =>
+        prev.map((m) => (m.id === editingInternalMeetingId ? updated : m))
+      )
+      cancelEditInternalMeeting()
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=internal`)
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setInternalMeetings(meetings)
+      }
+    } catch (err) {
+      console.error("Error updating meeting:", err)
+      alert("Failed to update meeting. Please try again.")
+    } finally {
+      setUpdatingInternalMeeting(false)
+    }
+  }, [
+    editingInternalMeetingId,
+    editingInternalMeetingTitle,
+    editingInternalMeetingPlatform,
+    editingInternalMeetingStartsAt,
+    editingInternalMeetingStartTime,
+    editingInternalMeetingRecurrenceType,
+    editingInternalMeetingRecurrenceDaysOfWeek,
+    editingInternalMeetingRecurrenceDaysOfMonth,
+    editingInternalMeetingRecurrenceMonth,
+    editingInternalMeetingRecurrenceDay,
+    editingInternalMeetingDepartmentId,
+    commonDepartmentId,
+    apiFetch,
+    cancelEditInternalMeeting,
+  ])
+
+  const deleteInternalMeeting = React.useCallback(
+    async (meetingId: string) => {
+      if (!isAdmin) return
+      const confirmed = window.confirm("Delete this internal meeting? This action cannot be undone.")
+      if (!confirmed) return
+      setDeletingInternalMeetingId(meetingId)
+      try {
+        const res = await apiFetch(`/meetings/${meetingId}`, {
+          method: "DELETE",
+        })
+        if (!res?.ok) {
+          console.error("Failed to delete meeting", res?.status)
+          alert("Failed to delete meeting. Only admins can delete meetings.")
+          return
+        }
+        setInternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
+        const meetingsBase = commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+        const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=internal`)
+        if (meetingsRes?.ok) {
+          const meetings = (await meetingsRes.json()) as Meeting[]
+          setInternalMeetings(meetings)
+        }
+      } catch (err) {
+        console.error("Error deleting meeting:", err)
+        alert("Failed to delete meeting. Please try again.")
+      } finally {
+        setDeletingInternalMeetingId(null)
       }
     },
     [isAdmin, apiFetch, commonDepartmentId]
@@ -2191,10 +2645,18 @@ export default function CommonViewPage() {
       : filtered.external
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
-      assignees: x.assignees || (x.owner ? [x.owner] : []),
-      subtitle: `${formatDateHuman(x.date)} - ${x.platform}`,
+      subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent external",
+    }))
+    const internalSource = isMultiDate
+      ? sortByDate(filtered.internal, (x) => x.date, (x) => x.title)
+      : filtered.internal
+    const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
+      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
+      subtitle: x.department || "Department TBD",
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent internal",
     }))
 
     const r1Source = isMultiDate
@@ -2273,6 +2735,14 @@ export default function CommonViewPage() {
         headerClass: "swimlane-header external",
         badgeClass: "swimlane-badge external",
         items: externalItems,
+      },
+      {
+        id: "internal",
+        label: "TAK INT",
+        count: filtered.internal.length,
+        headerClass: "swimlane-header internal",
+        badgeClass: "swimlane-badge internal",
+        items: internalItems,
       },
       {
         id: "blocked",
@@ -2354,6 +2824,7 @@ export default function CommonViewPage() {
       oneH: OneHItem[]
       personal: PersonalItem[]
       external: ExternalItem[]
+      internal: InternalItem[]
       r1: R1Item[]
       problems: ProblemItem[]
       feedback: FeedbackItem[]
@@ -2369,6 +2840,7 @@ export default function CommonViewPage() {
         oneH: filtered.oneH.filter((x) => x.date === iso),
         personal: filtered.personal.filter((x) => x.date === iso),
         external: filtered.external.filter((x) => x.date === iso),
+        internal: filtered.internal.filter((x) => x.date === iso),
         r1: filtered.r1.filter((x) => x.date === iso),
         problems: filtered.problems.filter((x) => x.date === iso),
         feedback: filtered.feedback.filter((x) => x.date === iso),
@@ -2705,6 +3177,8 @@ export default function CommonViewPage() {
           --personal-accent: #a855f7;
           --external-bg: #e0f2fe;
           --external-accent: #0284c7;
+          --internal-bg: #f1f5f9;
+          --internal-accent: #475569;
           --r1-bg: #dcfce7;
           --r1-accent: #16a34a;
           --problem-bg: #ecfeff;
@@ -2989,6 +3463,7 @@ export default function CommonViewPage() {
           .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
           .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
+          .swimlane-header.internal { background: var(--internal-bg) !important; color: #334155 !important; }
           .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
           .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
           .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
@@ -3000,6 +3475,7 @@ export default function CommonViewPage() {
           .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
           .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
+          .swimlane-badge.internal { border-color: var(--internal-accent) !important; color: #334155 !important; }
           .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
           .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
           .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
@@ -3733,6 +4209,7 @@ export default function CommonViewPage() {
         .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
+        .swimlane-header.internal { background: var(--internal-bg); color: #334155; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
         .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
@@ -3744,6 +4221,7 @@ export default function CommonViewPage() {
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
+        .swimlane-badge.internal { border-color: var(--internal-accent); color: #334155; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
         .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
@@ -3755,6 +4233,7 @@ export default function CommonViewPage() {
         .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
         .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
+        .swimlane-accent.internal { border-left: 4px solid var(--internal-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
@@ -4262,6 +4741,14 @@ export default function CommonViewPage() {
             >
               External Meetings
             </button>
+            <button
+              className={`btn-outline no-print ${internalMeetingsOpen ? "active" : ""}`}
+              type="button"
+              aria-pressed={internalMeetingsOpen}
+              onClick={() => setInternalMeetingsOpen((prev) => !prev)}
+            >
+              Internal Meetings
+            </button>
             <button className="btn-outline no-print" type="button" onClick={() => openModal()}>
               + Add
             </button>
@@ -4355,6 +4842,13 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("external")}
             >
               TAK EXT
+            </button>
+            <button
+              className={`chip ${typeFilters.has("internal") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("internal")}
+            >
+              TAK INT
             </button>
             <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
@@ -5479,6 +5973,494 @@ export default function CommonViewPage() {
         </section>
       ) : null}
 
+      {internalMeetingsOpen ? (
+        <section className="meeting-panel internal-meetings-panel">
+          <div className="meeting-panel-header">
+            <div>
+              <div className="meeting-title">Internal Meetings</div>
+              <div className="meeting-subtitle">Show all internal meetings and add new ones.</div>
+            </div>
+            <button className="btn-outline" type="button" onClick={() => setInternalMeetingsOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="external-meetings-grid">
+            <div className="external-meeting-form">
+              <div className="external-meeting-form-title">Add meeting</div>
+              <div className="external-meeting-fields">
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="Meeting title"
+                  value={internalMeetingTitle}
+                  onChange={(e) => setInternalMeetingTitle(e.target.value)}
+                />
+                <div className="external-meeting-row">
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Platform (Zoom, Meet, Office...)"
+                    value={internalMeetingPlatform}
+                    onChange={(e) => setInternalMeetingPlatform(e.target.value)}
+                  />
+                  {internalMeetingRecurrenceType === "none" ? (
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      value={internalMeetingStartsAt}
+                      onChange={(e) => setInternalMeetingStartsAt(e.target.value)}
+                    />
+                  ) : (
+                    <input
+                      className="input"
+                      type="time"
+                      value={internalMeetingStartTime}
+                      onChange={(e) => setInternalMeetingStartTime(e.target.value)}
+                    />
+                  )}
+                </div>
+                <div className="external-meeting-row">
+                  <select
+                    className="input"
+                    value={internalMeetingRecurrenceType}
+                    onChange={(e) => setInternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                  >
+                    <option value="none">One time</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                    <option value="yearly">Every year</option>
+                  </select>
+                </div>
+                {internalMeetingRecurrenceType === "weekly" ? (
+                  <>
+                    <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>
+                      <button
+                        className="btn-surface"
+                        type="button"
+                        onClick={() => setShowInternalWeekendDays((prev) => !prev)}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          backgroundColor: showInternalWeekendDays ? "#1d4ed8" : "#eef2ff",
+                          borderColor: "#3b82f6",
+                          color: showInternalWeekendDays ? "#ffffff" : "#1d4ed8",
+                        }}
+                      >
+                        {showInternalWeekendDays ? "Hide weekend days" : "Show weekend days"}
+                      </button>
+                    </div>
+                    <div className="external-meeting-row" style={{ flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                        .map((day, idx) => ({ day, idx }))
+                        .filter(({ idx }) => showInternalWeekendDays || idx < 5)
+                        .map(({ day, idx }) => (
+                          <label key={day} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                            <input
+                              type="checkbox"
+                              checked={internalMeetingRecurrenceDaysOfWeek.includes(idx)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setInternalMeetingRecurrenceDaysOfWeek((prev) => [...prev, idx])
+                                } else {
+                                  setInternalMeetingRecurrenceDaysOfWeek((prev) => prev.filter((d) => d !== idx))
+                                }
+                              }}
+                            />
+                            {day}
+                          </label>
+                        ))}
+                    </div>
+                  </>
+                ) : null}
+                {internalMeetingRecurrenceType === "monthly" ? (
+                  <div
+                    className="external-meeting-row"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                      gap: "6px",
+                    }}
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                      <label
+                        key={day}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "12px",
+                          padding: "4px 6px",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          backgroundColor: internalMeetingRecurrenceDaysOfMonth.includes(day) ? "#eef2ff" : "#ffffff",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={internalMeetingRecurrenceDaysOfMonth.includes(day)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setInternalMeetingRecurrenceDaysOfMonth((prev) => [...prev, day])
+                            } else {
+                              setInternalMeetingRecurrenceDaysOfMonth((prev) => prev.filter((d) => d !== day))
+                            }
+                          }}
+                        />
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{day}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                {internalMeetingRecurrenceType === "yearly" ? (
+                  <div className="external-meeting-row" style={{ gap: "8px" }}>
+                    <select
+                      className="input"
+                      value={internalMeetingRecurrenceMonth}
+                      onChange={(e) => setInternalMeetingRecurrenceMonth(e.target.value)}
+                    >
+                      {[
+                        "January",
+                        "February",
+                        "March",
+                        "April",
+                        "May",
+                        "June",
+                        "July",
+                        "August",
+                        "September",
+                        "October",
+                        "November",
+                        "December",
+                      ].map((label, idx) => (
+                        <option key={label} value={String(idx + 1)}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      value={internalMeetingRecurrenceDay}
+                      onChange={(e) => setInternalMeetingRecurrenceDay(e.target.value)}
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                        <option key={day} value={String(day)}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                <div className="external-meeting-row">
+                  <select
+                    className="input"
+                    value={internalMeetingDepartmentId}
+                    onChange={(e) => setInternalMeetingDepartmentId(e.target.value)}
+                    disabled={!canSelectExternalDepartment}
+                  >
+                    {canSelectExternalDepartment ? (
+                      <option value="">Select department</option>
+                    ) : (
+                      <option value="">Department</option>
+                    )}
+                    {departments.map((dep) => (
+                      <option key={dep.id} value={dep.id}>
+                        {dep.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {!canSelectExternalDepartment && internalMeetingDepartment ? (
+                  <div className="external-meeting-hint">
+                    Department: {internalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : internalMeetingDepartment.name}
+                  </div>
+                ) : null}
+                <div className="external-meeting-row" style={{ marginTop: "16px" }}>
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    disabled={!canCreateInternalMeeting || creatingInternalMeeting}
+                    onClick={() => void submitInternalMeeting()}
+                    style={{
+                      width: "100%",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      padding: "8px 12px",
+                      backgroundColor: "#2563eb",
+                      borderColor: "#1d4ed8",
+                      boxShadow: "0 6px 14px rgba(37, 99, 235, 0.25)",
+                      color: "#ffffff",
+                    }}
+                  >
+                    {creatingInternalMeeting ? "Saving..." : "Add"}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="external-meeting-list">
+              <div className="external-meeting-form-title">All internal meetings</div>
+              {internalMeetingsSorted.length ? (
+                <div className="external-meeting-cards">
+                  {internalMeetingsSorted.map((meeting) => {
+                    const department = departments.find((d) => d.id === meeting.department_id) || null
+                    const owner = meeting.created_by ? userById.get(meeting.created_by) : null
+                    const ownerName = owner?.full_name || owner?.username || "Unknown"
+                    const isEditing = editingInternalMeetingId === meeting.id
+                    return (
+                      <div key={meeting.id} className="external-meeting-card">
+                        {isEditing ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <input
+                              className="input"
+                              type="text"
+                              placeholder="Meeting title"
+                              value={editingInternalMeetingTitle}
+                              onChange={(e) => setEditingInternalMeetingTitle(e.target.value)}
+                            />
+                            <div className="external-meeting-row">
+                              <input
+                                className="input"
+                                type="text"
+                                placeholder="Platform (Zoom, Meet, Office...)"
+                                value={editingInternalMeetingPlatform}
+                                onChange={(e) => setEditingInternalMeetingPlatform(e.target.value)}
+                              />
+                              {editingInternalMeetingRecurrenceType === "none" ? (
+                                <input
+                                  className="input"
+                                  type="datetime-local"
+                                  value={editingInternalMeetingStartsAt}
+                                  onChange={(e) => setEditingInternalMeetingStartsAt(e.target.value)}
+                                />
+                              ) : (
+                                <input
+                                  className="input"
+                                  type="time"
+                                  value={editingInternalMeetingStartTime}
+                                  onChange={(e) => setEditingInternalMeetingStartTime(e.target.value)}
+                                />
+                              )}
+                            </div>
+                            <div className="external-meeting-row">
+                              <select
+                                className="input"
+                                value={editingInternalMeetingRecurrenceType}
+                                onChange={(e) => setEditingInternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                              >
+                                <option value="none">One time</option>
+                                <option value="weekly">Every week</option>
+                                <option value="monthly">Every month</option>
+                                <option value="yearly">Every year</option>
+                              </select>
+                            </div>
+                            {editingInternalMeetingRecurrenceType === "weekly" ? (
+                              <>
+                                <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => setShowInternalEditWeekendDays((prev) => !prev)}
+                                    style={{
+                                      padding: "4px 10px",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      backgroundColor: showInternalEditWeekendDays ? "#1d4ed8" : "#eef2ff",
+                                      borderColor: "#3b82f6",
+                                      color: showInternalEditWeekendDays ? "#ffffff" : "#1d4ed8",
+                                    }}
+                                  >
+                                    {showInternalEditWeekendDays ? "Hide weekend days" : "Show weekend days"}
+                                  </button>
+                                </div>
+                                <div className="external-meeting-row" style={{ flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                                    .map((day, idx) => ({ day, idx }))
+                                    .filter(({ idx }) => showInternalEditWeekendDays || idx < 5)
+                                    .map(({ day, idx }) => (
+                                      <label key={day} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={editingInternalMeetingRecurrenceDaysOfWeek.includes(idx)}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setEditingInternalMeetingRecurrenceDaysOfWeek((prev) => [...prev, idx])
+                                            } else {
+                                              setEditingInternalMeetingRecurrenceDaysOfWeek((prev) => prev.filter((d) => d !== idx))
+                                            }
+                                          }}
+                                        />
+                                        {day}
+                                      </label>
+                                    ))}
+                                </div>
+                              </>
+                            ) : null}
+                            {editingInternalMeetingRecurrenceType === "monthly" ? (
+                              <div
+                                className="external-meeting-row"
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                                  gap: "6px",
+                                }}
+                              >
+                                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                  <label
+                                    key={day}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      fontSize: "12px",
+                                      padding: "4px 6px",
+                                      border: "1px solid #e2e8f0",
+                                      borderRadius: "8px",
+                                      backgroundColor: editingInternalMeetingRecurrenceDaysOfMonth.includes(day) ? "#eef2ff" : "#ffffff",
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={editingInternalMeetingRecurrenceDaysOfMonth.includes(day)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setEditingInternalMeetingRecurrenceDaysOfMonth((prev) => [...prev, day])
+                                        } else {
+                                          setEditingInternalMeetingRecurrenceDaysOfMonth((prev) => prev.filter((d) => d !== day))
+                                        }
+                                      }}
+                                    />
+                                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{day}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+                            {editingInternalMeetingRecurrenceType === "yearly" ? (
+                              <div className="external-meeting-row" style={{ gap: "8px" }}>
+                                <select
+                                  className="input"
+                                  value={editingInternalMeetingRecurrenceMonth}
+                                  onChange={(e) => setEditingInternalMeetingRecurrenceMonth(e.target.value)}
+                                >
+                                  {[
+                                    "January",
+                                    "February",
+                                    "March",
+                                    "April",
+                                    "May",
+                                    "June",
+                                    "July",
+                                    "August",
+                                    "September",
+                                    "October",
+                                    "November",
+                                    "December",
+                                  ].map((label, idx) => (
+                                    <option key={label} value={String(idx + 1)}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <select
+                                  className="input"
+                                  value={editingInternalMeetingRecurrenceDay}
+                                  onChange={(e) => setEditingInternalMeetingRecurrenceDay(e.target.value)}
+                                >
+                                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                    <option key={day} value={String(day)}>
+                                      {day}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : null}
+                            <div className="external-meeting-row">
+                              <select
+                                className="input"
+                                value={editingInternalMeetingDepartmentId}
+                                onChange={(e) => setEditingInternalMeetingDepartmentId(e.target.value)}
+                              >
+                                <option value="">Select department</option>
+                                {departments.map((dep) => (
+                                  <option key={dep.id} value={dep.id}>
+                                    {dep.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                className="btn-surface"
+                                type="button"
+                                onClick={() => void saveInternalMeeting()}
+                                disabled={updatingInternalMeeting || !editingInternalMeetingTitle.trim()}
+                                style={{ flex: 1 }}
+                              >
+                                {updatingInternalMeeting ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                className="btn-surface"
+                                type="button"
+                                onClick={cancelEditInternalMeeting}
+                                disabled={updatingInternalMeeting}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div style={{ flex: 1 }}>
+                                <div className="external-meeting-title">{meeting.title || "Internal meeting"}</div>
+                                <div className="external-meeting-meta">
+                                  <span>{formatExternalMeetingWhen(meeting)}</span>
+                                  <span>{meeting.platform || "-"}</span>
+                                </div>
+                                <div className="external-meeting-meta">
+                                  <span>{department?.name || "Department TBD"}</span>
+                                  <span>Owner: {ownerName}</span>
+                                </div>
+                              </div>
+                              {canEditInternalMeeting(meeting) ? (
+                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => startEditInternalMeeting(meeting)}
+                                    disabled={deletingInternalMeetingId === meeting.id || updatingInternalMeeting}
+                                    title="Edit meeting"
+                                  >
+                                    Edit
+                                  </button>
+                                  {isAdmin ? (
+                                    <button
+                                      className="btn-surface"
+                                      type="button"
+                                      onClick={() => void deleteInternalMeeting(meeting.id)}
+                                      disabled={deletingInternalMeetingId === meeting.id || updatingInternalMeeting}
+                                      title="Delete meeting"
+                                      style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                    >
+                                      {deletingInternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="external-meeting-empty">No internal meetings yet.</div>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div className="view-container">
         {allDaysSelected ? (
           <div className="week-table-view">
@@ -5533,6 +6515,7 @@ export default function CommonViewPage() {
                       else if (row.id === "oneH") dayEntries[iso] = dayData.oneH || []
                       else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
+                      else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
                       else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
                       else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
@@ -5701,6 +6684,19 @@ export default function CommonViewPage() {
                             </div>
                           </div>
                         ))
+                      } else if (row.id === "internal") {
+                        return entries.map((e: InternalItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
@@ -5824,6 +6820,9 @@ export default function CommonViewPage() {
                                     {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
+                                  {(row.id === "external" || row.id === "internal") && cell.subtitle ? (
+                                    <div className="swimlane-subtitle">{cell.subtitle}</div>
+                                  ) : null}
                                   {cell.dateLabel ? (
                                     <div className="swimlane-date">{cell.dateLabel}</div>
                                   ) : null}
