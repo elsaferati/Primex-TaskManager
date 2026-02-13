@@ -937,6 +937,14 @@ export default function WeeklyPlannerPage() {
       .map((part) => part[0]?.toUpperCase())
       .join("") || "?"
     const legendEntriesByDept = new Map<string, LegendEntry[]>()
+    const escapeHtml = (value: string) => (
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+    )
 
     await Promise.all(
       data.departments.map(async (dept) => {
@@ -1094,6 +1102,38 @@ export default function WeeklyPlannerPage() {
             .legend-answer-line {
               height: 9px;
               border-bottom: 0.5px solid #000;
+            }
+            .pv-fest-cell {
+              position: relative;
+              min-height: 18px;
+              border: 0.5px solid #cbd5e1;
+              background: #f1f5f9;
+              color: #475569;
+              border-radius: 3px;
+              padding: 2px 4px 3px;
+              display: flex;
+              align-items: flex-start;
+              justify-content: flex-start;
+            }
+            .pv-fest-badge {
+              position: absolute;
+              top: 1px;
+              right: 1px;
+              font-size: 4.5pt;
+              font-weight: 700;
+              text-transform: uppercase;
+              background: #e2e8f0;
+              color: #475569;
+              padding: 1px 2px;
+              border-radius: 2px;
+              letter-spacing: 0.2px;
+            }
+            .pv-fest-note {
+              font-size: 5pt;
+              font-weight: 600;
+              line-height: 1.15;
+              margin-top: 6px;
+              color: #475569;
             }
             .print-legend-spacer {
               height: 0.18in;
@@ -1616,9 +1656,16 @@ export default function WeeklyPlannerPage() {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.am_projects || []
         const systemTasks = userDay?.am_system_tasks || []
+        const block = getBlockForSlot(user.user_id, dayIso, "am")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (projects.length > 0 || systemTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1668,9 +1715,16 @@ export default function WeeklyPlannerPage() {
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
+        const block = getBlockForSlot(user.user_id, dayIso, "am")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (fastTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
@@ -1702,9 +1756,16 @@ export default function WeeklyPlannerPage() {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.pm_projects || []
         const systemTasks = userDay?.pm_system_tasks || []
+        const block = getBlockForSlot(user.user_id, dayIso, "pm")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (projects.length > 0 || systemTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1754,9 +1815,16 @@ export default function WeeklyPlannerPage() {
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
+        const block = getBlockForSlot(user.user_id, dayIso, "pm")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (fastTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
@@ -1863,6 +1931,7 @@ export default function WeeklyPlannerPage() {
     departmentId,
     departments,
     getFastTaskBadge,
+    getBlockForSlot,
     getStatusValueForDay,
     getTaskStatusBadge,
     sortFastTasks,
