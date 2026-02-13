@@ -1098,7 +1098,7 @@ export default function DepartmentKanban() {
   const [editInternalNoteProjects, setEditInternalNoteProjects] = React.useState<Project[]>([])
   const [loadingEditInternalNoteProjects, setLoadingEditInternalNoteProjects] = React.useState(false)
   const [editInternalNoteToUserIds, setEditInternalNoteToUserIds] = React.useState<string[]>([])
-  const [showDoneInternalNotes, setShowDoneInternalNotes] = React.useState(false)
+  const [internalNotesFilter, setInternalNotesFilter] = React.useState<"all" | "done" | "undone">("all")
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
 
@@ -1622,9 +1622,25 @@ export default function DepartmentKanban() {
       !isMineView && selectedUserId !== "__all__"
         ? base.filter((n) => n.to_user_id === selectedUserId)
         : base
-    if (showDoneInternalNotes) return filteredByUser.filter((n) => n.is_done)
-    return filteredByUser.filter((n) => !n.is_done)
-  }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
+    if (internalNotesFilter === "done") return filteredByUser.filter((n) => n.is_done)
+    if (internalNotesFilter === "undone") return filteredByUser.filter((n) => !n.is_done)
+    return filteredByUser
+  }, [internalNotes, internalNotesFilter, isMineView, selectedUserId, user?.id])
+  const viewUserId = React.useMemo(() => {
+    if (viewMode === "mine" && user?.id) return user.id
+    if (selectedUserId !== "__all__") return selectedUserId
+    const isAdminOrManager = user?.role === "ADMIN" || user?.role === "MANAGER"
+    if (!isAdminOrManager && user?.id) return user.id
+    return null
+  }, [selectedUserId, user?.id, user?.role, viewMode])
+  const getInternalNoteStatusNotes = React.useCallback(
+    (notes: InternalNote[]) => {
+      if (!viewUserId) return notes
+      const filtered = notes.filter((n) => n.to_user_id === viewUserId)
+      return filtered.length ? filtered : notes
+    },
+    [viewUserId]
+  )
   const groupedInternalNotes = React.useMemo(() => {
     const normalizeTime = (value?: string | null) => {
       if (!value) return ""
@@ -1662,15 +1678,20 @@ export default function DepartmentKanban() {
     if (!isMineView && selectedUserId !== "__all__") {
       grouped = grouped.filter((group) => group.toUserIds.includes(selectedUserId))
     }
-    grouped = showDoneInternalNotes
-      ? grouped.filter((group) => group.notes.length > 0 && group.notes.every((n) => n.is_done))
-      : grouped.filter((group) => group.notes.some((n) => !n.is_done))
+    grouped = grouped.filter((group) => {
+      if (internalNotesFilter === "all") return true
+      const statusNotes = getInternalNoteStatusNotes(group.notes)
+      if (internalNotesFilter === "done") {
+        return statusNotes.length > 0 && statusNotes.every((n) => n.is_done)
+      }
+      return statusNotes.some((n) => !n.is_done)
+    })
     return grouped.sort((a, b) => {
       const aTime = a.note.created_at ? new Date(a.note.created_at).getTime() : 0
       const bTime = b.note.created_at ? new Date(b.note.created_at).getTime() : 0
       return bTime - aTime
     })
-  }, [internalNotes, isMineView, selectedUserId, showDoneInternalNotes, user?.id])
+  }, [getInternalNoteStatusNotes, internalNotes, internalNotesFilter, isMineView, selectedUserId, user?.id])
   const visibleMeetings = React.useMemo(
     () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
     [meetings, isMineView, user?.id]
@@ -7114,14 +7135,16 @@ export default function DepartmentKanban() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="text-base sm:text-lg font-semibold">Internal Notes</div>
               <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={showDoneInternalNotes}
-                    onChange={(e) => setShowDoneInternalNotes(e.target.checked)}
-                  />
-                  <span>Show Done (last 7 days)</span>
-                </label>
+                <Select value={internalNotesFilter} onValueChange={(value) => setInternalNotesFilter(value as "all" | "done" | "undone")}>
+                  <SelectTrigger className="h-8 sm:h-9 w-full sm:w-48 border-slate-200 focus:border-slate-400 rounded-xl text-xs sm:text-sm">
+                    <SelectValue placeholder="All notes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="done">Done</SelectItem>
+                    <SelectItem value="undone">Undone</SelectItem>
+                  </SelectContent>
+                </Select>
                 {viewMode === "department" ? (
                   <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                     <SelectTrigger className="h-8 sm:h-9 w-full sm:w-48 border-slate-200 focus:border-slate-400 rounded-xl text-xs sm:text-sm">
@@ -7455,7 +7478,8 @@ export default function DepartmentKanban() {
                           isAdminOrManager ||
                           (user?.id ? group.toUserIds.includes(user.id) : false)
                         const canEditNote = isAdminOrManager || (user?.id ? note.from_user_id === user.id : false)
-                        const groupIsDone = group.notes.length > 0 && group.notes.every((n) => n.is_done)
+                        const statusNotes = getInternalNoteStatusNotes(group.notes)
+                        const groupIsDone = statusNotes.length > 0 && statusNotes.every((n) => n.is_done)
                         const noteIdsForAction = (() => {
                           if (isAdminOrManager) return group.notes.map((n) => n.id)
                           return user?.id ? group.notes.filter((n) => n.to_user_id === user.id).map((n) => n.id) : []
