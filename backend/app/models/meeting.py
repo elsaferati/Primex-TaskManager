@@ -18,6 +18,7 @@ class Meeting(Base):
     platform: Mapped[str | None] = mapped_column(String(100))
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meeting_url: Mapped[str | None] = mapped_column(String(500))
+    meeting_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="external")
     recurrence_type: Mapped[str | None] = mapped_column(String(20))  # "none", "weekly", "monthly"
     recurrence_days_of_week: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
     recurrence_days_of_month: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)

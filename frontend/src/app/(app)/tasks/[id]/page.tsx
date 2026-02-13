@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Task, User, UserLookup } from "@/lib/types"
+import type { Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
@@ -26,6 +26,8 @@ const TASK_PRIORITY_LABELS: Record<string, string> = {
   NORMAL: "Normal",
   HIGH: "High",
 }
+
+const FINISH_PERIOD_NONE_VALUE = "__none__"
 
 const FAST_TASK_TYPES = [
   { value: "N", label: "N (Normal)" },
@@ -130,6 +132,9 @@ export default function TaskDetailsPage() {
   const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskType>("N")
+  const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
+    FINISH_PERIOD_NONE_VALUE
+  )
 
   const currentTaskAssigneeIds = React.useMemo(() => {
     if (!task) return [] as string[]
@@ -165,6 +170,7 @@ export default function TaskDetailsPage() {
     setReminder(Boolean(task.reminder_enabled))
     // Initialize fast task type
     setFastTaskType(getCurrentFastTaskType(task))
+    setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }, [task])
 
   const canAssign =
@@ -184,6 +190,7 @@ export default function TaskDetailsPage() {
       if (canAssign) {
         payload.start_date = startDate || null
         payload.due_date = dueDate || null
+        payload.finish_period = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
         // Only send assignees if the user actually changed them.
         // For fast tasks, sending assignees can trigger backend "group membership" logic
         // (and potentially create per-user copies). Status-only changes shouldn't do that.
@@ -375,32 +382,53 @@ export default function TaskDetailsPage() {
               </div>
 
               {isFastTask(task) ? (
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <Select 
-                    value={fastTaskType} 
-                    onValueChange={(value) => setFastTaskType(value as FastTaskType)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FAST_TASK_TYPES.map((option) => (
-                        <SelectItem 
-                          key={option.value} 
-                          value={option.value}
-                          disabled={option.value === "GA" && !task?.ga_note_origin_id}
-                        >
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {fastTaskType === "GA" && !task?.ga_note_origin_id && (
-                    <p className="text-xs text-muted-foreground">
-                      Note: GA type is only available for tasks created from GA notes.
-                    </p>
-                  )}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select
+                      value={fastTaskType}
+                      onValueChange={(value) => setFastTaskType(value as FastTaskType)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FAST_TASK_TYPES.map((option) => (
+                          <SelectItem
+                            key={option.value}
+                            value={option.value}
+                            disabled={option.value === "GA" && !task?.ga_note_origin_id}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {fastTaskType === "GA" && !task?.ga_note_origin_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Note: GA type is only available for tasks created from GA notes.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Finish period</Label>
+                    <Select
+                      value={finishPeriod}
+                      onValueChange={(value) =>
+                        setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
+                        <SelectItem value="AM">AM</SelectItem>
+                        <SelectItem value="PM">PM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               ) : null}
 
