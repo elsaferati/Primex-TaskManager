@@ -210,6 +210,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => ws.close()
   }, [token, user])
 
+  const logout = React.useCallback(async () => {
+    try {
+      await fetch(`${API_HTTP_URL}/auth/logout`, { method: "POST", credentials: "include" })
+    } catch {
+      // ignore
+    }
+    setStoredToken(null)
+    setStoredLogoutAt(null)
+    setToken(null)
+    setUser(null)
+  }, [])
+
   React.useEffect(() => {
     if (!token || !user) return
     const checkLogoutSession = async () => {
@@ -316,18 +328,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.access_token)
     setUser(me)
     setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
-  }, [])
-
-  const logout = React.useCallback(async () => {
-    try {
-      await fetch(`${API_HTTP_URL}/auth/logout`, { method: "POST", credentials: "include" })
-    } catch {
-      // ignore
-    }
-    setStoredToken(null)
-    setStoredLogoutAt(null)
-    setToken(null)
-    setUser(null)
   }, [])
 
   const value = React.useMemo<AuthContextValue>(
