@@ -281,9 +281,6 @@ const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className
   if (task.is_1h_report) {
     return { label: "1H", className: "border-amber-200 bg-amber-50 text-amber-700" }
   }
-  if (task.ga_note_origin_id) {
-    return { label: "GA", className: "border-sky-200 bg-sky-50 text-sky-700" }
-  }
   if (task.is_personal) {
     return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
   }
@@ -298,9 +295,11 @@ const getFastTaskBadge = (task: SnapshotTaskEntry): { label: string; className: 
       BLL: "border-red-200 bg-red-50 text-red-700",
       R1: "border-indigo-200 bg-indigo-50 text-indigo-700",
       "1H": "border-amber-200 bg-amber-50 text-amber-700",
-      GA: "border-sky-200 bg-sky-50 text-sky-700",
       "P:": "border-emerald-200 bg-emerald-50 text-emerald-700",
       N: "border-slate-200 bg-slate-50 text-slate-700",
+    }
+    if (task.fast_task_type === "GA") {
+      return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
     }
     return {
       label: task.fast_task_type,
@@ -313,7 +312,7 @@ const getFastTaskBadge = (task: SnapshotTaskEntry): { label: string; className: 
 const getFastTaskSortLabel = (task: SnapshotTaskEntry) => getFastTaskBadge(task).label
 
 const sortFastTasks = (tasks: SnapshotTaskEntry[]) => {
-  const order = ["BLL", "1H", "GA", "P:", "R1", "N"]
+  const order = ["BLL", "1H", "P:", "R1", "N"]
   const rank = new Map<string, number>(order.map((label, index) => [label, index]))
   return tasks
     .map((task, index) => ({ task, index }))
