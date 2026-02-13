@@ -632,6 +632,7 @@ function resolveMeetingDisplayDate(meeting: Meeting) {
       })
       if (next) return next
     }
+    return null
   }
   if (!meeting.starts_at) return null
   return new Date(meeting.starts_at)
