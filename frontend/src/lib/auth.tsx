@@ -205,11 +205,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let res: Response
       try {
         res = await doFetch()
-      } catch {
+      } catch (err) {
+        const errName = (err as { name?: string } | null)?.name
+        const aborted = init.signal?.aborted || errName === "AbortError"
+        if (aborted) {
+          return new Response(null, { status: 499, statusText: "Request aborted" })
+        }
+
         if (!path.startsWith("http") && API_HTTP_FALLBACK_URL !== API_HTTP_URL) {
           try {
             res = await doFetch(undefined, makeUrl(API_HTTP_FALLBACK_URL))
-          } catch {
+          } catch (fallbackErr) {
+            const fallbackErrName = (fallbackErr as { name?: string } | null)?.name
+            const fallbackAborted = init.signal?.aborted || fallbackErrName === "AbortError"
+            if (fallbackAborted) {
+              return new Response(null, { status: 499, statusText: "Request aborted" })
+            }
             toast("Network error", {
               description: "Unable to reach the server. Check the API URL or backend status.",
             })
