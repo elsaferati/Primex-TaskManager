@@ -2566,30 +2566,32 @@ export default function WeeklyPlannerPage() {
                               : undefined
 
                             if (!hasContent && !isBlocked) {
-                              return <div className="min-h-20 text-xs text-muted-foreground/50">—</div>
+                              return <div className="min-h-20 text-xs text-muted-foreground/50">--</div>
                             }
 
-                            return (
-                              <div
-                                className={[
-                                  "min-h-20",
-                                  isBlocked ? "relative rounded-md border border-slate-300 bg-slate-100/70 text-slate-600 cursor-not-allowed" : "",
-                                ].join(" ")}
-                                title={blockTitle}
-                              >
-                                {isBlocked && (
+                            if (isBlocked) {
+                              return (
+                                <div
+                                  className="min-h-20 relative rounded-md border border-slate-300 bg-slate-100/70 text-slate-600 cursor-not-allowed"
+                                  title={blockTitle}
+                                >
                                   <div className="absolute inset-0 bg-slate-200/50 pointer-events-none" />
-                                )}
-                                {isBlocked && (
                                   <div className="absolute top-1 right-1 z-10 text-[10px] font-semibold uppercase tracking-wide text-slate-600 bg-slate-200/90 px-1.5 py-0.5 rounded">
                                     PV/FEST
                                   </div>
-                                )}
-                                <div className={isBlocked ? "relative z-0 opacity-70" : ""}>
-                                  {!hasContent ? (
-                                    <div className="min-h-20 text-xs text-muted-foreground/50">--</div>
-                                  ) : (
-                                    <div className="space-y-2 min-h-20">
+                                  <div className="relative z-0 px-2 py-1 text-xs font-semibold text-slate-600">
+                                    {block?.note ?? null}
+                                  </div>
+                                </div>
+                              )
+                            }
+
+                            return (
+                              <div className="min-h-20">
+                                {!hasContent ? (
+                                  <div className="min-h-20 text-xs text-muted-foreground/50">--</div>
+                                ) : (
+                                  <div className="space-y-2 min-h-20">
                                       {/* Projects */}
                                 {projectsList.map((project, projectIndex) => {
                                   // Debug: log if project should be late
@@ -2785,7 +2787,6 @@ export default function WeeklyPlannerPage() {
                               </div>
                             )}
                           </div>
-                        </div>
                       )
                           }
 

@@ -3114,7 +3114,7 @@ export default function PcmProjectPage() {
       }),
     [activePhase, project?.current_phase, tasks]
   )
-  const assignableUsers = React.useMemo(() => allUsers.filter((u) => u.role !== "ADMIN"), [allUsers])
+  const assignableUsers = React.useMemo(() => allUsers, [allUsers])
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
