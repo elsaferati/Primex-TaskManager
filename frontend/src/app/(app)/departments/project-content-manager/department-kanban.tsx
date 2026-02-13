@@ -698,6 +698,22 @@ function formatMeetingLabel(meeting: Meeting) {
   return `${prefix} - ${meeting.title}${platformLabel}`
 }
 
+function formatMeetingDateTime(meeting: Meeting): string {
+  if (!meeting.starts_at) return "-"
+  const date = new Date(meeting.starts_at)
+  if (Number.isNaN(date.getTime())) return "-"
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  const dateLabel = sameDay
+    ? "Today"
+    : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  return `${dateLabel} ${timeLabel}`
+}
+
 function startOfWeekMonday(date: Date) {
   const day = date.getDay()
   const diff = (day + 6) % 7
@@ -2415,19 +2431,19 @@ export default function DepartmentKanban() {
         })
       }
 
-      // Process tasks from API response
-      const allTasks = [
-        ...(report.tasks_today || []).map((item) => item.task),
-        ...(report.tasks_overdue || []).map((item) => item.task),
-      ]
+      // Process tasks from API response (guard against missing task payloads)
+      const allTaskItems = [...(report.tasks_today || []), ...(report.tasks_overdue || [])].filter(
+        (item): item is { task: Task; project_title?: string | null } => Boolean(item?.task)
+      )
       const projectTitleByTaskId = new Map<string, string>()
-      for (const item of [...(report.tasks_today || []), ...(report.tasks_overdue || [])]) {
+      for (const item of allTaskItems) {
         if (item.project_title) {
           projectTitleByTaskId.set(item.task.id, item.project_title)
         }
       }
 
-      for (const task of allTasks) {
+      for (const item of allTaskItems) {
+        const task = item.task
         const startDate = task.start_date ? toDate(task.start_date) : null
         const dueDate = task.due_date ? toDate(task.due_date) : null
         const isProject = Boolean(task.project_id)
@@ -3121,6 +3137,11 @@ export default function DepartmentKanban() {
     const run = async () => {
       if (activeTab !== "all") {
         setDailyReport(null)
+        return
+      }
+      if (viewMode === "department" && selectedUserId === "__all__") {
+        setDailyReport(null)
+        setLoadingDailyReport(false)
         return
       }
       const targetUserId =

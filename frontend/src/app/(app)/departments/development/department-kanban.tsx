@@ -2906,6 +2906,11 @@ export default function DepartmentKanban() {
         setDailyReport(null)
         return
       }
+      if (viewMode === "department" && selectedUserId === "__all__") {
+        setDailyReport(null)
+        setLoadingDailyReport(false)
+        return
+      }
       const targetUserId =
         viewMode === "department"
           ? selectedUserId !== "__all__"
