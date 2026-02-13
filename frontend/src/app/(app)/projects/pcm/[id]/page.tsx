@@ -5000,6 +5000,7 @@ export default function PcmProjectPage() {
                               size="icon"
                               className="h-6 w-6 text-red-600 hover:bg-red-50 flex-shrink-0"
                               onClick={async () => {
+                                if (!confirm("Are you sure you want to delete this task?")) return
                                 const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                 if (!res?.ok) {
                                   if (res?.status == 405) {
@@ -6736,6 +6737,7 @@ export default function PcmProjectPage() {
                                     size="sm"
                                     className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
                                     onClick={async () => {
+                                      if (!confirm("Are you sure you want to delete this task?")) return
                                       const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                       if (!res?.ok) {
                                         if (res?.status == 405) {
@@ -6745,7 +6747,30 @@ export default function PcmProjectPage() {
                                         }
                                         return
                                       }
-                                      setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                                      setTasks((prev) => {
+                                        const next: Task[] = []
+                                        for (const t of prev) {
+                                          if (t.id === task.id) continue
+                                          if (t.phase === "CONTROL") {
+                                            const originTaskId = getOriginTaskId(t.internal_notes)
+                                            if (originTaskId && originTaskId === task.id) {
+                                              const totals = parseTaskTotals(t.internal_notes)
+                                              const koUserId = parseKoUserId(t.internal_notes)
+                                              const productionDate = parseProductionDate(t.internal_notes)
+                                              const internalNotes = serializeInternalNotes({
+                                                total: totals.total,
+                                                completed: totals.completed,
+                                                koUserId,
+                                                productionDate,
+                                              })
+                                              next.push({ ...t, internal_notes: internalNotes })
+                                              continue
+                                            }
+                                          }
+                                          next.push(t)
+                                        }
+                                        return next
+                                      })
                                       toast.success("Task deleted")
                                     }}
                                   >
@@ -7751,6 +7776,7 @@ export default function PcmProjectPage() {
                                     size="sm"
                                     className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
                                     onClick={async () => {
+                                      if (!confirm("Are you sure you want to delete this task?")) return
                                       const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                       if (!res?.ok) {
                                         if (res?.status == 405) {

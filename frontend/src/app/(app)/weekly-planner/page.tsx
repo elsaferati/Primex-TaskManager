@@ -666,8 +666,6 @@ export default function WeeklyPlannerPage() {
               taskPayload.is_r1 = true
             } else if (manualTaskFastType === "1H") {
               taskPayload.is_1h_report = true
-            } else if (manualTaskFastType === "GA") {
-              // Leave ga_note_origin_id null for manual creation.
             } else if (manualTaskFastType === "P:") {
               taskPayload.is_personal = true
             }
@@ -755,7 +753,6 @@ export default function WeeklyPlannerPage() {
     BLL: "border-red-200 bg-red-50 text-red-700",
     R1: "border-indigo-200 bg-indigo-50 text-indigo-700",
     "1H": "border-amber-200 bg-amber-50 text-amber-700",
-    GA: "border-sky-200 bg-sky-50 text-sky-700",
     "P:": "border-emerald-200 bg-emerald-50 text-emerald-700",
     N: "border-slate-200 bg-slate-50 text-slate-700",
   }
@@ -862,9 +859,6 @@ export default function WeeklyPlannerPage() {
     if (task.is_1h_report) {
       return { label: "1H", className: "border-amber-200 bg-amber-50 text-amber-700" }
     }
-    if (task.ga_note_origin_id) {
-      return { label: "GA", className: "border-sky-200 bg-sky-50 text-sky-700" }
-    }
     if (task.is_personal) {
       return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
     }
@@ -882,6 +876,9 @@ export default function WeeklyPlannerPage() {
     const badge = getTaskStatusBadge(task)
     if (badge) return badge
     if (task.fast_task_type) {
+      if (task.fast_task_type === "GA") {
+        return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
+      }
       return {
         label: task.fast_task_type,
         className: fastTaskBadgeStyles[task.fast_task_type] || "border-slate-200 bg-slate-50 text-slate-700",
@@ -890,7 +887,7 @@ export default function WeeklyPlannerPage() {
     return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
   }, [getTaskStatusBadge, fastTaskBadgeStyles])
 
-  const fastTaskSortOrder = ["BLL", "1H", "GA", "P:", "R1", "N"] as const
+  const fastTaskSortOrder = ["BLL", "1H", "P:", "R1", "N"] as const
   const fastTaskSortRank = new Map<string, number>(
     fastTaskSortOrder.map((label, index) => [label, index])
   )
@@ -940,6 +937,14 @@ export default function WeeklyPlannerPage() {
       .map((part) => part[0]?.toUpperCase())
       .join("") || "?"
     const legendEntriesByDept = new Map<string, LegendEntry[]>()
+    const escapeHtml = (value: string) => (
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+    )
 
     await Promise.all(
       data.departments.map(async (dept) => {
@@ -1097,6 +1102,38 @@ export default function WeeklyPlannerPage() {
             .legend-answer-line {
               height: 9px;
               border-bottom: 0.5px solid #000;
+            }
+            .pv-fest-cell {
+              position: relative;
+              min-height: 18px;
+              border: 0.5px solid #cbd5e1;
+              background: #f1f5f9;
+              color: #475569;
+              border-radius: 3px;
+              padding: 2px 4px 3px;
+              display: flex;
+              align-items: flex-start;
+              justify-content: flex-start;
+            }
+            .pv-fest-badge {
+              position: absolute;
+              top: 1px;
+              right: 1px;
+              font-size: 4.5pt;
+              font-weight: 700;
+              text-transform: uppercase;
+              background: #e2e8f0;
+              color: #475569;
+              padding: 1px 2px;
+              border-radius: 2px;
+              letter-spacing: 0.2px;
+            }
+            .pv-fest-note {
+              font-size: 5pt;
+              font-weight: 600;
+              line-height: 1.15;
+              margin-top: 6px;
+              color: #475569;
             }
             .print-legend-spacer {
               height: 0.18in;
@@ -1619,9 +1656,16 @@ export default function WeeklyPlannerPage() {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.am_projects || []
         const systemTasks = userDay?.am_system_tasks || []
+        const block = getBlockForSlot(user.user_id, dayIso, "am")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (projects.length > 0 || systemTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1671,9 +1715,16 @@ export default function WeeklyPlannerPage() {
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
+        const block = getBlockForSlot(user.user_id, dayIso, "am")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (fastTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
@@ -1705,9 +1756,16 @@ export default function WeeklyPlannerPage() {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.pm_projects || []
         const systemTasks = userDay?.pm_system_tasks || []
+        const block = getBlockForSlot(user.user_id, dayIso, "pm")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (projects.length > 0 || systemTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1757,9 +1815,16 @@ export default function WeeklyPlannerPage() {
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
+        const block = getBlockForSlot(user.user_id, dayIso, "pm")
+        const isBlocked = Boolean(block)
 
         html += `<td>`
-        if (fastTasks.length > 0) {
+        if (isBlocked) {
+          html += `<div class="pv-fest-cell">`
+          html += `<div class="pv-fest-badge">PV/FEST</div>`
+          html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+          html += `</div>`
+        } else if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
@@ -1866,6 +1931,7 @@ export default function WeeklyPlannerPage() {
     departmentId,
     departments,
     getFastTaskBadge,
+    getBlockForSlot,
     getStatusValueForDay,
     getTaskStatusBadge,
     sortFastTasks,
@@ -2179,7 +2245,6 @@ export default function WeeklyPlannerPage() {
                       <SelectItem value="BLL">BLL</SelectItem>
                       <SelectItem value="R1">R1</SelectItem>
                       <SelectItem value="1H">1H</SelectItem>
-                      <SelectItem value="GA">GA</SelectItem>
                       <SelectItem value="P:">P:</SelectItem>
                       <SelectItem value="N">N</SelectItem>
                     </SelectContent>

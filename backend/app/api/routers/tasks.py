@@ -265,6 +265,28 @@ def _enum_value(value) -> str | None:
     return value.value if hasattr(value, "value") else value
 
 
+def _parse_origin_task_id(internal_notes: str | None) -> uuid.UUID | None:
+    if not internal_notes:
+        return None
+    match = re.search(r"origin_task_id[:=]\s*([a-f0-9-]+)", internal_notes, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return uuid.UUID(match.group(1))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _strip_origin_task_id(internal_notes: str | None) -> str | None:
+    if not internal_notes:
+        return None
+    parts = [part.strip() for part in internal_notes.split(";")]
+    kept = [part for part in parts if part and not part.lower().startswith("origin_task_id")]
+    if not kept:
+        return None
+    return "; ".join(kept)
+
+
 async def _project_for_id(db: AsyncSession, project_id: uuid.UUID) -> Project:
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
@@ -1965,6 +1987,24 @@ async def delete_task(
             "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         },
     )
+
+    if task.project_id is not None and task.phase == ProjectPhaseStatus.PRODUCT.value:
+        project = (
+            await db.execute(select(Project).where(Project.id == task.project_id))
+        ).scalar_one_or_none()
+        if project is not None and _is_mst_or_tt_project(project):
+            control_tasks = (
+                await db.execute(
+                    select(Task)
+                    .where(Task.project_id == task.project_id)
+                    .where(Task.phase == ProjectPhaseStatus.CONTROL.value)
+                    .where(Task.internal_notes.ilike("%origin_task_id%"))
+                )
+            ).scalars().all()
+            for control_task in control_tasks:
+                origin_id = _parse_origin_task_id(control_task.internal_notes)
+                if origin_id == task.id:
+                    control_task.internal_notes = _strip_origin_task_id(control_task.internal_notes)
 
     # Fast task groups: "delete only for me" -> soft-delete only this copy.
     if task.fast_task_group_id is not None and is_fast_task_model(task):

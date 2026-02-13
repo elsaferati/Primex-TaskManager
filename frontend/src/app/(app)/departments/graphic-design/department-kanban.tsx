@@ -139,7 +139,6 @@ const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
-  { id: "ga", label: "GA", description: "GA tasks that should be tracked separately." },
   { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
   { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
@@ -573,7 +572,6 @@ function noProjectTypeLabel(task: Task) {
   if (task.is_r1) return "R1"
   if (task.is_1h_report) return "1H"
   if (task.is_personal) return "Personal"
-  if (task.ga_note_origin_id) return "GA"
   return "Normal"
 }
 
@@ -3438,19 +3436,6 @@ export default function DepartmentKanban() {
     if (!noProjectTitle.trim() || !noProjectStartDate || !department) return
     setCreatingNoProject(true)
     try {
-      let gaNoteId: string | null = null
-      if (noProjectType === "ga") {
-        const noteRes = await apiFetch("/ga-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: department.id, content: noProjectDescription.trim() || noProjectTitle.trim(), note_type: "GA" }) })
-        if (noteRes.ok) {
-          const createdNote = (await noteRes.json()) as GaNote
-          gaNoteId = createdNote.id
-          setGaNotes((prev) => [createdNote, ...prev])
-        }
-        // If GA note creation failed or was skipped, still tag the task as GA so it shows in GA bucket.
-        if (!gaNoteId) {
-          gaNoteId = "__ga__"
-        }
-      }
       const startDate = noProjectStartDate ? new Date(noProjectStartDate).toISOString() : null
       const dueDate = noProjectDueDate ? new Date(noProjectDueDate).toISOString() : null
       const payload = {
@@ -3465,7 +3450,7 @@ export default function DepartmentKanban() {
         is_1h_report: noProjectType === "hourly",
         is_r1: noProjectType === "r1",
         is_personal: noProjectType === "personal",
-        ga_note_origin_id: gaNoteId,
+        ga_note_origin_id: null,
         start_date: startDate,
         due_date: dueDate,
       }

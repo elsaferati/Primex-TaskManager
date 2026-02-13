@@ -34,7 +34,6 @@ const FAST_TASK_TYPES = [
   { value: "BLL", label: "BLL (BLLOK)" },
   { value: "R1", label: "R1" },
   { value: "1H", label: "1H (1 Hour Report)" },
-  { value: "GA", label: "GA" },
   { value: "P:", label: "P: (Personal)" },
 ] as const
 
@@ -45,7 +44,6 @@ function getCurrentFastTaskType(task: Task | null): FastTaskType {
   if (task.is_bllok) return "BLL"
   if (task.is_r1) return "R1"
   if (task.is_1h_report) return "1H"
-  if (task.ga_note_origin_id) return "GA"
   if (task.is_personal) return "P:"
   return "N"
 }
@@ -225,15 +223,6 @@ export default function TaskDetailsPage() {
             case "P:":
               payload.is_personal = true
               break
-            case "GA":
-              // GA type requires ga_note_origin_id - if task doesn't have it, we can't change to GA
-              if (!task.ga_note_origin_id) {
-                toast.error("Cannot change to GA type: task must originate from a GA note")
-                setSaving(false)
-                return
-              }
-              // If already GA, no change needed
-              break
             case "N":
               // Normal - all flags already false
               break
@@ -404,11 +393,6 @@ export default function TaskDetailsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                    {fastTaskType === "GA" && !task?.ga_note_origin_id && (
-                      <p className="text-xs text-muted-foreground">
-                        Note: GA type is only available for tasks created from GA notes.
-                      </p>
-                    )}
                   </div>
 
                   <div className="space-y-2">

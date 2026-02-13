@@ -6814,19 +6814,23 @@ export default function CommonViewPage() {
                       } else if (row.id === "leave") {
                         return entries.map((e: LeaveItem, idx: number) => {
                           const range = "" // hide date in table view
+                          const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
+                          const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
                           return (
                             <div key={idx} className="week-table-entry">
                               <span>
-                                {e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`}
+                                {isAllUsers ? `${timeLabel} ALL` : timeLabel}
                                 {range ? ` ${range}` : ""}
                               </span>
-                              <div className="week-table-avatars">
-                                {entryAssignees(e).map((name: string) => (
-                                  <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
-                                    {initials(name)}
-                                  </span>
-                                ))}
-                              </div>
+                              {!isAllUsers ? (
+                                <div className="week-table-avatars">
+                                  {entryAssignees(e).map((name: string) => (
+                                    <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
+                                      {initials(name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
                               {canDeleteCommon && e.entryId ? (
                                 <button
                                   type="button"
