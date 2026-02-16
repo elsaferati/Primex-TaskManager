@@ -353,6 +353,7 @@ export default function CommonViewPage() {
   const [formFullDay, setFormFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
+  const [formError, setFormError] = React.useState("")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
@@ -1505,6 +1506,16 @@ export default function CommonViewPage() {
   const leaveCovers = (leave: LeaveItem, dateStr: string) => {
     return dateStr >= leave.startDate && dateStr <= leave.endDate
   }
+  const isDateFullyCovered = (dateStr: string) => {
+    const activeUserIds = users.filter((u) => u.is_active).map((u) => u.id)
+    if (!activeUserIds.length) return false
+    const coveredUsers = new Set(
+      commonData.leave
+        .filter((x) => x.userId && leaveCovers(x, dateStr))
+        .map((x) => x.userId as string)
+    )
+    return coveredUsers.size >= activeUserIds.length
+  }
 
   // Filtered data
   const filtered = React.useMemo(() => {
@@ -1825,6 +1836,7 @@ export default function CommonViewPage() {
     setFormFullDay(false)
     setFormTitle("")
     setFormNote("")
+    setFormError("")
   }
 
   const submitForm = async (e: React.FormEvent) => {
@@ -1833,6 +1845,11 @@ export default function CommonViewPage() {
     setIsSavingEntry(true)
 
     try {
+      setFormError("")
+      if ((formType === "late" || formType === "absent") && formDate && isDateFullyCovered(formDate)) {
+        setFormError("All users are on leave for this date, so VONS/MUNG entries are hidden.")
+        return
+      }
       let category: string
       if (formType === "late") category = "Delays"
       else if (formType === "absent") category = "Absences"
@@ -2726,7 +2743,7 @@ export default function CommonViewPage() {
       : filtered.late
     const lateItems: SwimlaneCell[] = lateSource.map((x) => ({
       title: x.person,
-      subtitle: `${toDDMMYYYYDot(x.date)} · ${x.start || "08:00"}-${x.until}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.start || "08:00"}-${x.until}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent delay",
       entryId: x.entryId,
@@ -4357,6 +4374,11 @@ export default function CommonViewPage() {
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
+        }
+        .form-error {
+          color: #b91c1c;
+          font-size: 12px;
+          font-weight: 600;
         }
         @media print {
           .week-table-view {
@@ -7132,6 +7154,7 @@ export default function CommonViewPage() {
                 onChange={(e) => {
                   const nextType = e.target.value as any
                   setFormType(nextType)
+                  setFormError("")
                   if (nextType !== "leave" && formPerson === ALL_USERS_VALUE) {
                     setFormPerson("")
                   }
@@ -7151,7 +7174,10 @@ export default function CommonViewPage() {
                       id="cv-person"
                       className="input"
                       value={formPerson}
-                      onChange={(e) => setFormPerson(e.target.value)}
+                      onChange={(e) => {
+                        setFormPerson(e.target.value)
+                        setFormError("")
+                      }}
                       required
                     >
                       <option value="">--</option>
@@ -7193,6 +7219,7 @@ export default function CommonViewPage() {
                         onChange={(e) => {
                           const value = e.target.value
                           setFormDateDisplay(value)
+                          setFormError("")
                           const isoDate = fromDDMMYYYY(value)
                           if (isoDate) {
                             setFormDate(isoDate)
@@ -7210,6 +7237,7 @@ export default function CommonViewPage() {
                           if (value) {
                             setFormDate(value)
                             setFormDateDisplay(toDDMMYYYY(value))
+                            setFormError("")
                           }
                         }}
                         style={{
@@ -7418,6 +7446,7 @@ export default function CommonViewPage() {
                     />
                   </div>
                 </div>
+                {formError ? <div className="form-error">{formError}</div> : null}
                 <div className="modal-footer">
                   <button className="btn-outline" type="button" onClick={closeModal} disabled={isSavingEntry}>
                     Cancel
