@@ -169,7 +169,7 @@ export default function WeeklyPlannerPage() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
   const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
-  const [isThisWeek, setIsThisWeek] = React.useState(false)
+  const [isThisWeek, setIsThisWeek] = React.useState(true)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
 

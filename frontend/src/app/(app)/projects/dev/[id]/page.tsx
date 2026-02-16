@@ -296,7 +296,7 @@ export default function DevelopmentProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   const loadDevelopmentChecklist = React.useCallback(
     async (targetProjectId?: string) => {

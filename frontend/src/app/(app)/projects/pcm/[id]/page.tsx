@@ -898,7 +898,7 @@ export default function PcmProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {

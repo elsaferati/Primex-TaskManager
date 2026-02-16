@@ -6877,7 +6877,7 @@ export default function CommonViewPage() {
                       if (row.id === "late") {
         return entries.map((e: LateItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{e.start || "08:00"}-{e.until}</span>
+            <span>{idx + 1}. {e.start || "08:00"}-{e.until}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.start}-${name}`} className="week-table-avatar" title={name}>
@@ -6901,7 +6901,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "absent") {
                         return entries.map((e: AbsentItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{e.from} - {e.to}</span>
+                            <span>{idx + 1}. {e.from} - {e.to}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
@@ -6930,7 +6930,7 @@ export default function CommonViewPage() {
                           return (
                             <div key={idx} className="week-table-entry">
                               <span>
-                                {isAllUsers ? `${timeLabel} ALL` : timeLabel}
+                                {idx + 1}. {isAllUsers ? `${timeLabel} ALL` : timeLabel}
                                 {range ? ` ${range}` : ""}
                               </span>
                               {!isAllUsers ? (
@@ -6970,7 +6970,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6983,7 +6983,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "problem" || row.id === "feedback") {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
+                            <span>{idx + 1}. {initials(e.person || e.title || "")}: {e.note || ""}</span>
                             {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
@@ -7000,7 +7000,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "oneH" || row.id === "r1") {
                         return entries.map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -7013,7 +7013,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "personal") {
                         return entries.map((e: PersonalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -7026,7 +7026,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -7039,7 +7039,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "internal") {
                         return entries.map((e: InternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -7073,12 +7073,13 @@ export default function CommonViewPage() {
                           if (!isOther(a) && isOther(b)) return -1
                           return a.localeCompare(b)
                         })
+                        let entryIndex = 0
                         return groupKeys.map((departmentName, groupIdx) => (
                           <React.Fragment key={departmentName}>
                             <div className="week-table-prjk-group-header">{departmentName}</div>
                             {(groupMap.get(departmentName) || []).map((e, idx) => (
                               <div key={`${departmentName}-${idx}`} className="week-table-entry">
-                                <span>{idx + 1}. {e.project}</span>
+                                <span>{++entryIndex}. {e.project}</span>
                                 <div className="week-table-avatars">
                                   {e.assignees.map((name) => (
                                     <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
@@ -7209,7 +7210,6 @@ export default function CommonViewPage() {
                                     </div>
                                   ) : null}
                                   <div className="swimlane-title">
-                                    {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
                                   {(row.id === "external" ||
