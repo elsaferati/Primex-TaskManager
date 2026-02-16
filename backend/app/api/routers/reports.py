@@ -12,7 +12,7 @@ from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import GaNoteStatus, UserRole
+from app.models.enums import GaNoteStatus, UserRole, TaskStatus
 from app.models.ga_note import GaNote
 from app.models.project import Project
 from app.models.daily_report_ga_entry import DailyReportGaEntry
@@ -365,6 +365,8 @@ async def daily_report(
                 )
             )
         elif planned_end < day:
+            if t.completed_at is not None or t.status == TaskStatus.DONE:
+                continue
             late_days = business_days_between(planned_end, day)
             tasks_overdue.append(
                 DailyReportTaskItem(
