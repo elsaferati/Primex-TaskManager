@@ -723,7 +723,7 @@ export default function GaKaNotesPage() {
       return
     }
     const trimmed = note.content.trim()
-    const defaultTitle = trimmed ? trimmed.split(/\r?\n/)[0].slice(0, 120) : "GA/KA note task"
+    const defaultTitle = trimmed ? trimmed : "GA/KA note task"
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
@@ -1671,14 +1671,26 @@ export default function GaKaNotesPage() {
                                           {formatFileSize(attachment.size_bytes)}
                                         </span>
                                       </div>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 text-[10px]"
-                                        onClick={() => void downloadAttachment(attachment)}
-                                      >
-                                        Download
-                                      </Button>
+                                      <div className="flex items-center gap-2">
+                                        {(attachment.content_type || "").startsWith("image/") ? (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-6 text-[10px]"
+                                            onClick={() => void openAttachmentPreview(attachment)}
+                                          >
+                                            View
+                                          </Button>
+                                        ) : null}
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px]"
+                                          onClick={() => void downloadAttachment(attachment)}
+                                        >
+                                          Download
+                                        </Button>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -1902,7 +1914,11 @@ export default function GaKaNotesPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Title</Label>
-                <Input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} />
+                <Textarea
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  className="min-h-[72px]"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>

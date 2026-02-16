@@ -63,6 +63,13 @@ type MicrosoftEvent = {
   body_preview?: string | null
 }
 
+type TaskChecklist = {
+  id: string
+  title?: string | null
+  task_id?: string | null
+  items: ChecklistItem[]
+}
+
 const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
 const PHASE_LABELS: Record<string, string> = {
@@ -632,6 +639,7 @@ function resolveMeetingDisplayDate(meeting: Meeting) {
       })
       if (next) return next
     }
+    return null
   }
   if (!meeting.starts_at) return null
   return new Date(meeting.starts_at)
@@ -748,6 +756,22 @@ function dayKey(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
+function businessDayDelta(startDate: Date, endDate: Date) {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
+  if (end <= start) return 0
+  const totalDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY)
+  const fullWeeks = Math.floor(totalDays / 7)
+  const remainder = totalDays % 7
+  let weekdays = fullWeeks * 5
+  const startWeekday = start.getDay() // Sunday=0 ... Saturday=6
+  for (let offset = 1; offset <= remainder; offset += 1) {
+    const dayIdx = (startWeekday + offset) % 7
+    if (dayIdx !== 0 && dayIdx !== 6) weekdays += 1
+  }
+  return weekdays
+}
+
 function systemFrequencyReportLabel(freq?: SystemTaskTemplate["frequency"] | string | null) {
   if (!freq) return "-"
   switch (freq) {
@@ -811,7 +835,7 @@ function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefin
   if (completedDate && isSameDay(completedDate, today)) return "T"
   if (!baseDate) return "-"
   if (isSameDay(baseDate, today)) return "T"
-  const delta = Math.floor((dayKey(today) - dayKey(baseDate)) / MS_PER_DAY)
+  const delta = businessDayDelta(baseDate, today)
   if (delta === 1) return "Y"
   if (delta > 1) return String(delta)
   return "-"
@@ -847,7 +871,7 @@ function getDailyReportTyo({
     if (reportKey === dueKey) return "T"
   }
 
-  const lateDays = Math.floor((reportKey - dueKey) / MS_PER_DAY)
+  const lateDays = businessDayDelta(dueDate, reportDate)
   if (lateDays === 1) return "Y"
   if (lateDays >= 2) return String(lateDays)
   return "-"
@@ -950,7 +974,7 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
-    isTabId ? (normalizedTab as TabId) : "projects"
+    isTabId ? (normalizedTab as TabId) : "all"
   )
   const [allRange, setAllRange] = React.useState<"today" | "week">("today")
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
@@ -959,6 +983,9 @@ export default function DepartmentKanban() {
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
+  const [taskChecklistLoading, setTaskChecklistLoading] = React.useState<Record<string, boolean>>({})
+  const [taskChecklistOpen, setTaskChecklistOpen] = React.useState<Record<string, boolean>>({})
   const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
   const [gaTableInput, setGaTableInput] = React.useState("")
   const [savingGaTable, setSavingGaTable] = React.useState(false)
@@ -2058,6 +2085,30 @@ export default function DepartmentKanban() {
     }
     return map
   }, [visibleSystemTemplates])
+
+  const getChecklistItemsForTask = React.useCallback(
+    (taskId?: string) => {
+      if (!taskId) return []
+      const checklist = taskChecklists[taskId]
+      if (!checklist?.items?.length) return []
+      return checklist.items
+        .filter((item) => item.item_type === "CHECKBOX")
+        .slice()
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    },
+    [taskChecklists]
+  )
+
+  const getChecklistCountsForTask = React.useCallback(
+    (taskId?: string) => {
+      const items = getChecklistItemsForTask(taskId)
+      const total = items.length
+      const done = items.filter((item) => item.is_checked).length
+      return { total, done }
+    },
+    [getChecklistItemsForTask]
+  )
+
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
       typeLabel: string
@@ -2979,6 +3030,43 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+
+  const loadTaskChecklist = React.useCallback(async (taskId: string) => {
+    if (!taskId || taskChecklists[taskId] !== undefined) return
+    setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
+    try {
+      const res = await apiFetch(`/checklists?task_id=${taskId}&include_items=true`)
+      if (!res.ok) {
+        let detail = "Failed to load checklist"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to load checklist")
+        setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+        return
+      }
+      const data = (await res.json()) as TaskChecklist[]
+      const checklist = data.length ? data[0] : null
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: checklist }))
+    } catch (error) {
+      console.error("Failed to load task checklist", error)
+      toast.error("Failed to load checklist")
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+    } finally {
+      setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }, [apiFetch, taskChecklists])
+
+  const toggleTaskChecklist = React.useCallback((taskId: string) => {
+    if (!taskId) return
+    setTaskChecklistOpen((prev) => ({ ...prev, [taskId]: !prev[taskId] }))
+    if (taskChecklists[taskId] === undefined) {
+      void loadTaskChecklist(taskId)
+    }
+  }, [loadTaskChecklist, taskChecklists])
 
   React.useEffect(() => {
     let cancelled = false
@@ -5407,6 +5495,44 @@ export default function DepartmentKanban() {
                                 ) : (
                                   row.title
                                 )}
+                                {row.typeLabel === "PRJK" && row.taskId ? (
+                                  <div className="mt-1">
+                                    <button
+                                      type="button"
+                                      className="text-[10px] uppercase text-slate-500 hover:text-slate-700"
+                                      onClick={() => toggleTaskChecklist(row.taskId!)}
+                                    >
+                                      {(() => {
+                                        const counts = getChecklistCountsForTask(row.taskId)
+                                        const isOpen = Boolean(taskChecklistOpen[row.taskId])
+                                        const label = counts.total > 0 ? `Subtasks ${counts.done}/${counts.total}` : "Subtasks"
+                                        return `${label} ${isOpen ? "▲" : "▼"}`
+                                      })()}
+                                    </button>
+                                    {taskChecklistOpen[row.taskId] ? (
+                                      <div className="mt-1 space-y-1">
+                                        {taskChecklistLoading[row.taskId] ? (
+                                          <div className="text-[10px] text-slate-500">Loading subtasks...</div>
+                                        ) : getChecklistItemsForTask(row.taskId).length === 0 ? (
+                                          <div className="text-[10px] text-slate-500">No subtasks yet.</div>
+                                        ) : (
+                                          getChecklistItemsForTask(row.taskId).map((item) => {
+                                            const isChecked = Boolean(item.is_checked)
+                                            const label = item.title || item.comment || item.description || "Untitled subtask"
+                                            return (
+                                              <div key={item.id} className="flex items-start gap-1.5 normal-case">
+                                                <Checkbox checked={isChecked} disabled />
+                                                <span className={["text-[10px]", isChecked ? "line-through text-slate-400" : "text-slate-700"].join(" ")}>
+                                                  {label}
+                                                </span>
+                                              </div>
+                                            )
+                                          })
+                                        )}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </td>
                               <td
                                 className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
@@ -5611,7 +5737,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "TASK TITLE", "DESCRIPTION", "ASSIGNED", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5633,10 +5759,6 @@ export default function DepartmentKanban() {
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
                             <TableCell>{phaseLabel}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5654,6 +5776,10 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5686,7 +5812,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "TYPE", "TASK TITLE", "ASSIGNED", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5703,9 +5829,6 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5722,6 +5845,9 @@ export default function DepartmentKanban() {
                               ) : (
                                 <span className="text-slate-500">-</span>
                               )}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
                             </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -5754,7 +5880,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "TASK TITLE", "ASSIGNED", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5775,9 +5901,6 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title || "-"}
-                            </TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5794,6 +5917,9 @@ export default function DepartmentKanban() {
                               ) : (
                                 <span className="text-slate-500">-</span>
                               )}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title || "-"}
                             </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>
@@ -8382,6 +8508,54 @@ export default function DepartmentKanban() {
                     allRows.push({ ...row, userName, userInitials })
                   }
                 }
+                const tyoRank = (value: string) => {
+                  const trimmed = value.trim()
+                  if (!trimmed || trimmed === "-") return 3
+                  if (trimmed === "Y") return 1
+                  if (trimmed === "T") return 2
+                  if (/^\d+$/.test(trimmed)) return 0
+                  return 3
+                }
+                const tyoNumber = (value: string) => {
+                  const trimmed = value.trim()
+                  return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+                }
+                const sortByTyo = (a: (typeof allRows)[number], b: (typeof allRows)[number]) => {
+                  const rankA = tyoRank(a.tyo)
+                  const rankB = tyoRank(b.tyo)
+                  if (rankA !== rankB) return rankA - rankB
+                  if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+                  return 0
+                }
+                const fastSubtypeOrder = (subtype: string) => {
+                  const normalized = subtype.trim().toUpperCase()
+                  if (normalized === "BLL") return 0
+                  if (normalized === "1H") return 1
+                  if (normalized === "P:" || normalized === "P") return 2
+                  if (normalized === "R1") return 3
+                  if (normalized === "N" || normalized === "NORMAL") return 4
+                  return 5
+                }
+                const typeOrder = (row: (typeof allRows)[number]) => {
+                  if (row.typeLabel === "FT") return 0
+                  if (row.typeLabel === "SYS") return row.period === "PM" ? 3 : 1
+                  if (row.typeLabel === "PRJK") return 2
+                  return 4
+                }
+                const sortedRows = [...allRows].sort((a, b) => {
+                  const typeDiff = typeOrder(a) - typeOrder(b)
+                  if (typeDiff !== 0) return typeDiff
+                  if (a.typeLabel === "FT" && b.typeLabel === "FT") {
+                    const subtypeDiff = fastSubtypeOrder(a.subtype) - fastSubtypeOrder(b.subtype)
+                    if (subtypeDiff !== 0) return subtypeDiff
+                    const tyoDiff = sortByTyo(a, b)
+                    if (tyoDiff !== 0) return tyoDiff
+                    return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
+                  }
+                  const tyoDiff = sortByTyo(a, b)
+                  if (tyoDiff !== 0) return tyoDiff
+                  return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
+                })
 
                 return (
                   <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
@@ -8423,8 +8597,8 @@ export default function DepartmentKanban() {
                       </tr>
                     </thead>
                     <tbody>
-                      {allRows.length ? (
-                        allRows.map((row, index) => (
+                      {sortedRows.length ? (
+                        sortedRows.map((row, index) => (
                           <tr key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}>
                             <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>

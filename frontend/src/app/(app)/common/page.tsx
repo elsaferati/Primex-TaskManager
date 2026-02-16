@@ -157,6 +157,7 @@ export default function CommonViewPage() {
     if (d < 1 || d > 31 || m < 1 || m > 12) return ""
     return `${y}-${pad2(m)}-${pad2(d)}`
   }
+  const toDDMMYYYYDot = (isoDate: string) => toDDMMYYYY(isoDate).replaceAll("/", ".")
   const addDays = (d: Date, n: number) => {
     const x = new Date(d)
     x.setDate(x.getDate() + n)
@@ -352,6 +353,7 @@ export default function CommonViewPage() {
   const [formFullDay, setFormFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
+  const [formError, setFormError] = React.useState("")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
@@ -1504,6 +1506,16 @@ export default function CommonViewPage() {
   const leaveCovers = (leave: LeaveItem, dateStr: string) => {
     return dateStr >= leave.startDate && dateStr <= leave.endDate
   }
+  const isDateFullyCovered = (dateStr: string) => {
+    const activeUserIds = users.filter((u) => u.is_active).map((u) => u.id)
+    if (!activeUserIds.length) return false
+    const coveredUsers = new Set(
+      commonData.leave
+        .filter((x) => x.userId && leaveCovers(x, dateStr))
+        .map((x) => x.userId as string)
+    )
+    return coveredUsers.size >= activeUserIds.length
+  }
 
   // Filtered data
   const filtered = React.useMemo(() => {
@@ -1824,6 +1836,7 @@ export default function CommonViewPage() {
     setFormFullDay(false)
     setFormTitle("")
     setFormNote("")
+    setFormError("")
   }
 
   const submitForm = async (e: React.FormEvent) => {
@@ -1832,6 +1845,11 @@ export default function CommonViewPage() {
     setIsSavingEntry(true)
 
     try {
+      setFormError("")
+      if ((formType === "late" || formType === "absent") && formDate && isDateFullyCovered(formDate)) {
+        setFormError("All users are on leave for this date, so VONS/MUNG entries are hidden.")
+        return
+      }
       let category: string
       if (formType === "late") category = "Delays"
       else if (formType === "absent") category = "Absences"
@@ -2725,7 +2743,7 @@ export default function CommonViewPage() {
       : filtered.late
     const lateItems: SwimlaneCell[] = lateSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.start || "08:00"}-${x.until}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent delay",
       entryId: x.entryId,
@@ -2736,7 +2754,7 @@ export default function CommonViewPage() {
       : filtered.absent
     const absentItems: SwimlaneCell[] = absentSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.from}-${x.to}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent absence",
       entryId: x.entryId,
@@ -2793,14 +2811,14 @@ export default function CommonViewPage() {
     const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
-        ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
-        : formatDateHuman(x.startDate)
+        ? `${toDDMMYYYYDot(x.startDate)} - ${toDDMMYYYYDot(x.endDate)}`
+        : toDDMMYYYYDot(x.startDate)
       const timeLabel = x.fullDay
         ? "Full day"
-        : `${x.from || ""}${x.from && x.to ? " - " : ""}${x.to || ""}`.trim()
+        : `${x.from || ""}${x.from && x.to ? "-" : ""}${x.to || ""}`.trim()
       return {
         title: x.person,
-        subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        subtitle: `${dateLabel} - ${timeLabel}${x.note ? ` - ${x.note}` : ""}`,
         dateLabel,
         accentClass: "swimlane-accent leave",
         entryId: x.entryId,
@@ -4356,6 +4374,11 @@ export default function CommonViewPage() {
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
+        }
+        .form-error {
+          color: #b91c1c;
+          font-size: 12px;
+          font-weight: 600;
         }
         @media print {
           .week-table-view {
@@ -6941,7 +6964,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <div>{idx + 1}. {e.project}</div>
+                            <span>{idx + 1}. {e.project}</span>
                             <div className="week-table-avatars">
                               {e.assignees.map((name) => (
                                 <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
@@ -7076,10 +7099,15 @@ export default function CommonViewPage() {
                                     {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
-                                  {(row.id === "external" || row.id === "internal") && cell.subtitle ? (
+                                  {(row.id === "external" ||
+                                    row.id === "internal" ||
+                                    row.id === "late" ||
+                                    row.id === "absent" ||
+                                    row.id === "leave") &&
+                                  cell.subtitle ? (
                                     <div className="swimlane-subtitle">{cell.subtitle}</div>
                                   ) : null}
-                                  {cell.dateLabel ? (
+                                  {cell.dateLabel && !["late", "absent", "leave"].includes(row.id) ? (
                                     <div className="swimlane-date">{cell.dateLabel}</div>
                                   ) : null}
                                 </div>
@@ -7126,6 +7154,7 @@ export default function CommonViewPage() {
                 onChange={(e) => {
                   const nextType = e.target.value as any
                   setFormType(nextType)
+                  setFormError("")
                   if (nextType !== "leave" && formPerson === ALL_USERS_VALUE) {
                     setFormPerson("")
                   }
@@ -7145,7 +7174,10 @@ export default function CommonViewPage() {
                       id="cv-person"
                       className="input"
                       value={formPerson}
-                      onChange={(e) => setFormPerson(e.target.value)}
+                      onChange={(e) => {
+                        setFormPerson(e.target.value)
+                        setFormError("")
+                      }}
                       required
                     >
                       <option value="">--</option>
@@ -7187,6 +7219,7 @@ export default function CommonViewPage() {
                         onChange={(e) => {
                           const value = e.target.value
                           setFormDateDisplay(value)
+                          setFormError("")
                           const isoDate = fromDDMMYYYY(value)
                           if (isoDate) {
                             setFormDate(isoDate)
@@ -7204,6 +7237,7 @@ export default function CommonViewPage() {
                           if (value) {
                             setFormDate(value)
                             setFormDateDisplay(toDDMMYYYY(value))
+                            setFormError("")
                           }
                         }}
                         style={{
@@ -7412,6 +7446,7 @@ export default function CommonViewPage() {
                     />
                   </div>
                 </div>
+                {formError ? <div className="form-error">{formError}</div> : null}
                 <div className="modal-footer">
                   <button className="btn-outline" type="button" onClick={closeModal} disabled={isSavingEntry}>
                     Cancel

@@ -742,6 +742,22 @@ function dayKey(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
+function businessDayDelta(startDate: Date, endDate: Date) {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
+  if (end <= start) return 0
+  const totalDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY)
+  const fullWeeks = Math.floor(totalDays / 7)
+  const remainder = totalDays % 7
+  let weekdays = fullWeeks * 5
+  const startWeekday = start.getDay() // Sunday=0 ... Saturday=6
+  for (let offset = 1; offset <= remainder; offset += 1) {
+    const dayIdx = (startWeekday + offset) % 7
+    if (dayIdx !== 0 && dayIdx !== 6) weekdays += 1
+  }
+  return weekdays
+}
+
 type TaskDateSource = {
   start_date?: string | null
   due_date?: string | null
@@ -894,7 +910,7 @@ function getTyoLabel(baseDate: Date | null, completedAt: string | null | undefin
   if (completedDate && isSameDay(completedDate, today)) return "T"
   if (!baseDate) return "-"
   if (isSameDay(baseDate, today)) return "T"
-  const delta = Math.floor((dayKey(today) - dayKey(baseDate)) / MS_PER_DAY)
+  const delta = businessDayDelta(baseDate, today)
   if (delta === 1) return "Y"
   if (delta > 1) return String(delta)
   return "-"
@@ -930,7 +946,7 @@ function getDailyReportTyo({
     if (reportKey === dueKey) return "T"
   }
 
-  const lateDays = Math.floor((reportKey - dueKey) / MS_PER_DAY)
+  const lateDays = businessDayDelta(dueDate, reportDate)
   if (lateDays === 1) return "Y"
   if (lateDays >= 2) return String(lateDays)
   return "-"
@@ -1073,7 +1089,7 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
-    isTabId ? (normalizedTab as TabId) : "projects"
+    isTabId ? (normalizedTab as TabId) : "all"
   )
   const [allRange, setAllRange] = React.useState<"today" | "week">("today")
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
@@ -3095,7 +3111,54 @@ export default function DepartmentKanban() {
         rows.push({ ...row, userName, userInitials })
       }
     }
-    return rows
+    const tyoRank = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed || trimmed === "-") return 3
+      if (trimmed === "Y") return 1
+      if (trimmed === "T") return 2
+      if (/^\d+$/.test(trimmed)) return 0
+      return 3
+    }
+    const tyoNumber = (value: string) => {
+      const trimmed = value.trim()
+      return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+    }
+    const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const rankA = tyoRank(a.tyo)
+      const rankB = tyoRank(b.tyo)
+      if (rankA !== rankB) return rankA - rankB
+      if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+      return 0
+    }
+    const fastSubtypeOrder = (subtype: string) => {
+      const normalized = subtype.trim().toUpperCase()
+      if (normalized === "BLL") return 0
+      if (normalized === "1H") return 1
+      if (normalized === "P:" || normalized === "P") return 2
+      if (normalized === "R1") return 3
+      if (normalized === "N" || normalized === "NORMAL") return 4
+      return 5
+    }
+    const typeOrder = (row: (typeof rows)[number]) => {
+      if (row.typeLabel === "FT") return 0
+      if (row.typeLabel === "SYS") return row.period === "PM" ? 3 : 1
+      if (row.typeLabel === "PRJK") return 2
+      return 4
+    }
+    return rows.sort((a, b) => {
+      const typeDiff = typeOrder(a) - typeOrder(b)
+      if (typeDiff !== 0) return typeDiff
+      if (a.typeLabel === "FT" && b.typeLabel === "FT") {
+        const subtypeDiff = fastSubtypeOrder(a.subtype) - fastSubtypeOrder(b.subtype)
+        if (subtypeDiff !== 0) return subtypeDiff
+        const tyoDiff = sortByTyo(a, b)
+        if (tyoDiff !== 0) return tyoDiff
+        return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
+      }
+      const tyoDiff = sortByTyo(a, b)
+      if (tyoDiff !== 0) return tyoDiff
+      return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
+    })
   }, [allTodayPrintBaseUsers, allUsersDailyReports])
 
   const projectTaskGroups = React.useMemo(() => {
@@ -5443,7 +5506,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "TASK TITLE", "DESCRIPTION", "ASSIGNED", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5465,10 +5528,6 @@ export default function DepartmentKanban() {
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
                             <TableCell>{phaseLabel}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5486,6 +5545,10 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5518,7 +5581,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "TYPE", "TASK TITLE", "ASSIGNED", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5535,12 +5598,9 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell>
-                              {assignees.length ? (
-                                <div className="flex items-center gap-1">
+                          <TableCell>
+                            {assignees.length ? (
+                              <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
                                     <div
                                       key={item.id}
@@ -5551,10 +5611,13 @@ export default function DepartmentKanban() {
                                     </div>
                                   ))}
                                 </div>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </TableCell>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                            {task.title}
+                          </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5586,7 +5649,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "TASK TITLE", "ASSIGNED", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5607,12 +5670,9 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title || "-"}
-                            </TableCell>
-                            <TableCell>
-                              {assignees.length ? (
-                                <div className="flex items-center gap-1">
+                          <TableCell>
+                            {assignees.length ? (
+                              <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
                                     <div
                                       key={item.id}
@@ -5623,10 +5683,13 @@ export default function DepartmentKanban() {
                                     </div>
                                   ))}
                                 </div>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </TableCell>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                            {task.title || "-"}
+                          </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>
                             <TableCell>{PRIORITY_LABELS[priorityValue]}</TableCell>

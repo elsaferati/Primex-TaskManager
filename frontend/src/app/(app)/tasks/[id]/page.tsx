@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput } from "@/lib/dates"
-import type { Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
+import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
@@ -28,6 +28,12 @@ const TASK_PRIORITY_LABELS: Record<string, string> = {
 }
 
 const FINISH_PERIOD_NONE_VALUE = "__none__"
+const formatFileSize = (bytes?: number) => {
+  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return "-"
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
+}
 
 const FAST_TASK_TYPES = [
   { value: "N", label: "N (Normal)" },
@@ -133,6 +139,10 @@ export default function TaskDetailsPage() {
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [gaNoteAttachments, setGaNoteAttachments] = React.useState<GaNoteAttachment[]>([])
+  const [loadingAttachments, setLoadingAttachments] = React.useState(false)
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
 
   const currentTaskAssigneeIds = React.useMemo(() => {
     if (!task) return [] as string[]
@@ -170,6 +180,102 @@ export default function TaskDetailsPage() {
     setFastTaskType(getCurrentFastTaskType(task))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }, [task])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const loadAttachments = async () => {
+      if (!task?.ga_note_origin_id) {
+        setGaNoteAttachments([])
+        return
+      }
+      setLoadingAttachments(true)
+      try {
+        const noteRes = await apiFetch(`/ga-notes/${encodeURIComponent(task.ga_note_origin_id)}`)
+        if (!noteRes.ok) throw new Error("Failed to load attachments")
+        const note = (await noteRes.json()) as { attachments?: GaNoteAttachment[] }
+        if (!cancelled) setGaNoteAttachments(note.attachments || [])
+      } catch {
+        if (!cancelled) {
+          setGaNoteAttachments([])
+          toast.error("Failed to load GA/KA attachments")
+        }
+      } finally {
+        if (!cancelled) setLoadingAttachments(false)
+      }
+    }
+    void loadAttachments()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, task?.ga_note_origin_id])
+
+  React.useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        window.URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
+
+  const downloadAttachment = async (attachment: GaNoteAttachment) => {
+    try {
+      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      if (!res?.ok) {
+        let detail = `Failed to download file (${res?.status || "unknown"})`
+        try {
+          const contentType = res?.headers?.get("content-type") || ""
+          if (contentType.includes("application/json")) {
+            const data = await res.json()
+            if (data?.detail) detail = String(data.detail)
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = attachment.original_filename || "download"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error("Failed to download file")
+    }
+  }
+
+  const openAttachmentPreview = async (attachment: GaNoteAttachment) => {
+    try {
+      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      if (!res?.ok) {
+        let detail = `Failed to open file (${res?.status || "unknown"})`
+        try {
+          const contentType = res?.headers?.get("content-type") || ""
+          if (contentType.includes("application/json")) {
+            const data = await res.json()
+            if (data?.detail) detail = String(data.detail)
+          }
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      setPreviewTitle(attachment.original_filename || "Attachment preview")
+      setPreviewUrl((prev) => {
+        if (prev) window.URL.revokeObjectURL(prev)
+        return url
+      })
+    } catch {
+      toast.error("Failed to open file")
+    }
+  }
 
   const canAssign =
     user?.role === "ADMIN" ||
@@ -301,7 +407,8 @@ export default function TaskDetailsPage() {
   const priorityText = task.priority ? TASK_PRIORITY_LABELS[task.priority] || task.priority : "-"
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50">
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50">
       <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
         <Card className="border-slate-200/70 bg-white/80 shadow-sm">
           <CardContent className="p-6">
@@ -568,10 +675,83 @@ export default function TaskDetailsPage() {
                   ) : null}
                 </div>
               </div>
+
+              {task.ga_note_origin_id ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Attachments</div>
+                  {loadingAttachments ? (
+                    <div className="text-sm text-muted-foreground">Loading attachments...</div>
+                  ) : gaNoteAttachments.length ? (
+                    <div className="space-y-2">
+                      {gaNoteAttachments.map((attachment) => {
+                        const isImage = (attachment.content_type || "").startsWith("image/")
+                        return (
+                          <div key={attachment.id} className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-medium text-slate-700">
+                                {attachment.original_filename}
+                              </span>
+                              <span className="text-[10px] text-slate-500">
+                                {formatFileSize(attachment.size_bytes)}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isImage ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[10px]"
+                                  onClick={() => void openAttachmentPreview(attachment)}
+                                >
+                                  View
+                                </Button>
+                              ) : null}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[10px]"
+                                onClick={() => void downloadAttachment(attachment)}
+                              >
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No attachments.</div>
+                  )}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
       </div>
     </div>
+      <Dialog
+      open={Boolean(previewUrl)}
+      onOpenChange={(open) => {
+        if (!open) {
+          setPreviewUrl((prev) => {
+            if (prev) window.URL.revokeObjectURL(prev)
+            return null
+          })
+          setPreviewTitle(null)
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>{previewTitle || "Attachment preview"}</DialogTitle>
+        </DialogHeader>
+        {previewUrl ? (
+          <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-2">
+            <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-[66vh] w-auto object-contain" />
+          </div>
+        ) : null}
+      </DialogContent>
+      </Dialog>
+    </>
   )
 }
