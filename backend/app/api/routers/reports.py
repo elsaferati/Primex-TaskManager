@@ -20,6 +20,7 @@ from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.schemas.daily_report import (
     DailyReportResponse,
@@ -138,7 +139,26 @@ async def _assignees_for_tasks(db: AsyncSession, task_ids: list[uuid.UUID]) -> d
     return out
 
 
-def _task_to_out(t: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
+async def _user_comments_for_tasks(
+    db: AsyncSession, task_ids: list[uuid.UUID], user_id: uuid.UUID
+) -> dict[uuid.UUID, str | None]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskUserComment.task_id, TaskUserComment.comment)
+            .where(TaskUserComment.task_id.in_(task_ids))
+            .where(TaskUserComment.user_id == user_id)
+        )
+    ).all()
+    return {task_id: comment for task_id, comment in rows}
+
+
+def _task_to_out(
+    t: Task,
+    assignees: list[TaskAssigneeOut],
+    user_comment: str | None = None,
+) -> TaskOut:
     # Reuse TaskOut model shape; keep it minimal for reporting.
     return TaskOut(
         id=t.id,
@@ -167,7 +187,7 @@ def _task_to_out(t: Task, assignees: list[TaskAssigneeOut]) -> TaskOut:
         is_r1=t.is_r1,
         is_personal=t.is_personal,
         is_active=t.is_active,
-        user_comment=None,
+        user_comment=user_comment,
         created_at=t.created_at,
         updated_at=t.updated_at,
     )
@@ -269,6 +289,7 @@ async def daily_report(
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_out_map = await _assignees_for_tasks(db, task_ids)
+    comment_map = await _user_comments_for_tasks(db, task_ids, user_id)
 
     assignee_ids_by_task: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in task_ids}
     if task_ids:
@@ -312,7 +333,11 @@ async def daily_report(
         if completed_today:
             tasks_today.append(
                 DailyReportTaskItem(
-                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
+                    task=_task_to_out(
+                        t,
+                        assignee_out_map.get(t.id, []),
+                        user_comment=comment_map.get(t.id),
+                    ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,
@@ -326,7 +351,11 @@ async def daily_report(
         if planned_start <= day <= planned_end:
             tasks_today.append(
                 DailyReportTaskItem(
-                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
+                    task=_task_to_out(
+                        t,
+                        assignee_out_map.get(t.id, []),
+                        user_comment=comment_map.get(t.id),
+                    ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,
@@ -339,7 +368,11 @@ async def daily_report(
             late_days = business_days_between(planned_end, day)
             tasks_overdue.append(
                 DailyReportTaskItem(
-                    task=_task_to_out(t, assignee_out_map.get(t.id, [])),
+                    task=_task_to_out(
+                        t,
+                        assignee_out_map.get(t.id, []),
+                        user_comment=comment_map.get(t.id),
+                    ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
                     planned_end=planned_end,

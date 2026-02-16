@@ -841,7 +841,7 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
-    isTabId ? (normalizedTab as TabId) : "projects"
+    isTabId ? (normalizedTab as TabId) : "all"
   )
   const [allRange, setAllRange] = React.useState<"today" | "week">("today")
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
