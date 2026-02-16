@@ -1671,14 +1671,26 @@ export default function GaKaNotesPage() {
                                           {formatFileSize(attachment.size_bytes)}
                                         </span>
                                       </div>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 text-[10px]"
-                                        onClick={() => void downloadAttachment(attachment)}
-                                      >
-                                        Download
-                                      </Button>
+                                      <div className="flex items-center gap-2">
+                                        {(attachment.content_type || "").startsWith("image/") ? (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-6 text-[10px]"
+                                            onClick={() => void openAttachmentPreview(attachment)}
+                                          >
+                                            View
+                                          </Button>
+                                        ) : null}
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px]"
+                                          onClick={() => void downloadAttachment(attachment)}
+                                        >
+                                          Download
+                                        </Button>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
