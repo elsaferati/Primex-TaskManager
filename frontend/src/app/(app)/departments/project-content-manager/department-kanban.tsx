@@ -5506,7 +5506,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "TASK TITLE", "DESCRIPTION", "ASSIGNED", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5528,10 +5528,6 @@ export default function DepartmentKanban() {
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
                             <TableCell>{phaseLabel}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5549,6 +5545,10 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5581,7 +5581,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "TYPE", "TASK TITLE", "ASSIGNED", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5598,12 +5598,9 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell>
-                              {assignees.length ? (
-                                <div className="flex items-center gap-1">
+                          <TableCell>
+                            {assignees.length ? (
+                              <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
                                     <div
                                       key={item.id}
@@ -5614,10 +5611,13 @@ export default function DepartmentKanban() {
                                     </div>
                                   ))}
                                 </div>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </TableCell>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                            {task.title}
+                          </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5649,7 +5649,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "TASK TITLE", "ASSIGNED", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5670,12 +5670,9 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title || "-"}
-                            </TableCell>
-                            <TableCell>
-                              {assignees.length ? (
-                                <div className="flex items-center gap-1">
+                          <TableCell>
+                            {assignees.length ? (
+                              <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
                                     <div
                                       key={item.id}
@@ -5686,10 +5683,13 @@ export default function DepartmentKanban() {
                                     </div>
                                   ))}
                                 </div>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </TableCell>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                            {task.title || "-"}
+                          </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>
                             <TableCell>{PRIORITY_LABELS[priorityValue]}</TableCell>

@@ -63,6 +63,13 @@ type MicrosoftEvent = {
   body_preview?: string | null
 }
 
+type TaskChecklist = {
+  id: string
+  title?: string | null
+  task_id?: string | null
+  items: ChecklistItem[]
+}
+
 const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
 const PHASE_LABELS: Record<string, string> = {
@@ -976,6 +983,9 @@ export default function DepartmentKanban() {
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
+  const [taskChecklistLoading, setTaskChecklistLoading] = React.useState<Record<string, boolean>>({})
+  const [taskChecklistOpen, setTaskChecklistOpen] = React.useState<Record<string, boolean>>({})
   const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
   const [gaTableInput, setGaTableInput] = React.useState("")
   const [savingGaTable, setSavingGaTable] = React.useState(false)
@@ -2075,6 +2085,30 @@ export default function DepartmentKanban() {
     }
     return map
   }, [visibleSystemTemplates])
+
+  const getChecklistItemsForTask = React.useCallback(
+    (taskId?: string) => {
+      if (!taskId) return []
+      const checklist = taskChecklists[taskId]
+      if (!checklist?.items?.length) return []
+      return checklist.items
+        .filter((item) => item.item_type === "CHECKBOX")
+        .slice()
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    },
+    [taskChecklists]
+  )
+
+  const getChecklistCountsForTask = React.useCallback(
+    (taskId?: string) => {
+      const items = getChecklistItemsForTask(taskId)
+      const total = items.length
+      const done = items.filter((item) => item.is_checked).length
+      return { total, done }
+    },
+    [getChecklistItemsForTask]
+  )
+
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
       typeLabel: string
@@ -2996,6 +3030,43 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+
+  const loadTaskChecklist = React.useCallback(async (taskId: string) => {
+    if (!taskId || taskChecklists[taskId] !== undefined) return
+    setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
+    try {
+      const res = await apiFetch(`/checklists?task_id=${taskId}&include_items=true`)
+      if (!res.ok) {
+        let detail = "Failed to load checklist"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to load checklist")
+        setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+        return
+      }
+      const data = (await res.json()) as TaskChecklist[]
+      const checklist = data.length ? data[0] : null
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: checklist }))
+    } catch (error) {
+      console.error("Failed to load task checklist", error)
+      toast.error("Failed to load checklist")
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+    } finally {
+      setTaskChecklistLoading((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }, [apiFetch, taskChecklists])
+
+  const toggleTaskChecklist = React.useCallback((taskId: string) => {
+    if (!taskId) return
+    setTaskChecklistOpen((prev) => ({ ...prev, [taskId]: !prev[taskId] }))
+    if (taskChecklists[taskId] === undefined) {
+      void loadTaskChecklist(taskId)
+    }
+  }, [loadTaskChecklist, taskChecklists])
 
   React.useEffect(() => {
     let cancelled = false
@@ -5424,6 +5495,44 @@ export default function DepartmentKanban() {
                                 ) : (
                                   row.title
                                 )}
+                                {row.typeLabel === "PRJK" && row.taskId ? (
+                                  <div className="mt-1">
+                                    <button
+                                      type="button"
+                                      className="text-[10px] uppercase text-slate-500 hover:text-slate-700"
+                                      onClick={() => toggleTaskChecklist(row.taskId!)}
+                                    >
+                                      {(() => {
+                                        const counts = getChecklistCountsForTask(row.taskId)
+                                        const isOpen = Boolean(taskChecklistOpen[row.taskId])
+                                        const label = counts.total > 0 ? `Subtasks ${counts.done}/${counts.total}` : "Subtasks"
+                                        return `${label} ${isOpen ? "▲" : "▼"}`
+                                      })()}
+                                    </button>
+                                    {taskChecklistOpen[row.taskId] ? (
+                                      <div className="mt-1 space-y-1">
+                                        {taskChecklistLoading[row.taskId] ? (
+                                          <div className="text-[10px] text-slate-500">Loading subtasks...</div>
+                                        ) : getChecklistItemsForTask(row.taskId).length === 0 ? (
+                                          <div className="text-[10px] text-slate-500">No subtasks yet.</div>
+                                        ) : (
+                                          getChecklistItemsForTask(row.taskId).map((item) => {
+                                            const isChecked = Boolean(item.is_checked)
+                                            const label = item.title || item.comment || item.description || "Untitled subtask"
+                                            return (
+                                              <div key={item.id} className="flex items-start gap-1.5 normal-case">
+                                                <Checkbox checked={isChecked} disabled />
+                                                <span className={["text-[10px]", isChecked ? "line-through text-slate-400" : "text-slate-700"].join(" ")}>
+                                                  {label}
+                                                </span>
+                                              </div>
+                                            )
+                                          })
+                                        )}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </td>
                               <td
                                 className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
@@ -5628,7 +5737,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "TASK TITLE", "DESCRIPTION", "ASSIGNED", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5650,10 +5759,6 @@ export default function DepartmentKanban() {
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
                             <TableCell>{phaseLabel}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5671,6 +5776,10 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
@@ -5703,7 +5812,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "TYPE", "TASK TITLE", "ASSIGNED", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5720,9 +5829,6 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
-                            </TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5739,6 +5845,9 @@ export default function DepartmentKanban() {
                               ) : (
                                 <span className="text-slate-500">-</span>
                               )}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title}
                             </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -5771,7 +5880,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "TASK TITLE", "ASSIGNED", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -5792,9 +5901,6 @@ export default function DepartmentKanban() {
                           <TableRow key={task.id}>
                             <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                             <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title || "-"}
-                            </TableCell>
                             <TableCell>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -5811,6 +5917,9 @@ export default function DepartmentKanban() {
                               ) : (
                                 <span className="text-slate-500">-</span>
                               )}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
+                              {task.title || "-"}
                             </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>
