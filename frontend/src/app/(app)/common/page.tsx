@@ -157,6 +157,7 @@ export default function CommonViewPage() {
     if (d < 1 || d > 31 || m < 1 || m > 12) return ""
     return `${y}-${pad2(m)}-${pad2(d)}`
   }
+  const toDDMMYYYYDot = (isoDate: string) => toDDMMYYYY(isoDate).replaceAll("/", ".")
   const addDays = (d: Date, n: number) => {
     const x = new Date(d)
     x.setDate(x.getDate() + n)
@@ -2725,7 +2726,7 @@ export default function CommonViewPage() {
       : filtered.late
     const lateItems: SwimlaneCell[] = lateSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} · ${x.start || "08:00"}-${x.until}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent delay",
       entryId: x.entryId,
@@ -2736,7 +2737,7 @@ export default function CommonViewPage() {
       : filtered.absent
     const absentItems: SwimlaneCell[] = absentSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.from}-${x.to}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent absence",
       entryId: x.entryId,
@@ -2793,14 +2794,14 @@ export default function CommonViewPage() {
     const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
-        ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
-        : formatDateHuman(x.startDate)
+        ? `${toDDMMYYYYDot(x.startDate)} - ${toDDMMYYYYDot(x.endDate)}`
+        : toDDMMYYYYDot(x.startDate)
       const timeLabel = x.fullDay
         ? "Full day"
-        : `${x.from || ""}${x.from && x.to ? " - " : ""}${x.to || ""}`.trim()
+        : `${x.from || ""}${x.from && x.to ? "-" : ""}${x.to || ""}`.trim()
       return {
         title: x.person,
-        subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        subtitle: `${dateLabel} - ${timeLabel}${x.note ? ` - ${x.note}` : ""}`,
         dateLabel,
         accentClass: "swimlane-accent leave",
         entryId: x.entryId,
@@ -6941,7 +6942,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "priority") {
                         return entries.map((e: PriorityItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <div>{idx + 1}. {e.project}</div>
+                            <span>{idx + 1}. {e.project}</span>
                             <div className="week-table-avatars">
                               {e.assignees.map((name) => (
                                 <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
@@ -7076,10 +7077,15 @@ export default function CommonViewPage() {
                                     {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
-                                  {(row.id === "external" || row.id === "internal") && cell.subtitle ? (
+                                  {(row.id === "external" ||
+                                    row.id === "internal" ||
+                                    row.id === "late" ||
+                                    row.id === "absent" ||
+                                    row.id === "leave") &&
+                                  cell.subtitle ? (
                                     <div className="swimlane-subtitle">{cell.subtitle}</div>
                                   ) : null}
-                                  {cell.dateLabel ? (
+                                  {cell.dateLabel && !["late", "absent", "leave"].includes(row.id) ? (
                                     <div className="swimlane-date">{cell.dateLabel}</div>
                                   ) : null}
                                 </div>
