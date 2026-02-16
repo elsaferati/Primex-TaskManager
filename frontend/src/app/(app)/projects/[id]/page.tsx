@@ -2252,7 +2252,7 @@ export default function ProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   const submitDevelopmentChecklistItem = async () => {
     if (!project) return

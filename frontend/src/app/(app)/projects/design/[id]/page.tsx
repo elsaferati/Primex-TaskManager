@@ -536,7 +536,7 @@ export default function DesignProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
   const canEditGjenerale =
     Boolean(isAdmin || isManager) || Boolean(user && members.some((m) => m.id === user.id))
 

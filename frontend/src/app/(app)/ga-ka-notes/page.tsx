@@ -167,6 +167,7 @@ export default function GaKaNotesPage() {
   const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
   const [taskPriority, setTaskPriority] = React.useState<TaskTypeOption>("NORMAL")
@@ -1215,9 +1216,108 @@ export default function GaKaNotesPage() {
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-sm">Notes</CardTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setShowLegend((prev) => !prev)}
+            >
+              {showLegend ? "Hide legend" : "Show legend"}
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {showLegend ? (
+            <div className="rounded-md border bg-white">
+              <div className="px-4 pt-4">
+              <div className="text-xs font-semibold tracking-[0.18em] text-slate-500 uppercase">Legjenda</div>
+              </div>
+              <div className="p-4 pt-3 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16 text-sm">Color</TableHead>
+                      <TableHead className="w-36 text-sm">Label</TableHead>
+                      <TableHead className="text-sm">Meaning</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-sky-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Shenim pa task</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-pink-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: To do</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-amber-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: In progress</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-emerald-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: Done</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-slate-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Mbyllur</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-rose-200 bg-rose-100" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">GA</TableCell>
+                      <TableCell className="text-sm text-slate-600">Inicialet (NGA / PER)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-blue-200 bg-blue-100" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">KA</TableCell>
+                      <TableCell className="text-sm text-slate-600">Inicialet (NGA / PER)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-slate-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Tjere</TableCell>
+                      <TableCell className="text-sm text-slate-600">Inicialet (NGA / PER)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className={`w-4 h-4 rounded-sm border ${PRIORITY_BADGE.NORMAL}`} />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">NORMAL</TableCell>
+                      <TableCell className="text-sm text-slate-600">Prioriteti i shenimit</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className={`w-4 h-4 rounded-sm border ${PRIORITY_BADGE.HIGH}`} />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">HIGH</TableCell>
+                      <TableCell className="text-sm text-slate-600">Prioriteti i shenimit</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <div className="space-y-1">
               <Select value={rangeFilter} onValueChange={(v) => setRangeFilter(v as "week" | "all")}>
