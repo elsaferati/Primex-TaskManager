@@ -466,6 +466,7 @@ const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
   NORMAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
   HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
+const GA_BADGE_CLASSES = "bg-rose-100 text-rose-800 border-rose-200"
 
 type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "GA"
 const GA_NOTE_TASK_TYPE_OPTIONS_PROJECT: Array<{ value: GaNoteTaskType; label: string }> = [
@@ -1533,6 +1534,19 @@ export default function DepartmentKanban() {
   }, [projectTemplateId])
 
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const isGaTask = React.useCallback(
+    (task: Task | SystemTaskTemplate) => {
+      if ("ga_note_origin_id" in task && task.ga_note_origin_id) return true
+      const createdById = task.created_by
+      if (!createdById) return false
+      const creator = userMap.get(createdById)
+      if (!creator) return false
+      const label = creator.full_name || creator.username || ""
+      if (!label) return false
+      return getInitials(label) === "GA"
+    },
+    [userMap]
+  )
   const taskAssigneeLabels = React.useCallback(
     (task: Task) => {
       const ids = new Set<string>()
@@ -5546,7 +5560,12 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
+                              <div className="flex items-center gap-2">
+                                <span>{task.title}</span>
+                                {isGaTask(task) ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
@@ -5616,7 +5635,12 @@ export default function DepartmentKanban() {
                             )}
                           </TableCell>
                           <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            {task.title}
+                            <div className="flex items-center gap-2">
+                              <span>{task.title}</span>
+                              {isGaTask(task) ? (
+                                <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                              ) : null}
+                            </div>
                           </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -5688,7 +5712,12 @@ export default function DepartmentKanban() {
                             )}
                           </TableCell>
                           <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            {task.title || "-"}
+                            <div className="flex items-center gap-2">
+                              <span>{task.title || "-"}</span>
+                              {isGaTask(task) ? (
+                                <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                              ) : null}
+                            </div>
                           </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>

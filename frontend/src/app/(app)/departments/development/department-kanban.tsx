@@ -292,6 +292,7 @@ const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
   NORMAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
   HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
+const GA_BADGE_CLASSES = "bg-rose-100 text-rose-800 border-rose-200"
 
 type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "GA"
 const GA_NOTE_TASK_TYPE_OPTIONS_PROJECT: Array<{ value: GaNoteTaskType; label: string }> = [
@@ -994,6 +995,7 @@ export default function DepartmentKanban() {
   const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
   const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
+  const [isDailyReportScrolled, setIsDailyReportScrolled] = React.useState(false)
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
@@ -1436,6 +1438,19 @@ export default function DepartmentKanban() {
   }, [isTabId, normalizedTab])
 
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const isGaTask = React.useCallback(
+    (task: Task | SystemTaskTemplate) => {
+      if ("ga_note_origin_id" in task && task.ga_note_origin_id) return true
+      const createdById = task.created_by
+      if (!createdById) return false
+      const creator = userMap.get(createdById)
+      if (!creator) return false
+      const label = creator.full_name || creator.username || ""
+      if (!label) return false
+      return getInitials(label) === "GA"
+    },
+    [userMap]
+  )
   const taskAssigneeLabels = React.useCallback(
     (task: Task) => {
       const ids = new Set<string>()
@@ -3067,6 +3082,21 @@ export default function DepartmentKanban() {
       void loadTaskChecklist(taskId)
     }
   }, [loadTaskChecklist, taskChecklists])
+
+  React.useEffect(() => {
+    if (!dailyUserReportRows.length) return
+    const taskIds = new Set<string>()
+    for (const row of dailyUserReportRows) {
+      if (row.typeLabel !== "PRJK") continue
+      if (!row.taskId) continue
+      taskIds.add(row.taskId)
+    }
+    for (const taskId of taskIds) {
+      if (taskChecklists[taskId] === undefined) {
+        void loadTaskChecklist(taskId)
+      }
+    }
+  }, [dailyUserReportRows, loadTaskChecklist, taskChecklists])
 
   React.useEffect(() => {
     let cancelled = false
@@ -5431,6 +5461,11 @@ export default function DepartmentKanban() {
                   onMouseMove={handleDailyReportMouseMove}
                   onMouseUp={handleDailyReportMouseEnd}
                   onMouseLeave={handleDailyReportMouseEnd}
+                  onScroll={(e) => {
+                    const target = e.currentTarget
+                    const scrolled = target.scrollTop > 0
+                    setIsDailyReportScrolled(scrolled)
+                  }}
                 >
                   <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
@@ -5447,7 +5482,11 @@ export default function DepartmentKanban() {
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr>
-                        <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                        <th
+                          className={`sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal transition-opacity ${
+                            isDailyReportScrolled ? "opacity-0" : "opacity-100"
+                          }`}
+                        >
                           Nr
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
@@ -5480,7 +5519,11 @@ export default function DepartmentKanban() {
                           const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
                           return (
                             <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                              <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                              <td
+                                className={`sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold transition-opacity ${
+                                  isDailyReportScrolled ? "opacity-0" : "opacity-100"
+                                }`}
+                              >
                                 {index + 1}
                               </td>
                               <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
@@ -5496,42 +5539,43 @@ export default function DepartmentKanban() {
                                   row.title
                                 )}
                                 {row.typeLabel === "PRJK" && row.taskId ? (
-                                  <div className="mt-1">
-                                    <button
-                                      type="button"
-                                      className="text-[10px] uppercase text-slate-500 hover:text-slate-700"
-                                      onClick={() => toggleTaskChecklist(row.taskId!)}
-                                    >
-                                      {(() => {
-                                        const counts = getChecklistCountsForTask(row.taskId)
-                                        const isOpen = Boolean(taskChecklistOpen[row.taskId])
-                                        const label = counts.total > 0 ? `Subtasks ${counts.done}/${counts.total}` : "Subtasks"
-                                        return `${label} ${isOpen ? "▲" : "▼"}`
-                                      })()}
-                                    </button>
-                                    {taskChecklistOpen[row.taskId] ? (
-                                      <div className="mt-1 space-y-1">
-                                        {taskChecklistLoading[row.taskId] ? (
-                                          <div className="text-[10px] text-slate-500">Loading subtasks...</div>
-                                        ) : getChecklistItemsForTask(row.taskId).length === 0 ? (
-                                          <div className="text-[10px] text-slate-500">No subtasks yet.</div>
-                                        ) : (
-                                          getChecklistItemsForTask(row.taskId).map((item) => {
-                                            const isChecked = Boolean(item.is_checked)
-                                            const label = item.title || item.comment || item.description || "Untitled subtask"
-                                            return (
-                                              <div key={item.id} className="flex items-start gap-1.5 normal-case">
-                                                <Checkbox checked={isChecked} disabled />
-                                                <span className={["text-[10px]", isChecked ? "line-through text-slate-400" : "text-slate-700"].join(" ")}>
-                                                  {label}
-                                                </span>
-                                              </div>
-                                            )
-                                          })
-                                        )}
+                                  (() => {
+                                    const counts = getChecklistCountsForTask(row.taskId)
+                                    if (counts.total === 0) return null
+                                    const isOpen = Boolean(taskChecklistOpen[row.taskId])
+                                    const label = `Subtasks ${counts.done}/${counts.total}`
+                                    return (
+                                      <div className="mt-1">
+                                        <button
+                                          type="button"
+                                          className="text-[10px] uppercase text-slate-500 hover:text-slate-700"
+                                          onClick={() => toggleTaskChecklist(row.taskId!)}
+                                        >
+                                          {`${label} ${isOpen ? "▲" : "▼"}`}
+                                        </button>
+                                        {isOpen ? (
+                                          <div className="mt-1 space-y-1">
+                                            {taskChecklistLoading[row.taskId] ? (
+                                              <div className="text-[10px] text-slate-500">Loading subtasks...</div>
+                                            ) : (
+                                              getChecklistItemsForTask(row.taskId).map((item) => {
+                                                const isChecked = Boolean(item.is_checked)
+                                                const label = item.title || item.comment || item.description || "Untitled subtask"
+                                                return (
+                                                  <div key={item.id} className="flex items-start gap-1.5 normal-case">
+                                                    <Checkbox checked={isChecked} disabled />
+                                                    <span className={["text-[10px]", isChecked ? "line-through text-slate-400" : "text-slate-700"].join(" ")}>
+                                                      {label}
+                                                    </span>
+                                                  </div>
+                                                )
+                                              })
+                                            )}
+                                          </div>
+                                        ) : null}
                                       </div>
-                                    ) : null}
-                                  </div>
+                                    )
+                                  })()
                                 ) : null}
                               </td>
                               <td
@@ -5777,7 +5821,12 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
+                              <div className="flex items-center gap-2">
+                                <span>{task.title}</span>
+                                {isGaTask(task) ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
@@ -5847,7 +5896,12 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title}
+                              <div className="flex items-center gap-2">
+                                <span>{task.title}</span>
+                                {isGaTask(task) ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -5919,7 +5973,12 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              {task.title || "-"}
+                              <div className="flex items-center gap-2">
+                                <span>{task.title || "-"}</span>
+                                {isGaTask(task) ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell>{task.finish_period || "-"}</TableCell>
                             <TableCell>{statusLabel}</TableCell>
