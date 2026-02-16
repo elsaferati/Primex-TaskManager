@@ -16,6 +16,7 @@ import {
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import { formatDepartmentName } from "@/lib/department-name"
+import { formatDateTimeDMY } from "@/lib/dates"
 import { toast } from "sonner"
 import { Printer } from "lucide-react"
 
@@ -183,8 +184,7 @@ const formatDate = (iso: string) => {
 }
 
 const formatDateTime = (iso: string) => {
-  const parsed = new Date(iso)
-  return parsed.toLocaleString()
+  return formatDateTimeDMY(iso)
 }
 
 const timeToMinutes = (value?: string | null) => {
@@ -1001,13 +1001,7 @@ export function WeeklyPlannerSnapshotsView({
     const weekRange = `${formatDate(planVsFinal.week_start)} - ${formatDate(planVsFinal.week_end)}`
     const departmentLabel = formatDepartmentName(planVsFinal.department_name || "")
     const printedAt = new Date()
-    const printedAtLabel = printedAt.toLocaleString("en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const printedAtLabel = formatDateTimeDMY(printedAt)
 
     const root = document.getElementById(PLAN_VS_FINAL_PRINT_ROOT_ID)
     const table = root?.querySelector("table")
@@ -1018,8 +1012,8 @@ export function WeeklyPlannerSnapshotsView({
       return
     }
 
-    const baselineLabel = planVsFinal.snapshot_created_at ? new Date(planVsFinal.snapshot_created_at).toLocaleString() : ""
-    const finalLabel = planVsFinal.final_snapshot_created_at ? new Date(planVsFinal.final_snapshot_created_at).toLocaleString() : ""
+    const baselineLabel = planVsFinal.snapshot_created_at ? formatDateTimeDMY(planVsFinal.snapshot_created_at) : ""
+    const finalLabel = planVsFinal.final_snapshot_created_at ? formatDateTimeDMY(planVsFinal.final_snapshot_created_at) : ""
 
     const html = `
       <!DOCTYPE html>
@@ -1085,13 +1079,7 @@ export function WeeklyPlannerSnapshotsView({
     const weekRange = `${formatDate(activeSnapshot.payload.week_start)} - ${formatDate(activeSnapshot.payload.week_end)}`
     const selectedDept = formatDepartmentName(department.department_name)
     const printedAt = new Date()
-    const printedAtLabel = printedAt.toLocaleString("en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const printedAtLabel = formatDateTimeDMY(printedAt)
     const printInitials = (user?.full_name || user?.username || "")
       .trim()
       .split(/\s+/)

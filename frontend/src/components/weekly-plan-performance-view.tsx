@@ -6,6 +6,7 @@ import Link from "next/link"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { formatDateTimeDMY } from "@/lib/dates"
 
 export type WeeklyPlanPerformanceTaskAssignee = {
   assignee_id: string | null
@@ -102,8 +103,7 @@ const formatDate = (iso: string) => {
 }
 
 const formatDateTime = (iso: string) => {
-  const parsed = new Date(iso)
-  return parsed.toLocaleString()
+  return formatDateTimeDMY(iso)
 }
 
 const getStatusCardClasses = (status?: string | null) => {

@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -220,7 +220,7 @@ function assigneeLabel(user?: UserLookup | null) {
 
 function formatToday() {
   const now = new Date()
-  const date = now.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })
+  const date = formatDateDMY(now)
   const day = now.toLocaleDateString("en-US", { weekday: "long" })
   return `${day}, ${date}`
 }
@@ -255,14 +255,7 @@ function formatDate(value?: string | null) {
 }
 
 function formatDateOnly(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
+  return formatDateDMY(value)
 }
 
 function todayInputValue() {
@@ -517,7 +510,7 @@ function getNextOccurrenceDate(t: SystemTaskTemplate, fromDate: Date = new Date(
 
 function formatSchedule(t: SystemTaskTemplate, date: Date) {
   const dayLabel = formatDayLabel(date)
-  const dateLabel = date.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" })
+  const dateLabel = formatDateDMY(date)
   return `${dayLabel}\n${dateLabel}`
 }
 
@@ -564,7 +557,7 @@ function startOfWeekMonday(date: Date) {
 
 function formatPrintDay(date: Date) {
   const weekday = date.toLocaleDateString("en-US", { weekday: "short" })
-  const day = date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })
+  const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" })
   return `${weekday} ${day}`
 }
 
@@ -2319,8 +2312,8 @@ export default function DepartmentKanban() {
     const start = weekDates[0]
     const end = weekDates[weekDates.length - 1]
     if (!start || !end) return ""
-    const startLabel = start.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
-    const endLabel = end.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+    const startLabel = formatDateDMY(start)
+    const endLabel = formatDateDMY(end)
     return `${startLabel} - ${endLabel}`
   }, [weekDates])
   const todayProjectPrint = React.useMemo(() => {
@@ -2372,7 +2365,7 @@ export default function DepartmentKanban() {
   const printedAt = React.useMemo(() => new Date(), [])
   const printRangeLabel = React.useMemo(() => {
     if (printRange === "today") {
-      const dateLabel = todayDate.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+      const dateLabel = formatDateDMY(todayDate)
       return `Today - ${dateLabel}`
     }
     return weekRangeLabel
@@ -6769,13 +6762,7 @@ export default function DepartmentKanban() {
                   : "PLANIFIKIMI JAVOR - PRMBL PLANIFIKIMI JAVOR"}
             </div>
             <div className="print-datetime">
-              {printedAt.toLocaleString("en-US", {
-                month: "2-digit",
-                day: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formatDateTimeDMY(printedAt)}
             </div>
           </div>
           <div className="print-meta">

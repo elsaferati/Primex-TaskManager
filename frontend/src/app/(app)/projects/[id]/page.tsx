@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import type {
   ChecklistItem,
   Department,
@@ -144,10 +144,7 @@ function toDateInput(value?: string | null) {
 }
 
 function formatDateDisplay(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+  return formatDateDMY(value)
 }
 
 function isOverdue(task: Task) {
@@ -194,16 +191,7 @@ function formatErrorDetail(detail: unknown) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("sq-AL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDateTimeDMY(value)
 }
 
 function getTaskSortDate(task: Task): number | null {
@@ -4715,7 +4703,7 @@ export default function ProjectPage() {
                           <div className="flex-1">
                             <div className="font-medium mb-1">{prompt.title || "Untitled"}</div>
                             <div className="text-xs text-muted-foreground">
-                              {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                              {formatDateTimeDMY(prompt.created_at)}
                             </div>
                             {isExpanded ? (
                               <div className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
@@ -4760,7 +4748,7 @@ export default function ProjectPage() {
                           <div className="flex-1">
                             <div className="font-medium mb-1">{prompt.title || "Untitled"}</div>
                             <div className="text-xs text-muted-foreground">
-                              {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                              {formatDateTimeDMY(prompt.created_at)}
                             </div>
                             {isExpanded ? (
                               <div className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
