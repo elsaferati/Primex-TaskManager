@@ -40,7 +40,13 @@ type InternalItem = { title: string; date: string; time: string; platform: strin
 type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
 type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
-type PriorityItem = { project: string; date: string; assignees: string[] }
+type PriorityItem = {
+  project: string
+  date: string
+  assignees: string[]
+  department_id?: string | null
+  department_name?: string | null
+}
 
 type SwimlaneCell = {
   title: string
@@ -888,6 +894,17 @@ export default function CommonViewPage() {
           loadedDepartments = (await depRes.json()) as Department[]
           if (mounted) setDepartments(loadedDepartments)
         }
+        const normalizeDepartmentName = (name: string) => {
+          const trimmed = name.trim()
+          const lower = trimmed.toLowerCase()
+          if (lower.includes("project content manager")) return "Product Content"
+          return trimmed
+        }
+        const departmentNameById = new Map<string, string>(
+          loadedDepartments
+            .map((d) => (d.id && d.name ? [d.id, normalizeDepartmentName(d.name)] as [string, string] : null))
+            .filter((entry): entry is [string, string] => entry !== null)
+        )
         
         // Find Product Content Manager department ID
         let productContentDeptId: string | null = null
@@ -1405,11 +1422,15 @@ export default function CommonViewPage() {
             for (const date of datesToUse) {
               // Get assignees who have tasks specifically on this date
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
+              const departmentId = project.department_id ?? null
+              const departmentName = departmentId ? departmentNameById.get(departmentId) || "Other" : "Other"
 
               expandedPriority.push({
                 project: entry.project,
                 date: date,
                 assignees: Array.from(dateAssignees),
+                department_id: departmentId,
+                department_name: departmentName,
               })
             }
           }
@@ -4047,6 +4068,7 @@ export default function CommonViewPage() {
           line-height: 1.1;
           font-size: 12px;
           word-break: break-word;
+          background: #f8f9fa;
         }
         .swimlane-badge {
           min-width: 24px;
@@ -4310,6 +4332,42 @@ export default function CommonViewPage() {
           font-weight: 700;
           background: #f8f9fa;
         }
+        .week-table-row.delay .week-table-label {
+          background: var(--delay-bg);
+        }
+        .week-table-row.absence .week-table-label {
+          background: var(--absence-bg);
+        }
+        .week-table-row.leave .week-table-label {
+          background: var(--leave-bg);
+        }
+        .week-table-row.blocked .week-table-label {
+          background: var(--blocked-bg);
+        }
+        .week-table-row.oneh .week-table-label {
+          background: var(--oneh-bg);
+        }
+        .week-table-row.personal .week-table-label {
+          background: var(--personal-bg);
+        }
+        .week-table-row.external .week-table-label {
+          background: var(--external-bg);
+        }
+        .week-table-row.internal .week-table-label {
+          background: var(--internal-bg);
+        }
+        .week-table-row.r1 .week-table-label {
+          background: var(--r1-bg);
+        }
+        .week-table-row.problem .week-table-label {
+          background: var(--problem-bg);
+        }
+        .week-table-row.feedback .week-table-label {
+          background: var(--feedback-bg);
+        }
+        .week-table-row.priority .week-table-label {
+          background: var(--priority-bg);
+        }
         .week-table-cell {
           min-height: 30px;
         }
@@ -4329,6 +4387,20 @@ export default function CommonViewPage() {
           padding: 4px 6px;
           background: #ffffff;
           margin-bottom: 2px;
+        }
+        .week-table-prjk-group-header {
+          font-size: 9px;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: #475569;
+          letter-spacing: 0.02em;
+          margin: 0;
+          padding: 0;
+          line-height: 0.5;
+        }
+        .week-table-prjk-divider {
+          border-top: 1px solid #cbd5e1;
+          margin: 1px 0;
         }
         .week-table-entry span {
           flex: 1;
@@ -4540,6 +4612,10 @@ export default function CommonViewPage() {
           background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
           color: white; 
           box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        .day-chip.active {
+          background: #2563eb;
+          box-shadow: none;
         }
         
         /* Week Navigation Buttons - Different style from day chips */
@@ -5014,7 +5090,7 @@ export default function CommonViewPage() {
               return (
                 <button
                   key={iso}
-                  className={`chip ${isActive ? "active" : ""}`}
+                  className={`chip day-chip ${isActive ? "active" : ""}`}
                   type="button"
                   onClick={() => toggleDay(iso)}
                 >
@@ -6770,7 +6846,24 @@ export default function CommonViewPage() {
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
                       else if (row.id === "priority") dayEntries[iso] = dayData.priority || []
                     })
-                    
+
+                    const getWeekRowClass = (rowId: string) => {
+                      if (rowId === "late") return "delay"
+                      if (rowId === "absent") return "absence"
+                      if (rowId === "leave") return "leave"
+                      if (rowId === "blocked") return "blocked"
+                      if (rowId === "oneH") return "oneh"
+                      if (rowId === "personal") return "personal"
+                      if (rowId === "external") return "external"
+                      if (rowId === "internal") return "internal"
+                      if (rowId === "r1") return "r1"
+                      if (rowId === "problem") return "problem"
+                      if (rowId === "feedback") return "feedback"
+                      if (rowId === "priority") return "priority"
+                      return ""
+                    }
+                    const weekRowClass = getWeekRowClass(row.id)
+
                     const getCellContent = (iso: string) => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
@@ -6962,17 +7055,48 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "priority") {
-                        return entries.map((e: PriorityItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {e.project}</span>
-                            <div className="week-table-avatars">
-                              {e.assignees.map((name) => (
-                                <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
-                                  {initials(name)}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        const groupMap = new Map<string, PriorityItem[]>()
+                        for (const item of entries as PriorityItem[]) {
+                          const departmentName = item.department_name || "Other"
+                          const existing = groupMap.get(departmentName) || []
+                          existing.push(item)
+                          groupMap.set(departmentName, existing)
+                        }
+                        const preferredOrder = ["DEVELOPMENT", "GRAPHIC DESIGN", "PRODUCT CONTENT"]
+                        const orderIndex = new Map(preferredOrder.map((name, idx) => [name, idx]))
+                        const normalizeDept = (value: string) => value.trim().toUpperCase()
+                        const isOther = (value: string) => normalizeDept(value) === "OTHER"
+                        const groupKeys = Array.from(groupMap.keys()).sort((a, b) => {
+                          const aKey = normalizeDept(a)
+                          const bKey = normalizeDept(b)
+                          const aIdx = orderIndex.get(aKey)
+                          const bIdx = orderIndex.get(bKey)
+                          if (aIdx != null && bIdx != null) return aIdx - bIdx
+                          if (aIdx != null) return -1
+                          if (bIdx != null) return 1
+                          if (isOther(a) && !isOther(b)) return 1
+                          if (!isOther(a) && isOther(b)) return -1
+                          return a.localeCompare(b)
+                        })
+                        return groupKeys.map((departmentName, groupIdx) => (
+                          <React.Fragment key={departmentName}>
+                            <div className="week-table-prjk-group-header">{departmentName}</div>
+                            {(groupMap.get(departmentName) || []).map((e, idx) => (
+                              <div key={`${departmentName}-${idx}`} className="week-table-entry">
+                                <span>{idx + 1}. {e.project}</span>
+                                <div className="week-table-avatars">
+                                  {e.assignees.map((name) => (
+                                    <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
+                                      {initials(name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                            {groupIdx < groupKeys.length - 1 ? (
+                              <div className="week-table-prjk-divider" />
+                            ) : null}
+                          </React.Fragment>
                         ))
                       }
                       return null
@@ -6981,7 +7105,7 @@ export default function CommonViewPage() {
                     const rowLabel = row.label.toUpperCase()
                     
                     return (
-                      <tr key={row.id}>
+                      <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
                         <td className="week-table-number">{rowIndex + 1}</td>
                         <td className="week-table-label">{rowLabel}</td>
                         {weekISOs.map((iso) => {
