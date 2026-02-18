@@ -55,7 +55,7 @@ const items: NavItem[] = [
     icon: StickyNote,
   },
   {
-    href: "/ga-ka-tasks",
+    href: "/admin-tasks",
     label: "Admin tasks",
     icon: ClipboardCheck,
   },

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
-import type { User, Task, CommonEntry, Project, Meeting, Department } from "@/lib/types"
+import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
 type CommonType =
   | "late"
@@ -18,6 +18,7 @@ type CommonType =
   | "problem"
   | "feedback"
   | "priority"
+  | "bz"
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
@@ -48,6 +49,13 @@ type PriorityItem = {
   department_id?: string | null
   department_name?: string | null
 }
+type BzItem = {
+  title: string
+  date: string
+  time: string
+  assignees?: string[]
+  bzWithLabel?: string
+}
 
 type SwimlaneCell = {
   title: string
@@ -55,6 +63,7 @@ type SwimlaneCell = {
   dateLabel?: string
   accentClass?: string
   assignees?: string[]
+  assigneeLabels?: string[]
   placeholder?: boolean
   entryId?: string
   number?: number
@@ -184,6 +193,11 @@ export default function CommonViewPage() {
   }
   const formatTime = (d: Date) =>
     d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+  const formatAlignmentTime = (value?: string | null) => {
+    if (!value) return "TBD"
+    const match = String(value).match(/^(\d{2}:\d{2})/)
+    return match ? match[1] : String(value)
+  }
   const parseTimeValue = (value: string) => {
     const match = /^(\d{2}):(\d{2})$/.exec(value)
     if (!match) return null
@@ -335,6 +349,7 @@ export default function CommonViewPage() {
     problems: [] as ProblemItem[],
     feedback: [] as FeedbackItem[],
     priority: [] as PriorityItem[],
+    bz: [] as BzItem[],
   })
   const [dataLoaded, setDataLoaded] = React.useState(false)
 
@@ -850,6 +865,7 @@ export default function CommonViewPage() {
         if (mounted) setDataLoaded(false)
         const weekStartIso = toISODate(weekStart)
         const weekEndIso = toISODate(addDays(weekStart, 6))
+        const weekDates = getWeekdays(weekStart).map(toISODate)
         // Initialize all data buckets
         const allData = {
           late: [] as LateItem[],
@@ -864,6 +880,7 @@ export default function CommonViewPage() {
           problems: [] as ProblemItem[],
           feedback: [] as FeedbackItem[],
           priority: [] as PriorityItem[],
+          bz: [] as BzItem[],
         }
 
         // Load primary datasets in parallel (week scoped)
@@ -878,6 +895,13 @@ export default function CommonViewPage() {
           ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
           : "/meetings?include_all_departments=true"
 
+        const systemTasksRequests = weekDates.map((dateStr) => {
+          const qs = new URLSearchParams()
+          qs.set("occurrence_date", dateStr)
+          if (commonDepartmentId) qs.set("department_id", commonDepartmentId)
+          return apiFetch(`/system-tasks?${qs.toString()}`)
+        })
+
         const [
           uRes,
           depRes,
@@ -885,6 +909,7 @@ export default function CommonViewPage() {
           initialTasksRes,
           externalMeetingsRes,
           internalMeetingsRes,
+          ...systemTasksResponses
         ] = await Promise.all([
           apiFetch(usersEndpoint),
           apiFetch("/departments"),
@@ -892,6 +917,7 @@ export default function CommonViewPage() {
           apiFetch(tasksEndpointWithWindow),
           apiFetch(`${meetingsEndpointBase}&meeting_type=external`),
           apiFetch(`${meetingsEndpointBase}&meeting_type=internal`),
+          ...systemTasksRequests,
         ])
 
         let loadedUsers: User[] = []
@@ -1481,6 +1507,52 @@ export default function CommonViewPage() {
           }
         }
 
+        const userMap = new Map(loadedUsers.map((u) => [u.id, u]))
+        const ganeUserId =
+          loadedUsers.find((u) => u.username?.toLowerCase() === "gane.arifaj")?.id || null
+        const bzItems: BzItem[] = []
+        for (let i = 0; i < systemTasksResponses.length; i += 1) {
+          const res = systemTasksResponses[i]
+          const dateStr = weekDates[i]
+          if (!res?.ok || !dateStr) continue
+          const templates = (await res.json()) as SystemTaskTemplate[]
+          for (const tmpl of templates) {
+            if (tmpl.occurrence_date && tmpl.occurrence_date !== dateStr) continue
+            const alignmentEnabled = Boolean(
+              tmpl.requires_alignment ||
+              tmpl.alignment_time ||
+              (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+              (tmpl.alignment_roles && tmpl.alignment_roles.length)
+            )
+            if (!alignmentEnabled) continue
+            const alignmentUserIds = tmpl.alignment_user_ids ?? []
+            if (!ganeUserId || !alignmentUserIds.includes(ganeUserId)) continue
+            const bzWithNames = alignmentUserIds
+              .map((id) => {
+                const person = userMap.get(id)
+                return person?.full_name || person?.username || ""
+              })
+              .filter(Boolean)
+            const bzWithInitials = bzWithNames.map(initials).filter(Boolean)
+            const bzWithLabel =
+              bzWithInitials.length > 0
+                ? bzWithInitials.join(", ")
+                : tmpl.alignment_roles?.length
+                  ? tmpl.alignment_roles.join(", ")
+                  : ""
+            const taskAssignees =
+              tmpl.assignees?.map((a) => a.full_name || a.username || a.email || "Unknown").filter(Boolean) || []
+            bzItems.push({
+              title: tmpl.title || "-",
+              date: dateStr,
+              time: formatAlignmentTime(tmpl.alignment_time),
+              assignees: taskAssignees,
+              bzWithLabel,
+            })
+          }
+        }
+        allData.bz = bzItems
+
         // Single state update with all data
         if (mounted) {
           setCommonData(allData)
@@ -1652,6 +1724,7 @@ export default function CommonViewPage() {
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const problems = commonData.problems.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const bz = commonData.bz.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
@@ -1670,6 +1743,7 @@ export default function CommonViewPage() {
       r1,
       problems,
       feedback,
+      bz,
       priority: filteredPriority,
       fullyCoveredDates,
     }
@@ -2882,6 +2956,17 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent internal",
     }))
 
+    const bzSource = isMultiDate
+      ? sortByDate(filtered.bz, (x) => x.date, (x) => x.title)
+      : filtered.bz
+    const bzItems: SwimlaneCell[] = bzSource.map((x) => ({
+      title: x.title,
+      subtitle: `${formatTimeLabel(x.time)}${x.bzWithLabel ? ` - BZ: ${x.bzWithLabel}` : ""}`.trim(),
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent bz",
+      assignees: x.assignees,
+    }))
+
     const r1Source = isMultiDate
       ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
       : filtered.r1
@@ -2968,6 +3053,14 @@ export default function CommonViewPage() {
         items: internalItems,
       },
       {
+        id: "bz",
+        label: "BZ GA",
+        count: filtered.bz.length,
+        headerClass: "swimlane-header bz",
+        badgeClass: "swimlane-badge bz",
+        items: bzItems,
+      },
+      {
         id: "blocked",
         label: "BLL",
         count: filtered.blocked.length,
@@ -3048,6 +3141,7 @@ export default function CommonViewPage() {
       personal: PersonalItem[]
       external: ExternalItem[]
       internal: InternalItem[]
+      bz: BzItem[]
       r1: R1Item[]
       problems: ProblemItem[]
       feedback: FeedbackItem[]
@@ -3073,6 +3167,7 @@ export default function CommonViewPage() {
           personal: [],
           external: [],
           internal: [],
+          bz: [],
           r1: [],
           problems: [],
           feedback: [],
@@ -3089,6 +3184,7 @@ export default function CommonViewPage() {
         personal: filtered.personal.filter((x) => x.date === iso),
         external: filtered.external.filter((x) => x.date === iso),
         internal: filtered.internal.filter((x) => x.date === iso),
+        bz: filtered.bz.filter((x) => x.date === iso),
         r1: filtered.r1.filter((x) => x.date === iso),
         problems: filtered.problems.filter((x) => x.date === iso),
         feedback: filtered.feedback.filter((x) => x.date === iso),
@@ -3427,6 +3523,8 @@ export default function CommonViewPage() {
           --external-accent: #0284c7;
           --internal-bg: #f1f5f9;
           --internal-accent: #475569;
+          --bz-bg: #e6fffb;
+          --bz-accent: #14b8a6;
           --r1-bg: #dcfce7;
           --r1-accent: #16a34a;
           --problem-bg: #ecfeff;
@@ -3712,6 +3810,7 @@ export default function CommonViewPage() {
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
           .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
           .swimlane-header.internal { background: var(--internal-bg) !important; color: #334155 !important; }
+          .swimlane-header.bz { background: var(--bz-bg) !important; color: #0f766e !important; }
           .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
           .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
           .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
@@ -3724,6 +3823,7 @@ export default function CommonViewPage() {
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
           .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.internal { border-color: var(--internal-accent) !important; color: #334155 !important; }
+          .swimlane-badge.bz { border-color: var(--bz-accent) !important; color: #0f766e !important; }
           .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
           .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
           .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
@@ -4339,6 +4439,9 @@ export default function CommonViewPage() {
         .week-table-row.internal .week-table-label {
           background: var(--internal-bg);
         }
+        .week-table-row.bz .week-table-label {
+          background: var(--bz-bg);
+        }
         .week-table-row.r1 .week-table-label {
           background: var(--r1-bg);
         }
@@ -4504,6 +4607,7 @@ export default function CommonViewPage() {
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.internal { background: var(--internal-bg); color: #334155; }
+        .swimlane-header.bz { background: var(--bz-bg); color: #0f766e; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
         .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
@@ -4516,6 +4620,7 @@ export default function CommonViewPage() {
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.internal { border-color: var(--internal-accent); color: #334155; }
+        .swimlane-badge.bz { border-color: var(--bz-accent); color: #0f766e; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
         .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
@@ -4528,6 +4633,7 @@ export default function CommonViewPage() {
         .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.internal { border-left: 4px solid var(--internal-accent); }
+        .swimlane-accent.bz { border-left: 4px solid var(--bz-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
@@ -5147,6 +5253,13 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("internal")}
             >
               TAK INT
+            </button>
+            <button
+              className={`chip ${typeFilters.has("bz") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("bz")}
+            >
+              BZ
             </button>
             <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
@@ -6808,6 +6921,7 @@ export default function CommonViewPage() {
                       else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
+                      else if (row.id === "bz") dayEntries[iso] = dayData.bz || []
                       else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
                       else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
@@ -6823,6 +6937,7 @@ export default function CommonViewPage() {
                       if (rowId === "personal") return "personal"
                       if (rowId === "external") return "external"
                       if (rowId === "internal") return "internal"
+                      if (rowId === "bz") return "bz"
                       if (rowId === "r1") return "r1"
                       if (rowId === "problem") return "problem"
                       if (rowId === "feedback") return "feedback"
@@ -7021,6 +7136,24 @@ export default function CommonViewPage() {
                             </div>
                           </div>
                         ))
+                      } else if (row.id === "bz") {
+                        return entries.map((e: BzItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <span>
+                              {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
+                              {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
+                            </span>
+                            {e.assignees && e.assignees.length ? (
+                              <div className="week-table-avatars">
+                                {e.assignees.map((name: string) => (
+                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                    {initials(name)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
                       } else if (row.id === "priority") {
                         const groupMap = new Map<string, PriorityItem[]>()
                         for (const item of entries as PriorityItem[]) {
@@ -7179,12 +7312,21 @@ export default function CommonViewPage() {
                                         </span>
                                       ))}
                                     </div>
+                                  ) : !cell.placeholder && cell.assigneeLabels?.length ? (
+                                    <div className="swimlane-assignees">
+                                      {cell.assigneeLabels.map((label) => (
+                                        <span key={`${cell.title}-${label}`} className="swimlane-avatar" title={label}>
+                                          {label}
+                                        </span>
+                                      ))}
+                                    </div>
                                   ) : null}
                                   <div className="swimlane-title">
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
                                   {(row.id === "external" ||
                                     row.id === "internal" ||
+                                    row.id === "bz" ||
                                     row.id === "late" ||
                                     row.id === "absent" ||
                                     row.id === "leave") &&
