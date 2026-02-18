@@ -2984,7 +2984,7 @@ export default function DepartmentKanban() {
       system: visibleSystemTemplates.length,
       "no-project": visibleNoProjectTasks.length,
       "ga-ka": visibleGaNotes.filter((n) => n.status !== "CLOSED").length,
-      "internal-notes": visibleInternalNotes.length,
+      "internal-notes": groupedInternalNotes.length,
       meetings: visibleMeetings.length,
     }),
     [
