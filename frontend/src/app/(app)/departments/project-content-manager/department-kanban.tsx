@@ -974,7 +974,7 @@ function periodFromDate(value?: string | null) {
 function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: string | null) {
   if (finishPeriod === "PM") return "PM"
   if (finishPeriod === "AM") return "AM"
-  return periodFromDate(dateValue)
+  return "AM/PM"
 }
 
 function toMeetingInputValue(value?: string | null) {

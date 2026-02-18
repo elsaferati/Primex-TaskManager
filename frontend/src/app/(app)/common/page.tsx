@@ -4389,18 +4389,8 @@ export default function CommonViewPage() {
           background: #ffffff;
           margin-bottom: 2px;
         }
-        .week-table-prjk-group-header {
-          font-size: 9px;
-          font-weight: 700;
-          text-transform: uppercase;
-          color: #475569;
-          letter-spacing: 0.02em;
-          margin: 0;
-          padding: 0;
-          line-height: 0.5;
-        }
         .week-table-prjk-divider {
-          border-top: 1px solid #cbd5e1;
+          border-top: 1px solid #64748b;
           margin: 1px 0;
         }
         .week-table-entry span {
@@ -7076,7 +7066,6 @@ export default function CommonViewPage() {
                         let entryIndex = 0
                         return groupKeys.map((departmentName, groupIdx) => (
                           <React.Fragment key={departmentName}>
-                            <div className="week-table-prjk-group-header">{departmentName}</div>
                             {(groupMap.get(departmentName) || []).map((e, idx) => (
                               <div key={`${departmentName}-${idx}`} className="week-table-entry">
                                 <span>{++entryIndex}. {e.project}</span>

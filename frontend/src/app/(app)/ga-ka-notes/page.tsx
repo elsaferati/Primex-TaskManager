@@ -141,6 +141,13 @@ function abbreviateDepartmentName(name: string): string {
   return name.slice(0, 3).toUpperCase()
 }
 
+function isDevelopmentDepartment(dept?: Department | null) {
+  if (!dept) return false
+  const name = (dept.name || "").trim().toUpperCase()
+  const code = (dept.code || "").trim().toUpperCase()
+  return name === "DEVELOPMENT" || code === "DEV"
+}
+
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const searchParams = useSearchParams()
@@ -351,10 +358,6 @@ export default function GaKaNotesPage() {
     const loadNoteTasks = async () => {
       if (!notes.length) {
         setNoteTaskInfo(new Map())
-        return
-      }
-      // Wait for users to be loaded before processing
-      if (users.length === 0) {
         return
       }
       const res = await apiFetch("/tasks?include_done=true&include_all_departments=true")
@@ -719,8 +722,16 @@ export default function GaKaNotesPage() {
   }
 
   const openTaskDialog = (note: GaNote) => {
-    if (note.project_id) {
-      toast.error("Tasks for project-linked notes must be created manually")
+    const hasProject = Boolean(note.project_id)
+    const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
+    const noteProject = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+    const projectDepartment = noteProject?.department_id
+      ? departments.find((d) => d.id === noteProject.department_id) || null
+      : null
+    const isDevLinked = isDevelopmentDepartment(noteDepartment) || isDevelopmentDepartment(projectDepartment)
+
+    if (hasProject && !isDevLinked) {
+      toast.error("Tasks for non-development project notes must be created manually")
       return
     }
     const trimmed = note.content.trim()
@@ -747,8 +758,15 @@ export default function GaKaNotesPage() {
 
   const createTaskFromNote = async (note: GaNote) => {
     if (note.is_converted_to_task) return
-    if (note.project_id) {
-      toast.error("Tasks for project-linked notes must be created manually")
+    const hasProject = Boolean(note.project_id)
+    const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
+    const noteProject = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
+    const projectDepartment = noteProject?.department_id
+      ? departments.find((d) => d.id === noteProject.department_id) || null
+      : null
+    const isDevLinked = isDevelopmentDepartment(noteDepartment) || isDevelopmentDepartment(projectDepartment)
+    if (hasProject && !isDevLinked) {
+      toast.error("Tasks for non-development project notes must be created manually")
       return
     }
     if (!taskTitle.trim()) {
@@ -1679,10 +1697,9 @@ export default function GaKaNotesPage() {
                     const projectDepartment = project?.department_id
                       ? departmentMap.get(project.department_id)
                       : null
-                    const projectDepartmentName = (projectDepartment?.name || "").trim().toUpperCase()
-                    const projectDepartmentCode = (projectDepartment?.code || "").trim().toUpperCase()
-                    const isDevProject =
-                      projectDepartmentName === "DEVELOPMENT" || projectDepartmentCode === "DEV"
+                    const isDevProject = isDevelopmentDepartment(projectDepartment)
+                    const isDevNote = isDevelopmentDepartment(noteDepartment)
+                    const isDevLinked = isDevProject || isDevNote
                     const hasProject = Boolean(projectId)
                     const assignees = taskInfo?.assignees ?? []
                     const attachments = note.attachments ?? []
@@ -1695,8 +1712,8 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
-                    const canCreateTask = !isClosed && (!hasProject || isDevProject)
-                    const showManualOnly = hasProject && !isDevProject
+                    const canCreateTask = !isClosed && (!hasProject || isDevLinked)
+                    const showManualOnly = hasProject && !isDevLinked
                     const shenimiCellClass = isClosed
                       ? "bg-slate-200 opacity-70"
                       : hasTask
