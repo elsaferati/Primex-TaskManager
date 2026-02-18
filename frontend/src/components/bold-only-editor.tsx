@@ -95,9 +95,10 @@ function escapeHtml(value: string) {
 type BoldOnlyEditorProps = {
   value: string
   onChange: (value: string) => void
+  editorClassName?: string
 }
 
-export function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
+export function BoldOnlyEditor({ value, onChange, editorClassName }: BoldOnlyEditorProps) {
   const editorRef = React.useRef<HTMLDivElement | null>(null)
   const lastValue = React.useRef("")
 
@@ -167,7 +168,7 @@ export function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
         contentEditable
         role="textbox"
         aria-multiline="true"
-        className="border-input focus-visible:border-ring focus-visible:ring-ring/50 min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] md:text-sm whitespace-pre-wrap"
+        className={`border-input focus-visible:border-ring focus-visible:ring-ring/50 min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none transition-[color,box-shadow] focus-visible:ring-[3px] md:text-sm whitespace-pre-wrap ${editorClassName || ""}`}
         onInput={handleInput}
         onBlur={commitChange}
         onSelect={checkBoldState}

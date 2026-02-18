@@ -847,6 +847,9 @@ export default function CommonViewPage() {
     let mounted = true
     async function load() {
       try {
+        if (mounted) setDataLoaded(false)
+        const weekStartIso = toISODate(weekStart)
+        const weekEndIso = toISODate(addDays(weekStart, 6))
         // Initialize all data buckets
         const allData = {
           late: [] as LateItem[],
@@ -863,12 +866,35 @@ export default function CommonViewPage() {
           priority: [] as PriorityItem[],
         }
 
-        // Load users and departments first
-          // Use lookup endpoint so STAFF can load all users
-          const usersEndpoint = "/users/lookup?include_inactive=false"
-        const uRes = await apiFetch(usersEndpoint)
+        // Load primary datasets in parallel (week scoped)
+        // Use lookup endpoint so STAFF can load all users
+        const usersEndpoint = "/users/lookup?include_inactive=false"
+        const commonEntriesEndpoint = `/common-entries?from=${encodeURIComponent(weekStartIso)}&to=${encodeURIComponent(weekEndIso)}`
+        let tasksEndpoint = commonDepartmentId
+          ? `/tasks?include_done=true&department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/tasks?include_done=true&include_all_departments=true"
+        const tasksEndpointWithWindow = `${tasksEndpoint}&window_from=${encodeURIComponent(weekStartIso)}&window_to=${encodeURIComponent(weekEndIso)}`
+        const meetingsEndpointBase = commonDepartmentId
+          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+          : "/meetings?include_all_departments=true"
+
+        const [
+          uRes,
+          depRes,
+          ceRes,
+          initialTasksRes,
+          externalMeetingsRes,
+          internalMeetingsRes,
+        ] = await Promise.all([
+          apiFetch(usersEndpoint),
+          apiFetch("/departments"),
+          apiFetch(commonEntriesEndpoint),
+          apiFetch(tasksEndpointWithWindow),
+          apiFetch(`${meetingsEndpointBase}&meeting_type=external`),
+          apiFetch(`${meetingsEndpointBase}&meeting_type=internal`),
+        ])
+
         let loadedUsers: User[] = []
-        let projectNameById = new Map<string, string>()
         if (uRes?.ok) {
           const lookup = (await uRes.json()) as {
             id: string
@@ -889,7 +915,6 @@ export default function CommonViewPage() {
           }))
           if (mounted) setUsers(loadedUsers)
         }
-        const depRes = await apiFetch("/departments")
         let loadedDepartments: Department[] = []
         if (depRes?.ok) {
           loadedDepartments = (await depRes.json()) as Department[]
@@ -917,40 +942,8 @@ export default function CommonViewPage() {
           )
           productContentDeptId = pcmDept?.id || null
         }
-        
-        // For priority items (PRJK), we want everyone to see all projects,
-        // so try to fetch all projects first, fallback if needed
-        let projectsEndpoint = commonDepartmentId
-          ? `/projects?department_id=${encodeURIComponent(commonDepartmentId)}`
-          : "/projects?include_all_departments=true"
-        let projectsRes = await apiFetch(projectsEndpoint)
-        
-        if (!projectsRes?.ok && projectsRes?.status === 403 && !commonDepartmentId) {
-          projectsRes = await apiFetch("/projects")
-        }
-        
-        // Store full project info for MST/VS/VL date generation
-        const projectInfoById = new Map<string, Project>()
-        if (projectsRes?.ok) {
-          const projects = (await projectsRes.json()) as Project[]
-          projectNameById = new Map(
-            projects
-              .map((p) => {
-                const baseTitle = (p.title || p.name || "").trim()
-                if (!baseTitle) return null
-                const title = p.project_type === "MST" && p.total_products != null && p.total_products > 0
-                  ? `${baseTitle} - ${p.total_products}`
-                  : baseTitle
-                // Store full project info
-                projectInfoById.set(p.id, p)
-                return [p.id, title] as [string, string]
-              })
-              .filter((entry): entry is [string, string] => entry !== null && entry[1] !== "")
-          )
-        }
 
         // Load common entries
-        const ceRes = await apiFetch("/common-entries")
         if (ceRes?.ok) {
           const entries = (await ceRes.json()) as CommonEntry[]
 
@@ -1120,52 +1113,59 @@ export default function CommonViewPage() {
           }
         }
 
+        let projectNameById = new Map<string, string>()
+        const projectInfoById = new Map<string, Project>()
+
         // Load tasks for blocked, 1H, R1, external, and priority
         // For priority items (PRJK), we want everyone to see the same projects,
         // so try to fetch all tasks first, fallback to user's tasks if 403
-        let tasksEndpoint = commonDepartmentId
-          ? `/tasks?include_done=true&department_id=${encodeURIComponent(commonDepartmentId)}`
-          : "/tasks?include_done=true&include_all_departments=true"
-        let tasksRes = await apiFetch(tasksEndpoint)
-        
+        let tasksRes = initialTasksRes
         if (!tasksRes?.ok && tasksRes?.status === 403 && !commonDepartmentId) {
-          tasksRes = await apiFetch("/tasks?include_done=true")
+          tasksRes = await apiFetch(`/tasks?include_done=true&window_from=${encodeURIComponent(weekStartIso)}&window_to=${encodeURIComponent(weekEndIso)}`)
         }
-        
+
         if (tasksRes?.ok) {
           const tasks = (await tasksRes.json()) as Task[]
-          
-          // Collect all project IDs from tasks that aren't in our map yet
-          const missingProjectIds = new Set<string>()
-          for (const t of tasks) {
-            if (t.project_id && !projectNameById.has(t.project_id)) {
-              missingProjectIds.add(t.project_id)
+
+          const chunk = <T,>(items: T[], size: number): T[][] => {
+            if (size <= 0) return [items]
+            const out: T[][] = []
+            for (let i = 0; i < items.length; i += size) {
+              out.push(items.slice(i, i + size))
             }
+            return out
           }
-          
-          // Fetch missing projects individually
-          if (missingProjectIds.size > 0) {
-            const projectFetchPromises = Array.from(missingProjectIds).map(async (projectId) => {
-              try {
-                const projRes = await apiFetch(`/projects/${projectId}`)
-                if (projRes?.ok) {
-                  const project = (await projRes.json()) as Project
-                  const baseTitle = (project.title || project.name || "").trim()
-                  if (baseTitle) {
-                    const projectName = project.project_type === "MST" && project.total_products != null && project.total_products > 0
-                      ? `${baseTitle} - ${project.total_products}`
-                      : baseTitle
-                    projectNameById.set(projectId, projectName)
-                    // Store full project info
-                    projectInfoById.set(projectId, project)
-                  }
-                }
-              } catch (err) {
-                // Project might not exist or user doesn't have access - ignore
-                console.warn(`Failed to fetch project ${projectId}`, err)
+          const fetchProjectLookup = async (ids: string[]) => {
+            const uniqueIds = Array.from(new Set(ids.filter(Boolean)))
+            const out = new Map<string, Project>()
+            for (const batch of chunk(uniqueIds, 50)) {
+              const qs = new URLSearchParams()
+              for (const id of batch) qs.append("ids", id)
+              const res = await apiFetch(`/projects/lookup?${qs.toString()}`)
+              if (!res.ok) continue
+              const data = (await res.json()) as Array<Project>
+              for (const item of data) {
+                if (item?.id) out.set(item.id, item)
               }
-            })
-            await Promise.all(projectFetchPromises)
+            }
+            return out
+          }
+
+          const projectIds = Array.from(
+            new Set(tasks.map((t) => t.project_id).filter((id): id is string => Boolean(id)))
+          )
+          if (projectIds.length) {
+            const lookupMap = await fetchProjectLookup(projectIds)
+            for (const project of lookupMap.values()) {
+              const baseTitle = (project.title || project.name || "").trim()
+              if (!baseTitle) continue
+              const projectName =
+                project.project_type === "MST" && project.total_products != null && project.total_products > 0
+                  ? `${baseTitle} - ${project.total_products}`
+                  : baseTitle
+              projectNameById.set(project.id, projectName)
+              projectInfoById.set(project.id, project)
+            }
           }
           
           const today = toISODate(new Date())
@@ -1243,7 +1243,12 @@ export default function CommonViewPage() {
               return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
             }
             
-            const taskDates = getTaskDates(t, isCheckPhase)
+            const taskDates = getTaskDates(t, isCheckPhase).filter(
+              (dateStr) => dateStr >= weekStartIso && dateStr <= weekEndIso
+            )
+            if (!taskDates.length) {
+              continue
+            }
 
             // Create entries for each date in the range
             for (const taskDate of taskDates) {
@@ -1336,28 +1341,10 @@ export default function CommonViewPage() {
               }
             }
           }
-          
-          // Include ALL projects in priority list, not just those with tasks
-          // This ensures all users see all projects
-          for (const [projectId, project] of projectInfoById.entries()) {
-            if (!priorityMap.has(projectId)) {
-              const baseTitle = (project.title || project.name || "").trim()
-              if (!baseTitle) continue
-              const projectName = project.project_type === "MST" && project.total_products != null && project.total_products > 0
-                ? `${baseTitle} - ${project.total_products}`
-                : baseTitle
-              
-              priorityMap.set(projectId, {
-                project: projectName,
-                assigneesByDate: new Map<string, Set<string>>(),
-                dates: new Set<string>(),
-              })
-            }
-          }
-          
           // Expand priority items: create one entry per project-date combination
-          // For MST and VS/VL projects in Product Content, show every day until due date
+          // For MST and VS/VL projects in Product Content, show only dates within the selected week
           const expandedPriority: PriorityItem[] = []
+          const isInWeek = (dateStr: string) => dateStr >= weekStartIso && dateStr <= weekEndIso
           for (const [projectKey, entry] of priorityMap.entries()) {
             const project = projectInfoById.get(projectKey)
             if (!project) continue // Skip if project info not available
@@ -1374,32 +1361,33 @@ export default function CommonViewPage() {
             
             if ((isMst || isVsVl) && isProductContent) {
               if (project.due_date) {
-                // For MST/VS/VL in Product Content with due_date, generate all dates from today until due date
-                const today = new Date()
-                today.setHours(0, 0, 0, 0)
+                // For MST/VS/VL in Product Content with due_date, generate dates within the selected week
+                const weekStartDate = fromISODate(weekStartIso)
+                const weekEndDate = fromISODate(weekEndIso)
                 const dueDate = new Date(project.due_date)
                 dueDate.setHours(0, 0, 0, 0)
-                
-                // Start from today, end at due date (or today if due date is in the past)
-                const startDate = today
-                const endDate = dueDate >= today ? dueDate : today
-                
-                // Generate all dates from start to end (weekdays only: Monday-Friday)
-                const currentDate = new Date(startDate)
-                while (currentDate <= endDate) {
-                  const dayOfWeek = currentDate.getDay()
-                  // Only include weekdays (Monday=1 to Friday=5)
-                  if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-                    datesToUse.push(toISODate(currentDate))
+                const startDate = new Date(weekStartDate)
+                const endDate = new Date(weekEndDate)
+
+                if (dueDate >= startDate) {
+                  if (dueDate < endDate) {
+                    endDate.setTime(dueDate.getTime())
                   }
-                  currentDate.setDate(currentDate.getDate() + 1)
+                  const currentDate = new Date(startDate)
+                  while (currentDate <= endDate) {
+                    const dayOfWeek = currentDate.getDay()
+                    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                      datesToUse.push(toISODate(currentDate))
+                    }
+                    currentDate.setDate(currentDate.getDate() + 1)
+                  }
                 }
               } else if (entry.dates.size > 0) {
                 // MST/VS/VL without due_date but with tasks - use task dates
                 datesToUse = Array.from(entry.dates).sort()
               } else {
                 // MST/VS/VL without due_date and no tasks - show on today
-                datesToUse = [toISODate(new Date())]
+                datesToUse = [weekStartIso]
               }
             } else {
               // For other projects, use dates from tasks
@@ -1417,6 +1405,10 @@ export default function CommonViewPage() {
               const merged = new Set(datesToUse)
               for (const d of entry.dates) merged.add(d)
               datesToUse = Array.from(merged).sort()
+            }
+            datesToUse = datesToUse.filter(isInWeek)
+            if (!datesToUse.length) {
+              continue
             }
             // Create one priority entry per date for this project
             // Participants are derived strictly from tasks on that specific date.
@@ -1438,16 +1430,6 @@ export default function CommonViewPage() {
           
           allData.priority = expandedPriority
         }
-
-        // Show all external/internal meetings for all users in common view
-        const meetingsEndpointBase = commonDepartmentId
-          ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
-          : "/meetings?include_all_departments=true"
-
-        const [externalMeetingsRes, internalMeetingsRes] = await Promise.all([
-          apiFetch(`${meetingsEndpointBase}&meeting_type=external`),
-          apiFetch(`${meetingsEndpointBase}&meeting_type=internal`),
-        ])
 
         if (externalMeetingsRes?.ok) {
           const meetings = (await externalMeetingsRes.json()) as Meeting[]
@@ -1521,7 +1503,7 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, user?.role, user?.department_id])
+  }, [apiFetch, user?.role, user?.department_id, weekStart])
 
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
