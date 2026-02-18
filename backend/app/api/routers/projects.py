@@ -31,7 +31,7 @@ from app.services.workflow_service import (
     get_active_workflow_items,
     dependency_item_ids_from_info,
 )
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 router = APIRouter()
@@ -40,6 +40,10 @@ router = APIRouter()
 class ProjectTitleLookupOut(BaseModel):
     id: uuid.UUID
     title: str
+    project_type: str | None = None
+    total_products: int | None = None
+    department_id: uuid.UUID | None = None
+    due_date: datetime | None = None
 
 
 @router.get("/lookup", response_model=list[ProjectTitleLookupOut])
@@ -53,12 +57,30 @@ async def lookup_project_titles(
         return []
     rows = (
         await db.execute(
-            select(Project.id, Project.title)
+            select(
+                Project.id,
+                Project.title,
+                Project.project_type,
+                Project.total_products,
+                Project.department_id,
+                Project.due_date,
+            )
             .where(Project.is_template == False)
             .where(Project.id.in_(list(dict.fromkeys(ids))))
         )
     ).all()
-    return [ProjectTitleLookupOut(id=pid, title=title) for pid, title in rows if title]
+    return [
+        ProjectTitleLookupOut(
+            id=pid,
+            title=title,
+            project_type=project_type,
+            total_products=total_products,
+            department_id=department_id,
+            due_date=due_date,
+        )
+        for pid, title, project_type, total_products, department_id, due_date in rows
+        if title
+    ]
 
 
 async def _copy_tasks_from_template_project(

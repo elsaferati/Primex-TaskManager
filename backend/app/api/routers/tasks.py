@@ -10,7 +10,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, insert, or_, select, cast, update, String as SQLString
+from sqlalchemy import delete, insert, or_, select, cast, update, String as SQLString, func, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
@@ -300,6 +300,8 @@ async def list_tasks(
     created_by: uuid.UUID | None = None,
     due_from: datetime | None = None,
     due_to: datetime | None = None,
+    window_from: datetime | None = None,
+    window_to: datetime | None = None,
     include_done: bool = True,
     include_inactive: bool = False,
     include_all_departments: bool = False,
@@ -352,6 +354,19 @@ async def list_tasks(
         stmt = stmt.where(Task.due_date >= due_from)
     if due_to:
         stmt = stmt.where(Task.due_date <= due_to)
+    if window_from or window_to:
+        effective_columns = [Task.due_date, Task.start_date, Task.created_at]
+        if hasattr(Task, "planned_for"):
+            effective_columns.insert(0, getattr(Task, "planned_for"))
+        effective_date = cast(func.coalesce(*effective_columns), Date)
+        if window_from:
+            window_from_date = _as_local_date(window_from)
+            if window_from_date:
+                stmt = stmt.where(effective_date >= window_from_date)
+        if window_to:
+            window_to_date = _as_local_date(window_to)
+            if window_to_date:
+                stmt = stmt.where(effective_date <= window_to_date)
     if not include_done:
         stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
 

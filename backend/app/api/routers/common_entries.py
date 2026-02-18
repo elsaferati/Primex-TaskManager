@@ -4,8 +4,8 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -112,10 +112,39 @@ def _to_out(e: CommonEntry) -> CommonEntryOut:
 
 
 @router.get("", response_model=list[CommonEntryOut])
-async def list_entries(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)) -> list[CommonEntryOut]:
-    stmt = select(CommonEntry).order_by(CommonEntry.created_at.desc())
-    entries = (await db.execute(stmt)).scalars().all()
-    return [_to_out(e) for e in entries]
+async def list_entries(
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[CommonEntryOut]:
+    if from_ is None and to is None:
+        stmt = select(CommonEntry).order_by(CommonEntry.created_at.desc())
+        entries = (await db.execute(stmt)).scalars().all()
+        return [_to_out(e) for e in entries]
+
+    effective_date = func.coalesce(CommonEntry.entry_date, func.date(CommonEntry.created_at))
+    non_annual_stmt = select(CommonEntry).where(CommonEntry.category != CommonCategory.annual_leave)
+    if from_ is not None:
+        non_annual_stmt = non_annual_stmt.where(effective_date >= from_)
+    if to is not None:
+        non_annual_stmt = non_annual_stmt.where(effective_date <= to)
+    non_annual_entries = (await db.execute(non_annual_stmt)).scalars().all()
+
+    annual_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)
+    annual_entries = (await db.execute(annual_stmt)).scalars().all()
+    annual_overlapping: list[CommonEntry] = []
+    for entry in annual_entries:
+        start_date, end_date, _, _, _, _ = _parse_annual_leave(entry)
+        if from_ is not None and end_date < from_:
+            continue
+        if to is not None and start_date > to:
+            continue
+        annual_overlapping.append(entry)
+
+    merged = non_annual_entries + annual_overlapping
+    merged.sort(key=lambda e: e.created_at, reverse=True)
+    return [_to_out(e) for e in merged]
 
 
 @router.get("/blocks", response_model=list[CommonLeaveBlockOut])
