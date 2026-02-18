@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Clock, Image as ImageIcon, Printer, Mic, Square } from "lucide-react"
+import { Clock, Image as ImageIcon, ListTodo, Pencil, Printer, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -360,9 +360,24 @@ export default function GaKaNotesPage() {
         setNoteTaskInfo(new Map())
         return
       }
-      const res = await apiFetch("/tasks?include_done=true&include_all_departments=true")
-      if (!res?.ok) return
-      const data = (await res.json()) as Task[]
+      const noteIds = notes.map((note) => note.id).filter(Boolean)
+      const chunkSize = 50
+      const chunks: string[][] = []
+      for (let i = 0; i < noteIds.length; i += chunkSize) {
+        chunks.push(noteIds.slice(i, i + chunkSize))
+      }
+
+      const data: Task[] = []
+      for (const chunk of chunks) {
+        const params = new URLSearchParams()
+        params.set("include_done", "true")
+        params.set("include_all_departments", "true")
+        chunk.forEach((id) => params.append("ga_note_origin_ids", id))
+        const res = await apiFetch(`/tasks?${params.toString()}`)
+        if (!res?.ok) return
+        const chunkData = (await res.json()) as Task[]
+        data.push(...chunkData)
+      }
       const userMapById = new Map(users.map((u) => [u.id, u]))
 
       const map = new Map<string, {
@@ -1733,6 +1748,9 @@ export default function GaKaNotesPage() {
                     const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
                     const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
                     const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
+                    const mobileDeptAbbrev = displayDepartment ? abbreviateDepartmentName(displayDepartment.name) : null
+                    const showMobileDeptBadge =
+                      mobileDeptAbbrev === "DEV" || mobileDeptAbbrev === "GDS" || mobileDeptAbbrev === "PCM"
 
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
@@ -1740,19 +1758,76 @@ export default function GaKaNotesPage() {
                         <td className={`whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-sm">{note.content}</span>
-                              {attachments.length > 0 ? (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {showMobileDeptBadge || assignees.length > 0 ? (
+                                  <span className="sm:hidden inline-flex items-center gap-1 mr-1">
+                                    {showMobileDeptBadge ? (
+                                      <Badge className="text-[9px] px-1 py-0 bg-amber-50 text-amber-700 border border-amber-200">
+                                        {mobileDeptAbbrev}
+                                      </Badge>
+                                    ) : null}
+                                    {assignees.length > 0 ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        {assignees.map((assignee, assigneeIdx) => {
+                                          const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
+                                          const assigneeInitials = getInitials(assigneeLabel)
+                                          return (
+                                            <span
+                                              key={assigneeIdx}
+                                              className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold bg-slate-200 text-slate-700"
+                                              title={assigneeLabel}
+                                            >
+                                              {assigneeInitials}
+                                            </span>
+                                          )
+                                        })}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                                <span className="text-sm">{note.content}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {attachments.length > 0 ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 sm:hidden"
+                                    title="Attachments"
+                                    aria-label="Attachments"
+                                    onClick={() => openAttachmentsForNote(note.id)}
+                                  >
+                                    <ImageIcon className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
                                 <Button
                                   variant="outline"
                                   size="icon"
                                   className="h-7 w-7 shrink-0 sm:hidden"
-                                  title="Attachments"
-                                  aria-label="Attachments"
-                                  onClick={() => openAttachmentsForNote(note.id)}
+                                  disabled={hasTask}
+                                  aria-disabled={hasTask}
+                                  title={hasTask ? "Edit disabled when task exists" : "Edit"}
+                                  aria-label="Edit note"
+                                  onClick={() => openEditNote(note)}
                                 >
-                                  <ImageIcon className="h-4 w-4" />
+                                  <Pencil className="h-4 w-4" />
                                 </Button>
-                              ) : null}
+                                {!note.is_converted_to_task && canCreateTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 sm:hidden"
+                                    title="Create task"
+                                    aria-label="Create task"
+                                    onClick={() => openTaskDialog(note)}
+                                  >
+                                    <ListTodo className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-600 sm:hidden">
+                              {formatDate(note.created_at)}
                             </div>
                             <div className="flex items-center gap-2">
                               {note.priority ? (
