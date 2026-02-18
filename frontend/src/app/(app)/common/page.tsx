@@ -135,8 +135,7 @@ const initials = (name: string) => {
   return `${first}${last}`.toUpperCase()
 }
 const stripInitialsPrefix = (value: string) => {
-  if (!value) return value
-  return value.replace(/^\s*[A-Z]{2,3}\s*:\s*/u, "")
+  return value
 }
 
 export default function CommonViewPage() {
