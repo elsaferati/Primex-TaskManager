@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
 
@@ -500,16 +500,7 @@ function statusLabel(status?: string) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("sq-AL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDateTimeDMY(value)
 }
 
 async function initializeMeetingChecklistItems(
@@ -571,10 +562,8 @@ function toDateInput(value?: string | null) {
 }
 
 function formatDateDisplay(value?: string | null) {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+  const formatted = formatDateDMY(value, "")
+  return formatted || null
 }
 
 function isMstProject(project?: Project | null) {
@@ -909,7 +898,7 @@ export default function PcmProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
@@ -3585,7 +3574,7 @@ export default function PcmProjectPage() {
                   project?.start_date ? (
                     <div className="flex items-center gap-2">
                       <div className="text-xs text-slate-500">
-                        Started: {new Date(project.start_date).toLocaleDateString()}
+                        Started: {formatDateDMY(project.start_date)}
                       </div>
                       {isAdmin && (
                         <Button
@@ -6518,7 +6507,7 @@ export default function PcmProjectPage() {
                                   className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
                                 />
                               ) : (
-                                <span className="text-slate-500">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "-"}</span>
+                                <span className="text-slate-500">{formatDateDMY(task.due_date)}</span>
                               )}
                             </div>
                             <div className="col-span-1 px-2">
@@ -7534,7 +7523,7 @@ export default function PcmProjectPage() {
                                   className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
                                 />
                               ) : (
-                                <span className="text-slate-500">{productionDate ? new Date(productionDate).toLocaleDateString() : "-"}</span>
+                                <span className="text-slate-500">{formatDateDMY(productionDate)}</span>
                               )}
                             </div>
                             <div className="col-span-1 px-2">

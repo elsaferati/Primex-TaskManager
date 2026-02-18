@@ -30,6 +30,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
+import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import { toast } from "sonner"
 import type {
@@ -1617,7 +1618,7 @@ export function SystemTasksView({
 
     const effectiveTitle = headingTitle ?? (scopeFilter === "GA" ? "Admin System Tasks" : "System Tasks")
     const now = new Date()
-    const printedAt = now.toLocaleString()
+    const printedAt = formatDateTimeDMY(now)
 
     const activeFilters: string[] = []
     if (searchQuery.trim()) activeFilters.push(`Search: "${searchQuery.trim()}"`)

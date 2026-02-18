@@ -253,6 +253,25 @@ async def update_ga_note(
     return _note_out(note)
 
 
+@router.get("/{note_id}", response_model=GaNoteOut)
+async def get_ga_note(
+    note_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> GaNoteOut:
+    note = (
+        await db.execute(
+            select(GaNote)
+            .options(selectinload(GaNote.attachments))
+            .where(GaNote.id == note_id)
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA note not found")
+    await _ensure_note_access(note, user, db)
+    return _note_out(note)
+
+
 @router.post("/{note_id}/attachments", response_model=list[GaNoteAttachmentOut], status_code=status.HTTP_201_CREATED)
 async def upload_ga_note_attachments(
     note_id: uuid.UUID,

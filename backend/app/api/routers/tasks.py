@@ -358,6 +358,7 @@ async def list_tasks(
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
+    comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
     fallback_ids = [
         t.assigned_to
         for t in tasks
@@ -397,7 +398,12 @@ async def list_tasks(
         # Otherwise each per-user copy would appear assigned to everyone in the group,
         # which breaks "My view" filtering and per-user status display.
         dto_assignees = assignee_map.get(t.id, [])
-        dto = _task_to_out(t, dto_assignees or [], status_override=status_override)
+        dto = _task_to_out(
+            t,
+            dto_assignees or [],
+            user_comment=comment_map.get(t.id),
+            status_override=status_override,
+        )
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)
     return out

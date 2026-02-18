@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown, Eye } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import type {
   ChecklistItem,
   GaNote,
@@ -112,10 +112,7 @@ function toDateInput(value?: string | null) {
 }
 
 function formatDateDisplay(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+  return formatDateDMY(value)
 }
 
 function isOverdue(task: Task) {
@@ -135,16 +132,7 @@ function statusLabel(status?: string) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("sq-AL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDateTimeDMY(value)
 }
 
 function formatMeetingLabel(meeting: Meeting) {
@@ -308,7 +296,7 @@ export default function DevelopmentProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   const loadDevelopmentChecklist = React.useCallback(
     async (targetProjectId?: string) => {
@@ -1570,11 +1558,11 @@ export default function DevelopmentProjectPage() {
                         className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors"
                         title="Edit project due date"
                       >
-                        {project.due_date ? `Due: ${new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}` : "Set due date"}
+                        {project.due_date ? `Due: ${formatDateDMY(project.due_date)}` : "Set due date"}
                       </button>
                     )}
                     {!canEditDueDate && project.due_date && (
-                      <span className="text-sm text-slate-600">Due: {new Date(project.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}</span>
+                      <span className="text-sm text-slate-600">Due: {formatDateDMY(project.due_date)}</span>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -2874,7 +2862,7 @@ export default function DevelopmentProjectPage() {
                               <div className="flex-1">
                                 <div className="font-medium text-slate-800 mb-1">{prompt.title || "Untitled"}</div>
                                 <div className="text-xs text-slate-500">
-                                  {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                                  {formatDateTimeDMY(prompt.created_at)}
                                 </div>
                                 {isExpanded ? (
                                   <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>
@@ -2925,7 +2913,7 @@ export default function DevelopmentProjectPage() {
                               <div className="flex-1">
                                 <div className="font-medium text-slate-800 mb-1">{prompt.title || "Untitled"}</div>
                                 <div className="text-xs text-slate-500">
-                                  {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                                  {formatDateTimeDMY(prompt.created_at)}
                                 </div>
                                 {isExpanded ? (
                                   <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{prompt.content}</div>

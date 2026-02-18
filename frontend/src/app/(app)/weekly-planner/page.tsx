@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner"
 import { ChevronDown, Plus, X, Printer } from "lucide-react"
 import { useAuth } from "@/lib/auth"
+import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import {
   DropdownMenu,
@@ -34,7 +35,7 @@ import {
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
-import type { Department, Project, Task, UserLookup } from "@/lib/types"
+import type { ChecklistItem, Department, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
   task_id: string
@@ -121,6 +122,13 @@ type WeeklyPrintUser = {
   user_name: string
 }
 
+type TaskChecklist = {
+  id: string
+  title?: string | null
+  task_id?: string | null
+  items: ChecklistItem[]
+}
+
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -161,7 +169,7 @@ export default function WeeklyPlannerPage() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
   const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
-  const [isThisWeek, setIsThisWeek] = React.useState(false)
+  const [isThisWeek, setIsThisWeek] = React.useState(true)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
 
@@ -283,6 +291,11 @@ export default function WeeklyPlannerPage() {
 
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
+  const [checklistDialogOpen, setChecklistDialogOpen] = React.useState(false)
+  const [checklistTaskId, setChecklistTaskId] = React.useState<string | null>(null)
+  const [checklistTaskTitle, setChecklistTaskTitle] = React.useState<string | null>(null)
+  const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
+  const [checklistLoading, setChecklistLoading] = React.useState<Record<string, boolean>>({})
 
   const deleteTask = React.useCallback(async (
     taskId: string,
@@ -396,6 +409,43 @@ export default function WeeklyPlannerPage() {
       setDeletingProjectId(null)
     }
   }, [apiFetch, departmentId, isThisWeek])
+
+  const loadTaskChecklist = React.useCallback(async (taskId: string) => {
+    if (!taskId || taskChecklists[taskId] !== undefined) return
+    setChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
+    try {
+      const res = await apiFetch(`/checklists?task_id=${taskId}&include_items=true`)
+      if (!res.ok) {
+        let detail = "Failed to load checklist"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to load checklist")
+        setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+        return
+      }
+      const data = (await res.json()) as TaskChecklist[]
+      const checklist = data.length ? data[0] : null
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: checklist }))
+    } catch (error) {
+      console.error("Failed to load task checklist", error)
+      toast.error("Failed to load checklist")
+      setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
+    } finally {
+      setChecklistLoading((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }, [apiFetch, taskChecklists])
+
+  const openChecklistForTask = React.useCallback((taskId: string, taskTitle?: string | null) => {
+    if (!taskId) return
+    setChecklistTaskId(taskId)
+    setChecklistTaskTitle(taskTitle || null)
+    setChecklistDialogOpen(true)
+    void loadTaskChecklist(taskId)
+  }, [loadTaskChecklist])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -529,6 +579,18 @@ export default function WeeklyPlannerPage() {
   const availableDepartments = React.useMemo(() => {
     return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [departments])
+
+  const checklistItems = React.useMemo(() => {
+    if (!checklistTaskId) return []
+    const checklist = taskChecklists[checklistTaskId]
+    if (!checklist?.items?.length) return []
+    return checklist.items
+      .filter((item) => item.item_type === "CHECKBOX")
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  }, [checklistTaskId, taskChecklists])
+
+  const checklistIsLoading = checklistTaskId ? checklistLoading[checklistTaskId] : false
 
   const pvFestByUserDate = React.useMemo(() => {
     const map = new Map<string, Map<string, WeeklyPlannerBlock[]>>()
@@ -1360,13 +1422,7 @@ export default function WeeklyPlannerPage() {
 
 
 
-    const formatPrintedAt = printedAt.toLocaleString("en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const formatPrintedAt = formatDateTimeDMY(printedAt)
 
     const createHeader = (showTitle: boolean) => {
       const header = doc.createElement("div")
@@ -2180,6 +2236,49 @@ export default function WeeklyPlannerPage() {
         ) : null}
       </div>
 
+      <Dialog
+        open={checklistDialogOpen}
+        onOpenChange={(open) => {
+          setChecklistDialogOpen(open)
+          if (!open) {
+            setChecklistTaskId(null)
+            setChecklistTaskTitle(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[520px] max-h-[75vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {checklistTaskTitle ? `Subtasks • ${checklistTaskTitle}` : "Subtasks"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {!checklistTaskId ? (
+              <div className="text-sm text-muted-foreground">Select a task to view subtasks.</div>
+            ) : checklistIsLoading ? (
+              <div className="text-sm text-muted-foreground">Loading subtasks...</div>
+            ) : checklistItems.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No subtasks yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {checklistItems.map((item) => {
+                  const isChecked = Boolean(item.is_checked)
+                  const label = item.title || item.comment || item.description || "Untitled subtask"
+                  return (
+                    <div key={item.id} className="flex items-start gap-2">
+                      <Checkbox checked={isChecked} disabled />
+                      <span className={["text-sm", isChecked ? "line-through text-muted-foreground" : "text-slate-900"].join(" ")}>
+                        {label}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={manualTaskOpen} onOpenChange={setManualTaskOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
@@ -2710,7 +2809,14 @@ export default function WeeklyPlannerPage() {
                                                   getStatusCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status),
                                                 ].join(" ")}
                                               >
-                                                  <span className="truncate whitespace-nowrap font-semibold text-slate-900">{taskNumber}. {task.task_title}</span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openChecklistForTask(task.task_id, task.task_title)}
+                                                    className="truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                                    title="View subtasks"
+                                                  >
+                                                    {taskNumber}. {task.task_title}
+                                                  </button>
                                                 <div className="flex items-center gap-1">
                                                   {statusBadge && (
                                                     <span

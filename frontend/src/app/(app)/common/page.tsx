@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { formatDateTimeDMY } from "@/lib/dates"
 import type { User, Task, CommonEntry, Project, Meeting, Department } from "@/lib/types"
 
 type CommonType =
@@ -40,7 +41,13 @@ type InternalItem = { title: string; date: string; time: string; platform: strin
 type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
 type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
 type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
-type PriorityItem = { project: string; date: string; assignees: string[] }
+type PriorityItem = {
+  project: string
+  date: string
+  assignees: string[]
+  department_id?: string | null
+  department_name?: string | null
+}
 
 type SwimlaneCell = {
   title: string
@@ -157,6 +164,7 @@ export default function CommonViewPage() {
     if (d < 1 || d > 31 || m < 1 || m > 12) return ""
     return `${y}-${pad2(m)}-${pad2(d)}`
   }
+  const toDDMMYYYYDot = (isoDate: string) => toDDMMYYYY(isoDate).replaceAll("/", ".")
   const addDays = (d: Date, n: number) => {
     const x = new Date(d)
     x.setDate(x.getDate() + n)
@@ -352,6 +360,7 @@ export default function CommonViewPage() {
   const [formFullDay, setFormFullDay] = React.useState(false)
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
+  const [formError, setFormError] = React.useState("")
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
@@ -886,6 +895,17 @@ export default function CommonViewPage() {
           loadedDepartments = (await depRes.json()) as Department[]
           if (mounted) setDepartments(loadedDepartments)
         }
+        const normalizeDepartmentName = (name: string) => {
+          const trimmed = name.trim()
+          const lower = trimmed.toLowerCase()
+          if (lower.includes("project content manager")) return "Product Content"
+          return trimmed
+        }
+        const departmentNameById = new Map<string, string>(
+          loadedDepartments
+            .map((d) => (d.id && d.name ? [d.id, normalizeDepartmentName(d.name)] as [string, string] : null))
+            .filter((entry): entry is [string, string] => entry !== null)
+        )
         
         // Find Product Content Manager department ID
         let productContentDeptId: string | null = null
@@ -1403,11 +1423,15 @@ export default function CommonViewPage() {
             for (const date of datesToUse) {
               // Get assignees who have tasks specifically on this date
               const dateAssignees = entry.assigneesByDate.get(date) || new Set<string>()
+              const departmentId = project.department_id ?? null
+              const departmentName = departmentId ? departmentNameById.get(departmentId) || "Other" : "Other"
 
               expandedPriority.push({
                 project: entry.project,
                 date: date,
                 assignees: Array.from(dateAssignees),
+                department_id: departmentId,
+                department_name: departmentName,
               })
             }
           }
@@ -1503,6 +1527,16 @@ export default function CommonViewPage() {
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
   const leaveCovers = (leave: LeaveItem, dateStr: string) => {
     return dateStr >= leave.startDate && dateStr <= leave.endDate
+  }
+  const isDateFullyCovered = (dateStr: string) => {
+    const activeUserIds = users.filter((u) => u.is_active).map((u) => u.id)
+    if (!activeUserIds.length) return false
+    const coveredUsers = new Set(
+      commonData.leave
+        .filter((x) => x.userId && leaveCovers(x, dateStr))
+        .map((x) => x.userId as string)
+    )
+    return coveredUsers.size >= activeUserIds.length
   }
 
   // Filtered data
@@ -1824,6 +1858,7 @@ export default function CommonViewPage() {
     setFormFullDay(false)
     setFormTitle("")
     setFormNote("")
+    setFormError("")
   }
 
   const submitForm = async (e: React.FormEvent) => {
@@ -1832,6 +1867,11 @@ export default function CommonViewPage() {
     setIsSavingEntry(true)
 
     try {
+      setFormError("")
+      if ((formType === "late" || formType === "absent") && formDate && isDateFullyCovered(formDate)) {
+        setFormError("All users are on leave for this date, so VONS/MUNG entries are hidden.")
+        return
+      }
       let category: string
       if (formType === "late") category = "Delays"
       else if (formType === "absent") category = "Absences"
@@ -2725,7 +2765,7 @@ export default function CommonViewPage() {
       : filtered.late
     const lateItems: SwimlaneCell[] = lateSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.start || "08:00"}-${x.until} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.start || "08:00"}-${x.until}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent delay",
       entryId: x.entryId,
@@ -2736,7 +2776,7 @@ export default function CommonViewPage() {
       : filtered.absent
     const absentItems: SwimlaneCell[] = absentSource.map((x) => ({
       title: x.person,
-      subtitle: `${x.from} - ${x.to} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      subtitle: `${toDDMMYYYYDot(x.date)} - ${x.from}-${x.to}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent absence",
       entryId: x.entryId,
@@ -2793,14 +2833,14 @@ export default function CommonViewPage() {
     const leaveItems: SwimlaneCell[] = leaveSource.map((x) => {
       const isRange = x.endDate && x.endDate !== x.startDate
       const dateLabel = isRange
-        ? `${formatDateHuman(x.startDate)} - ${formatDateHuman(x.endDate)}`
-        : formatDateHuman(x.startDate)
+        ? `${toDDMMYYYYDot(x.startDate)} - ${toDDMMYYYYDot(x.endDate)}`
+        : toDDMMYYYYDot(x.startDate)
       const timeLabel = x.fullDay
         ? "Full day"
-        : `${x.from || ""}${x.from && x.to ? " - " : ""}${x.to || ""}`.trim()
+        : `${x.from || ""}${x.from && x.to ? "-" : ""}${x.to || ""}`.trim()
       return {
         title: x.person,
-        subtitle: `${timeLabel} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        subtitle: `${dateLabel} - ${timeLabel}${x.note ? ` - ${x.note}` : ""}`,
         dateLabel,
         accentClass: "swimlane-accent leave",
         entryId: x.entryId,
@@ -4029,6 +4069,7 @@ export default function CommonViewPage() {
           line-height: 1.1;
           font-size: 12px;
           word-break: break-word;
+          background: #f8f9fa;
         }
         .swimlane-badge {
           min-width: 24px;
@@ -4292,6 +4333,42 @@ export default function CommonViewPage() {
           font-weight: 700;
           background: #f8f9fa;
         }
+        .week-table-row.delay .week-table-label {
+          background: var(--delay-bg);
+        }
+        .week-table-row.absence .week-table-label {
+          background: var(--absence-bg);
+        }
+        .week-table-row.leave .week-table-label {
+          background: var(--leave-bg);
+        }
+        .week-table-row.blocked .week-table-label {
+          background: var(--blocked-bg);
+        }
+        .week-table-row.oneh .week-table-label {
+          background: var(--oneh-bg);
+        }
+        .week-table-row.personal .week-table-label {
+          background: var(--personal-bg);
+        }
+        .week-table-row.external .week-table-label {
+          background: var(--external-bg);
+        }
+        .week-table-row.internal .week-table-label {
+          background: var(--internal-bg);
+        }
+        .week-table-row.r1 .week-table-label {
+          background: var(--r1-bg);
+        }
+        .week-table-row.problem .week-table-label {
+          background: var(--problem-bg);
+        }
+        .week-table-row.feedback .week-table-label {
+          background: var(--feedback-bg);
+        }
+        .week-table-row.priority .week-table-label {
+          background: var(--priority-bg);
+        }
         .week-table-cell {
           min-height: 30px;
         }
@@ -4311,6 +4388,20 @@ export default function CommonViewPage() {
           padding: 4px 6px;
           background: #ffffff;
           margin-bottom: 2px;
+        }
+        .week-table-prjk-group-header {
+          font-size: 9px;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: #475569;
+          letter-spacing: 0.02em;
+          margin: 0;
+          padding: 0;
+          line-height: 0.5;
+        }
+        .week-table-prjk-divider {
+          border-top: 1px solid #cbd5e1;
+          margin: 1px 0;
         }
         .week-table-entry span {
           flex: 1;
@@ -4356,6 +4447,11 @@ export default function CommonViewPage() {
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
+        }
+        .form-error {
+          color: #b91c1c;
+          font-size: 12px;
+          font-weight: 600;
         }
         @media print {
           .week-table-view {
@@ -4517,6 +4613,10 @@ export default function CommonViewPage() {
           background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
           color: white; 
           box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        .day-chip.active {
+          background: #2563eb;
+          box-shadow: none;
         }
         
         /* Week Navigation Buttons - Different style from day chips */
@@ -4991,7 +5091,7 @@ export default function CommonViewPage() {
               return (
                 <button
                   key={iso}
-                  className={`chip ${isActive ? "active" : ""}`}
+                  className={`chip day-chip ${isActive ? "active" : ""}`}
                   type="button"
                   onClick={() => toggleDay(iso)}
                 >
@@ -6694,13 +6794,7 @@ export default function CommonViewPage() {
               <div />
               <div className="print-title">COMMON VIEW - WEEK PLAN</div>
               <div className="print-datetime">
-                {printedAt.toLocaleString("en-US", {
-                  month: "2-digit",
-                  day: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatDateTimeDMY(printedAt)}
               </div>
             </div>
             <table className="week-table">
@@ -6747,7 +6841,24 @@ export default function CommonViewPage() {
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
                       else if (row.id === "priority") dayEntries[iso] = dayData.priority || []
                     })
-                    
+
+                    const getWeekRowClass = (rowId: string) => {
+                      if (rowId === "late") return "delay"
+                      if (rowId === "absent") return "absence"
+                      if (rowId === "leave") return "leave"
+                      if (rowId === "blocked") return "blocked"
+                      if (rowId === "oneH") return "oneh"
+                      if (rowId === "personal") return "personal"
+                      if (rowId === "external") return "external"
+                      if (rowId === "internal") return "internal"
+                      if (rowId === "r1") return "r1"
+                      if (rowId === "problem") return "problem"
+                      if (rowId === "feedback") return "feedback"
+                      if (rowId === "priority") return "priority"
+                      return ""
+                    }
+                    const weekRowClass = getWeekRowClass(row.id)
+
                     const getCellContent = (iso: string) => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
@@ -6766,7 +6877,7 @@ export default function CommonViewPage() {
                       if (row.id === "late") {
         return entries.map((e: LateItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{e.start || "08:00"}-{e.until}</span>
+            <span>{idx + 1}. {e.start || "08:00"}-{e.until}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.start}-${name}`} className="week-table-avatar" title={name}>
@@ -6790,7 +6901,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "absent") {
                         return entries.map((e: AbsentItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{e.from} - {e.to}</span>
+                            <span>{idx + 1}. {e.from} - {e.to}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
@@ -6819,7 +6930,7 @@ export default function CommonViewPage() {
                           return (
                             <div key={idx} className="week-table-entry">
                               <span>
-                                {isAllUsers ? `${timeLabel} ALL` : timeLabel}
+                                {idx + 1}. {isAllUsers ? `${timeLabel} ALL` : timeLabel}
                                 {range ? ` ${range}` : ""}
                               </span>
                               {!isAllUsers ? (
@@ -6859,7 +6970,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6872,7 +6983,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "problem" || row.id === "feedback") {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{initials(e.person || e.title || "")}: {e.note || ""}</span>
+                            <span>{idx + 1}. {initials(e.person || e.title || "")}: {e.note || ""}</span>
                             {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
@@ -6889,7 +7000,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "oneH" || row.id === "r1") {
                         return entries.map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6902,7 +7013,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "personal") {
                         return entries.map((e: PersonalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(e.title)}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6915,7 +7026,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6928,7 +7039,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "internal") {
                         return entries.map((e: InternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -6939,17 +7050,49 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "priority") {
-                        return entries.map((e: PriorityItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <div>{idx + 1}. {e.project}</div>
-                            <div className="week-table-avatars">
-                              {e.assignees.map((name) => (
-                                <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
-                                  {initials(name)}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        const groupMap = new Map<string, PriorityItem[]>()
+                        for (const item of entries as PriorityItem[]) {
+                          const departmentName = item.department_name || "Other"
+                          const existing = groupMap.get(departmentName) || []
+                          existing.push(item)
+                          groupMap.set(departmentName, existing)
+                        }
+                        const preferredOrder = ["DEVELOPMENT", "GRAPHIC DESIGN", "PRODUCT CONTENT"]
+                        const orderIndex = new Map(preferredOrder.map((name, idx) => [name, idx]))
+                        const normalizeDept = (value: string) => value.trim().toUpperCase()
+                        const isOther = (value: string) => normalizeDept(value) === "OTHER"
+                        const groupKeys = Array.from(groupMap.keys()).sort((a, b) => {
+                          const aKey = normalizeDept(a)
+                          const bKey = normalizeDept(b)
+                          const aIdx = orderIndex.get(aKey)
+                          const bIdx = orderIndex.get(bKey)
+                          if (aIdx != null && bIdx != null) return aIdx - bIdx
+                          if (aIdx != null) return -1
+                          if (bIdx != null) return 1
+                          if (isOther(a) && !isOther(b)) return 1
+                          if (!isOther(a) && isOther(b)) return -1
+                          return a.localeCompare(b)
+                        })
+                        let entryIndex = 0
+                        return groupKeys.map((departmentName, groupIdx) => (
+                          <React.Fragment key={departmentName}>
+                            <div className="week-table-prjk-group-header">{departmentName}</div>
+                            {(groupMap.get(departmentName) || []).map((e, idx) => (
+                              <div key={`${departmentName}-${idx}`} className="week-table-entry">
+                                <span>{++entryIndex}. {e.project}</span>
+                                <div className="week-table-avatars">
+                                  {e.assignees.map((name) => (
+                                    <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
+                                      {initials(name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                            {groupIdx < groupKeys.length - 1 ? (
+                              <div className="week-table-prjk-divider" />
+                            ) : null}
+                          </React.Fragment>
                         ))
                       }
                       return null
@@ -6958,7 +7101,7 @@ export default function CommonViewPage() {
                     const rowLabel = row.label.toUpperCase()
                     
                     return (
-                      <tr key={row.id}>
+                      <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
                         <td className="week-table-number">{rowIndex + 1}</td>
                         <td className="week-table-label">{rowLabel}</td>
                         {weekISOs.map((iso) => {
@@ -6992,13 +7135,7 @@ export default function CommonViewPage() {
             <div />
             <div className="print-title">COMMON VIEW</div>
             <div className="print-datetime">
-              {printedAt.toLocaleString("en-US", {
-                month: "2-digit",
-                day: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formatDateTimeDMY(printedAt)}
             </div>
           </div>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
@@ -7073,13 +7210,17 @@ export default function CommonViewPage() {
                                     </div>
                                   ) : null}
                                   <div className="swimlane-title">
-                                    {row.id === "priority" && cell.number ? `${cell.number}. ` : ""}
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
-                                  {(row.id === "external" || row.id === "internal") && cell.subtitle ? (
+                                  {(row.id === "external" ||
+                                    row.id === "internal" ||
+                                    row.id === "late" ||
+                                    row.id === "absent" ||
+                                    row.id === "leave") &&
+                                  cell.subtitle ? (
                                     <div className="swimlane-subtitle">{cell.subtitle}</div>
                                   ) : null}
-                                  {cell.dateLabel ? (
+                                  {cell.dateLabel && !["late", "absent", "leave"].includes(row.id) ? (
                                     <div className="swimlane-date">{cell.dateLabel}</div>
                                   ) : null}
                                 </div>
@@ -7126,6 +7267,7 @@ export default function CommonViewPage() {
                 onChange={(e) => {
                   const nextType = e.target.value as any
                   setFormType(nextType)
+                  setFormError("")
                   if (nextType !== "leave" && formPerson === ALL_USERS_VALUE) {
                     setFormPerson("")
                   }
@@ -7145,7 +7287,10 @@ export default function CommonViewPage() {
                       id="cv-person"
                       className="input"
                       value={formPerson}
-                      onChange={(e) => setFormPerson(e.target.value)}
+                      onChange={(e) => {
+                        setFormPerson(e.target.value)
+                        setFormError("")
+                      }}
                       required
                     >
                       <option value="">--</option>
@@ -7187,6 +7332,7 @@ export default function CommonViewPage() {
                         onChange={(e) => {
                           const value = e.target.value
                           setFormDateDisplay(value)
+                          setFormError("")
                           const isoDate = fromDDMMYYYY(value)
                           if (isoDate) {
                             setFormDate(isoDate)
@@ -7204,6 +7350,7 @@ export default function CommonViewPage() {
                           if (value) {
                             setFormDate(value)
                             setFormDateDisplay(toDDMMYYYY(value))
+                            setFormError("")
                           }
                         }}
                         style={{
@@ -7412,6 +7559,7 @@ export default function CommonViewPage() {
                     />
                   </div>
                 </div>
+                {formError ? <div className="form-error">{formError}</div> : null}
                 <div className="modal-footer">
                   <button className="btn-outline" type="button" onClick={closeModal} disabled={isSavingEntry}>
                     Cancel

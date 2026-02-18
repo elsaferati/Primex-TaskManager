@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
 function toDateInput(value?: string | null) {
@@ -35,10 +35,7 @@ function todayInputValue() {
 }
 
 function formatDateDisplay(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+  return formatDateDMY(value)
 }
 
 // MST phases for Graphic Design projects
@@ -126,16 +123,7 @@ function statusLabel(status?: string) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("sq-AL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDateTimeDMY(value)
 }
 
 function formatMeetingLabel(meeting: Meeting) {
@@ -548,7 +536,7 @@ export default function DesignProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
   const canEditGjenerale =
     Boolean(isAdmin || isManager) || Boolean(user && members.some((m) => m.id === user.id))
 

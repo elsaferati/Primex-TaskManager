@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
 import type {
   ChecklistItem,
   Department,
@@ -144,10 +144,7 @@ function toDateInput(value?: string | null) {
 }
 
 function formatDateDisplay(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
+  return formatDateDMY(value)
 }
 
 function isOverdue(task: Task) {
@@ -194,16 +191,7 @@ function formatErrorDetail(detail: unknown) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("sq-AL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDateTimeDMY(value)
 }
 
 function getTaskSortDate(task: Task): number | null {
@@ -795,6 +783,17 @@ export default function ProjectPage() {
     [apiFetch]
   )
 
+  const isChecklistComplete = React.useCallback(
+    (taskId: string) => {
+      const checklist = taskChecklists[taskId]
+      if (!checklist?.items?.length) return true
+      const checkboxItems = checklist.items.filter((item) => item.item_type === "CHECKBOX")
+      if (checkboxItems.length === 0) return true
+      return checkboxItems.every((item) => Boolean(item.is_checked))
+    },
+    [taskChecklists]
+  )
+
   const toggleTaskChecklist = async (taskId: string) => {
     const next = !taskChecklistOpen[taskId]
     setTaskChecklistOpen((prev) => ({ ...prev, [taskId]: next }))
@@ -1151,6 +1150,16 @@ export default function ProjectPage() {
       return
     }
     
+    if (nextStatus === "DONE") {
+      if (taskChecklists[taskId] === undefined) {
+        await loadTaskChecklist(taskId)
+      }
+      if (!isChecklistComplete(taskId)) {
+        toast.error("Complete all subtasks before marking this task as done.")
+        return
+      }
+    }
+
     setUpdatingTaskId(taskId)
     setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)))
     try {
@@ -1256,6 +1265,9 @@ export default function ProjectPage() {
     setEditStartDate(toDateInput(task.start_date))
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    if (taskChecklists[task.id] === undefined) {
+      void loadTaskChecklist(task.id)
+    }
     setEditOpen(true)
   }
 
@@ -1278,6 +1290,15 @@ export default function ProjectPage() {
     if (!editDueDate || !editDueDate.trim()) {
       toast.error("Due date is required")
       return
+    }
+    if (editStatus === "DONE") {
+      if (taskChecklists[editingTaskId] === undefined) {
+        await loadTaskChecklist(editingTaskId)
+      }
+      if (!isChecklistComplete(editingTaskId)) {
+        toast.error("Complete all subtasks before marking this task as done.")
+        return
+      }
     }
     setSavingEdit(true)
     try {
@@ -2231,7 +2252,7 @@ export default function ProjectPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const canEditDueDate = isAdmin || isManager
-  const canEditProjectTitle = isAdmin || isManager
+  const canEditProjectTitle = Boolean(user)
 
   const submitDevelopmentChecklistItem = async () => {
     if (!project) return
@@ -3788,6 +3809,11 @@ export default function ProjectPage() {
                           <Select
                             value={task.status || "TODO"}
                             onValueChange={(value) => void updateTaskStatus(task.id, value as Task["status"])}
+                            onOpenChange={(open) => {
+                              if (open && taskChecklists[task.id] === undefined) {
+                                void loadTaskChecklist(task.id)
+                              }
+                            }}
                             disabled={updatingTaskId === task.id}
                           >
                             <SelectTrigger className="h-8">
@@ -3797,8 +3823,14 @@ export default function ProjectPage() {
                               {TASK_STATUSES.map((status) => {
                                 // Disable all non-DONE options if task is DONE and user is not admin
                                 const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
+                                const isChecklistBlocking = status === "DONE" && !isChecklistComplete(task.id)
                                 return (
-                                  <SelectItem key={status} value={status} disabled={isDisabled}>
+                                  <SelectItem
+                                    key={status}
+                                    value={status}
+                                    disabled={isDisabled || isChecklistBlocking}
+                                    title={isChecklistBlocking ? "Complete all subtasks first." : undefined}
+                                  >
                                     {statusLabel(status)}
                                   </SelectItem>
                                 )
@@ -4671,7 +4703,7 @@ export default function ProjectPage() {
                           <div className="flex-1">
                             <div className="font-medium mb-1">{prompt.title || "Untitled"}</div>
                             <div className="text-xs text-muted-foreground">
-                              {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                              {formatDateTimeDMY(prompt.created_at)}
                             </div>
                             {isExpanded ? (
                               <div className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
@@ -4716,7 +4748,7 @@ export default function ProjectPage() {
                           <div className="flex-1">
                             <div className="font-medium mb-1">{prompt.title || "Untitled"}</div>
                             <div className="text-xs text-muted-foreground">
-                              {new Date(prompt.created_at).toLocaleString("sq-AL")}
+                              {formatDateTimeDMY(prompt.created_at)}
                             </div>
                             {isExpanded ? (
                               <div className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{prompt.content}</div>
