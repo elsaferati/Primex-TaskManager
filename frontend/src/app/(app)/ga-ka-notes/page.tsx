@@ -2020,12 +2020,12 @@ export default function GaKaNotesPage() {
       </Dialog>
 
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl w-[95vw]">
           <DialogHeader>
             <DialogTitle>Create Task from Note</DialogTitle>
           </DialogHeader>
           {taskDialogNote ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea
@@ -2036,9 +2036,13 @@ export default function GaKaNotesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>
-                <BoldOnlyEditor value={taskDescription} onChange={setTaskDescription} />
+                <BoldOnlyEditor
+                  value={taskDescription}
+                  onChange={setTaskDescription}
+                  editorClassName="min-h-[72px] text-sm px-2 py-1"
+                />
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Priority</Label>
                   <Select 
@@ -2084,7 +2088,7 @@ export default function GaKaNotesPage() {
                   </Select>
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Start date (optional)</Label>
                   <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
@@ -2095,7 +2099,7 @@ export default function GaKaNotesPage() {
                 </div>
                
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Departments</Label>
                   <div className="rounded-md border bg-white p-2">
@@ -2105,7 +2109,7 @@ export default function GaKaNotesPage() {
                       ) : (
                         taskDepartmentIds.map((id) => {
                           const dept = departments.find((d) => d.id === id)
-                          const label = dept?.name || id
+                          const label = formatDepartmentName(dept?.name) || id
                           return (
                             <button
                               key={id}
@@ -2141,36 +2145,36 @@ export default function GaKaNotesPage() {
                           .filter((dept) => !taskDepartmentIds.includes(dept.id))
                           .map((dept) => (
                             <SelectItem key={dept.id} value={dept.id}>
-                              {dept.name}
+                              {formatDepartmentName(dept.name)}
                             </SelectItem>
                           ))}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Project (optional)</Label>
-                <Select
-                  value={taskProjectId}
-                  onValueChange={(value) => setTaskProjectId(value)}
-                  disabled={effectiveTaskDepartmentIds.length === 0 && taskProjectOptions.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NONE">No project</SelectItem>
-                    {taskProjectOptions.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.title || p.name || "Untitled project"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {effectiveTaskDepartmentIds.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Choose a department to filter its projects.</p>
-                ) : null}
+                <div className="space-y-2">
+                  <Label>Project (optional)</Label>
+                  <Select
+                    value={taskProjectId}
+                    onValueChange={(value) => setTaskProjectId(value)}
+                    disabled={effectiveTaskDepartmentIds.length === 0 && taskProjectOptions.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">No project</SelectItem>
+                      {taskProjectOptions.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.title || p.name || "Untitled project"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {effectiveTaskDepartmentIds.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Choose a department to filter its projects.</p>
+                  ) : null}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Assign to</Label>
