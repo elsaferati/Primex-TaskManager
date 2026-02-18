@@ -288,7 +288,7 @@ function periodFromDate(value?: string | null) {
 function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: string | null) {
   if (finishPeriod === "PM") return "PM"
   if (finishPeriod === "AM") return "AM"
-  return periodFromDate(dateValue)
+  return "AM/PM"
 }
 
 function noProjectTypeLabel(task: Task) {
@@ -824,7 +824,38 @@ export default function GaKaTasksPage() {
     systemToday.forEach(pushSystemRow)
     systemOverdue.forEach(pushSystemRow)
 
-    return rows
+    const tyoRank = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed || trimmed === "-") return 3
+      if (trimmed === "Y") return 1
+      if (trimmed === "T") return 2
+      if (/^\d+$/.test(trimmed)) return 0
+      return 3
+    }
+    const tyoNumber = (value: string) => {
+      const trimmed = value.trim()
+      return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+    }
+    const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const rankA = tyoRank(a.tyo)
+      const rankB = tyoRank(b.tyo)
+      if (rankA !== rankB) return rankA - rankB
+      if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+      return 0
+    }
+    const orderedRows = rows
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const aIsProject = a.row.typeLabel === "PRJK"
+        const bIsProject = b.row.typeLabel === "PRJK"
+        if (aIsProject && bIsProject) {
+          return sortByTyo(a.row, b.row)
+        }
+        return a.index - b.index
+      })
+      .map((entry) => entry.row)
+
+    return orderedRows
   }, [dailyReport, departments, ganeUser, ganeUserId, taskAssigneeInitials, taskCommentMap, tasks, todayDate])
 
   const startEditTask = (task: Task) => {

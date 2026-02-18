@@ -912,7 +912,7 @@ function periodFromDate(value?: string | null) {
 function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: string | null) {
   if (finishPeriod === "PM") return "PM"
   if (finishPeriod === "AM") return "AM"
-  return periodFromDate(dateValue)
+  return "AM/PM"
 }
 
 export default function DepartmentKanban() {
@@ -2324,11 +2324,31 @@ export default function DepartmentKanban() {
       })
     }
 
+    const tyoRank = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed || trimmed === "-") return 3
+      if (trimmed === "Y") return 1
+      if (trimmed === "T") return 2
+      if (/^\d+$/.test(trimmed)) return 0
+      return 3
+    }
+    const tyoNumber = (value: string) => {
+      const trimmed = value.trim()
+      return /^\d+$/.test(trimmed) ? Number(trimmed) : -1
+    }
+    const sortByTyo = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const rankA = tyoRank(a.tyo)
+      const rankB = tyoRank(b.tyo)
+      if (rankA !== rankB) return rankA - rankB
+      if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
+      return 0
+    }
+
     fastRows
       .sort((a, b) => a.order - b.order || a.index - b.index)
       .forEach((entry) => rows.push(entry.row))
     rows.push(...systemAmRows)
-    rows.push(...projectRows)
+    rows.push(...projectRows.sort(sortByTyo))
     rows.push(...systemPmRows)
 
     return rows
@@ -4508,6 +4528,25 @@ export default function DepartmentKanban() {
     void loadMicrosoftEvents()
   }, [msConnected, activeTab, loadMicrosoftEvents])
 
+  const markGaNoteConverted = React.useCallback(
+    async (noteId: string) => {
+      const res = await apiFetch(`/ga-notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_converted_to_task: true }),
+      })
+      if (res?.ok) {
+        const updated = (await res.json()) as GaNote
+        setGaNotes((prev) => prev.map((n) => (n.id === noteId ? updated : n)))
+      } else {
+        setGaNotes((prev) =>
+          prev.map((n) => (n.id === noteId ? { ...n, is_converted_to_task: true } : n))
+        )
+      }
+    },
+    [apiFetch]
+  )
+
   const submitGaNote = async () => {
     if (!newGaNote.trim()) return
     if (!department) {
@@ -4581,6 +4620,7 @@ export default function DepartmentKanban() {
           if (isNoProjectTask(createdTask)) {
             setNoProjectTasks((prev) => [createdTask, ...prev])
           }
+          await markGaNoteConverted(created.id)
         }
       }
       setNewGaNote("")
@@ -4832,6 +4872,7 @@ export default function DepartmentKanban() {
       if (isNoProjectTask(createdTask)) {
         setNoProjectTasks((prev) => [createdTask, ...prev])
       }
+      await markGaNoteConverted(note.id)
       setGaNoteTaskOpenId(null)
       setGaNoteTaskAssigneeIds([])
       setGaNoteTaskTitle("")

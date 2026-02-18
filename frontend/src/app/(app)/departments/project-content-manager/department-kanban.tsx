@@ -974,7 +974,19 @@ function periodFromDate(value?: string | null) {
 function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: string | null) {
   if (finishPeriod === "PM") return "PM"
   if (finishPeriod === "AM") return "AM"
-  return periodFromDate(dateValue)
+  return "AM/PM"
+}
+
+function isVsVlProjectLabel(label?: string | null) {
+  if (!label) return false
+  const upper = label.toUpperCase()
+  return upper.includes("VS") || upper.includes("VL")
+}
+
+function resolveDailyReportProjectPeriod(task: Task, projectLabel?: string | null) {
+  if (task.finish_period === "AM" || task.finish_period === "PM") return task.finish_period
+  if (isVsVlProjectLabel(projectLabel)) return "AM/PM"
+  return resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at)
 }
 
 function toMeetingInputValue(value?: string | null) {
@@ -2341,7 +2353,7 @@ export default function DepartmentKanban() {
       projectRows.push({
         typeLabel: "PRJK",
         subtype: "-",
-        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        period: resolveDailyReportProjectPeriod(task, projectLabel),
         title: task.title || "-",
         projectTitle: projectLabel,
         description: task.description || "-",
@@ -2492,7 +2504,7 @@ export default function DepartmentKanban() {
           projectRows.push({
             typeLabel: "PRJK",
             subtype: "-",
-            period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+            period: resolveDailyReportProjectPeriod(task, projectLabel),
             title: task.title || "-",
             projectTitle: projectLabel,
             description: task.description || "-",
