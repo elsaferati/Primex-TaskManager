@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { Pencil, Printer, Trash2 } from "lucide-react"
+import { Printer } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -1403,146 +1403,280 @@ export default function AdminTasksPage() {
     }
   }
 
+  const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
+  const sectionHeaderClass = "flex flex-wrap items-center justify-between gap-3"
+  const badgeBaseClass = "h-6 rounded-md px-2 text-[11px] font-semibold uppercase"
+
+  const AdminTasksSection = ({
+    title,
+    description,
+    actions,
+    children,
+  }: {
+    title: string
+    description?: string
+    actions?: React.ReactNode
+    children?: React.ReactNode
+  }) => (
+    <Card className={sectionCardClass}>
+      <CardHeader className={sectionHeaderClass}>
+        <div>
+          <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
+          {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
+        </div>
+        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      </CardHeader>
+      {children ? <CardContent>{children}</CardContent> : null}
+    </Card>
+  )
+
+  const AdminTasksHeaderCard = () => (
+    <Card className={sectionCardClass}>
+      <CardHeader className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-2xl font-semibold text-slate-900">Admin Tasks</CardTitle>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline" className="border-slate-200 bg-white">
+              Admin items: {adminTaskRows.length}
+            </Badge>
+            <Badge variant="outline" className="border-slate-200 bg-white">
+              Filtered: {sortedTasks.length}
+            </Badge>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-[160px]">
+            <Label className="text-xs text-muted-foreground">View</Label>
+            <Select value={viewFilter} onValueChange={(value) => setViewFilter(value as "all" | "tasks" | "system")}>
+              <SelectTrigger className="h-10 rounded-lg text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tasks + System</SelectItem>
+                <SelectItem value="tasks">Tasks only</SelectItem>
+                <SelectItem value="system">System only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[160px]">
+            <Label className="text-xs text-muted-foreground">Priority</Label>
+            <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as "all" | TaskPriority)}>
+              <SelectTrigger className="h-10 rounded-lg text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All priorities</SelectItem>
+                {PRIORITY_OPTIONS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[160px]">
+            <Label className="text-xs text-muted-foreground">Day</Label>
+            <Select value={dayFilter} onValueChange={setDayFilter}>
+              <SelectTrigger className="h-10 rounded-lg text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DAY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[160px]">
+            <Label className="text-xs text-muted-foreground">Due date</Label>
+            <Input
+              type="date"
+              className="h-10 rounded-lg text-sm"
+              value={dateFilter}
+              onChange={(event) => setDateFilter(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            className="h-10 px-3 text-xs text-slate-600"
+            onClick={() => {
+              setViewFilter("all")
+              setPriorityFilter("all")
+              setDayFilter("all")
+              setDateFilter("")
+            }}
+          >
+            Clear filters
+          </Button>
+        </div>
+      </CardHeader>
+    </Card>
+  )
+
+  const AdminTasksTable = () => (
+    <div className="overflow-x-auto">
+      <table className="min-w-[720px] w-full text-sm">
+        <colgroup>
+          <col className="w-[56px]" />
+          <col />
+          <col className="w-[120px]" />
+          <col className="w-[120px]" />
+          <col className="w-[120px]" />
+          {isAdmin ? <col className="w-[140px]" /> : null}
+        </colgroup>
+        <thead className="sticky top-0 z-10 bg-slate-50/95">
+          <tr className="border-b border-slate-200">
+            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              No.
+            </th>
+            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Task Title
+            </th>
+            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Status
+            </th>
+            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Priority
+            </th>
+            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Due Date
+            </th>
+            {isAdmin ? (
+              <th className="text-right py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                Actions
+              </th>
+            ) : null}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {sortedTasks.map((task, index) => (
+            <tr key={task.id} className="transition-colors hover:bg-slate-50/70">
+              <td className="py-2.5 px-4">
+                <span className="text-sm text-slate-700">{index + 1}</span>
+              </td>
+              <td className="py-2.5 px-4">
+                <div className="min-w-0">
+                  <Link
+                    href={`/tasks/${task.id}`}
+                    className="block truncate font-medium text-slate-900 hover:text-blue-600"
+                    title={task.title}
+                  >
+                    {task.title}
+                  </Link>
+                </div>
+              </td>
+              <td className="py-2.5 px-4">
+                {task.status ? (
+                  <Badge variant="secondary" className={badgeBaseClass}>
+                    {task.status}
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">-</span>
+                )}
+              </td>
+              <td className="py-2.5 px-4">
+                {getDisplayPriority(task) ? (
+                  <Badge variant="outline" className={`${badgeBaseClass} border-slate-200 text-slate-700`}>
+                    {getDisplayPriority(task)}
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">-</span>
+                )}
+              </td>
+              <td className="py-2.5 px-4">
+                <span className="text-sm text-slate-700">{formatDate(task.due_date)}</span>
+              </td>
+              {isAdmin ? (
+                <td className="py-2.5 px-4">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => startEditTask(task)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                      disabled={deletingTaskId === task.id}
+                      onClick={() => void deleteTask(task.id)}
+                    >
+                      {deletingTaskId === task.id ? "Deleting..." : "Delete"}
+                    </Button>
+                  </div>
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+
   return (
-    <div className="space-y-6">
-      <div className="space-y-6 print:hidden">
-        <Card className="sticky top-0 z-40 border-0 bg-gradient-to-r from-slate-50 via-slate-100 to-slate-50 shadow-sm">
-          <CardHeader className="gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg">Admin Tasks</CardTitle>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="outline" className="border-slate-200 bg-white">
-                  Admin items: {adminTaskRows.length}
-                </Badge>
-                <Badge variant="outline" className="border-slate-200 bg-white">
-                  Filtered: {sortedTasks.length}
-                </Badge>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-[160px]">
-                <Label className="text-xs text-muted-foreground">View</Label>
-                <Select value={viewFilter} onValueChange={(value) => setViewFilter(value as "all" | "tasks" | "system")}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tasks + System</SelectItem>
-                    <SelectItem value="tasks">Tasks only</SelectItem>
-                    <SelectItem value="system">System only</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="min-w-[160px]">
-                <Label className="text-xs text-muted-foreground">Priority</Label>
-                <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as "all" | TaskPriority)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All priorities</SelectItem>
-                    {PRIORITY_OPTIONS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {value}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="min-w-[160px]">
-                <Label className="text-xs text-muted-foreground">Day</Label>
-                <Select value={dayFilter} onValueChange={setDayFilter}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DAY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="min-w-[160px]">
-                <Label className="text-xs text-muted-foreground">Due date</Label>
-                <Input
-                  type="date"
-                  className="h-9"
-                  value={dateFilter}
-                  onChange={(event) => setDateFilter(event.target.value)}
-                />
-              </div>
-              <div className="flex items-end">
+    <div className="bg-slate-50/30">
+      <div className="mx-auto max-w-7xl space-y-8 px-6 py-6">
+        <div className="space-y-8 print:hidden">
+          <AdminTasksHeaderCard />
+          <AdminTasksSection
+            title="Daily Report"
+            description="Tasks and system occurrences for today."
+            actions={
+              <>
                 <Button
-                  variant="ghost"
-                  className="h-9 text-xs text-slate-600"
+                  variant="outline"
+                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
                   onClick={() => {
-                    setViewFilter("all")
-                    setPriorityFilter("all")
-                    setDayFilter("all")
-                    setDateFilter("")
+                    setShowDailyUserReport(true)
+                    setShowAllTasksReport(false)
+                    setTimeout(() => window.print(), 100)
                   }}
                 >
-                  Clear filters
+                  <Printer className="mr-2 h-4 w-4" />
+                  Print Daily
                 </Button>
-              </div>
-            </div>
-          </CardHeader>
-        </Card>
-        <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">Daily Report</CardTitle>
-              <div className="text-xs text-slate-500 mt-1">Tasks and system occurrences for today.</div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                onClick={() => {
-                  setShowDailyUserReport(true)
-                  setShowAllTasksReport(false)
-                  setTimeout(() => window.print(), 100)
-                }}
-              >
-                <Printer className="mr-2 h-4 w-4" />
-                Print Daily
-              </Button>
-              <Button
-                variant="outline"
-                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                disabled={exportingDailyReport}
-                onClick={() => void exportDailyReport()}
-              >
-                {exportingDailyReport ? "Exporting..." : "Export Daily Excel"}
-              </Button>
-              <Button
-                variant="outline"
-                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                onClick={() => {
-                  setShowAllTasksReport(true)
-                  setShowDailyUserReport(false)
-                  setTimeout(() => window.print(), 100)
-                }}
-              >
-                <Printer className="mr-2 h-4 w-4" />
-                Print All
-              </Button>
-              <Button
-                variant="outline"
-                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                disabled={exportingAllTasks}
-                onClick={() => void exportAllTasks()}
-              >
-                {exportingAllTasks ? "Exporting..." : "Export All Excel"}
-              </Button>
-            </div>
-          </CardHeader>
-          {showDailyUserReport ? (
-            <CardContent>
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                  disabled={exportingDailyReport}
+                  onClick={() => void exportDailyReport()}
+                >
+                  {exportingDailyReport ? "Exporting..." : "Export Daily Excel"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                  onClick={() => {
+                    setShowAllTasksReport(true)
+                    setShowDailyUserReport(false)
+                    setTimeout(() => window.print(), 100)
+                  }}
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  Print All
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                  disabled={exportingAllTasks}
+                  onClick={() => void exportAllTasks()}
+                >
+                  {exportingAllTasks ? "Exporting..." : "Export All Excel"}
+                </Button>
+              </>
+            }
+          >
+            {showDailyUserReport ? (
+              <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <div className="text-xs text-slate-500">
                   {formatDateDMY(todayDate)}
@@ -1719,34 +1853,30 @@ export default function AdminTasksPage() {
                   </tbody>
                 </table>
               </div>
-            </CardContent>
+            </div>
           ) : null}
-        </Card>
+        </AdminTasksSection>
 
         {showAllTasksReport ? (
-          <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl">
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-base">All Tasks Report</CardTitle>
-                <div className="text-xs text-slate-500 mt-1">All tasks assigned to Gane Arifaj.</div>
+          <AdminTasksSection
+            title="All Tasks Report"
+            description="All tasks assigned to Gane Arifaj."
+            actions={
+              <Button
+                variant="outline"
+                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+                onClick={() => setShowAllTasksReport(false)}
+              >
+                Hide All Tasks Report
+              </Button>
+            }
+          >
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-slate-500">
+                Total tasks: {allTasksReportRows.length}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                  onClick={() => setShowAllTasksReport(false)}
-                >
-                  Hide All Tasks Report
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-slate-500">
-                  Total tasks: {allTasksReportRows.length}
-                </div>
-              </div>
-              <div className="mt-3 max-h-[320px] overflow-x-auto overflow-y-auto">
+            </div>
+            <div className="mt-3 max-h-[320px] overflow-x-auto overflow-y-auto">
                 <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
                   <colgroup>
                     <col className="w-[36px]" />
@@ -1912,14 +2042,13 @@ export default function AdminTasksPage() {
                   </tbody>
                 </table>
               </div>
-            </CardContent>
-          </Card>
+          </AdminTasksSection>
         ) : null}
 
         {viewFilter !== "system" ? (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-base">Tasks</CardTitle>
+          <AdminTasksSection
+            title="Fast Tasks"
+            actions={
               <Dialog open={createOpen} onOpenChange={setCreateOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm">+ Add Task</Button>
@@ -2112,110 +2241,49 @@ export default function AdminTasksPage() {
                   </div>
                 </DialogContent>
               </Dialog>
-            </CardHeader>
-            <CardContent>
-              {loadingTasks ? (
-                <div className="text-sm text-muted-foreground">Loading tasks...</div>
-              ) : sortedTasks.length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-slate-200">
-                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          NO.
-                        </th>
-                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Task Title
-                        </th>
-                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Priority
-                        </th>
-                        <th className="text-left py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Due Date
-                        </th>
-                        {isAdmin ? (
-                          <th className="text-right py-3 px-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            Actions
-                          </th>
-                        ) : null}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {sortedTasks.map((task, index) => {
-                        return (
-                          <tr
-                            key={task.id}
-                            className="hover:bg-slate-50 transition-colors"
-                          >
-                            <td className="py-3 px-4">
-                              <span className="text-sm text-slate-700">{index + 1}</span>
-                            </td>
-                            <td className="py-3 px-4">
-                              <Link
-                                href={`/tasks/${task.id}`}
-                                className="font-semibold text-slate-900 hover:text-blue-600"
-                              >
-                                {task.title}
-                              </Link>
-                            </td>
-                            <td className="py-3 px-4">
-                              {task.status ? (
-                                <Badge variant="secondary" className="uppercase">
-                                  {task.status}
-                                </Badge>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">-</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              {getDisplayPriority(task) ? (
-                                <Badge variant="outline" className="border-slate-200 text-slate-700">
-                                  {getDisplayPriority(task)}
-                                </Badge>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">-</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="text-sm text-slate-700">{formatDate(task.due_date)}</span>
-                            </td>
-                            {isAdmin ? (
-                              <td className="py-3 px-4">
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                                    onClick={() => startEditTask(task)}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                                    disabled={deletingTaskId === task.id}
-                                    onClick={() => void deleteTask(task.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </td>
-                            ) : null}
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">No items found.</div>
-              )}
-            </CardContent>
-          </Card>
+            }
+          >
+            {loadingTasks ? (
+              <div className="text-sm text-muted-foreground">Loading tasks...</div>
+            ) : sortedTasks.length ? (
+              <AdminTasksTable />
+            ) : (
+              <div className="text-sm text-muted-foreground">No items found.</div>
+            )}
+          </AdminTasksSection>
+        ) : null}
+
+        {viewFilter !== "tasks" ? (
+          <div className={sectionCardClass}>
+            <div className="p-4">
+              <SystemTasksView
+                headingTitle="Barazime"
+                headingDescription=""
+                showSystemActions={false}
+                showFilters={false}
+                allowMarkAsDone={true}
+                forceLoadAll={isAdmin}
+                externalPriorityFilter={priorityFilter}
+                externalDayFilter={dayFilter}
+                externalDateFilter={dateFilter}
+                alignmentUsernameFilter="gane.arifaj"
+              />
+              <div className="mt-6">
+                <SystemTasksView
+                  scopeFilter="GA"
+                  headingTitle="Admin System Tasks"
+                  headingDescription="System tasks assigned to Gane Arifaj GA department."
+                  showSystemActions={false}
+                  showFilters={false}
+                  allowMarkAsDone={true}
+                  forceLoadAll={isAdmin}
+                  externalPriorityFilter={priorityFilter}
+                  externalDayFilter={dayFilter}
+                  externalDateFilter={dateFilter}
+                />
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
 
@@ -2415,34 +2483,6 @@ export default function AdminTasksPage() {
         </DialogContent>
       </Dialog>
 
-      {viewFilter !== "tasks" ? (
-        <div className="print:hidden">
-          <SystemTasksView
-            headingTitle="BZ With Gane Arifaj"
-            headingDescription="System tasks where BZ-with includes Gane Arifaj."
-            showSystemActions={false}
-            showFilters={false}
-            allowMarkAsDone={true}
-            forceLoadAll={isAdmin}
-            externalPriorityFilter={priorityFilter}
-            externalDayFilter={dayFilter}
-            externalDateFilter={dateFilter}
-            alignmentUsernameFilter="gane.arifaj"
-          />
-          <SystemTasksView
-            scopeFilter="GA"
-            headingTitle="Admin System Tasks"
-            headingDescription="System tasks assigned to Gane Arifaj or scoped to GA department."
-            showSystemActions={false}
-            showFilters={false}
-            allowMarkAsDone={true}
-            forceLoadAll={isAdmin}
-            externalPriorityFilter={priorityFilter}
-            externalDayFilter={dayFilter}
-            externalDateFilter={dateFilter}
-          />
-        </div>
-      ) : null}
       {showAllTasksReport ? (
         <div className="hidden print:block print:!p-0 print:!m-0">
           <div className="print-page">
@@ -2789,6 +2829,7 @@ export default function AdminTasksPage() {
           }
         }
       `}</style>
+    </div>
     </div>
   )
 }
