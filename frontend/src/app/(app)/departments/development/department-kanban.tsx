@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -917,6 +918,7 @@ function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: strin
 
 export default function DepartmentKanban() {
   const departmentName = "Development"
+  const departmentSlug = "development"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -939,6 +941,9 @@ export default function DepartmentKanban() {
   >(new Map())
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
+  const bootstrapSystemTasksKeyRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteDeptIdRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteProjectsRef = React.useRef<Project[] | null>(null)
   const printContainerRef = React.useRef<HTMLDivElement | null>(null)
   const printMeasureRef = React.useRef<HTMLDivElement | null>(null)
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
@@ -1006,6 +1011,44 @@ export default function DepartmentKanban() {
     () => (department?.code || department?.name || departmentName || "DEV").toUpperCase(),
     [department?.code, department?.name, departmentName]
   )
+  const systemDateKey = React.useMemo(() => formatDateInput(systemDate), [systemDate])
+  const cacheKey = React.useMemo(() => {
+    const userId = user?.id || "anon"
+    return `department:${departmentSlug}|user:${userId}|systemDate:${systemDateKey}|showTemplates:false`
+  }, [departmentSlug, systemDateKey, user?.id])
+  type DepartmentBootstrapPayload = {
+    departments: Department[]
+    department: Department | null
+    users: UserLookup[]
+    projects: Project[]
+    systemTasks: SystemTaskTemplate[]
+    departmentTasks: Task[]
+    noProjectTasks: Task[]
+    gaNotes: GaNote[]
+    internalNotes: InternalNote[]
+    meetings: Meeting[]
+    systemDepartmentId: string
+    systemTasksKey: string
+    internalNoteDepartmentId: string | null
+    internalNoteProjects: Project[]
+  }
+  const applyBootstrap = React.useCallback((payload: DepartmentBootstrapPayload) => {
+    setDepartments(payload.departments)
+    setDepartment(payload.department)
+    setUsers(payload.users)
+    setProjects(payload.projects)
+    setSystemTasks(payload.systemTasks)
+    setDepartmentTasks(payload.departmentTasks)
+    setNoProjectTasks(payload.noProjectTasks)
+    setGaNotes(payload.gaNotes)
+    setInternalNotes(payload.internalNotes)
+    setMeetings(payload.meetings)
+    setSystemDepartmentId(payload.systemDepartmentId)
+    setInternalNoteProjects(payload.internalNoteProjects)
+    bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
+    bootstrapInternalNoteDeptIdRef.current = payload.internalNoteDepartmentId
+    bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
+  }, [])
   const [projectManagerId, setProjectManagerId] = React.useState("__unassigned__")
   const [projectMemberIds, setProjectMemberIds] = React.useState<string[]>([])
   const [selectMembersOpen, setSelectMembersOpen] = React.useState(false)
@@ -1118,67 +1161,85 @@ export default function DepartmentKanban() {
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
 
-  React.useEffect(() => {
-    const load = async () => {
-      setLoading(true)
+  const loadBootstrapData = React.useCallback(
+    async (options: { silent: boolean }) => {
+      const { silent } = options
+      if (!silent) setLoading(true)
       try {
         const depRes = await apiFetch("/departments")
         if (!depRes.ok) {
           console.error("Failed to load departments:", depRes.status)
-          setLoading(false)
           return
         }
         const deps = (await depRes.json()) as Department[]
-        setDepartments(deps)
         const dep = deps.find((d) => d.name === departmentName) || null
-        setDepartment(dep)
-        if (!dep) {
-          setLoading(false)
-          return
-        }
+        if (!dep) return
 
         // Fetch users first so we can filter tasks by assignee departments
         const usersRes = await apiFetch("/users/lookup")
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
-          setUsers(allUsers)
         }
 
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
-          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
+          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
-        if (projRes.ok) setProjects((await projRes.json()) as Project[])
-        if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
-        if (tasksRes.ok) {
-          const taskRows = (await tasksRes.json()) as Task[]
-          // Show all non-system tasks for this department.
-          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
-          setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
+        const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
+        const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
+        const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+        const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
+        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
+        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        const payload: DepartmentBootstrapPayload = {
+          departments: deps,
+          department: dep,
+          users: allUsers,
+          projects,
+          systemTasks,
+          departmentTasks: nonSystemTasks,
+          noProjectTasks: nonSystemTasks.filter(isNoProjectTask),
+          gaNotes,
+          internalNotes,
+          meetings,
+          systemDepartmentId: dep.id,
+          systemTasksKey: `${dep.id}|${systemDateKey}`,
+          internalNoteDepartmentId: dep.id,
+          internalNoteProjects: projects,
         }
-        if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
-        if (internalRes.ok) setInternalNotes((await internalRes.json()) as InternalNote[])
-        if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
-
-        setSystemDepartmentId(dep.id)
+        applyBootstrap(payload)
+        setDepartmentBootstrapCache(cacheKey, payload)
       } catch (error) {
         console.error("Error loading department data:", error)
         toast.error("Failed to load department data. Please check if the backend server is running.")
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
+    },
+    [apiFetch, applyBootstrap, cacheKey, departmentName, systemDateKey]
+  )
+
+  React.useEffect(() => {
+    const cached = getDepartmentBootstrapCache<DepartmentBootstrapPayload>(cacheKey)
+    if (cached) {
+      applyBootstrap(cached)
+      setLoading(false)
+      void loadBootstrapData({ silent: true })
+      return
     }
-    void load()
-  }, [apiFetch, departmentName, user?.role])
+    void loadBootstrapData({ silent: false })
+  }, [applyBootstrap, cacheKey, loadBootstrapData])
 
   React.useEffect(() => {
     if (!department?.id) return
+    const systemTasksKey = `${department.id}|${formatDateInput(systemDate)}`
+    if (bootstrapSystemTasksKeyRef.current === systemTasksKey) return
     const loadSystemTasks = async () => {
       const res = await apiFetch(
         `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
@@ -1200,6 +1261,11 @@ export default function DepartmentKanban() {
     const loadProjects = async () => {
       if (!internalNoteDepartmentId) {
         setInternalNoteProjects([])
+        return
+      }
+      const bootstrapProjects = bootstrapInternalNoteProjectsRef.current
+      if (bootstrapInternalNoteDeptIdRef.current === internalNoteDepartmentId && bootstrapProjects) {
+        setInternalNoteProjects(bootstrapProjects)
         return
       }
       setLoadingInternalNoteProjects(true)

@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -799,6 +800,7 @@ function gaNoteTaskDefaultTitle(note: string) {
 
 export default function DepartmentKanban() {
   const departmentName = "Graphic Design"
+  const departmentSlug = "graphic-design"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -818,6 +820,9 @@ export default function DepartmentKanban() {
   const [templateProjects, setTemplateProjects] = React.useState<Project[]>([])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
+  const bootstrapSystemTasksKeyRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteDeptIdRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteProjectsRef = React.useRef<Project[] | null>(null)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
@@ -864,6 +869,46 @@ export default function DepartmentKanban() {
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [pendingPrint, setPendingPrint] = React.useState(false)
   const [showTemplates, setShowTemplates] = React.useState(false)
+  const systemDateKey = React.useMemo(() => formatDateInput(systemDate), [systemDate])
+  const cacheKey = React.useMemo(() => {
+    const userId = user?.id || "anon"
+    return `department:${departmentSlug}|user:${userId}|systemDate:${systemDateKey}|showTemplates:false`
+  }, [departmentSlug, systemDateKey, user?.id])
+  type DepartmentBootstrapPayload = {
+    departments: Department[]
+    department: Department | null
+    users: UserLookup[]
+    projects: Project[]
+    templateProjects: Project[]
+    systemTasks: SystemTaskTemplate[]
+    departmentTasks: Task[]
+    noProjectTasks: Task[]
+    gaNotes: GaNote[]
+    internalNotes: InternalNote[]
+    meetings: Meeting[]
+    systemDepartmentId: string
+    systemTasksKey: string
+    internalNoteDepartmentId: string | null
+    internalNoteProjects: Project[]
+  }
+  const applyBootstrap = React.useCallback((payload: DepartmentBootstrapPayload) => {
+    setDepartments(payload.departments)
+    setDepartment(payload.department)
+    setUsers(payload.users)
+    setProjects(payload.projects)
+    setTemplateProjects(payload.templateProjects)
+    setSystemTasks(payload.systemTasks)
+    setDepartmentTasks(payload.departmentTasks)
+    setNoProjectTasks(payload.noProjectTasks)
+    setGaNotes(payload.gaNotes)
+    setInternalNotes(payload.internalNotes)
+    setMeetings(payload.meetings)
+    setSystemDepartmentId(payload.systemDepartmentId)
+    setInternalNoteProjects(payload.internalNoteProjects)
+    bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
+    bootstrapInternalNoteDeptIdRef.current = payload.internalNoteDepartmentId
+    bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
+  }, [])
 
   // Form States
   const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
@@ -980,16 +1025,15 @@ export default function DepartmentKanban() {
     if (typeof window === "undefined") return
     window.localStorage.setItem("gd_show_templates", showTemplates ? "true" : "false")
   }, [showTemplates])
-  React.useEffect(() => {
-    const load = async () => {
-      setLoading(true)
+  const loadBootstrapData = React.useCallback(
+    async (options: { silent: boolean }) => {
+      const { silent } = options
+      if (!silent) setLoading(true)
       try {
         const depRes = await apiFetch("/departments")
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
-        setDepartments(deps)
         const dep = deps.find((d) => d.name === departmentName) || null
-        setDepartment(dep)
         if (!dep) return
 
         // Fetch users first so we can filter tasks by assignee departments
@@ -997,51 +1041,71 @@ export default function DepartmentKanban() {
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
-          setUsers(allUsers)
         }
 
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
-          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
+          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
-        let templateProjectIds = new Set<string>()
-        if (projRes.ok) {
-          const allProjects = (await projRes.json()) as Project[]
-          const templateProjects = allProjects.filter((p) => p.is_template)
-          templateProjectIds = new Set(templateProjects.map((p) => p.id))
-          setTemplateProjects(templateProjects)
-          setProjects(allProjects.filter((p) => !p.is_template))
+        const allProjects = projRes.ok ? ((await projRes.json()) as Project[]) : []
+        const templateProjects = allProjects.filter((p) => p.is_template)
+        const templateProjectIds = new Set(templateProjects.map((p) => p.id))
+        const projects = allProjects.filter((p) => !p.is_template)
+        const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
+        const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
+        const nonSystemTasks = taskRows.filter((t) => {
+          if (t.system_template_origin_id) return false
+          if (t.project_id && templateProjectIds.has(t.project_id)) return false
+          return true
+        })
+        const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
+        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
+        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        const payload: DepartmentBootstrapPayload = {
+          departments: deps,
+          department: dep,
+          users: allUsers,
+          projects,
+          templateProjects,
+          systemTasks,
+          departmentTasks: nonSystemTasks,
+          noProjectTasks: nonSystemTasks.filter(isNoProjectTask),
+          gaNotes,
+          internalNotes,
+          meetings,
+          systemDepartmentId: dep.id,
+          systemTasksKey: `${dep.id}|${systemDateKey}`,
+          internalNoteDepartmentId: dep.id,
+          internalNoteProjects: projects,
         }
-        if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
-        if (tasksRes.ok) {
-          const taskRows = (await tasksRes.json()) as Task[]
-          // Show all non-system tasks for this department, still exclude template projects.
-          const nonSystemTasks = taskRows.filter((t) => {
-            if (t.system_template_origin_id) return false
-            if (t.project_id && templateProjectIds.has(t.project_id)) return false
-            return true
-          })
-          setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
-        }
-        if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
-        if (internalRes.ok) setInternalNotes((await internalRes.json()) as InternalNote[])
-        if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
-
-        setSystemDepartmentId(dep.id)
+        applyBootstrap(payload)
+        setDepartmentBootstrapCache(cacheKey, payload)
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
+    },
+    [apiFetch, applyBootstrap, cacheKey, departmentName, systemDateKey]
+  )
+
+  React.useEffect(() => {
+    const cached = getDepartmentBootstrapCache<DepartmentBootstrapPayload>(cacheKey)
+    if (cached) {
+      applyBootstrap(cached)
+      setLoading(false)
+      void loadBootstrapData({ silent: true })
+      return
     }
-    void load()
-  }, [apiFetch, departmentName, user?.role])
+    void loadBootstrapData({ silent: false })
+  }, [applyBootstrap, cacheKey, loadBootstrapData])
 
   React.useEffect(() => {
     if (!department?.id) return
+    const systemTasksKey = `${department.id}|${formatDateInput(systemDate)}`
+    if (bootstrapSystemTasksKeyRef.current === systemTasksKey) return
     const loadSystemTasks = async () => {
       const res = await apiFetch(
         `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
@@ -1063,6 +1127,11 @@ export default function DepartmentKanban() {
     const loadProjects = async () => {
       if (!internalNoteDepartmentId) {
         setInternalNoteProjects([])
+        return
+      }
+      const bootstrapProjects = bootstrapInternalNoteProjectsRef.current
+      if (bootstrapInternalNoteDeptIdRef.current === internalNoteDepartmentId && bootstrapProjects) {
+        setInternalNoteProjects(bootstrapProjects)
         return
       }
       setLoadingInternalNoteProjects(true)
