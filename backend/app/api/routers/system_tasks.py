@@ -380,6 +380,23 @@ async def list_system_tasks(
     )
 
     rows = (await db.execute(task_stmt)).all()
+    template_assignees_map: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for tmpl in templates:
+        assignee_ids = getattr(tmpl, "assignee_ids", None) or []
+        if not assignee_ids and tmpl.default_assignee_id:
+            assignee_ids = [tmpl.default_assignee_id]
+        template_assignees_map[tmpl.id] = set(assignee_ids)
+    filtered_rows: list[tuple[SystemTaskTemplate, Task | None]] = []
+    for template, task in rows:
+        if task is None:
+            filtered_rows.append((template, task))
+            continue
+        allowed_ids = template_assignees_map.get(template.id, set())
+        if not allowed_ids:
+            continue
+        if task.assigned_to and task.assigned_to in allowed_ids:
+            filtered_rows.append((template, task))
+    rows = filtered_rows
     # Return all tasks for each template (no de-duplication)
     # Also include templates that don't have tasks yet
     task_ids = [task.id for template, task in rows if task is not None]
@@ -492,6 +509,10 @@ async def list_system_tasks(
             if template.id not in template_tasks_map:
                 template_tasks_map[template.id] = []
             template_tasks_map[template.id].append((task, template))
+    if templates:
+        for template in templates:
+            if template.id not in template_tasks_map:
+                template_only_map.setdefault(template.id, template)
     
     result = []
     
@@ -796,33 +817,33 @@ async def create_system_task_template(
     scope_value = payload.scope
     
     if assignee_users and len(assignee_users) > 0:
-        # Check if any assignee is gane.arifaj - if so, set department to GA
-        gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
-        if gane_user:
-            # Find GA department
+        # Get unique departments from assignees
+        assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
+        is_gane_assignee = any(
+            u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
+        )
+        ga_department = None
+        if is_gane_assignee:
             ga_department = (
                 await db.execute(select(Department).where(Department.code == "GA"))
             ).scalar_one_or_none()
-            if ga_department:
-                # Set department to GA and scope to DEPARTMENT
-                department_id = ga_department.id
-                scope_value = SystemTaskScope.DEPARTMENT
-        else:
-            # Get unique departments from assignees
-            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-            
-            if len(assignee_departments) == 1:
-                # All assignees are from the same department - use that department
-                department_id = list(assignee_departments)[0]
-                scope_value = SystemTaskScope.DEPARTMENT
-            elif len(assignee_departments) > 1:
-                # Assignees are from different departments - use ALL scope
-                department_id = None
+
+        # Only force GA when ALL assignees are from GA (prevents mixed-department tasks from being hidden)
+        if ga_department and assignee_departments == {ga_department.id}:
+            department_id = ga_department.id
+            scope_value = SystemTaskScope.DEPARTMENT
+        elif len(assignee_departments) == 1:
+            # All assignees are from the same department - use that department
+            department_id = list(assignee_departments)[0]
+            scope_value = SystemTaskScope.DEPARTMENT
+        elif len(assignee_departments) > 1:
+            # Assignees are from different departments - use ALL scope
+            department_id = None
+            scope_value = SystemTaskScope.ALL
+        elif len(assignee_departments) == 0:
+            # Assignees have no department - if no department was set, use ALL scope
+            if department_id is None:
                 scope_value = SystemTaskScope.ALL
-            elif len(assignee_departments) == 0:
-                # Assignees have no department - if no department was set, use ALL scope
-                if department_id is None:
-                    scope_value = SystemTaskScope.ALL
     else:
         # No assignees - use scope/department from payload or defaults
         if scope_value is None:
@@ -1059,33 +1080,33 @@ async def update_system_task_template(
     
     # If assignees are being set/changed, automatically determine department from assignees
     if assignee_set and assignee_users and len(assignee_users) > 0:
-        # Check if any assignee is gane.arifaj - if so, set department to GA
-        gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
-        if gane_user:
-            # Find GA department
+        # Get unique departments from assignees
+        assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
+        is_gane_assignee = any(
+            u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
+        )
+        ga_department = None
+        if is_gane_assignee:
             ga_department = (
                 await db.execute(select(Department).where(Department.code == "GA"))
             ).scalar_one_or_none()
-            if ga_department:
-                # Set department to GA and scope to DEPARTMENT
-                target_department = ga_department.id
-                scope_value = SystemTaskScope.DEPARTMENT
-        else:
-            # Get unique departments from assignees
-            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-            
-            if len(assignee_departments) == 1:
-                # All assignees are from the same department - use that department
-                target_department = list(assignee_departments)[0]
-                scope_value = SystemTaskScope.DEPARTMENT
-            elif len(assignee_departments) > 1:
-                # Assignees are from different departments - use ALL scope
-                target_department = None
+
+        # Only force GA when ALL assignees are from GA (prevents mixed-department tasks from being hidden)
+        if ga_department and assignee_departments == {ga_department.id}:
+            target_department = ga_department.id
+            scope_value = SystemTaskScope.DEPARTMENT
+        elif len(assignee_departments) == 1:
+            # All assignees are from the same department - use that department
+            target_department = list(assignee_departments)[0]
+            scope_value = SystemTaskScope.DEPARTMENT
+        elif len(assignee_departments) > 1:
+            # Assignees are from different departments - use ALL scope
+            target_department = None
+            scope_value = SystemTaskScope.ALL
+        elif len(assignee_departments) == 0:
+            # Assignees have no department - if no department was set, use ALL scope
+            if target_department is None:
                 scope_value = SystemTaskScope.ALL
-            elif len(assignee_departments) == 0:
-                # Assignees have no department - if no department was set, use ALL scope
-                if target_department is None:
-                    scope_value = SystemTaskScope.ALL
 
     # Validate scope and department consistency
     if scope_value == SystemTaskScope.DEPARTMENT:
@@ -1115,14 +1136,17 @@ async def update_system_task_template(
     if scope_value == SystemTaskScope.DEPARTMENT:
         if department_set:
             template.department_id = payload.department_id
-        # If gane.arifaj is assigned, ensure department is set to GA (already set above)
-        elif assignee_set and assignee_users:
-            gane_user = next((u for u in assignee_users if u.username and u.username.lower() == "gane.arifaj"), None)
-            if gane_user and template.department_id is None:
+        # If assignees are GA-only and department is missing, set GA department
+        elif assignee_set and assignee_users and template.department_id is None:
+            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
+            is_gane_assignee = any(
+                u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
+            )
+            if is_gane_assignee:
                 ga_department = (
                     await db.execute(select(Department).where(Department.code == "GA"))
                 ).scalar_one_or_none()
-                if ga_department:
+                if ga_department and assignee_departments == {ga_department.id}:
                     template.department_id = ga_department.id
     else:
         template.department_id = None

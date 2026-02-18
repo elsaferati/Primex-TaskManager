@@ -2,8 +2,9 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateTimeDMY } from "@/lib/dates"
-import type { User, Task, CommonEntry, Project, Meeting, Department } from "@/lib/types"
+import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
 type CommonType =
   | "late"
@@ -18,6 +19,7 @@ type CommonType =
   | "problem"
   | "feedback"
   | "priority"
+  | "bz"
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
@@ -48,6 +50,68 @@ type PriorityItem = {
   department_id?: string | null
   department_name?: string | null
 }
+type BzItem = {
+  title: string
+  date: string
+  time: string
+  assignees?: string[]
+  bzWithLabel?: string
+}
+
+type CommonBucket =
+  | "late"
+  | "absent"
+  | "leave"
+  | "blocked"
+  | "oneH"
+  | "personal"
+  | "external"
+  | "internal"
+  | "r1"
+  | "problems"
+  | "feedback"
+  | "priority"
+  | "bz"
+type CommonViewCounts = Record<CommonBucket, number>
+type CommonViewGuardrails = {
+  max_items_per_bucket: number
+  truncated: Record<CommonBucket, boolean>
+}
+type CommonViewPayload = {
+  schema_version: number
+  generated_at: string
+  week_start: string
+  week_end: string
+  requested: string[]
+  included: string[]
+  missing: string[]
+  counts: CommonViewCounts
+  items: {
+    late: LateItem[]
+    absent: AbsentItem[]
+    leave: LeaveItem[]
+    blocked: BlockedItem[]
+    oneH: OneHItem[]
+    personal: PersonalItem[]
+    external: ExternalItem[]
+    internal: InternalItem[]
+    r1: R1Item[]
+    problems: ProblemItem[]
+    feedback: FeedbackItem[]
+    priority: PriorityItem[]
+    bz: BzItem[]
+  }
+  guardrails: CommonViewGuardrails
+  trace_id: string
+  timings_ms?: Record<string, number> | null
+  users?: User[]
+  departments?: Department[]
+}
+
+const COMMON_VIEW_CACHE = new Map<
+  string,
+  { etag: string | null; payload: CommonViewPayload; cachedAt: number }
+>()
 
 type SwimlaneCell = {
   title: string
@@ -55,6 +119,7 @@ type SwimlaneCell = {
   dateLabel?: string
   accentClass?: string
   assignees?: string[]
+  assigneeLabels?: string[]
   placeholder?: boolean
   entryId?: string
   number?: number
@@ -126,8 +191,7 @@ const initials = (name: string) => {
   return `${first}${last}`.toUpperCase()
 }
 const stripInitialsPrefix = (value: string) => {
-  if (!value) return value
-  return value.replace(/^\s*[A-Z]{2,3}\s*:\s*/u, "")
+  return value
 }
 
 export default function CommonViewPage() {
@@ -184,6 +248,11 @@ export default function CommonViewPage() {
   }
   const formatTime = (d: Date) =>
     d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+  const formatAlignmentTime = (value?: string | null) => {
+    if (!value) return "TBD"
+    const match = String(value).match(/^(\d{2}:\d{2})/)
+    return match ? match[1] : String(value)
+  }
   const parseTimeValue = (value: string) => {
     const match = /^(\d{2}):(\d{2})$/.exec(value)
     if (!match) return null
@@ -335,8 +404,15 @@ export default function CommonViewPage() {
     problems: [] as ProblemItem[],
     feedback: [] as FeedbackItem[],
     priority: [] as PriorityItem[],
+    bz: [] as BzItem[],
   })
   const [dataLoaded, setDataLoaded] = React.useState(false)
+  const [commonViewMeta, setCommonViewMeta] = React.useState<{
+    requested: string[]
+    included: string[]
+    missing: string[]
+    guardrails: CommonViewGuardrails | null
+  } | null>(null)
 
   const [weekStart, setWeekStart] = React.useState<Date>(() => getMonday(new Date()))
   const [selectedDates, setSelectedDates] = React.useState<Set<string>>(new Set())
@@ -388,6 +464,23 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
+  const commonViewAggregateEnabled = COMMON_VIEW_AGGREGATE_ENABLED
+  const commonViewIncludeStages = React.useMemo(
+    () => [
+      ["users", "departments", "entries"],
+      ["meetings", "system_tasks", "tasks"],
+    ],
+    []
+  )
+  const includeToBuckets: Record<string, CommonBucket[]> = React.useMemo(
+    () => ({
+      entries: ["late", "absent", "leave", "problems", "feedback"],
+      meetings: ["external", "internal"],
+      system_tasks: ["bz"],
+      tasks: ["blocked", "oneH", "personal", "r1", "priority"],
+    }),
+    []
+  )
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
@@ -842,14 +935,106 @@ export default function CommonViewPage() {
     }
   }, [departments, internalMeetingDepartmentId, user?.department_id])
 
+  const applyCommonViewPayload = React.useCallback(
+    (payload: CommonViewPayload) => {
+      if (payload.users) setUsers(payload.users)
+      if (payload.departments) setDepartments(payload.departments)
+      setCommonViewMeta({
+        requested: payload.requested,
+        included: payload.included,
+        missing: payload.missing,
+        guardrails: payload.guardrails || null,
+      })
+      setCommonData((prev) => {
+        let next = { ...prev }
+        for (const includeKey of payload.included) {
+          const buckets = includeToBuckets[includeKey] || []
+          for (const bucket of buckets) {
+            next = { ...next, [bucket]: payload.items[bucket] }
+          }
+        }
+        return next
+      })
+    },
+    [includeToBuckets]
+  )
+
+  const fetchCommonViewStage = React.useCallback(
+    async (weekStartIso: string, includeList: string[]) => {
+      const includeKey = includeList.join(",")
+      const cacheKey = `${weekStartIso}|${includeKey}|${user?.role || "anon"}|${user?.department_id || ""}`
+      const cached = COMMON_VIEW_CACHE.get(cacheKey)
+      if (cached) {
+        applyCommonViewPayload(cached.payload)
+      }
+      const headers: Record<string, string> = {}
+      if (cached?.etag) headers["If-None-Match"] = cached.etag
+      const deptParam = commonDepartmentId
+        ? `&department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "&include_all_departments=true"
+      const res = await apiFetch(
+        `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(includeKey)}${deptParam}`,
+        { headers }
+      )
+      if (res?.status === 304 && cached) {
+        applyCommonViewPayload(cached.payload)
+        return
+      }
+      if (!res?.ok) {
+        throw new Error(`common_view_failed_${res?.status}`)
+      }
+      const payload = (await res.json()) as CommonViewPayload
+      const etag = res.headers.get("ETag")
+      COMMON_VIEW_CACHE.set(cacheKey, { etag, payload, cachedAt: Date.now() })
+      applyCommonViewPayload(payload)
+    },
+    [apiFetch, applyCommonViewPayload, user?.department_id, user?.role, commonDepartmentId]
+  )
+
   // Load data on mount
   React.useEffect(() => {
     let mounted = true
     async function load() {
       try {
         if (mounted) setDataLoaded(false)
+        if (commonViewAggregateEnabled) {
+          const weekStartIso = toISODate(weekStart)
+          try {
+            if (mounted) {
+              setCommonViewMeta(null)
+              setCommonData({
+                late: [],
+                absent: [],
+                leave: [],
+                blocked: [],
+                oneH: [],
+                personal: [],
+                external: [],
+                internal: [],
+                r1: [],
+                problems: [],
+                feedback: [],
+                priority: [],
+                bz: [],
+              })
+            }
+            for (const includeList of commonViewIncludeStages) {
+              await fetchCommonViewStage(weekStartIso, includeList)
+            }
+            if (mounted) {
+              if (selectedDates.size === 0) {
+                setSelectedDates(new Set([toISODate(new Date())]))
+              }
+              setDataLoaded(true)
+            }
+            return
+          } catch (err) {
+            console.error("Failed to load aggregate common view data", err)
+          }
+        }
         const weekStartIso = toISODate(weekStart)
         const weekEndIso = toISODate(addDays(weekStart, 6))
+        const weekDates = getWeekdays(weekStart).map(toISODate)
         // Initialize all data buckets
         const allData = {
           late: [] as LateItem[],
@@ -864,6 +1049,7 @@ export default function CommonViewPage() {
           problems: [] as ProblemItem[],
           feedback: [] as FeedbackItem[],
           priority: [] as PriorityItem[],
+          bz: [] as BzItem[],
         }
 
         // Load primary datasets in parallel (week scoped)
@@ -878,6 +1064,13 @@ export default function CommonViewPage() {
           ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
           : "/meetings?include_all_departments=true"
 
+        const systemTasksRequests = weekDates.map((dateStr) => {
+          const qs = new URLSearchParams()
+          qs.set("occurrence_date", dateStr)
+          if (commonDepartmentId) qs.set("department_id", commonDepartmentId)
+          return apiFetch(`/system-tasks?${qs.toString()}`)
+        })
+
         const [
           uRes,
           depRes,
@@ -885,6 +1078,7 @@ export default function CommonViewPage() {
           initialTasksRes,
           externalMeetingsRes,
           internalMeetingsRes,
+          ...systemTasksResponses
         ] = await Promise.all([
           apiFetch(usersEndpoint),
           apiFetch("/departments"),
@@ -892,6 +1086,7 @@ export default function CommonViewPage() {
           apiFetch(tasksEndpointWithWindow),
           apiFetch(`${meetingsEndpointBase}&meeting_type=external`),
           apiFetch(`${meetingsEndpointBase}&meeting_type=internal`),
+          ...systemTasksRequests,
         ])
 
         let loadedUsers: User[] = []
@@ -1481,6 +1676,52 @@ export default function CommonViewPage() {
           }
         }
 
+        const userMap = new Map(loadedUsers.map((u) => [u.id, u]))
+        const ganeUserId =
+          loadedUsers.find((u) => u.username?.toLowerCase() === "gane.arifaj")?.id || null
+        const bzItems: BzItem[] = []
+        for (let i = 0; i < systemTasksResponses.length; i += 1) {
+          const res = systemTasksResponses[i]
+          const dateStr = weekDates[i]
+          if (!res?.ok || !dateStr) continue
+          const templates = (await res.json()) as SystemTaskTemplate[]
+          for (const tmpl of templates) {
+            if (tmpl.occurrence_date && tmpl.occurrence_date !== dateStr) continue
+            const alignmentEnabled = Boolean(
+              tmpl.requires_alignment ||
+              tmpl.alignment_time ||
+              (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+              (tmpl.alignment_roles && tmpl.alignment_roles.length)
+            )
+            if (!alignmentEnabled) continue
+            const alignmentUserIds = tmpl.alignment_user_ids ?? []
+            if (!ganeUserId || !alignmentUserIds.includes(ganeUserId)) continue
+            const bzWithNames = alignmentUserIds
+              .map((id) => {
+                const person = userMap.get(id)
+                return person?.full_name || person?.username || ""
+              })
+              .filter(Boolean)
+            const bzWithInitials = bzWithNames.map(initials).filter(Boolean)
+            const bzWithLabel =
+              bzWithInitials.length > 0
+                ? bzWithInitials.join(", ")
+                : tmpl.alignment_roles?.length
+                  ? tmpl.alignment_roles.join(", ")
+                  : ""
+            const taskAssignees =
+              tmpl.assignees?.map((a) => a.full_name || a.username || a.email || "Unknown").filter(Boolean) || []
+            bzItems.push({
+              title: tmpl.title || "-",
+              date: dateStr,
+              time: formatAlignmentTime(tmpl.alignment_time),
+              assignees: taskAssignees,
+              bzWithLabel,
+            })
+          }
+        }
+        allData.bz = bzItems
+
         // Single state update with all data
         if (mounted) {
           setCommonData(allData)
@@ -1503,7 +1744,37 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, user?.role, user?.department_id, weekStart])
+  }, [apiFetch, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
+
+  React.useEffect(() => {
+    if (!externalMeetingsOpen) return
+    const run = async () => {
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=external`)
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setExternalMeetings(meetings)
+      }
+    }
+    void run()
+  }, [externalMeetingsOpen, apiFetch, commonDepartmentId])
+
+  React.useEffect(() => {
+    if (!internalMeetingsOpen) return
+    const run = async () => {
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=internal`)
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setInternalMeetings(meetings)
+      }
+    }
+    void run()
+  }, [internalMeetingsOpen, apiFetch, commonDepartmentId])
 
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
@@ -1549,109 +1820,12 @@ export default function CommonViewPage() {
     const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const personal = commonData.personal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const getMeetingOwnerName = (meeting: Meeting) => {
-      const ownerUser = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
-      return ownerUser?.full_name || ownerUser?.username || "Unknown"
-    }
-    const getMeetingDepartmentName = (meeting: Meeting) => {
-      const department = departments.find((d) => d.id === meeting.department_id)
-      return department?.name || "Department TBD"
-    }
-    const getMeetingTimeLabel = (meeting: Meeting, date: Date | null) => {
-      if (!meeting.starts_at) return "TBD"
-      if (date) return formatTime(date)
-      const timeValue = toMeetingTimeValue(meeting.starts_at)
-      return timeValue || "TBD"
-    }
-    const meetingOccursOnDate = (meeting: Meeting, dateStr: string) => {
-      const date = fromISODate(dateStr)
-      if (Number.isNaN(date.getTime())) return false
-      if (meeting.recurrence_type === "weekly") {
-        const dayIndex = (date.getDay() + 6) % 7
-        return (meeting.recurrence_days_of_week || []).includes(dayIndex)
-      }
-      if (meeting.recurrence_type === "monthly") {
-        return (meeting.recurrence_days_of_month || []).includes(date.getDate())
-      }
-      if (meeting.recurrence_type === "yearly") {
-        const month = meeting.starts_at ? new Date(meeting.starts_at).getMonth() + 1 : null
-        const day = meeting.recurrence_days_of_month?.[0] || (meeting.starts_at ? new Date(meeting.starts_at).getDate() : null)
-        if (!month || !day) return false
-        return date.getMonth() + 1 === month && date.getDate() === day
-      }
-      return false
-    }
-    const external: ExternalItem[] = []
-    for (const meeting of externalMeetings) {
-      const ownerName = getMeetingOwnerName(meeting)
-      const departmentName = getMeetingDepartmentName(meeting)
-      const platform = meeting.platform?.trim() || "TBD"
-      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
-        const timeLabel = getMeetingTimeLabel(meeting, null)
-        for (const dateStr of datesToUse) {
-          if (!meetingOccursOnDate(meeting, dateStr)) continue
-          external.push({
-            title: meeting.title || "External meeting",
-            date: dateStr,
-            time: timeLabel,
-            platform,
-            owner: ownerName,
-            department: departmentName,
-          })
-        }
-      } else {
-        const resolvedDate = resolveExternalMeetingDate(meeting)
-        if (!resolvedDate) continue
-        const dateStr = toISODate(resolvedDate)
-        if (!inSelectedDates(dateStr)) continue
-        external.push({
-          title: meeting.title || "External meeting",
-          date: dateStr,
-          time: getMeetingTimeLabel(meeting, resolvedDate),
-          platform,
-          owner: ownerName,
-          department: departmentName,
-        })
-      }
-    }
-    const internal: InternalItem[] = []
-    for (const meeting of internalMeetings) {
-      const ownerName = getMeetingOwnerName(meeting)
-      const departmentName = getMeetingDepartmentName(meeting)
-      const platform = meeting.platform?.trim() || "TBD"
-      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
-        const timeLabel = getMeetingTimeLabel(meeting, null)
-        for (const dateStr of datesToUse) {
-          if (!meetingOccursOnDate(meeting, dateStr)) continue
-          internal.push({
-            title: meeting.title || "Internal meeting",
-            date: dateStr,
-            time: timeLabel,
-            platform,
-            owner: ownerName,
-            department: departmentName,
-          })
-        }
-      } else {
-        const resolvedDate = resolveExternalMeetingDate(meeting)
-        if (!resolvedDate) continue
-        const dateStr = toISODate(resolvedDate)
-        if (!inSelectedDates(dateStr)) continue
-        internal.push({
-          title: meeting.title || "Internal meeting",
-          date: dateStr,
-          time: getMeetingTimeLabel(meeting, resolvedDate),
-          platform,
-          owner: ownerName,
-          department: departmentName,
-        })
-      }
-    }
-    const filteredExternal = external.filter((x) => !fullyCoveredDates.has(x.date))
-    const filteredInternal = internal.filter((x) => !fullyCoveredDates.has(x.date))
+    const external = commonData.external.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const internal = commonData.internal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const problems = commonData.problems.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const bz = commonData.bz.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
     )
@@ -1665,15 +1839,16 @@ export default function CommonViewPage() {
       blocked,
       oneH,
       personal,
-      external: filteredExternal,
-      internal: filteredInternal,
+      external,
+      internal,
       r1,
       problems,
       feedback,
+      bz,
       priority: filteredPriority,
       fullyCoveredDates,
     }
-  }, [commonData, selectedDates, externalMeetings, internalMeetings, users, weekISOs, departments])
+  }, [commonData, selectedDates, users, weekISOs])
 
   // Common people for priority (from users)
   const commonPeople = React.useMemo(() => {
@@ -2882,6 +3057,17 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent internal",
     }))
 
+    const bzSource = isMultiDate
+      ? sortByDate(filtered.bz, (x) => x.date, (x) => x.title)
+      : filtered.bz
+    const bzItems: SwimlaneCell[] = bzSource.map((x) => ({
+      title: x.title,
+      subtitle: `${formatTimeLabel(x.time)}${x.bzWithLabel ? ` - BZ: ${x.bzWithLabel}` : ""}`.trim(),
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent bz",
+      assignees: x.assignees,
+    }))
+
     const r1Source = isMultiDate
       ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
       : filtered.r1
@@ -2968,6 +3154,14 @@ export default function CommonViewPage() {
         items: internalItems,
       },
       {
+        id: "bz",
+        label: "BZ GA",
+        count: filtered.bz.length,
+        headerClass: "swimlane-header bz",
+        badgeClass: "swimlane-badge bz",
+        items: bzItems,
+      },
+      {
         id: "blocked",
         label: "BLL",
         count: filtered.blocked.length,
@@ -3048,6 +3242,7 @@ export default function CommonViewPage() {
       personal: PersonalItem[]
       external: ExternalItem[]
       internal: InternalItem[]
+      bz: BzItem[]
       r1: R1Item[]
       problems: ProblemItem[]
       feedback: FeedbackItem[]
@@ -3073,6 +3268,7 @@ export default function CommonViewPage() {
           personal: [],
           external: [],
           internal: [],
+          bz: [],
           r1: [],
           problems: [],
           feedback: [],
@@ -3089,6 +3285,7 @@ export default function CommonViewPage() {
         personal: filtered.personal.filter((x) => x.date === iso),
         external: filtered.external.filter((x) => x.date === iso),
         internal: filtered.internal.filter((x) => x.date === iso),
+        bz: filtered.bz.filter((x) => x.date === iso),
         r1: filtered.r1.filter((x) => x.date === iso),
         problems: filtered.problems.filter((x) => x.date === iso),
         feedback: filtered.feedback.filter((x) => x.date === iso),
@@ -3427,6 +3624,8 @@ export default function CommonViewPage() {
           --external-accent: #0284c7;
           --internal-bg: #f1f5f9;
           --internal-accent: #475569;
+          --bz-bg: #e6fffb;
+          --bz-accent: #14b8a6;
           --r1-bg: #dcfce7;
           --r1-accent: #16a34a;
           --problem-bg: #ecfeff;
@@ -3712,6 +3911,7 @@ export default function CommonViewPage() {
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
           .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
           .swimlane-header.internal { background: var(--internal-bg) !important; color: #334155 !important; }
+          .swimlane-header.bz { background: var(--bz-bg) !important; color: #0f766e !important; }
           .swimlane-header.r1 { background: var(--r1-bg) !important; color: #15803d !important; }
           .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
           .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
@@ -3724,6 +3924,7 @@ export default function CommonViewPage() {
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
           .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.internal { border-color: var(--internal-accent) !important; color: #334155 !important; }
+          .swimlane-badge.bz { border-color: var(--bz-accent) !important; color: #0f766e !important; }
           .swimlane-badge.r1 { border-color: var(--r1-accent) !important; color: #15803d !important; }
           .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
           .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
@@ -4339,6 +4540,9 @@ export default function CommonViewPage() {
         .week-table-row.internal .week-table-label {
           background: var(--internal-bg);
         }
+        .week-table-row.bz .week-table-label {
+          background: var(--bz-bg);
+        }
         .week-table-row.r1 .week-table-label {
           background: var(--r1-bg);
         }
@@ -4504,6 +4708,7 @@ export default function CommonViewPage() {
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
         .swimlane-header.internal { background: var(--internal-bg); color: #334155; }
+        .swimlane-header.bz { background: var(--bz-bg); color: #0f766e; }
         .swimlane-header.r1 { background: var(--r1-bg); color: #15803d; }
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
         .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
@@ -4516,6 +4721,7 @@ export default function CommonViewPage() {
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
         .swimlane-badge.internal { border-color: var(--internal-accent); color: #334155; }
+        .swimlane-badge.bz { border-color: var(--bz-accent); color: #0f766e; }
         .swimlane-badge.r1 { border-color: var(--r1-accent); color: #15803d; }
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
         .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
@@ -4528,6 +4734,7 @@ export default function CommonViewPage() {
         .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.internal { border-left: 4px solid var(--internal-accent); }
+        .swimlane-accent.bz { border-left: 4px solid var(--bz-accent); }
         .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
@@ -5147,6 +5354,13 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("internal")}
             >
               TAK INT
+            </button>
+            <button
+              className={`chip ${typeFilters.has("bz") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("bz")}
+            >
+              BZ
             </button>
             <button
               className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
@@ -6808,6 +7022,7 @@ export default function CommonViewPage() {
                       else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
+                      else if (row.id === "bz") dayEntries[iso] = dayData.bz || []
                       else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
                       else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
@@ -6823,6 +7038,7 @@ export default function CommonViewPage() {
                       if (rowId === "personal") return "personal"
                       if (rowId === "external") return "external"
                       if (rowId === "internal") return "internal"
+                      if (rowId === "bz") return "bz"
                       if (rowId === "r1") return "r1"
                       if (rowId === "problem") return "problem"
                       if (rowId === "feedback") return "feedback"
@@ -7021,6 +7237,24 @@ export default function CommonViewPage() {
                             </div>
                           </div>
                         ))
+                      } else if (row.id === "bz") {
+                        return entries.map((e: BzItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <span>
+                              {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
+                              {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
+                            </span>
+                            {e.assignees && e.assignees.length ? (
+                              <div className="week-table-avatars">
+                                {e.assignees.map((name: string) => (
+                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                    {initials(name)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
                       } else if (row.id === "priority") {
                         const groupMap = new Map<string, PriorityItem[]>()
                         for (const item of entries as PriorityItem[]) {
@@ -7179,12 +7413,21 @@ export default function CommonViewPage() {
                                         </span>
                                       ))}
                                     </div>
+                                  ) : !cell.placeholder && cell.assigneeLabels?.length ? (
+                                    <div className="swimlane-assignees">
+                                      {cell.assigneeLabels.map((label) => (
+                                        <span key={`${cell.title}-${label}`} className="swimlane-avatar" title={label}>
+                                          {label}
+                                        </span>
+                                      ))}
+                                    </div>
                                   ) : null}
                                   <div className="swimlane-title">
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
                                   {(row.id === "external" ||
                                     row.id === "internal" ||
+                                    row.id === "bz" ||
                                     row.id === "late" ||
                                     row.id === "absent" ||
                                     row.id === "leave") &&

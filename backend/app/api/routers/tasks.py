@@ -9,7 +9,7 @@ try:
 except ImportError:
     ZoneInfo = None
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from sqlalchemy import delete, insert, or_, select, cast, update, String as SQLString, func, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -298,6 +298,7 @@ async def list_tasks(
     status: TaskStatus | None = None,
     assigned_to: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
+    ga_note_origin_ids: list[uuid.UUID] | None = Query(None),
     due_from: datetime | None = None,
     due_to: datetime | None = None,
     window_from: datetime | None = None,
@@ -350,6 +351,8 @@ async def list_tasks(
             stmt = stmt.where(Task.assigned_to == assigned_to)
     if created_by:
         stmt = stmt.where(Task.created_by == created_by)
+    if ga_note_origin_ids:
+        stmt = stmt.where(Task.ga_note_origin_id.in_(ga_note_origin_ids))
     if due_from:
         stmt = stmt.where(Task.due_date >= due_from)
     if due_to:
