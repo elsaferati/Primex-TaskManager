@@ -379,6 +379,7 @@ type SystemTasksViewProps = {
   externalPriorityFilter?: TaskPriority | "all"
   externalDayFilter?: string | "all"
   externalDateFilter?: string | null
+  alignmentUsernameFilter?: string | null
 }
 
 export function SystemTasksView({
@@ -392,6 +393,7 @@ export function SystemTasksView({
   externalPriorityFilter = "all",
   externalDayFilter = "all",
   externalDateFilter = null,
+  alignmentUsernameFilter = null,
 }: SystemTasksViewProps) {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
@@ -469,6 +471,11 @@ export function SystemTasksView({
     [users]
   )
   const ganeUserId = React.useMemo(() => ganeUser?.id ?? null, [ganeUser])
+  const alignmentFilterUserId = React.useMemo(() => {
+    if (!alignmentUsernameFilter) return null
+    const normalized = alignmentUsernameFilter.toLowerCase()
+    return users.find((u) => u.username?.toLowerCase() === normalized)?.id ?? null
+  }, [alignmentUsernameFilter, users])
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -915,31 +922,39 @@ export function SystemTasksView({
     return templates.filter((template) => resolveTemplateScope(template) === scopeFilter)
   }, [scopeFilter, templates, ganeUserId, gaDepartmentId])
 
+  const filteredByAlignmentUser = React.useMemo(() => {
+    if (!alignmentUsernameFilter) return scopeTemplates
+    if (!alignmentFilterUserId) return []
+    return scopeTemplates.filter((template) =>
+      template.alignment_user_ids?.includes(alignmentFilterUserId)
+    )
+  }, [alignmentFilterUserId, alignmentUsernameFilter, scopeTemplates])
+
   const frequencyCounts = React.useMemo(() => {
     const counts = new Map<SystemTaskFrequency, number>()
     for (const value of FREQUENCY_VALUES) {
       counts.set(value as SystemTaskFrequency, 0)
     }
-    for (const template of scopeTemplates) {
+    for (const template of filteredByAlignmentUser) {
       counts.set(template.frequency, (counts.get(template.frequency) || 0) + 1)
     }
     return counts
-  }, [scopeTemplates])
+  }, [filteredByAlignmentUser])
 
   const priorityCounts = React.useMemo(() => {
     const counts = new Map<TaskPriority, number>()
     for (const value of PRIORITY_OPTIONS) {
       counts.set(value, 0)
     }
-    for (const template of scopeTemplates) {
+    for (const template of filteredByAlignmentUser) {
       const normalized = normalizePriority(template.priority)
       counts.set(normalized, (counts.get(normalized) || 0) + 1)
     }
     return counts
-  }, [scopeTemplates])
+  }, [filteredByAlignmentUser])
 
   const filteredTemplates = React.useMemo(() => {
-    let filtered = scopeTemplates
+    let filtered = filteredByAlignmentUser
     const query = searchQuery.trim().toLowerCase()
     const dayFilterValue =
       externalDayFilter === "all" ? null : Number.isNaN(Number(externalDayFilter)) ? null : Number(externalDayFilter)
@@ -981,7 +996,7 @@ export function SystemTasksView({
     externalPriorityFilter,
     frequencyFilters,
     priorityFilters,
-    scopeTemplates,
+    filteredByAlignmentUser,
     searchQuery,
   ])
 
