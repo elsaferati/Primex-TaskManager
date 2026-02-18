@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useAuth } from "@/lib/auth"
+import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateTimeDMY } from "@/lib/dates"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
@@ -56,6 +57,61 @@ type BzItem = {
   assignees?: string[]
   bzWithLabel?: string
 }
+
+type CommonBucket =
+  | "late"
+  | "absent"
+  | "leave"
+  | "blocked"
+  | "oneH"
+  | "personal"
+  | "external"
+  | "internal"
+  | "r1"
+  | "problems"
+  | "feedback"
+  | "priority"
+  | "bz"
+type CommonViewCounts = Record<CommonBucket, number>
+type CommonViewGuardrails = {
+  max_items_per_bucket: number
+  truncated: Record<CommonBucket, boolean>
+}
+type CommonViewPayload = {
+  schema_version: number
+  generated_at: string
+  week_start: string
+  week_end: string
+  requested: string[]
+  included: string[]
+  missing: string[]
+  counts: CommonViewCounts
+  items: {
+    late: LateItem[]
+    absent: AbsentItem[]
+    leave: LeaveItem[]
+    blocked: BlockedItem[]
+    oneH: OneHItem[]
+    personal: PersonalItem[]
+    external: ExternalItem[]
+    internal: InternalItem[]
+    r1: R1Item[]
+    problems: ProblemItem[]
+    feedback: FeedbackItem[]
+    priority: PriorityItem[]
+    bz: BzItem[]
+  }
+  guardrails: CommonViewGuardrails
+  trace_id: string
+  timings_ms?: Record<string, number> | null
+  users?: User[]
+  departments?: Department[]
+}
+
+const COMMON_VIEW_CACHE = new Map<
+  string,
+  { etag: string | null; payload: CommonViewPayload; cachedAt: number }
+>()
 
 type SwimlaneCell = {
   title: string
@@ -351,6 +407,12 @@ export default function CommonViewPage() {
     bz: [] as BzItem[],
   })
   const [dataLoaded, setDataLoaded] = React.useState(false)
+  const [commonViewMeta, setCommonViewMeta] = React.useState<{
+    requested: string[]
+    included: string[]
+    missing: string[]
+    guardrails: CommonViewGuardrails | null
+  } | null>(null)
 
   const [weekStart, setWeekStart] = React.useState<Date>(() => getMonday(new Date()))
   const [selectedDates, setSelectedDates] = React.useState<Set<string>>(new Set())
@@ -402,6 +464,23 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
+  const commonViewAggregateEnabled = COMMON_VIEW_AGGREGATE_ENABLED
+  const commonViewIncludeStages = React.useMemo(
+    () => [
+      ["users", "departments", "entries"],
+      ["meetings", "system_tasks", "tasks"],
+    ],
+    []
+  )
+  const includeToBuckets: Record<string, CommonBucket[]> = React.useMemo(
+    () => ({
+      entries: ["late", "absent", "leave", "problems", "feedback"],
+      meetings: ["external", "internal"],
+      system_tasks: ["bz"],
+      tasks: ["blocked", "oneH", "personal", "r1", "priority"],
+    }),
+    []
+  )
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
@@ -856,12 +935,103 @@ export default function CommonViewPage() {
     }
   }, [departments, internalMeetingDepartmentId, user?.department_id])
 
+  const applyCommonViewPayload = React.useCallback(
+    (payload: CommonViewPayload) => {
+      if (payload.users) setUsers(payload.users)
+      if (payload.departments) setDepartments(payload.departments)
+      setCommonViewMeta({
+        requested: payload.requested,
+        included: payload.included,
+        missing: payload.missing,
+        guardrails: payload.guardrails || null,
+      })
+      setCommonData((prev) => {
+        let next = { ...prev }
+        for (const includeKey of payload.included) {
+          const buckets = includeToBuckets[includeKey] || []
+          for (const bucket of buckets) {
+            next = { ...next, [bucket]: payload.items[bucket] }
+          }
+        }
+        return next
+      })
+    },
+    [includeToBuckets]
+  )
+
+  const fetchCommonViewStage = React.useCallback(
+    async (weekStartIso: string, includeList: string[]) => {
+      const includeKey = includeList.join(",")
+      const cacheKey = `${weekStartIso}|${includeKey}|${user?.role || "anon"}|${user?.department_id || ""}`
+      const cached = COMMON_VIEW_CACHE.get(cacheKey)
+      if (cached) {
+        applyCommonViewPayload(cached.payload)
+      }
+      const headers: Record<string, string> = {}
+      if (cached?.etag) headers["If-None-Match"] = cached.etag
+      const deptParam = commonDepartmentId
+        ? `&department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "&include_all_departments=true"
+      const res = await apiFetch(
+        `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(includeKey)}${deptParam}`,
+        { headers }
+      )
+      if (res?.status === 304 && cached) {
+        applyCommonViewPayload(cached.payload)
+        return
+      }
+      if (!res?.ok) {
+        throw new Error(`common_view_failed_${res?.status}`)
+      }
+      const payload = (await res.json()) as CommonViewPayload
+      const etag = res.headers.get("ETag")
+      COMMON_VIEW_CACHE.set(cacheKey, { etag, payload, cachedAt: Date.now() })
+      applyCommonViewPayload(payload)
+    },
+    [apiFetch, applyCommonViewPayload, user?.department_id, user?.role, commonDepartmentId]
+  )
+
   // Load data on mount
   React.useEffect(() => {
     let mounted = true
     async function load() {
       try {
         if (mounted) setDataLoaded(false)
+        if (commonViewAggregateEnabled) {
+          const weekStartIso = toISODate(weekStart)
+          try {
+            if (mounted) {
+              setCommonViewMeta(null)
+              setCommonData({
+                late: [],
+                absent: [],
+                leave: [],
+                blocked: [],
+                oneH: [],
+                personal: [],
+                external: [],
+                internal: [],
+                r1: [],
+                problems: [],
+                feedback: [],
+                priority: [],
+                bz: [],
+              })
+            }
+            for (const includeList of commonViewIncludeStages) {
+              await fetchCommonViewStage(weekStartIso, includeList)
+            }
+            if (mounted) {
+              if (selectedDates.size === 0) {
+                setSelectedDates(new Set([toISODate(new Date())]))
+              }
+              setDataLoaded(true)
+            }
+            return
+          } catch (err) {
+            console.error("Failed to load aggregate common view data", err)
+          }
+        }
         const weekStartIso = toISODate(weekStart)
         const weekEndIso = toISODate(addDays(weekStart, 6))
         const weekDates = getWeekdays(weekStart).map(toISODate)
@@ -1574,7 +1744,37 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, user?.role, user?.department_id, weekStart])
+  }, [apiFetch, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
+
+  React.useEffect(() => {
+    if (!externalMeetingsOpen) return
+    const run = async () => {
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=external`)
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setExternalMeetings(meetings)
+      }
+    }
+    void run()
+  }, [externalMeetingsOpen, apiFetch, commonDepartmentId])
+
+  React.useEffect(() => {
+    if (!internalMeetingsOpen) return
+    const run = async () => {
+      const meetingsBase = commonDepartmentId
+        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+        : "/meetings?include_all_departments=true"
+      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=internal`)
+      if (meetingsRes?.ok) {
+        const meetings = (await meetingsRes.json()) as Meeting[]
+        setInternalMeetings(meetings)
+      }
+    }
+    void run()
+  }, [internalMeetingsOpen, apiFetch, commonDepartmentId])
 
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
@@ -1620,106 +1820,8 @@ export default function CommonViewPage() {
     const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const personal = commonData.personal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const getMeetingOwnerName = (meeting: Meeting) => {
-      const ownerUser = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
-      return ownerUser?.full_name || ownerUser?.username || "Unknown"
-    }
-    const getMeetingDepartmentName = (meeting: Meeting) => {
-      const department = departments.find((d) => d.id === meeting.department_id)
-      return department?.name || "Department TBD"
-    }
-    const getMeetingTimeLabel = (meeting: Meeting, date: Date | null) => {
-      if (!meeting.starts_at) return "TBD"
-      if (date) return formatTime(date)
-      const timeValue = toMeetingTimeValue(meeting.starts_at)
-      return timeValue || "TBD"
-    }
-    const meetingOccursOnDate = (meeting: Meeting, dateStr: string) => {
-      const date = fromISODate(dateStr)
-      if (Number.isNaN(date.getTime())) return false
-      if (meeting.recurrence_type === "weekly") {
-        const dayIndex = (date.getDay() + 6) % 7
-        return (meeting.recurrence_days_of_week || []).includes(dayIndex)
-      }
-      if (meeting.recurrence_type === "monthly") {
-        return (meeting.recurrence_days_of_month || []).includes(date.getDate())
-      }
-      if (meeting.recurrence_type === "yearly") {
-        const month = meeting.starts_at ? new Date(meeting.starts_at).getMonth() + 1 : null
-        const day = meeting.recurrence_days_of_month?.[0] || (meeting.starts_at ? new Date(meeting.starts_at).getDate() : null)
-        if (!month || !day) return false
-        return date.getMonth() + 1 === month && date.getDate() === day
-      }
-      return false
-    }
-    const external: ExternalItem[] = []
-    for (const meeting of externalMeetings) {
-      const ownerName = getMeetingOwnerName(meeting)
-      const departmentName = getMeetingDepartmentName(meeting)
-      const platform = meeting.platform?.trim() || "TBD"
-      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
-        const timeLabel = getMeetingTimeLabel(meeting, null)
-        for (const dateStr of datesToUse) {
-          if (!meetingOccursOnDate(meeting, dateStr)) continue
-          external.push({
-            title: meeting.title || "External meeting",
-            date: dateStr,
-            time: timeLabel,
-            platform,
-            owner: ownerName,
-            department: departmentName,
-          })
-        }
-      } else {
-        const resolvedDate = resolveExternalMeetingDate(meeting)
-        if (!resolvedDate) continue
-        const dateStr = toISODate(resolvedDate)
-        if (!inSelectedDates(dateStr)) continue
-        external.push({
-          title: meeting.title || "External meeting",
-          date: dateStr,
-          time: getMeetingTimeLabel(meeting, resolvedDate),
-          platform,
-          owner: ownerName,
-          department: departmentName,
-        })
-      }
-    }
-    const internal: InternalItem[] = []
-    for (const meeting of internalMeetings) {
-      const ownerName = getMeetingOwnerName(meeting)
-      const departmentName = getMeetingDepartmentName(meeting)
-      const platform = meeting.platform?.trim() || "TBD"
-      if (meeting.recurrence_type && meeting.recurrence_type !== "none") {
-        const timeLabel = getMeetingTimeLabel(meeting, null)
-        for (const dateStr of datesToUse) {
-          if (!meetingOccursOnDate(meeting, dateStr)) continue
-          internal.push({
-            title: meeting.title || "Internal meeting",
-            date: dateStr,
-            time: timeLabel,
-            platform,
-            owner: ownerName,
-            department: departmentName,
-          })
-        }
-      } else {
-        const resolvedDate = resolveExternalMeetingDate(meeting)
-        if (!resolvedDate) continue
-        const dateStr = toISODate(resolvedDate)
-        if (!inSelectedDates(dateStr)) continue
-        internal.push({
-          title: meeting.title || "Internal meeting",
-          date: dateStr,
-          time: getMeetingTimeLabel(meeting, resolvedDate),
-          platform,
-          owner: ownerName,
-          department: departmentName,
-        })
-      }
-    }
-    const filteredExternal = external.filter((x) => !fullyCoveredDates.has(x.date))
-    const filteredInternal = internal.filter((x) => !fullyCoveredDates.has(x.date))
+    const external = commonData.external.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const internal = commonData.internal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const problems = commonData.problems.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -1737,8 +1839,8 @@ export default function CommonViewPage() {
       blocked,
       oneH,
       personal,
-      external: filteredExternal,
-      internal: filteredInternal,
+      external,
+      internal,
       r1,
       problems,
       feedback,
@@ -1746,7 +1848,7 @@ export default function CommonViewPage() {
       priority: filteredPriority,
       fullyCoveredDates,
     }
-  }, [commonData, selectedDates, externalMeetings, internalMeetings, users, weekISOs, departments])
+  }, [commonData, selectedDates, users, weekISOs])
 
   // Common people for priority (from users)
   const commonPeople = React.useMemo(() => {
