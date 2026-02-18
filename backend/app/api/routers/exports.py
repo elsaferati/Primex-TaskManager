@@ -544,6 +544,13 @@ def _resolve_period(finish_period: str | None, date_value: date | datetime | Non
     return "AM"
 
 
+def _is_vs_vl_project_label(label: str | None) -> bool:
+    if not label:
+        return False
+    upper = label.upper()
+    return "VS" in upper or "VL" in upper
+
+
 def _planned_range_for_task(task: Task) -> tuple[date | None, date | None]:
     if task.due_date is None:
         return None, None
@@ -2076,6 +2083,12 @@ async def _daily_report_rows_for_user(
             fast_index += 1
         else:
             project_label = project_map.get(task.project_id, "-")
+            if task.finish_period in {"AM", "PM"}:
+                period = task.finish_period
+            elif _is_vs_vl_project_label(project_label):
+                period = "AM/PM"
+            else:
+                period = _resolve_period(task.finish_period, base_dt)
             project_rows.append(
                 [
                     "",
