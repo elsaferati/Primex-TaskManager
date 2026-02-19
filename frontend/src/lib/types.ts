@@ -76,6 +76,7 @@ export interface User {
   role: UserRole
   department_id?: string | null
   is_active: boolean
+  weekly_planner_sort_order?: number | null
 }
 
 export interface UserLookup {
@@ -85,6 +86,7 @@ export interface UserLookup {
   role: UserRole
   department_id?: string | null
   is_active: boolean
+  weekly_planner_sort_order?: number | null
 }
 
 export interface Department {

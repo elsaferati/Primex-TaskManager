@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     role: UserRole
     department_id: uuid.UUID | None = None
     is_active: bool
+    weekly_planner_sort_order: int | None = None
 
 
 class UserLookup(BaseModel):
@@ -25,6 +26,7 @@ class UserLookup(BaseModel):
     role: UserRole
     department_id: uuid.UUID | None = None
     is_active: bool
+    weekly_planner_sort_order: int | None = None
 
 
 def _validate_password(value: str) -> str:

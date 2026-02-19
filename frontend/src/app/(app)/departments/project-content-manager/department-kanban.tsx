@@ -94,6 +94,12 @@ function getProjectPhases(project: Project): string[] {
   return ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"]
 }
 
+function isTemplateProject(project: Project): boolean {
+  if (project.is_template) return true
+  const title = (project.title || project.name || "").trim().toUpperCase()
+  return title === "TT"
+}
+
 const WEEKDAYS_SQ = [
   "Monday",
   "Tuesday",
@@ -1327,7 +1333,7 @@ export default function DepartmentKanban() {
           systemDepartmentId: dep.id,
           systemTasksKey: `${dep.id}|${systemDateKey}`,
           internalNoteDepartmentId: dep.id,
-          internalNoteProjects: projects.filter((p) => !p.is_template),
+          internalNoteProjects: projects.filter((p) => !isTemplateProject(p)),
         }
         applyBootstrap(payload)
         setDepartmentBootstrapCache(cacheKey, payload)
@@ -1769,7 +1775,9 @@ export default function DepartmentKanban() {
       return p.project_type !== "GENERAL" && title !== "GENERAL"
     })
     if (showTemplates) {
-      next = next.filter((p) => p.is_template)
+      next = next.filter((p) => isTemplateProject(p))
+    } else {
+      next = next.filter((p) => !isTemplateProject(p))
     }
     if (viewMode === "mine" && user?.id) {
       next = next.filter((p) => {
@@ -5120,7 +5128,7 @@ export default function DepartmentKanban() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
                           <span className="text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100 truncate">{project.title || project.name}</span>
-                          {project.is_template && (
+                          {isTemplateProject(project) && (
                             <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50 flex-shrink-0">Template</Badge>
                           )}
                         </div>

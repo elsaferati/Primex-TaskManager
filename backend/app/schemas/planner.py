@@ -140,3 +140,9 @@ class WeeklyPlannerLegendEntryOut(BaseModel):
 class WeeklyPlannerLegendEntryUpdate(BaseModel):
     """Update payload for legend entry answer"""
     answer_text: str | None = None
+
+
+class WeeklyPlannerUserOrderUpdate(BaseModel):
+    """Update weekly planner user ordering for a department."""
+    department_id: uuid.UUID
+    ordered_user_ids: list[uuid.UUID]

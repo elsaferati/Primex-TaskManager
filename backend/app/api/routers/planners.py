@@ -46,6 +46,7 @@ from app.schemas.planner import (
     WeeklyPlannerDay,
     WeeklyPlannerLegendEntryOut,
     WeeklyPlannerLegendEntryUpdate,
+    WeeklyPlannerUserOrderUpdate,
     WeeklyPlannerProject,
     WeeklyPlannerResponse,
     WeeklyTableDay,
@@ -2132,9 +2133,15 @@ async def weekly_table_planner(
     # Debug: Log task counts
     logger.debug(f"Weekly planner: Found {len(week_tasks)} tasks for week {week_start_date} to {week_end}")
     
+    def _weekly_user_sort_key(u: User) -> tuple[int, int, str]:
+        name = (u.full_name or u.username or "").strip().lower()
+        order_value = u.weekly_planner_sort_order
+        return (1 if order_value is None else 0, order_value or 0, name)
+
     for dept in departments:
         # Show only users from this specific department (exclude users with no department)
         dept_users = [u for u in all_users if u.department_id is not None and u.department_id == dept.id]
+        dept_users = sorted(dept_users, key=_weekly_user_sort_key)
         # Show tasks that belong to users in this department (regardless of task.department_id)
         dept_user_ids = {u.id for u in dept_users}
         dept_tasks = []
@@ -2483,6 +2490,60 @@ async def weekly_table_planner(
         departments=departments_data,
         saved_plan_id=saved_plan_id,
     )
+
+
+@router.patch("/weekly-table/user-order")
+async def update_weekly_table_user_order(
+    payload: WeeklyPlannerUserOrderUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> Response:
+    ensure_manager_or_admin(user)
+    ensure_department_access(user, payload.department_id)
+
+    dept = (
+        await db.execute(select(Department).where(Department.id == payload.department_id))
+    ).scalar_one_or_none()
+    if dept is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    users = (
+        await db.execute(
+            select(User)
+            .where(User.department_id == payload.department_id)
+            .where(User.is_active == True)
+        )
+    ).scalars().all()
+    dept_user_map = {u.id: u for u in users}
+    dept_user_ids = set(dept_user_map.keys())
+    if not dept_user_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active users found for department")
+
+    ordered_unique_ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for user_id in payload.ordered_user_ids or []:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        ordered_unique_ids.append(user_id)
+
+    invalid_ids = [user_id for user_id in ordered_unique_ids if user_id not in dept_user_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ordered users must belong to the selected department",
+        )
+
+    # Reset all user orders in this department
+    for dept_user in users:
+        dept_user.weekly_planner_sort_order = None
+
+    # Apply new order
+    for index, user_id in enumerate(ordered_unique_ids, start=1):
+        dept_user_map[user_id].weekly_planner_sort_order = index
+
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _build_weekly_snapshot_payload(
