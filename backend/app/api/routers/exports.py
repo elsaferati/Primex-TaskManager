@@ -170,6 +170,18 @@ def _frequency_label(value: str | None) -> str:
 
 
 _WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _month_cycle_labels(start_month: int, interval: int) -> list[str]:
+    if start_month < 1 or start_month > 12 or interval <= 0:
+        return []
+    steps = 12 // interval
+    labels: list[str] = []
+    for i in range(steps):
+        month = ((start_month - 1 + (interval * i)) % 12) + 1
+        labels.append(_MONTH_LABELS[month - 1])
+    return labels
 
 
 def _system_task_schedule_label(template: SystemTaskTemplate) -> str:
@@ -191,15 +203,53 @@ def _system_task_schedule_label(template: SystemTaskTemplate) -> str:
             return ""
         return ", ".join(_WEEKDAY_LABELS[day] for day in sorted(day_values))
 
+    if frequency == "DAILY":
+        return "everyday"
+
     if frequency in {"MONTHLY", "3_MONTHS", "6_MONTHS"}:
         day_of_month = template.day_of_month
         if day_of_month is None:
             return ""
         if day_of_month == 0:
-            return "end_of_month"
-        if day_of_month == -1:
-            return "first_working_day"
-        return str(day_of_month)
+            day_label = "end_of_month"
+        elif day_of_month == -1:
+            day_label = "first_working_day"
+        elif day_of_month > 0:
+            day_label = f"{day_of_month:02d}"
+        else:
+            day_label = str(day_of_month)
+
+        if frequency == "MONTHLY":
+            return day_label
+
+        interval = 3 if frequency == "3_MONTHS" else 6
+        start_month = template.month_of_year
+        month_labels = _month_cycle_labels(start_month or 0, interval) if start_month else []
+        if month_labels:
+            return f"{day_label} {', '.join(month_labels)}"
+        return day_label
+
+    if frequency == "YEARLY":
+        month_label = ""
+        month_of_year = template.month_of_year
+        if month_of_year is not None and 1 <= month_of_year <= 12:
+            month_label = _MONTH_LABELS[month_of_year - 1]
+
+        day_label = ""
+        day_of_month = template.day_of_month
+        if day_of_month is not None:
+            if day_of_month == 0:
+                day_label = "end_of_month"
+            elif day_of_month == -1:
+                day_label = "first_working_day"
+            elif day_of_month > 0:
+                day_label = f"{day_of_month:02d}"
+            else:
+                day_label = str(day_of_month)
+
+        if day_label and month_label:
+            return f"{day_label} {month_label}"
+        return day_label or month_label
 
     return ""
 

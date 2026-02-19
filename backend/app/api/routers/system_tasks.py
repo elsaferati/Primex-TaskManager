@@ -35,7 +35,11 @@ from app.schemas.system_task_template import (
     SystemTaskTemplateOut,
     SystemTaskTemplateUpdate,
 )
-from app.services.system_task_schedule import matches_template_date, should_reopen_system_task
+from app.services.system_task_schedule import (
+    matches_template_date,
+    previous_occurrence_date,
+    should_reopen_system_task,
+)
 from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
 
 
@@ -300,13 +304,7 @@ def _task_row_to_out(
 
 
 def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
-    """Find the most recent occurrence date on or before target."""
-    candidate = target
-    for _ in range(370):
-        if matches_template_date(template, candidate):
-            return candidate
-        candidate = candidate - timedelta(days=1)
-    return target
+    return previous_occurrence_date(template, target)
 
 
 @router.get("", response_model=list[SystemTaskOut])
@@ -740,10 +738,26 @@ async def set_system_task_occurrence_status(
         )
     ).scalar_one_or_none()
     if occ is None:
+        fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
+        await ensure_occurrences_in_range(
+            db=db,
+            start=fallback_date,
+            end=fallback_date,
+            template_ids=[tmpl.id],
+        )
+        occ = (
+            await db.execute(
+                select(SystemTaskOccurrence)
+                .where(SystemTaskOccurrence.template_id == tmpl.id)
+                .where(SystemTaskOccurrence.user_id == user.id)
+                .where(SystemTaskOccurrence.occurrence_date == fallback_date)
+            )
+        ).scalar_one_or_none()
+    if occ is None:
         # This shouldn't happen if ensure_occurrences_in_range worked, but handle it gracefully
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Occurrence not available for this user. Please refresh and try again."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Occurrence not available for this user. Please refresh and try again.",
         )
 
     now = datetime.now(timezone.utc)
@@ -787,6 +801,22 @@ async def create_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
+    if payload.frequency == FrequencyType.YEARLY:
+        if payload.month_of_year is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Start month is required for yearly tasks",
+            )
+        if payload.month_of_year < 1 or payload.month_of_year > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
+    if payload.frequency in (FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
+        if payload.day_of_month is None or payload.month_of_year is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Day of month and start month are required for 3/6-month tasks",
+            )
+        if payload.month_of_year < 1 or payload.month_of_year > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
     days_of_week = payload.days_of_week
     if days_of_week is None and payload.day_of_week is not None:
         days_of_week = [payload.day_of_week]
@@ -1038,6 +1068,31 @@ async def update_system_task_template(
     department_set = "department_id" in fields_set
     assignee_set = "default_assignee_id" in fields_set or "assignee_ids" in fields_set
     days_set = "days_of_week" in fields_set or "day_of_week" in fields_set
+    schedule_fields_set = (
+        "frequency" in fields_set
+        or "day_of_month" in fields_set
+        or "month_of_year" in fields_set
+    )
+    effective_frequency = payload.frequency if "frequency" in fields_set else template.frequency
+    if schedule_fields_set and effective_frequency == FrequencyType.YEARLY:
+        effective_month = payload.month_of_year if "month_of_year" in fields_set else template.month_of_year
+        if effective_month is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Start month is required for yearly tasks",
+            )
+        if effective_month < 1 or effective_month > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
+    if schedule_fields_set and effective_frequency in (FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
+        effective_day = payload.day_of_month if "day_of_month" in fields_set else template.day_of_month
+        effective_month = payload.month_of_year if "month_of_year" in fields_set else template.month_of_year
+        if effective_day is None or effective_month is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Day of month and start month are required for 3/6-month tasks",
+            )
+        if effective_month < 1 or effective_month > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
     days_of_week = payload.days_of_week
     if days_of_week is None and "day_of_week" in fields_set:
         if payload.day_of_week is not None:

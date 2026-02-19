@@ -201,6 +201,25 @@ function resolveDepartmentId(value: string): string | null {
   return resolveScope(value) === "DEPARTMENT" ? value : null
 }
 
+function isCycleFrequency(value: SystemTaskFrequency | null | undefined) {
+  return value === "3_MONTHS" || value === "6_MONTHS"
+}
+
+function isYearlyFrequency(value: SystemTaskFrequency | null | undefined) {
+  return value === "YEARLY"
+}
+
+function resolveDayOfMonth(value: string): number | null {
+  if (!value) return null
+  if (value === END_OF_MONTH_VALUE) return 0
+  if (value === FIRST_WORKING_DAY_VALUE) return -1
+  return Number(value)
+}
+
+function resolveMonthOfYear(value: string): number | null {
+  return value && value !== EMPTY_VALUE ? Number(value) : null
+}
+
 function isGlobalScopeValue(value: string) {
   return value === ALL_DEPARTMENTS_VALUE || value === GA_DEPARTMENTS_VALUE
 }
@@ -1097,6 +1116,16 @@ export function SystemTasksView({
     }
     const scope = resolveScope(finalDeptId)
     const weeklyDays = frequency === "WEEKLY" ? normalizeDayValues(daysOfWeek) : []
+    const resolvedDayOfMonth = resolveDayOfMonth(dayOfMonth)
+    const resolvedMonthOfYear = resolveMonthOfYear(monthOfYear)
+    if (isCycleFrequency(frequency) && (resolvedDayOfMonth == null || resolvedMonthOfYear == null)) {
+      toast.error("Day of month and start month are required for 3/6-month tasks.")
+      return
+    }
+    if (isYearlyFrequency(frequency) && resolvedMonthOfYear == null) {
+      toast.error("Start month is required for yearly tasks.")
+      return
+    }
     if (requiresAlignment && !alignmentTime) {
       toast.error("BZ time is required when BZ is enabled.")
       return
@@ -1120,15 +1149,9 @@ export function SystemTasksView({
         day_of_week: weeklyDays.length ? weeklyDays[0] : null,
         days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
-          dayOfMonth === END_OF_MONTH_VALUE
-            ? 0
-            : dayOfMonth === FIRST_WORKING_DAY_VALUE
-              ? -1
-              : dayOfMonth
-                ? Number(dayOfMonth)
-                : null,
+          resolvedDayOfMonth,
         month_of_year:
-          monthOfYear && monthOfYear !== EMPTY_VALUE ? Number(monthOfYear) : null,
+          resolvedMonthOfYear,
         is_active: isActive,
       }
       const res = await apiFetch("/system-tasks", {
@@ -1221,6 +1244,26 @@ export function SystemTasksView({
     }
     const scope = resolveScope(finalDeptId)
     const weeklyDays = editFrequency === "WEEKLY" ? normalizeDayValues(editDaysOfWeek) : []
+    const resolvedEditDayOfMonth = resolveDayOfMonth(editDayOfMonth)
+    const resolvedEditMonthOfYear = resolveMonthOfYear(editMonthOfYear)
+    const originalDay = editTemplate.day_of_month ?? null
+    const originalMonth = editTemplate.month_of_year ?? null
+    const scheduleChanged =
+      editFrequency !== editTemplate.frequency ||
+      resolvedEditDayOfMonth !== originalDay ||
+      resolvedEditMonthOfYear !== originalMonth
+    if (
+      isCycleFrequency(editFrequency) &&
+      scheduleChanged &&
+      (resolvedEditDayOfMonth == null || resolvedEditMonthOfYear == null)
+    ) {
+      toast.error("Day of month and start month are required for 3/6-month tasks.")
+      return
+    }
+    if (isYearlyFrequency(editFrequency) && scheduleChanged && resolvedEditMonthOfYear == null) {
+      toast.error("Start month is required for yearly tasks.")
+      return
+    }
     if (editRequiresAlignment && !editAlignmentTime) {
       toast.error("BZ time is required when BZ is enabled.")
       return
@@ -1244,15 +1287,9 @@ export function SystemTasksView({
         day_of_week: weeklyDays.length ? weeklyDays[0] : null,
         days_of_week: weeklyDays.length ? weeklyDays : null,
         day_of_month:
-          editDayOfMonth === END_OF_MONTH_VALUE
-            ? 0
-            : editDayOfMonth === FIRST_WORKING_DAY_VALUE
-              ? -1
-              : editDayOfMonth
-                ? Number(editDayOfMonth)
-                : null,
+          resolvedEditDayOfMonth,
         month_of_year:
-          editMonthOfYear && editMonthOfYear !== EMPTY_VALUE ? Number(editMonthOfYear) : null,
+          resolvedEditMonthOfYear,
         is_active: editIsActive,
       }
       const templateId = editTemplate.template_id ?? editTemplate.id
@@ -2574,14 +2611,20 @@ export function SystemTasksView({
                                   </SelectItem>
                                 ))}
                               </SelectContent>
-                            </Select>
-                            <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Month (optional)</Label>
-                            <Select value={monthOfYear} onValueChange={setMonthOfYear}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select month" />
+                          </Select>
+                          <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>
+                            {isCycleFrequency(frequency)
+                              ? "Start month"
+                              : isYearlyFrequency(frequency)
+                                ? "Month (required)"
+                                : "Month (optional)"}
+                          </Label>
+                          <Select value={monthOfYear} onValueChange={setMonthOfYear}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select month" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value={EMPTY_VALUE}>None</SelectItem>
@@ -2591,10 +2634,10 @@ export function SystemTasksView({
                                   </SelectItem>
                                 ))}
                               </SelectContent>
-                            </Select>
-                          </div>
+                          </Select>
                         </div>
-                      )}
+                      </div>
+                    )}
                     <details className="rounded-lg border border-border/60 bg-muted/20 p-3">
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
                         More details
@@ -2969,14 +3012,20 @@ export function SystemTasksView({
                                   </SelectItem>
                                 ))}
                               </SelectContent>
-                            </Select>
-                            <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Month (optional)</Label>
-                            <Select value={editMonthOfYear} onValueChange={setEditMonthOfYear}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select month" />
+                          </Select>
+                          <div className="text-[13px] text-muted-foreground">{weekendShiftHint}</div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>
+                            {isCycleFrequency(editFrequency)
+                              ? "Start month"
+                              : isYearlyFrequency(editFrequency)
+                                ? "Month (required)"
+                                : "Month (optional)"}
+                          </Label>
+                          <Select value={editMonthOfYear} onValueChange={setEditMonthOfYear}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select month" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value={EMPTY_VALUE}>None</SelectItem>

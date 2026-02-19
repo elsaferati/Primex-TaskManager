@@ -4,9 +4,13 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from time import perf_counter
 from typing import Any
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
@@ -121,11 +125,47 @@ def _week_start_for(value: date | None) -> date:
 def _week_dates(week_start: date) -> list[date]:
     return [week_start + timedelta(days=i) for i in range(5)]
 
+def _tirane_tz():
+    tz = None
+    if ZoneInfo is not None:
+        try:
+            tz = ZoneInfo("Europe/Tirane")
+        except Exception:
+            try:
+                tz = ZoneInfo("Europe/Pristina")
+            except Exception:
+                try:
+                    tz = ZoneInfo("Europe/Belgrade")
+                except Exception:
+                    tz = None
+    if tz is None:
+        try:
+            import pytz
+
+            try:
+                tz = pytz.timezone("Europe/Tirane")
+            except Exception:
+                try:
+                    tz = pytz.timezone("Europe/Pristina")
+                except Exception:
+                    tz = pytz.timezone("Europe/Belgrade")
+        except ImportError:
+            tz = timezone(timedelta(hours=1))
+    return tz
+
+def _as_tirane_dt(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo:
+        return value.astimezone(_tirane_tz())
+    return value
+
 
 def _format_time(value: datetime | None) -> str:
     if value is None:
         return "TBD"
-    return value.strftime("%H:%M")
+    local = _as_tirane_dt(value) or value
+    return local.strftime("%H:%M")
 
 
 def _parse_annual_leave(entry: CommonEntry) -> tuple[date, date, bool, str | None, str | None, str | None, bool]:
@@ -775,7 +815,8 @@ async def get_common_view(
                 date_source = meeting.starts_at or meeting.created_at
                 if date_source is None:
                     continue
-                day = date_source.date()
+                local_date_source = _as_tirane_dt(date_source) or date_source
+                day = local_date_source.date()
                 if not (week_start_date <= day <= week_end):
                     continue
                 target = "external" if meeting.meeting_type == "external" else "internal"
