@@ -35,7 +35,11 @@ from app.schemas.system_task_template import (
     SystemTaskTemplateOut,
     SystemTaskTemplateUpdate,
 )
-from app.services.system_task_schedule import matches_template_date, should_reopen_system_task
+from app.services.system_task_schedule import (
+    matches_template_date,
+    previous_occurrence_date,
+    should_reopen_system_task,
+)
 from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
 
 
@@ -300,13 +304,7 @@ def _task_row_to_out(
 
 
 def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
-    """Find the most recent occurrence date on or before target."""
-    candidate = target
-    for _ in range(370):
-        if matches_template_date(template, candidate):
-            return candidate
-        candidate = candidate - timedelta(days=1)
-    return target
+    return previous_occurrence_date(template, target)
 
 
 @router.get("", response_model=list[SystemTaskOut])
@@ -740,10 +738,26 @@ async def set_system_task_occurrence_status(
         )
     ).scalar_one_or_none()
     if occ is None:
+        fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
+        await ensure_occurrences_in_range(
+            db=db,
+            start=fallback_date,
+            end=fallback_date,
+            template_ids=[tmpl.id],
+        )
+        occ = (
+            await db.execute(
+                select(SystemTaskOccurrence)
+                .where(SystemTaskOccurrence.template_id == tmpl.id)
+                .where(SystemTaskOccurrence.user_id == user.id)
+                .where(SystemTaskOccurrence.occurrence_date == fallback_date)
+            )
+        ).scalar_one_or_none()
+    if occ is None:
         # This shouldn't happen if ensure_occurrences_in_range worked, but handle it gracefully
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Occurrence not available for this user. Please refresh and try again."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Occurrence not available for this user. Please refresh and try again.",
         )
 
     now = datetime.now(timezone.utc)

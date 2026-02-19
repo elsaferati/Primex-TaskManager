@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.models.enums import FrequencyType, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
@@ -68,6 +68,16 @@ def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
         return day_matches
 
     return True
+
+
+def previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
+    """Find the most recent occurrence date on or before target."""
+    candidate = target
+    for _ in range(370):
+        if matches_template_date(template, candidate):
+            return candidate
+        candidate = candidate - timedelta(days=1)
+    return target
 
 
 def should_reopen_system_task(

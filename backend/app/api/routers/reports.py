@@ -265,7 +265,6 @@ async def daily_report(
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
         .where(Task.due_date.is_not(None))
-        .where(or_(Task.completed_at.is_(None), and_(Task.completed_at >= day_start, Task.completed_at < day_end)))
     )
     if department_id is not None:
         task_stmt = task_stmt.where(or_(Task.department_id == department_id, Project.department_id == department_id))
@@ -330,6 +329,7 @@ async def daily_report(
             continue
 
         completed_today = completed_on_day(t.completed_at, day)
+        is_done = t.completed_at is not None or t.status == TaskStatus.DONE
         if completed_today:
             tasks_today.append(
                 DailyReportTaskItem(
@@ -365,7 +365,7 @@ async def daily_report(
                 )
             )
         elif planned_end < day:
-            if t.completed_at is not None or t.status == TaskStatus.DONE:
+            if is_done:
                 continue
             late_days = business_days_between(planned_end, day)
             tasks_overdue.append(

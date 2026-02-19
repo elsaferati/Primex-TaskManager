@@ -22,6 +22,8 @@ from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
+from app.models.system_task_occurrence import SystemTaskOccurrence
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
@@ -35,6 +37,8 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
+from app.services.system_task_occurrences import ensure_occurrences_in_range
+from app.services.system_task_schedule import previous_occurrence_date
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
 
@@ -1291,6 +1295,7 @@ async def update_task(
 
     # Track if status was explicitly set in payload to prevent auto-status from overriding it
     status_was_explicitly_set = payload.status is not None
+    status_changed = False
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -1419,6 +1424,7 @@ async def update_task(
     if payload.status is not None and payload.status != task.status:
         old_status = task.status
         task.status = payload.status
+        status_changed = True
         if task.status == TaskStatus.DONE:
             task.completed_at = task.completed_at or datetime.now(timezone.utc)
         else:
@@ -1777,6 +1783,38 @@ async def update_task(
                   )
 
     await ensure_ko_user_is_task_assignee(db, task=task)
+
+    if status_changed and task.system_template_origin_id and task.assigned_to is not None:
+        tmpl = (
+            await db.execute(
+                select(SystemTaskTemplate).where(SystemTaskTemplate.id == task.system_template_origin_id)
+            )
+        ).scalar_one_or_none()
+        if tmpl is not None:
+            base_dt = task.start_date or task.created_at
+            if base_dt is None:
+                base_day = datetime.now(timezone.utc).date()
+            else:
+                base_day = base_dt.astimezone(timezone.utc).date() if base_dt.tzinfo else base_dt.date()
+            occurrence_date = previous_occurrence_date(tmpl, base_day)
+            await ensure_occurrences_in_range(
+                db=db,
+                start=occurrence_date,
+                end=occurrence_date,
+                template_ids=[tmpl.id],
+            )
+            occ = (
+                await db.execute(
+                    select(SystemTaskOccurrence)
+                    .where(SystemTaskOccurrence.template_id == tmpl.id)
+                    .where(SystemTaskOccurrence.user_id == task.assigned_to)
+                    .where(SystemTaskOccurrence.occurrence_date == occurrence_date)
+                )
+            ).scalar_one_or_none()
+            if occ is not None:
+                occ_status = "DONE" if task.status == TaskStatus.DONE else "OPEN"
+                occ.status = occ_status
+                occ.acted_at = None if occ_status == "OPEN" else datetime.now(timezone.utc)
 
     after = {
         "title": task.title,
