@@ -848,6 +848,7 @@ export default function DepartmentKanban() {
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
 
   const [loading, setLoading] = React.useState(true)
+  const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
@@ -1040,26 +1041,24 @@ export default function DepartmentKanban() {
       const { silent } = options
       if (!silent) setLoading(true)
       try {
-        const depRes = await apiFetch("/departments")
+        const [depRes, usersRes] = await Promise.all([
+          apiFetch("/departments"),
+          apiFetch("/users/lookup"),
+        ])
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
         const dep = deps.find((d) => d.name === departmentName) || null
         if (!dep) return
 
-        // Fetch users first so we can filter tasks by assignee departments
-        const usersRes = await apiFetch("/users/lookup")
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
+        const [projRes, sysRes, tasksRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
-          apiFetch(`/ga-notes?department_id=${dep.id}`),
-          apiFetch(`/internal-notes?department_id=${dep.id}`),
-          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         const allProjects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const templateProjects = allProjects.filter((p) => p.is_template)
@@ -1072,9 +1071,33 @@ export default function DepartmentKanban() {
           if (t.project_id && templateProjectIds.has(t.project_id)) return false
           return true
         })
+        setDepartments(deps)
+        setDepartment(dep)
+        setUsers(allUsers)
+        setProjects(projects)
+        setTemplateProjects(templateProjects)
+        setSystemTasks(systemTasks)
+        setDepartmentTasks(nonSystemTasks)
+        setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        setSystemDepartmentId(dep.id)
+        setInternalNoteProjects(projects)
+        bootstrapSystemTasksKeyRef.current = `${dep.id}|${systemDateKey}`
+        bootstrapInternalNoteDeptIdRef.current = dep.id
+        bootstrapInternalNoteProjectsRef.current = projects
+        if (!silent) setLoading(false)
+
+        if (!silent) setLoadingExtras(true)
+        const [gaRes, internalRes, meetingsRes] = await Promise.all([
+          apiFetch(`/ga-notes?department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
+        ])
         const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
         const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
         const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        setGaNotes(gaNotes)
+        setInternalNotes(internalNotes)
+        setMeetings(meetings)
         const payload: DepartmentBootstrapPayload = {
           departments: deps,
           department: dep,
@@ -1092,13 +1115,13 @@ export default function DepartmentKanban() {
           internalNoteDepartmentId: dep.id,
           internalNoteProjects: projects,
         }
-        applyBootstrap(payload)
         setDepartmentBootstrapCache(cacheKey, payload)
       } finally {
         if (!silent) setLoading(false)
+        if (!silent) setLoadingExtras(false)
       }
     },
-    [apiFetch, applyBootstrap, cacheKey, departmentName, systemDateKey]
+    [apiFetch, cacheKey, departmentName, systemDateKey]
   )
 
   React.useEffect(() => {
@@ -1446,6 +1469,23 @@ export default function DepartmentKanban() {
     },
     [weekEnd, weekStart]
   )
+  const isTaskCompletedToday = React.useCallback(
+    (task: Task) => {
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      return completedDate ? isSameDay(completedDate, todayDate) : false
+    },
+    [todayDate]
+  )
+  const sortDoneLast = React.useCallback(<T,>(items: T[], isDone: (item: T) => boolean) => {
+    const withIndex = items.map((item, index) => ({ item, index }))
+    withIndex.sort((a, b) => {
+      const aDone = isDone(a.item)
+      const bDone = isDone(b.item)
+      if (aDone === bDone) return a.index - b.index
+      return aDone ? 1 : -1
+    })
+    return withIndex.map((entry) => entry.item)
+  }, [])
 
   const filteredProjects = React.useMemo(() => {
     const base = showTemplates ? templateProjects : projects
@@ -1728,13 +1768,22 @@ export default function DepartmentKanban() {
     return projectTasks.filter((task) => {
       const matchesRange =
         allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-      if (!matchesRange) return false
+      const completedToday = isTaskCompletedToday(task)
+      if (!matchesRange && !completedToday) return false
       if (selectedUserId !== "__all__") {
         return isTaskAssignedToUser(task, selectedUserId)
       }
       return true
     })
-  }, [projectTasks, todayDate, selectedUserId, allRange, isTaskAssignedToUser, isTaskOverlappingWeek])
+  }, [
+    projectTasks,
+    todayDate,
+    selectedUserId,
+    allRange,
+    isTaskAssignedToUser,
+    isTaskCompletedToday,
+    isTaskOverlappingWeek,
+  ])
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -1777,13 +1826,22 @@ export default function DepartmentKanban() {
     return visibleNoProjectTasks.filter((task) => {
       const matchesRange =
         allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-      if (!matchesRange) return false
+      const completedToday = isTaskCompletedToday(task)
+      if (!matchesRange && !completedToday) return false
       if (selectedUserId !== "__all__") {
         return isTaskAssignedToUser(task, selectedUserId)
       }
       return true
     })
-  }, [visibleNoProjectTasks, todayDate, selectedUserId, allRange, isTaskAssignedToUser, isTaskOverlappingWeek])
+  }, [
+    visibleNoProjectTasks,
+    todayDate,
+    selectedUserId,
+    allRange,
+    isTaskAssignedToUser,
+    isTaskCompletedToday,
+    isTaskOverlappingWeek,
+  ])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
       const date = toDate(note.created_at)
@@ -1834,8 +1892,11 @@ export default function DepartmentKanban() {
 
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      if (completedDate && !completedToday) return false
       if (completedToday) return true
+      const isDone = Boolean(completedDate) || task.status === "DONE"
+      if (isDone) {
+        return isTaskActiveForDate(task, todayDate)
+      }
 
       const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
       if (!startDate) return false
@@ -1860,8 +1921,11 @@ export default function DepartmentKanban() {
 
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      if (completedDate && !completedToday) return false
       if (completedToday) return true
+      const isDone = Boolean(completedDate) || task.status === "DONE"
+      if (isDone) {
+        return isTaskActiveForDate(task, todayDate)
+      }
 
       const dueDate = toDate(task.due_date)
       if (!dueDate) return false
@@ -1932,6 +1996,22 @@ export default function DepartmentKanban() {
     const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
     const projectRows: typeof rows = []
     let fastIndex = 0
+    const isRowDone = (row: (typeof rows)[number]) => {
+      if (row.systemStatus === "DONE") return true
+      return row.status?.toUpperCase() === "DONE"
+    }
+    const doneLast = (items: Array<(typeof rows)[number]>) => {
+      const open: Array<(typeof rows)[number]> = []
+      const done: Array<(typeof rows)[number]> = []
+      for (const item of items) {
+        if (isRowDone(item)) {
+          done.push(item)
+        } else {
+          open.push(item)
+        }
+      }
+      return [...open, ...done]
+    }
     const projectTitleByTaskId = new Map<string, string>()
     for (const item of [...(dailyReport?.tasks_today || []), ...(dailyReport?.tasks_overdue || [])]) {
       if (item.project_title) {
@@ -2128,12 +2208,13 @@ export default function DepartmentKanban() {
       return 0
     }
 
-    fastRows
+    const sortedFastRows = fastRows
       .sort((a, b) => a.order - b.order || a.index - b.index)
-      .forEach((entry) => rows.push(entry.row))
-    rows.push(...systemAmRows)
-    rows.push(...projectRows.sort(sortByTyo))
-    rows.push(...systemPmRows)
+      .map((entry) => entry.row)
+    rows.push(...doneLast(sortedFastRows))
+    rows.push(...doneLast(systemAmRows))
+    rows.push(...doneLast(projectRows.sort(sortByTyo)))
+    rows.push(...doneLast(systemPmRows))
 
     return rows
   }, [
@@ -2173,6 +2254,22 @@ export default function DepartmentKanban() {
       const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
       const projectRows: typeof rows = []
       let fastIndex = 0
+      const isRowDone = (row: (typeof rows)[number]) => {
+        if (row.systemStatus === "DONE") return true
+        return row.status?.toUpperCase() === "DONE"
+      }
+      const doneLast = (items: Array<(typeof rows)[number]>) => {
+        const open: Array<(typeof rows)[number]> = []
+        const done: Array<(typeof rows)[number]> = []
+        for (const item of items) {
+          if (isRowDone(item)) {
+            done.push(item)
+          } else {
+            open.push(item)
+          }
+        }
+        return [...open, ...done]
+      }
 
       const pushSystemRow = (row: (typeof rows)[number]) => {
         if (row.period === "PM") {
@@ -2324,12 +2421,13 @@ export default function DepartmentKanban() {
         return 0
       }
 
-      fastRows
+      const sortedFastRows = fastRows
         .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
-        .forEach((entry) => rows.push(entry.row))
-      rows.push(...systemAmRows.sort(sortByTyo))
-      rows.push(...projectRows.sort(sortByTyo))
-      rows.push(...systemPmRows.sort(sortByTyo))
+        .map((entry) => entry.row)
+      rows.push(...doneLast(sortedFastRows))
+      rows.push(...doneLast(systemAmRows.sort(sortByTyo)))
+      rows.push(...doneLast(projectRows.sort(sortByTyo)))
+      rows.push(...doneLast(systemPmRows.sort(sortByTyo)))
 
       return rows
     },
@@ -2872,6 +2970,23 @@ export default function DepartmentKanban() {
     }),
     [filteredProjects, visibleSystemTemplates, visibleNoProjectTasks, visibleGaNotes, visibleInternalNotes.length, visibleMeetings, todayProjectTasks, todayNoProjectTasks, todayOpenNotes, todaySystemTasks, todayMeetings]
   )
+  const todayProjectTasksSorted = React.useMemo(
+    () => sortDoneLast(todayProjectTasks, (task) => taskStatusValue(task) === "DONE"),
+    [sortDoneLast, todayProjectTasks]
+  )
+  const todayNoProjectTasksSorted = React.useMemo(
+    () => sortDoneLast(todayNoProjectTasks, (task) => taskStatusValue(task) === "DONE"),
+    [sortDoneLast, todayNoProjectTasks]
+  )
+  const todaySystemTasksSorted = React.useMemo(
+    () =>
+      sortDoneLast(todaySystemTasks, (task) => {
+        const templateId = task.template_id || task.id
+        const statusValue = templateId ? systemOccurrenceStatusByTemplate.get(templateId) : null
+        return statusValue === "DONE"
+      }),
+    [sortDoneLast, todaySystemTasks, systemOccurrenceStatusByTemplate]
+  )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
   const gaTableDirty = gaTableInput !== (gaTableEntry?.content ?? "")
 
@@ -2921,6 +3036,31 @@ export default function DepartmentKanban() {
     void run()
     return () => {
       cancelled = true
+    }
+  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+
+  const refreshDailyReport = React.useCallback(async () => {
+    if (activeTab !== "all") return
+    if (viewMode === "department" && selectedUserId === "__all__") return
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+    if (!department?.id || !targetUserId) return
+    try {
+      const qs = new URLSearchParams({
+        day: todayIso,
+        department_id: department.id,
+        user_id: targetUserId,
+      })
+      const res = await apiFetch(`/reports/daily?${qs.toString()}`)
+      if (!res.ok) return
+      const payload = (await res.json()) as DailyReportResponse
+      setDailyReport(payload)
+    } catch {
+      // ignore refresh failures
     }
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
 
@@ -3119,8 +3259,15 @@ export default function DepartmentKanban() {
         normal.push(t)
       }
     }
-    return { normal, personal, ga, blocked, oneHour, r1 }
-  }, [visibleNoProjectTasks])
+    return {
+      normal: sortDoneLast(normal, (task) => taskStatusValue(task) === "DONE"),
+      personal: sortDoneLast(personal, (task) => taskStatusValue(task) === "DONE"),
+      ga: sortDoneLast(ga, (task) => taskStatusValue(task) === "DONE"),
+      blocked: sortDoneLast(blocked, (task) => taskStatusValue(task) === "DONE"),
+      oneHour: sortDoneLast(oneHour, (task) => taskStatusValue(task) === "DONE"),
+      r1: sortDoneLast(r1, (task) => taskStatusValue(task) === "DONE"),
+    }
+  }, [visibleNoProjectTasks, sortDoneLast, taskStatusValue])
 
   const statusRows = [
     {
@@ -3397,6 +3544,7 @@ export default function DepartmentKanban() {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }
 
+      void refreshDailyReport()
       setCloseTaskDialogOpen(false)
       setTaskToCloseId(null)
       setTaskToCloseTemplate(null)
@@ -3416,7 +3564,11 @@ export default function DepartmentKanban() {
       // Use the system-tasks/occurrences endpoint for system tasks
       // Map TaskStatus to occurrence status
       const occurrenceStatus = nextStatus === "DONE" ? "DONE" : "OPEN"
-      const occurrenceDate = formatDateInput(systemDate)
+      const template = systemTasks.find((item) => (item.template_id ?? item.id) === templateId)
+      const occurrenceBaseDate = template
+        ? findPreviousOccurrenceDate(template, systemDate)
+        : systemDate
+      const occurrenceDate = formatDateInput(occurrenceBaseDate)
 
       const res = await apiFetch("/system-tasks/occurrences", {
         method: "POST",
@@ -3444,6 +3596,7 @@ export default function DepartmentKanban() {
           return itemTemplateId === templateId ? { ...item, status: nextStatus } : item
         })
       )
+      void refreshDailyReport()
       toast.success(nextStatus === "DONE" ? "System task closed" : "System task reopened")
     } finally {
       setSystemStatusUpdatingId(null)
@@ -4907,7 +5060,7 @@ export default function DepartmentKanban() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {todayProjectTasks.map((task, index) => {
+                    {todayProjectTasksSorted.map((task, index) => {
                             const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
                             const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
                             const projectTitle = project?.title || project?.name || meta?.title || "-"
@@ -4993,7 +5146,7 @@ export default function DepartmentKanban() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {todayNoProjectTasks.map((task, index) => {
+                    {todayNoProjectTasksSorted.map((task, index) => {
                             const assignees = taskAssigneeInitials(task)
                         return (
                           <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
@@ -5068,7 +5221,7 @@ export default function DepartmentKanban() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {todaySystemTasks.map((task, index) => {
+                    {todaySystemTasksSorted.map((task, index) => {
                             const templateId = task.template_id || task.id
                             const statusValue = templateId ? systemOccurrenceStatusByTemplate.get(templateId) : null
                             const statusLabel = formatSystemOccurrenceStatus(statusValue)
@@ -5155,7 +5308,9 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                     ) : (
-                      <div className="mt-3 text-sm text-slate-500">No meetings today.</div>
+                      <div className="mt-3 text-sm text-slate-500">
+                        {loadingExtras ? "Loading meetings..." : "No meetings today."}
+                      </div>
                     )}
                   </Card>
                 </div>
@@ -6306,7 +6461,7 @@ export default function DepartmentKanban() {
                         ) : (
                           <tr>
                             <td colSpan={8} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                              No GA/KA notes yet.
+                              {loadingExtras ? "Loading GA/KA notes..." : "No GA/KA notes yet."}
                             </td>
                           </tr>
                         )}
@@ -6768,7 +6923,7 @@ export default function DepartmentKanban() {
                         ) : (
                           <tr>
                             <td colSpan={9} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                              No internal notes yet.
+                              {loadingExtras ? "Loading internal notes..." : "No internal notes yet."}
                             </td>
                           </tr>
                         )}
@@ -6845,7 +7000,11 @@ export default function DepartmentKanban() {
                           </div>
                         )
                       })}
-                      {!visibleMeetings.length && <div className="py-4 text-center text-sm text-slate-400">No scheduled meetings.</div>}
+                      {!visibleMeetings.length && (
+                        <div className="py-4 text-center text-sm text-slate-400">
+                          {loadingExtras ? "Loading meetings..." : "No scheduled meetings."}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
