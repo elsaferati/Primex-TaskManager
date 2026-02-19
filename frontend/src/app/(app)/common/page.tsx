@@ -266,7 +266,8 @@ export default function CommonViewPage() {
     if (!value) return ""
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return ""
-    return date.toISOString().slice(11, 16)
+    const pad2 = (n: number) => String(n).padStart(2, "0")
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   }
   const formatTimeLabel = (value?: string) => {
     if (!value) return ""
