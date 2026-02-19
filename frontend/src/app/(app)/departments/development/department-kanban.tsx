@@ -116,6 +116,10 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-l-red-600",
 }
 
+const TODAY_TASK_ROW_CLASS = "h-12"
+const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
+const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
+
 // Grid layout for system tasks table - matches system-tasks page
 const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
 
@@ -5895,11 +5899,15 @@ export default function DepartmentKanban() {
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
-                            <TableCell>{phaseLabel}</TableCell>
-                            <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{projectTitle}</div>
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{phaseLabel}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -5916,22 +5924,24 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              <div className="flex items-center gap-2">
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
-                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.description || "-"}</div>
+                            </TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
-                            <TableCell>{reportPriorityLabel(task.priority)}</TableCell>
-                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
-                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
-                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{reportPriorityLabel(task.priority)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -5971,10 +5981,12 @@ export default function DepartmentKanban() {
                       {todayNoProjectTasks.map((task, index) => {
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                            <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{noProjectTypeLabel(task)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -5991,20 +6003,20 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              <div className="flex items-center gap-2">
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
-                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
-                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
-                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -6048,10 +6060,12 @@ export default function DepartmentKanban() {
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                            <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{systemFrequencyReportLabel(task.frequency)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -6068,17 +6082,17 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              <div className="flex items-center gap-2">
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title || "-"}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell>{task.finish_period || "-"}</TableCell>
-                            <TableCell>{statusLabel}</TableCell>
-                            <TableCell>{PRIORITY_LABELS[priorityValue]}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{task.finish_period || "-"}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{statusLabel}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -6116,11 +6130,11 @@ export default function DepartmentKanban() {
                     </TableHeader>
                     <TableBody>
                       {todayMeetings.map((meeting) => (
-                        <TableRow key={meeting.id}>
-                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            {meeting.title || "Meeting"}
+                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
                           </TableCell>
-                          <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
