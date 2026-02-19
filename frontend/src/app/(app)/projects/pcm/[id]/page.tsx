@@ -295,6 +295,7 @@ type VsVlTaskMeta = {
   dependency_task_id?: string
   comment?: string
   unlock_after_days?: number  // Days after dependency task's creation before this task is editable
+  manual_due_date?: boolean
 }
 
 const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
@@ -1807,7 +1808,9 @@ export default function PcmProjectPage() {
       const expectedDate = addBusinessDaysToIso(baseDate, offsetDays)
       if (!expectedDate) return
       const patch: Record<string, unknown> = {}
-      if (!sameDate(task.due_date, expectedDate)) {
+      const meta = parseVsVlMeta(task.internal_notes)
+      const isManualDueDate = Boolean(meta?.manual_due_date)
+      if (!isManualDueDate && !sameDate(task.due_date, expectedDate)) {
         patch.due_date = expectedDate
       }
       if (dependencyId !== undefined && (task.dependency_task_id || null) !== dependencyId) {
@@ -3330,7 +3333,7 @@ export default function PcmProjectPage() {
         void patchTask(taskId, { description: description.trim() || null }, "Failed to update description")
       }, 800)
     }
-    const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
+    const buildVsVlMeta = (task: Task, updates: Partial<VsVlTaskMeta>) => {
       const current = parseVsVlMeta(task.internal_notes) || {}
       const nextMeta: VsVlTaskMeta = {
         ...current,
@@ -3339,11 +3342,16 @@ export default function PcmProjectPage() {
       }
       if (!nextMeta.comment) delete nextMeta.comment
       if (!nextMeta.checklist) delete nextMeta.checklist
+      if (!nextMeta.manual_due_date) delete nextMeta.manual_due_date
       if (nextMeta.unlock_after_days == null) delete nextMeta.unlock_after_days
+      return serializeVsVlMeta(nextMeta)
+    }
+    const updateVsVlMeta = async (task: Task, updates: Partial<VsVlTaskMeta>) => {
+      const meta = buildVsVlMeta(task, updates)
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ internal_notes: serializeVsVlMeta(nextMeta) }),
+        body: JSON.stringify({ internal_notes: meta }),
       })
       if (!res.ok) {
         toast.error("Failed to update task")
@@ -5035,7 +5043,12 @@ export default function PcmProjectPage() {
                                       onChange={(e) => {
                                         const nextValue = normalizeDueDateInput(e.target.value)
                                         const dueDate = nextValue ? new Date(nextValue).toISOString() : null
-                                        void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
+                                        const meta = buildVsVlMeta(task, { manual_due_date: Boolean(nextValue) })
+                                        void patchTask(
+                                          task.id,
+                                          { due_date: dueDate, internal_notes: meta },
+                                          "Failed to update date"
+                                        )
                                       }}
                                       type="date"
                                       className="h-7 text-xs border-slate-300 bg-white"
