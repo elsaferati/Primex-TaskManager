@@ -214,15 +214,20 @@ export default function CommonViewPage() {
   }
   const parseDateOnly = (value?: string | null) => {
     if (!value) return null
-    const raw = String(value).slice(0, 10)
+    const raw = String(value).trim()
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
-    if (!match) return null
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
-    const parsed = new Date(year, month - 1, day)
-    return Number.isNaN(parsed.getTime()) ? null : parsed
+    if (match) {
+      const year = Number(match[1])
+      const month = Number(match[2])
+      const day = Number(match[3])
+      if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
+      const parsed = new Date(year, month - 1, day)
+      return Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+    const parsed = new Date(raw)
+    if (Number.isNaN(parsed.getTime())) return null
+    // Use local calendar date to avoid UTC date shifts for ISO timestamps.
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
   }
   // Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY
   const toDDMMYYYY = (isoDate: string) => {

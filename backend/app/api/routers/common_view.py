@@ -160,6 +160,14 @@ def _as_tirane_dt(value: datetime | None) -> datetime | None:
         return value.astimezone(_tirane_tz())
     return value
 
+def _as_tirane_date(value: datetime | date | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        local = _as_tirane_dt(value) or value
+        return local.date()
+    return value
+
 
 def _format_time(value: datetime | None) -> str:
     if value is None:
@@ -247,13 +255,13 @@ def _get_task_date_source(task: Task) -> datetime | None:
 def _get_task_dates(task: Task, single_day_only: bool) -> list[date]:
     if single_day_only:
         source = _get_task_date_source(task)
-        return [source.date() if source else date.today()]
+        return [_as_tirane_date(source) or date.today()]
 
     start_dt = task.start_date
     due_dt = task.due_date
     if start_dt and due_dt:
-        start = start_dt.date()
-        end = due_dt.date()
+        start = _as_tirane_date(start_dt) or start_dt.date()
+        end = _as_tirane_date(due_dt) or due_dt.date()
         if start > end:
             start, end = end, start
         dates: list[date] = []
@@ -265,7 +273,7 @@ def _get_task_dates(task: Task, single_day_only: bool) -> list[date]:
         return dates if dates else [start]
 
     source = _get_task_date_source(task)
-    return [source.date() if source else date.today()]
+    return [_as_tirane_date(source) or date.today()]
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
