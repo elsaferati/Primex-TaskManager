@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -135,6 +136,10 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   NORMAL: "border-l-amber-500",
   HIGH: "border-l-red-600",
 }
+
+const TODAY_TASK_ROW_CLASS = "h-12"
+const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
+const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
 
 // Grid layout for system tasks table - matches system-tasks page
 const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
@@ -1046,6 +1051,7 @@ function serializeVsVlMeta(meta: VsVlTaskMeta): string {
 export default function DepartmentKanban() {
   const departmentLookupName = "Project Content Manager"
   const departmentDisplayName = "Product Content"
+  const departmentSlug = "project-content-manager"
   const { apiFetch, user } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
@@ -1075,6 +1081,9 @@ export default function DepartmentKanban() {
   }, [showTemplates])
   const [projectMembers, setProjectMembers] = React.useState<Record<string, UserLookup[]>>({})
   const projectMembersRef = React.useRef<Record<string, UserLookup[]>>({})
+  const bootstrapSystemTasksKeyRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteDeptIdRef = React.useRef<string | null>(null)
+  const bootstrapInternalNoteProjectsRef = React.useRef<Project[] | null>(null)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [systemStatusUpdatingId, setSystemStatusUpdatingId] = React.useState<string | null>(null)
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
@@ -1106,6 +1115,44 @@ export default function DepartmentKanban() {
   const [loadingAllUsersDailyReports, setLoadingAllUsersDailyReports] = React.useState(false)
   const [showAllSystem, setShowAllSystem] = React.useState(false)
   const [systemDate, setSystemDate] = React.useState(() => new Date())
+  const systemDateKey = React.useMemo(() => formatDateInput(systemDate), [systemDate])
+  const cacheKey = React.useMemo(() => {
+    const userId = user?.id || "anon"
+    return `department:${departmentSlug}|user:${userId}|systemDate:${systemDateKey}|showTemplates:${showTemplates ? "true" : "false"}`
+  }, [departmentSlug, showTemplates, systemDateKey, user?.id])
+  type DepartmentBootstrapPayload = {
+    departments: Department[]
+    department: Department | null
+    users: UserLookup[]
+    projects: Project[]
+    systemTasks: SystemTaskTemplate[]
+    departmentTasks: Task[]
+    noProjectTasks: Task[]
+    gaNotes: GaNote[]
+    internalNotes: InternalNote[]
+    meetings: Meeting[]
+    systemDepartmentId: string
+    systemTasksKey: string
+    internalNoteDepartmentId: string | null
+    internalNoteProjects: Project[]
+  }
+  const applyBootstrap = React.useCallback((payload: DepartmentBootstrapPayload) => {
+    setDepartments(payload.departments)
+    setDepartment(payload.department)
+    setUsers(payload.users)
+    setProjects(payload.projects)
+    setSystemTasks(payload.systemTasks)
+    setDepartmentTasks(payload.departmentTasks)
+    setNoProjectTasks(payload.noProjectTasks)
+    setGaNotes(payload.gaNotes)
+    setInternalNotes(payload.internalNotes)
+    setMeetings(payload.meetings)
+    setSystemDepartmentId(payload.systemDepartmentId)
+    setInternalNoteProjects(payload.internalNoteProjects)
+    bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
+    bootstrapInternalNoteDeptIdRef.current = payload.internalNoteDepartmentId
+    bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
+  }, [])
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [multiSelect, setMultiSelect] = React.useState(false)
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
@@ -1227,16 +1274,15 @@ export default function DepartmentKanban() {
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [expandedSystemDescriptions, setExpandedSystemDescriptions] = React.useState<Record<string, boolean>>({})
 
-  React.useEffect(() => {
-    const load = async () => {
-      setLoading(true)
+  const loadBootstrapData = React.useCallback(
+    async (options: { silent: boolean }) => {
+      const { silent } = options
+      if (!silent) setLoading(true)
       try {
         const depRes = await apiFetch("/departments")
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
-        setDepartments(deps)
         const dep = deps.find((d) => d.name === departmentLookupName) || null
-        setDepartment(dep)
         if (!dep) return
 
         // Fetch users first so we can filter tasks by assignee departments
@@ -1244,40 +1290,63 @@ export default function DepartmentKanban() {
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
-          setUsers(allUsers)
         }
 
         const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}${showTemplates ? "&include_templates=true" : ""}`),
-          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${formatDateInput(systemDate)}`),
+          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/ga-notes?department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
         ])
-        if (projRes.ok) setProjects((await projRes.json()) as Project[])
-        if (sysRes.ok) setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
-        if (tasksRes.ok) {
-          const taskRows = (await tasksRes.json()) as Task[]
-          // Show all non-system tasks for this department.
-          const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
-          setDepartmentTasks(nonSystemTasks)
-          setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
+        const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
+        const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
+        const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+        const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
+        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
+        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        const payload: DepartmentBootstrapPayload = {
+          departments: deps,
+          department: dep,
+          users: allUsers,
+          projects,
+          systemTasks,
+          departmentTasks: nonSystemTasks,
+          noProjectTasks: nonSystemTasks.filter(isNoProjectTask),
+          gaNotes,
+          internalNotes,
+          meetings,
+          systemDepartmentId: dep.id,
+          systemTasksKey: `${dep.id}|${systemDateKey}`,
+          internalNoteDepartmentId: dep.id,
+          internalNoteProjects: projects.filter((p) => !p.is_template),
         }
-        if (gaRes.ok) setGaNotes((await gaRes.json()) as GaNote[])
-        if (internalRes.ok) setInternalNotes((await internalRes.json()) as InternalNote[])
-        if (meetingsRes.ok) setMeetings((await meetingsRes.json()) as Meeting[])
-
-        setSystemDepartmentId(dep.id)
+        applyBootstrap(payload)
+        setDepartmentBootstrapCache(cacheKey, payload)
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
+    },
+    [apiFetch, applyBootstrap, cacheKey, departmentLookupName, showTemplates, systemDateKey]
+  )
+
+  React.useEffect(() => {
+    const cached = getDepartmentBootstrapCache<DepartmentBootstrapPayload>(cacheKey)
+    if (cached) {
+      applyBootstrap(cached)
+      setLoading(false)
+      void loadBootstrapData({ silent: true })
+      return
     }
-    void load()
-  }, [apiFetch, departmentLookupName, user?.role, showTemplates])
+    void loadBootstrapData({ silent: false })
+  }, [applyBootstrap, cacheKey, loadBootstrapData])
 
   React.useEffect(() => {
     if (!department?.id) return
+    const systemTasksKey = `${department.id}|${formatDateInput(systemDate)}`
+    if (bootstrapSystemTasksKeyRef.current === systemTasksKey) return
     const loadSystemTasks = async () => {
       const res = await apiFetch(
         `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
@@ -1299,6 +1368,11 @@ export default function DepartmentKanban() {
     const loadProjects = async () => {
       if (!internalNoteDepartmentId) {
         setInternalNoteProjects([])
+        return
+      }
+      const bootstrapProjects = bootstrapInternalNoteProjectsRef.current
+      if (bootstrapInternalNoteDeptIdRef.current === internalNoteDepartmentId && bootstrapProjects) {
+        setInternalNoteProjects(bootstrapProjects)
         return
       }
       setLoadingInternalNoteProjects(true)
@@ -5539,11 +5613,15 @@ export default function DepartmentKanban() {
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell className="whitespace-normal break-words">{projectTitle}</TableCell>
-                            <TableCell>{phaseLabel}</TableCell>
-                            <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{projectTitle}</div>
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{phaseLabel}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -5560,22 +5638,24 @@ export default function DepartmentKanban() {
                                 <span className="text-slate-500">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                              <div className="flex items-center gap-2">
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className="whitespace-normal break-words">{task.description || "-"}</TableCell>
-                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.description || "-"}</div>
+                            </TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
-                            <TableCell>{reportPriorityLabel(task.priority)}</TableCell>
-                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
-                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
-                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{reportPriorityLabel(task.priority)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -5615,10 +5695,12 @@ export default function DepartmentKanban() {
                       {todayNoProjectTasks.map((task, index) => {
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell>{noProjectTypeLabel(task)}</TableCell>
-                          <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{noProjectTypeLabel(task)}</TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>
                             {assignees.length ? (
                               <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -5635,20 +5717,20 @@ export default function DepartmentKanban() {
                               <span className="text-slate-500">-</span>
                             )}
                           </TableCell>
-                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            <div className="flex items-center gap-2">
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                               <span>{task.title}</span>
                               {isGaTask(task) ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                               ) : null}
                             </div>
                           </TableCell>
-                            <TableCell className={weeklyPlanStatusBgClass(taskStatusValue(task))}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
-                            <TableCell>{formatDateOnly(task.created_at)}</TableCell>
-                            <TableCell>{formatDateOnly(task.start_date)}</TableCell>
-                            <TableCell>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -5692,10 +5774,12 @@ export default function DepartmentKanban() {
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
                         return (
-                          <TableRow key={task.id}>
-                            <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                            <TableCell>{systemFrequencyReportLabel(task.frequency)}</TableCell>
-                          <TableCell>
+                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
+                              {index + 1}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{systemFrequencyReportLabel(task.frequency)}</TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>
                             {assignees.length ? (
                               <div className="flex items-center gap-1">
                                   {assignees.map((item) => (
@@ -5712,17 +5796,17 @@ export default function DepartmentKanban() {
                               <span className="text-slate-500">-</span>
                             )}
                           </TableCell>
-                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            <div className="flex items-center gap-2">
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                               <span>{task.title || "-"}</span>
                               {isGaTask(task) ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                               ) : null}
                             </div>
                           </TableCell>
-                            <TableCell>{task.finish_period || "-"}</TableCell>
-                            <TableCell>{statusLabel}</TableCell>
-                            <TableCell>{PRIORITY_LABELS[priorityValue]}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{task.finish_period || "-"}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{statusLabel}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -5760,11 +5844,11 @@ export default function DepartmentKanban() {
                     </TableHeader>
                     <TableBody>
                       {todayMeetings.map((meeting) => (
-                        <TableRow key={meeting.id}>
-                          <TableCell className="whitespace-normal break-words font-medium text-slate-800">
-                            {meeting.title || "Meeting"}
+                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
                           </TableCell>
-                          <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
