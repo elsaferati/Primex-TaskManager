@@ -44,7 +44,7 @@ class UserCreate(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=64)
     full_name: str = Field(min_length=2, max_length=100)
     role: UserRole = UserRole.STAFF
-    department_id: uuid.UUID | None = None
+    department_id: uuid.UUID
     password: str = Field(min_length=8, max_length=128)
 
     @field_validator("password")

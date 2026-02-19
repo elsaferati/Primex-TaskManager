@@ -17,10 +17,12 @@ from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem
 from app.models.department import Department
 from app.models.ga_note import GaNote
+from app.models.internal_note import InternalNote
 from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.task import Task
+from app.models.task_template import TaskTemplate
 from app.models.user import User
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.task_assignee import TaskAssignee
@@ -708,15 +710,11 @@ async def delete_project(
     if project.department_id is not None:
         ensure_department_access(user, project.department_id)
 
-    await db.execute(
-        update(Meeting).where(Meeting.project_id == project.id).values(project_id=None)
-    )
-    await db.execute(
-        update(GaNote).where(GaNote.project_id == project.id).values(project_id=None)
-    )
-    await db.execute(
-        update(Task).where(Task.project_id == project.id).values(project_id=None)
-    )
+    await db.execute(delete(Task).where(Task.project_id == project.id))
+    await db.execute(delete(TaskTemplate).where(TaskTemplate.project_id == project.id))
+    await db.execute(delete(Meeting).where(Meeting.project_id == project.id))
+    await db.execute(delete(GaNote).where(GaNote.project_id == project.id))
+    await db.execute(delete(InternalNote).where(InternalNote.project_id == project.id))
 
     await db.delete(project)
     await db.commit()

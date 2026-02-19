@@ -74,11 +74,10 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), u
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    if payload.department_id is not None:
-        ensure_department_access(user, payload.department_id)
-        dept = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
-        if dept is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+    ensure_department_access(user, payload.department_id)
+    dept = (await db.execute(select(Department).where(Department.id == payload.department_id))).scalar_one_or_none()
+    if dept is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
     existing_email = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
     if existing_email is not None:

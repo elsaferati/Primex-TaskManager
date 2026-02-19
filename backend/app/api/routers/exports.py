@@ -7,6 +7,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -4728,6 +4729,630 @@ async def export_ga_notes_xlsx(
     filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
     filename = f"GA/KA_NOTES {filename_date}_{user_initials}.xlsx"
     
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/weekly-plan-vs-actual.xlsx")
+async def export_weekly_plan_vs_actual_xlsx(
+    department_id: uuid.UUID,
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_department_access(user, department_id)
+
+    normalized_week_start = planners_router._week_start(week_start)
+    week_dates = planners_router._get_next_5_working_days(normalized_week_start)
+    week_end = week_dates[-1]
+
+    department = (await db.execute(select(Department).where(Department.id == department_id))).scalar_one_or_none()
+    dept_label = _display_department_name(department.name if department is not None else "")
+
+    title_label = (
+        f"{dept_label} "
+        f"{_format_excel_date(normalized_week_start)} - {_format_excel_date(week_end)} - "
+        "PLAN VS ACTUAL REPORT"
+    ).strip()
+    title_upper = title_label.upper() if title_label else "PLAN VS ACTUAL REPORT"
+
+    planned_official_snapshot = (
+        await db.execute(
+            select(WeeklyPlannerSnapshot)
+            .where(
+                WeeklyPlannerSnapshot.department_id == department_id,
+                WeeklyPlannerSnapshot.week_start_date == normalized_week_start,
+                WeeklyPlannerSnapshot.snapshot_type == WeeklySnapshotType.PLANNED.value,
+            )
+            .order_by(WeeklyPlannerSnapshot.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if planned_official_snapshot is None:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "PLAN VS ACTUAL"[:31]
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
+        title_cell = ws.cell(row=1, column=1, value=title_upper)
+        title_cell.font = Font(bold=True, size=16)
+        title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+        ws.row_dimensions[1].height = 24
+        ws.row_dimensions[2].height = 10
+        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=3)
+        msg_cell = ws.cell(row=3, column=1, value=planners_router.NO_PLAN_SNAPSHOT_MESSAGE)
+        msg_cell.font = Font(bold=True)
+        msg_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        ws.row_dimensions[3].height = 30
+
+        bio = io.BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+
+        today = datetime.now(timezone.utc).date()
+        initials_value = _initials(user.full_name or user.username or "") or "USER"
+        filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+        filename_title = _safe_filename_spaces(title_upper)
+        filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
+        return StreamingResponse(
+            bio,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+        )
+
+    snapshot_tasks_by_key = planners_router._tasks_by_key_from_snapshot_payload(planned_official_snapshot.payload or {})
+
+    current_weekly_table = await weekly_table_planner(
+        week_start=normalized_week_start,
+        department_id=department_id,
+        is_this_week=False,
+        db=db,
+        user=user,
+    )
+    current_table_json = jsonable_encoder(current_weekly_table)
+    current_departments = current_table_json.get("departments") or []
+    current_department_payload = current_departments[0] if current_departments else None
+    current_task_ids = planners_router._task_ids_from_department_payload(current_department_payload)
+    current_task_priorities = await planners_router._load_task_priority_map(db, current_task_ids)
+    current_task_items = planners_router._flatten_weekly_department_tasks(
+        current_department_payload,
+        task_priority_map=current_task_priorities,
+    )
+    current_tasks_by_key = {
+        task["match_key"]: task
+        for task in current_task_items
+    }
+
+    def _assignee_columns_from_current_table(department_payload: dict | None) -> list[tuple[uuid.UUID | None, str]]:
+        if not department_payload:
+            return []
+        try:
+            dept = WeeklyTableDepartment.model_validate(department_payload)
+        except Exception:
+            return []
+
+        seen: set[str] = set()
+        columns: list[tuple[uuid.UUID | None, str]] = []
+        for day in dept.days:
+            for user_day in day.users:
+                name = (user_day.user_name or "").strip()
+                if not name:
+                    continue
+                user_id = getattr(user_day, "user_id", None)
+                key = str(user_id) if user_id is not None else f"name:{name.lower()}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                columns.append((user_id, name))
+
+        columns.sort(key=lambda item: item[1].lower())
+        return columns
+
+    assignee_columns = _assignee_columns_from_current_table(current_department_payload)
+
+    today_local = planners_router._today_pristina_date()
+    as_of_date = min(today_local, week_end)
+
+    buckets = planners_router._classify_weekly_plan_performance(
+        planned_tasks=snapshot_tasks_by_key,
+        actual_tasks=current_tasks_by_key,
+        week_end=week_end,
+        as_of_date=as_of_date,
+    )
+
+    completed = [planners_router._to_compare_task_out(task) for task in buckets.get("completed", [])]
+    in_progress = [planners_router._to_compare_task_out(task) for task in buckets.get("in_progress", [])]
+    pending = [planners_router._to_compare_task_out(task) for task in buckets.get("pending", [])]
+    late = [planners_router._to_compare_task_out(task) for task in buckets.get("late", [])]
+    additional = [planners_router._to_compare_task_out(task) for task in buckets.get("additional", [])]
+    removed_or_canceled = [
+        planners_router._to_compare_task_out(task) for task in buckets.get("removed_or_canceled", [])
+    ]
+
+    grouped = planners_router._group_compare_tasks_by_assignee(
+        completed=completed,
+        in_progress=in_progress,
+        pending=pending,
+        late=late,
+        additional=additional,
+        removed_or_canceled=removed_or_canceled,
+    )
+
+    groups: list[dict[str, object]] = []
+    if grouped:
+        groups = [
+            {
+                "assignee_id": g.assignee_id,
+                "assignee_name": g.assignee_name,
+                "completed": g.completed or [],
+                "in_progress": g.in_progress or [],
+                "pending": g.pending or [],
+                "late": g.late or [],
+                "additional": g.additional or [],
+                "removed_or_canceled": g.removed_or_canceled or [],
+            }
+            for g in grouped
+        ]
+
+    if not groups and assignee_columns:
+        groups = [
+            {
+                "assignee_id": assignee_id,
+                "assignee_name": assignee_name,
+                "completed": [],
+                "in_progress": [],
+                "pending": [],
+                "late": [],
+                "additional": [],
+                "removed_or_canceled": [],
+            }
+            for assignee_id, assignee_name in assignee_columns
+        ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PLAN VS ACTUAL"[:31]
+
+    # Columns: NR, STATUS, then one column per user
+    last_col = max(2, 2 + len(groups))
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_upper)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    # Row 2-3: spacing
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    user_initials = _initials(user.full_name or user.username or "")
+
+    # Standard print setup
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    header_row = 4
+    data_start_row = 5
+
+    # Column widths
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 18
+    for idx in range(3, last_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 44
+
+    # Header row
+    ws.row_dimensions[header_row].height = 22
+    nr_header = ws.cell(row=header_row, column=1, value="NR")
+    nr_header.font = Font(bold=True)
+    nr_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    status_header = ws.cell(row=header_row, column=2, value="STATUS")
+    status_header.font = Font(bold=True)
+    status_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    for col_idx, group in enumerate(groups, start=3):
+        label = str(group.get("assignee_name") or "").upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    categories: list[tuple[str, str]] = [
+        ("completed", "COMPLETED"),
+        ("in_progress", "IN PROGRESS"),
+        ("pending", "PENDING"),
+        ("late", "LATE"),
+        ("additional", "ADDITIONAL"),
+        ("removed_or_canceled", "REMOVED/CANCELED"),
+    ]
+
+    def _cell_text(tasks: list[object]) -> str:
+        if not tasks:
+            return "-"
+        lines: list[str] = [str(len(tasks))]
+        for task in tasks:
+            title = getattr(task, "title", None) or ""
+            project_title = getattr(task, "project_title", None)
+            suffix = f" ({project_title})" if project_title else ""
+            lines.append(f"{title}{suffix}".strip())
+        value = "\n".join(lines).strip()
+        if len(value) > 32000:
+            value = value[:31950].rstrip() + "\n...(TRUNCATED)"
+        return value
+
+    row_idx = data_start_row
+    for idx, (key, label) in enumerate(categories, start=1):
+        nr_cell = ws.cell(row=row_idx, column=1, value=idx)
+        nr_cell.font = Font(bold=True)
+        nr_cell.number_format = "#,##0"
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+        label_cell = ws.cell(row=row_idx, column=2, value=label)
+        label_cell.font = Font(bold=True)
+        label_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        for col_idx, group in enumerate(groups, start=3):
+            tasks = group.get(key) or []
+            cell = ws.cell(row=row_idx, column=col_idx, value=_cell_text(list(tasks)))
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        row_idx += 1
+
+    last_row = row_idx - 1
+
+    # Filters + freeze + print titles
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "C5" if last_col >= 3 else "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+
+    # Borders (thick outside, thin inside; header thick outline)
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=header_row, column=c)
+        cell.border = Border(
+            left=thick if c == 1 else thin,
+            right=thick if c == last_col else thin,
+            top=thick,
+            bottom=thick,
+        )
+
+    # Row heights (based on max wrapped lines)
+    for r in range(data_start_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value is not None else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(300, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    initials_value = user_initials or "USER"
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename_title = _safe_filename_spaces(title_upper)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/weekly-snapshot-compare.xlsx")
+async def export_weekly_snapshot_compare_xlsx(
+    baseline_snapshot_id: uuid.UUID = Query(..., description="Baseline snapshot ID"),
+    compare_snapshot_id: uuid.UUID = Query(..., description="Comparison snapshot ID"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if baseline_snapshot_id == compare_snapshot_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose two different snapshots.")
+
+    baseline_snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == baseline_snapshot_id))
+    ).scalar_one_or_none()
+    if baseline_snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline snapshot not found")
+
+    compare_snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == compare_snapshot_id))
+    ).scalar_one_or_none()
+    if compare_snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comparison snapshot not found")
+
+    ensure_department_access(user, baseline_snapshot.department_id)
+    ensure_department_access(user, compare_snapshot.department_id)
+
+    if baseline_snapshot.department_id != compare_snapshot.department_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshots must belong to the same department.")
+    if baseline_snapshot.week_start_date != compare_snapshot.week_start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshots must be from the same week.")
+
+    department = (
+        await db.execute(select(Department).where(Department.id == baseline_snapshot.department_id))
+    ).scalar_one_or_none()
+    dept_label = _display_department_name(department.name if department is not None else "")
+
+    week_start = baseline_snapshot.week_start_date
+    week_end = baseline_snapshot.week_end_date or planners_router._get_next_5_working_days(week_start)[-1]
+
+    title_label = (
+        f"{dept_label} "
+        f"{_format_excel_date(week_start)} - {_format_excel_date(week_end)} - "
+        "SNAPSHOT COMPARISON"
+    ).strip()
+    title_upper = title_label.upper() if title_label else "SNAPSHOT COMPARISON"
+
+    planned_tasks_by_key = planners_router._tasks_by_key_from_snapshot_payload(baseline_snapshot.payload or {})
+    actual_tasks_by_key = planners_router._tasks_by_key_from_snapshot_payload(compare_snapshot.payload or {})
+
+    def _assignee_columns_from_snapshot(snapshot: WeeklyPlannerSnapshot | None) -> list[tuple[uuid.UUID | None, str]]:
+        if snapshot is None:
+            return []
+        payload = snapshot.payload or {}
+        department_payload = payload.get("department")
+        if not department_payload:
+            return []
+        try:
+            dept = WeeklyTableDepartment.model_validate(department_payload)
+        except Exception:
+            return []
+
+        seen: set[str] = set()
+        columns: list[tuple[uuid.UUID | None, str]] = []
+        for day in dept.days:
+            for user_day in day.users:
+                name = (user_day.user_name or "").strip()
+                if not name:
+                    continue
+                user_id = getattr(user_day, "user_id", None)
+                key = str(user_id) if user_id is not None else f"name:{name.lower()}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                columns.append((user_id, name))
+
+        columns.sort(key=lambda item: item[1].lower())
+        return columns
+
+    assignee_columns = _assignee_columns_from_snapshot(baseline_snapshot) or _assignee_columns_from_snapshot(compare_snapshot)
+
+    as_of_date = week_end + timedelta(days=1)
+    buckets = planners_router._classify_weekly_plan_performance(
+        planned_tasks=planned_tasks_by_key,
+        actual_tasks=actual_tasks_by_key,
+        week_end=week_end,
+        as_of_date=as_of_date,
+    )
+
+    completed = [planners_router._to_compare_task_out(task) for task in buckets.get("completed", [])]
+    in_progress = [planners_router._to_compare_task_out(task) for task in buckets.get("in_progress", [])]
+    pending = [planners_router._to_compare_task_out(task) for task in buckets.get("pending", [])]
+    late = [planners_router._to_compare_task_out(task) for task in buckets.get("late", [])]
+    additional = [planners_router._to_compare_task_out(task) for task in buckets.get("additional", [])]
+    removed_or_canceled = [
+        planners_router._to_compare_task_out(task) for task in buckets.get("removed_or_canceled", [])
+    ]
+
+    grouped = planners_router._group_compare_tasks_by_assignee(
+        completed=completed,
+        in_progress=in_progress,
+        pending=pending,
+        late=late,
+        additional=additional,
+        removed_or_canceled=removed_or_canceled,
+    )
+
+    groups: list[dict[str, object]] = []
+    if grouped:
+        groups = [
+            {
+                "assignee_id": g.assignee_id,
+                "assignee_name": g.assignee_name,
+                "completed": g.completed or [],
+                "in_progress": g.in_progress or [],
+                "pending": g.pending or [],
+                "late": g.late or [],
+                "additional": g.additional or [],
+                "removed_or_canceled": g.removed_or_canceled or [],
+            }
+            for g in grouped
+        ]
+
+    if not groups and assignee_columns:
+        groups = [
+            {
+                "assignee_id": assignee_id,
+                "assignee_name": assignee_name,
+                "completed": [],
+                "in_progress": [],
+                "pending": [],
+                "late": [],
+                "additional": [],
+                "removed_or_canceled": [],
+            }
+            for assignee_id, assignee_name in assignee_columns
+        ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "SNAPSHOT COMPARE"[:31]
+
+    last_col = max(2, 2 + len(groups))
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_upper)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    user_initials = _initials(user.full_name or user.username or "")
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    header_row = 4
+    data_start_row = 5
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 18
+    for idx in range(3, last_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 44
+
+    ws.row_dimensions[header_row].height = 22
+    nr_header = ws.cell(row=header_row, column=1, value="NR")
+    nr_header.font = Font(bold=True)
+    nr_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    status_header = ws.cell(row=header_row, column=2, value="STATUS")
+    status_header.font = Font(bold=True)
+    status_header.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    for col_idx, group in enumerate(groups, start=3):
+        label = str(group.get("assignee_name") or "").upper()
+        cell = ws.cell(row=header_row, column=col_idx, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    categories: list[tuple[str, str]] = [
+        ("completed", "COMPLETED"),
+        ("in_progress", "IN PROGRESS"),
+        ("pending", "PENDING"),
+        ("late", "LATE"),
+        ("additional", "ADDITIONAL"),
+        ("removed_or_canceled", "REMOVED/CANCELED"),
+    ]
+
+    def _cell_text(tasks: list[object]) -> str:
+        if not tasks:
+            return "-"
+        lines: list[str] = [str(len(tasks))]
+        for task in tasks:
+            title = getattr(task, "title", None) or ""
+            project_title = getattr(task, "project_title", None)
+            suffix = f" ({project_title})" if project_title else ""
+            lines.append(f"{title}{suffix}".strip())
+        value = "\n".join(lines).strip()
+        if len(value) > 32000:
+            value = value[:31950].rstrip() + "\n...(TRUNCATED)"
+        return value
+
+    row_idx = data_start_row
+    for idx, (key, label) in enumerate(categories, start=1):
+        nr_cell = ws.cell(row=row_idx, column=1, value=idx)
+        nr_cell.font = Font(bold=True)
+        nr_cell.number_format = "#,##0"
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+        label_cell = ws.cell(row=row_idx, column=2, value=label)
+        label_cell.font = Font(bold=True)
+        label_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        for col_idx, group in enumerate(groups, start=3):
+            tasks = group.get(key) or []
+            cell = ws.cell(row=row_idx, column=col_idx, value=_cell_text(list(tasks)))
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        row_idx += 1
+
+    last_row = row_idx - 1
+
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "C5" if last_col >= 3 else "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=header_row, column=c)
+        cell.border = Border(
+            left=thick if c == 1 else thin,
+            right=thick if c == last_col else thin,
+            top=thick,
+            bottom=thick,
+        )
+
+    for r in range(data_start_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value is not None else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(300, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    initials_value = user_initials or "USER"
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    filename_title = _safe_filename_spaces(title_upper)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
