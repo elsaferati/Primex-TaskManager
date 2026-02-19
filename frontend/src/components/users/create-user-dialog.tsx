@@ -23,11 +23,7 @@ const createUserSchema = z.object({
     .max(64, { message: "Username must be at most 64 characters" }),
   email: z.string().email({ message: "Invalid email address" }),
   role: z.enum(["ADMIN", "MANAGER", "STAFF"]),
-  department_id: z
-    .string()
-    .uuid({ message: "Select a department" })
-    .optional()
-    .or(z.literal("__none__")),
+  department_id: z.string().uuid({ message: "Select a department" }),
   password: z
     .string()
     .min(8, { message: "Must be at least 8 characters" })
@@ -49,7 +45,6 @@ export function CreateUserDialog({
 }) {
   const { apiFetch, user } = useAuth()
   const [open, setOpen] = React.useState(false)
-  const NONE_VALUE = "__none__"
 
   const form = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserSchema),
@@ -58,7 +53,7 @@ export function CreateUserDialog({
       username: "",
       email: "",
       role: "STAFF",
-      department_id: NONE_VALUE,
+      department_id: "",
       password: "",
     },
   })
@@ -76,7 +71,7 @@ export function CreateUserDialog({
         username: values.username.trim(),
         full_name: values.full_name?.trim() || null,
         role: values.role as UserRole,
-        department_id: values.department_id === NONE_VALUE ? null : values.department_id,
+        department_id: values.department_id,
         password: values.password,
       }),
     })
@@ -169,12 +164,11 @@ export function CreateUserDialog({
               control={form.control}
               name="department_id"
               render={({ field }) => (
-                <Select value={field.value ?? NONE_VALUE} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Department" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={NONE_VALUE}>None</SelectItem>
                     {departments.map((d) => (
                       <SelectItem key={d.id} value={d.id}>
                         {d.name}
