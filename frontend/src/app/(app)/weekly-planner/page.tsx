@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { ChevronDown, Plus, X, Printer, GripVertical } from "lucide-react"
+import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -255,11 +255,13 @@ export default function WeeklyPlannerPage() {
   const [isLoadingPlanVsActual, setIsLoadingPlanVsActual] = React.useState(false)
   const [planVsActualError, setPlanVsActualError] = React.useState<string | null>(null)
   const [planVsActual, setPlanVsActual] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [isExportingPlanVsActual, setIsExportingPlanVsActual] = React.useState(false)
   const [snapshotCompareOpen, setSnapshotCompareOpen] = React.useState(false)
   const [snapshotCompareLoading, setSnapshotCompareLoading] = React.useState(false)
   const [snapshotCompareListLoading, setSnapshotCompareListLoading] = React.useState(false)
   const [snapshotCompareError, setSnapshotCompareError] = React.useState<string | null>(null)
   const [snapshotCompareData, setSnapshotCompareData] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [isExportingSnapshotCompare, setIsExportingSnapshotCompare] = React.useState(false)
   const [snapshotCompareVersions, setSnapshotCompareVersions] = React.useState<WeeklySnapshotVersion[]>([])
   const [baselineSnapshotId, setBaselineSnapshotId] = React.useState("")
   const [compareSnapshotId, setCompareSnapshotId] = React.useState("")
@@ -2249,6 +2251,100 @@ export default function WeeklyPlannerPage() {
     }
   }
 
+  const exportPlanVsActualExcel = React.useCallback(async () => {
+    if (!data || !departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return
+    if (isExportingPlanVsActual) return
+    setIsExportingPlanVsActual(true)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("department_id", departmentId)
+      qs.set("week_start", data.week_start)
+      const res = await apiFetch(`/exports/weekly-plan-vs-actual.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to export plan vs actual report")
+        toast.error(message || "Failed to export plan vs actual report")
+        return
+      }
+      const blob = await res.blob()
+      if (blob.size === 0) {
+        toast.error("Export returned an empty file.")
+        return
+      }
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename || "plan_vs_actual_report.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export plan vs actual report", err)
+      toast.error("Failed to export plan vs actual report")
+    } finally {
+      setIsExportingPlanVsActual(false)
+    }
+  }, [apiFetch, data, departmentId, isExportingPlanVsActual])
+
+  const handlePrintPlanVsActual = React.useCallback(() => {
+    if (!planVsActual || !data) return
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    // Get the table from the modal content - find the dialog that contains "Plan vs Actual"
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'))
+    const planVsActualDialog = dialogs.find((dialog) => {
+      const title = dialog.querySelector('h2, [class*="DialogTitle"]')
+      return title?.textContent?.includes("Plan vs Actual")
+    })
+    const table = planVsActualDialog?.querySelector("table")
+    const tableHtml = table?.outerHTML || ""
+
+    if (!tableHtml) {
+      toast.error("Nothing to print for plan vs actual report.")
+      printWindow.close()
+      return
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Plan vs Actual Report</title>
+          <style>
+            @media print {
+              @page { size: letter landscape; margin: 0.35in; }
+            }
+
+            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
+            th { font-weight: 700; }
+
+            a { color: #000; text-decoration: none; }
+            td div { margin-bottom: 4px; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          ${tableHtml}
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+
+    setTimeout(() => {
+      printWindow.print()
+    }, 200)
+  }, [planVsActual, data])
+
   const plannedSnapshotOptions = React.useMemo(() => {
     const options = snapshotCompareVersions
       .filter((version) => version.snapshot_type === "PLANNED")
@@ -2372,6 +2468,103 @@ export default function WeeklyPlannerPage() {
     if (!snapshotCompareOpen) return
     void loadSnapshotCompareVersions()
   }, [loadSnapshotCompareVersions, snapshotCompareOpen])
+
+  const exportSnapshotCompareExcel = React.useCallback(async () => {
+    if (!baselineSnapshotId || !compareSnapshotId) {
+      toast.error("Select both snapshots to export.")
+      return
+    }
+    if (isExportingSnapshotCompare) return
+    setIsExportingSnapshotCompare(true)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("baseline_snapshot_id", baselineSnapshotId)
+      qs.set("compare_snapshot_id", compareSnapshotId)
+      const res = await apiFetch(`/exports/weekly-snapshot-compare.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to export snapshot comparison")
+        toast.error(message || "Failed to export snapshot comparison")
+        return
+      }
+      const blob = await res.blob()
+      if (blob.size === 0) {
+        toast.error("Export returned an empty file.")
+        return
+      }
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename || "snapshot_comparison.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export snapshot comparison", err)
+      toast.error("Failed to export snapshot comparison")
+    } finally {
+      setIsExportingSnapshotCompare(false)
+    }
+  }, [apiFetch, baselineSnapshotId, compareSnapshotId, isExportingSnapshotCompare])
+
+  const handlePrintSnapshotCompare = React.useCallback(() => {
+    if (!snapshotCompareData) return
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    // Get the table from the modal content - find the dialog that contains "Compare Weekly Snapshots"
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'))
+    const snapshotDialog = dialogs.find((dialog) => {
+      const title = dialog.querySelector('h2, [class*="DialogTitle"]')
+      return title?.textContent?.includes("Compare Weekly Snapshots")
+    })
+    const table = snapshotDialog?.querySelector("table")
+    const tableHtml = table?.outerHTML || ""
+
+    if (!tableHtml) {
+      toast.error("Nothing to print for snapshot comparison.")
+      printWindow.close()
+      return
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Snapshot Comparison</title>
+          <style>
+            @media print {
+              @page { size: letter landscape; margin: 0.35in; }
+            }
+
+            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
+            th { font-weight: 700; }
+
+            a { color: #000; text-decoration: none; }
+            td div { margin-bottom: 4px; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          ${tableHtml}
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+
+    setTimeout(() => {
+      printWindow.print()
+    }, 200)
+  }, [snapshotCompareData])
 
   const formatPlannerStatusLabel = (value?: string | null) => {
     const normalized = (value || "TODO")
@@ -2868,6 +3061,26 @@ export default function WeeklyPlannerPage() {
           <DialogHeader>
             <DialogTitle>Plan vs Actual Weekly Comparison</DialogTitle>
           </DialogHeader>
+          <div className="flex justify-end gap-2 mb-4 pb-2 border-b">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportPlanVsActualExcel()}
+              disabled={!planVsActual || isExportingPlanVsActual || !data || departmentId === ALL_DEPARTMENTS_VALUE}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              {isExportingPlanVsActual ? "Exporting..." : "Export Excel"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrintPlanVsActual}
+              disabled={!planVsActual}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </div>
           <div className="space-y-4">
             {isLoadingPlanVsActual ? (
               <div className="text-sm text-muted-foreground">Comparing plan vs actual...</div>
@@ -2977,7 +3190,29 @@ export default function WeeklyPlannerPage() {
             </div>
 
             {snapshotCompareData ? (
-              <WeeklyPlanPerformanceView data={snapshotCompareData} />
+              <>
+                <div className="flex justify-end gap-2 mb-4 pb-2 border-b">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void exportSnapshotCompareExcel()}
+                    disabled={!baselineSnapshotId || !compareSnapshotId || isExportingSnapshotCompare}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    {isExportingSnapshotCompare ? "Exporting..." : "Export Excel"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePrintSnapshotCompare}
+                    disabled={!snapshotCompareData}
+                  >
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print
+                  </Button>
+                </div>
+                <WeeklyPlanPerformanceView data={snapshotCompareData} />
+              </>
             ) : null}
           </div>
         </DialogContent>
