@@ -1104,6 +1104,7 @@ export default function DepartmentKanban() {
   const [internalNotes, setInternalNotes] = React.useState<InternalNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
@@ -1285,34 +1286,56 @@ export default function DepartmentKanban() {
       const { silent } = options
       if (!silent) setLoading(true)
       try {
-        const depRes = await apiFetch("/departments")
+        const [depRes, usersRes] = await Promise.all([
+          apiFetch("/departments"),
+          apiFetch("/users/lookup"),
+        ])
         if (!depRes.ok) return
         const deps = (await depRes.json()) as Department[]
         const dep = deps.find((d) => d.name === departmentLookupName) || null
         if (!dep) return
 
-        // Fetch users first so we can filter tasks by assignee departments
-        const usersRes = await apiFetch("/users/lookup")
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
+        const [projRes, sysRes, tasksRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}${showTemplates ? "&include_templates=true" : ""}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
-          apiFetch(`/ga-notes?department_id=${dep.id}`),
-          apiFetch(`/internal-notes?department_id=${dep.id}`),
-          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+        const internalProjects = projects.filter((p) => !p.is_template)
+        setDepartments(deps)
+        setDepartment(dep)
+        setUsers(allUsers)
+        setProjects(projects)
+        setSystemTasks(systemTasks)
+        setDepartmentTasks(nonSystemTasks)
+        setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        setSystemDepartmentId(dep.id)
+        setInternalNoteProjects(internalProjects)
+        bootstrapSystemTasksKeyRef.current = `${dep.id}|${systemDateKey}`
+        bootstrapInternalNoteDeptIdRef.current = dep.id
+        bootstrapInternalNoteProjectsRef.current = internalProjects
+        if (!silent) setLoading(false)
+
+        if (!silent) setLoadingExtras(true)
+        const [gaRes, internalRes, meetingsRes] = await Promise.all([
+          apiFetch(`/ga-notes?department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
+        ])
         const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
         const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
         const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        setGaNotes(gaNotes)
+        setInternalNotes(internalNotes)
+        setMeetings(meetings)
         const payload: DepartmentBootstrapPayload = {
           departments: deps,
           department: dep,
@@ -1327,15 +1350,15 @@ export default function DepartmentKanban() {
           systemDepartmentId: dep.id,
           systemTasksKey: `${dep.id}|${systemDateKey}`,
           internalNoteDepartmentId: dep.id,
-          internalNoteProjects: projects.filter((p) => !p.is_template),
+          internalNoteProjects: internalProjects,
         }
-        applyBootstrap(payload)
         setDepartmentBootstrapCache(cacheKey, payload)
       } finally {
         if (!silent) setLoading(false)
+        if (!silent) setLoadingExtras(false)
       }
     },
-    [apiFetch, applyBootstrap, cacheKey, departmentLookupName, showTemplates, systemDateKey]
+    [apiFetch, cacheKey, departmentLookupName, showTemplates, systemDateKey]
   )
 
   React.useEffect(() => {
@@ -5993,7 +6016,9 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No meetings today.</div>
+                  <div className="mt-3 text-sm text-slate-500">
+                    {loadingExtras ? "Loading meetings..." : "No meetings today."}
+                  </div>
                 )}
               </Card>
             </div>
@@ -7232,7 +7257,7 @@ export default function DepartmentKanban() {
                     ) : (
                       <tr>
                         <td colSpan={8} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                          No GA/KA notes yet.
+                          {loadingExtras ? "Loading GA/KA notes..." : "No GA/KA notes yet."}
                         </td>
                       </tr>
                     )}
@@ -7684,7 +7709,7 @@ export default function DepartmentKanban() {
                     ) : (
                       <tr>
                         <td colSpan={9} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                          No internal notes yet.
+                          {loadingExtras ? "Loading internal notes..." : "No internal notes yet."}
                         </td>
                       </tr>
                     )}
@@ -7813,7 +7838,9 @@ export default function DepartmentKanban() {
                       )
                     })
                   ) : (
-                    <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                    <div className="text-sm text-muted-foreground">
+                      {loadingExtras ? "Loading meetings..." : "No external meetings yet."}
+                    </div>
                   )}
                 </div>
               </Card>

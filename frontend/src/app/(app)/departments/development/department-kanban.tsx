@@ -978,6 +978,7 @@ export default function DepartmentKanban() {
   const [loadingMsEvents, setLoadingMsEvents] = React.useState(false)
   const [checkingMsStatus, setCheckingMsStatus] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
+  const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
@@ -1177,7 +1178,10 @@ export default function DepartmentKanban() {
       const { silent } = options
       if (!silent) setLoading(true)
       try {
-        const depRes = await apiFetch("/departments")
+        const [depRes, usersRes] = await Promise.all([
+          apiFetch("/departments"),
+          apiFetch("/users/lookup"),
+        ])
         if (!depRes.ok) {
           console.error("Failed to load departments:", depRes.status)
           return
@@ -1186,28 +1190,46 @@ export default function DepartmentKanban() {
         const dep = deps.find((d) => d.name === departmentName) || null
         if (!dep) return
 
-        // Fetch users first so we can filter tasks by assignee departments
-        const usersRes = await apiFetch("/users/lookup")
         let allUsers: UserLookup[] = []
         if (usersRes.ok) {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, tasksRes, gaRes, internalRes, meetingsRes] = await Promise.all([
+        const [projRes, sysRes, tasksRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
-          apiFetch(`/ga-notes?department_id=${dep.id}`),
-          apiFetch(`/internal-notes?department_id=${dep.id}`),
-          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+        setDepartments(deps)
+        setDepartment(dep)
+        setUsers(allUsers)
+        setProjects(projects)
+        setSystemTasks(systemTasks)
+        setDepartmentTasks(nonSystemTasks)
+        setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        setSystemDepartmentId(dep.id)
+        setInternalNoteProjects(projects)
+        bootstrapSystemTasksKeyRef.current = `${dep.id}|${systemDateKey}`
+        bootstrapInternalNoteDeptIdRef.current = dep.id
+        bootstrapInternalNoteProjectsRef.current = projects
+        if (!silent) setLoading(false)
+
+        if (!silent) setLoadingExtras(true)
+        const [gaRes, internalRes, meetingsRes] = await Promise.all([
+          apiFetch(`/ga-notes?department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
+        ])
         const gaNotes = gaRes.ok ? ((await gaRes.json()) as GaNote[]) : []
         const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
         const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        setGaNotes(gaNotes)
+        setInternalNotes(internalNotes)
+        setMeetings(meetings)
         const payload: DepartmentBootstrapPayload = {
           departments: deps,
           department: dep,
@@ -1224,16 +1246,16 @@ export default function DepartmentKanban() {
           internalNoteDepartmentId: dep.id,
           internalNoteProjects: projects,
         }
-        applyBootstrap(payload)
         setDepartmentBootstrapCache(cacheKey, payload)
       } catch (error) {
         console.error("Error loading department data:", error)
         toast.error("Failed to load department data. Please check if the backend server is running.")
       } finally {
         if (!silent) setLoading(false)
+        if (!silent) setLoadingExtras(false)
       }
     },
-    [apiFetch, applyBootstrap, cacheKey, departmentName, systemDateKey]
+    [apiFetch, cacheKey, departmentName, systemDateKey]
   )
 
   React.useEffect(() => {
@@ -6265,7 +6287,9 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No meetings today.</div>
+                  <div className="mt-3 text-sm text-slate-500">
+                    {loadingExtras ? "Loading meetings..." : "No meetings today."}
+                  </div>
                 )}
               </Card>
             </div>
@@ -7525,7 +7549,7 @@ export default function DepartmentKanban() {
                     ) : (
                       <tr>
                         <td colSpan={8} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                          No GA/KA notes yet.
+                          {loadingExtras ? "Loading GA/KA notes..." : "No GA/KA notes yet."}
                         </td>
                       </tr>
                     )}
@@ -7978,7 +8002,7 @@ export default function DepartmentKanban() {
                     ) : (
                       <tr>
                         <td colSpan={9} className="border border-slate-600 p-4 text-center text-sm text-muted-foreground">
-                          No internal notes yet.
+                          {loadingExtras ? "Loading internal notes..." : "No internal notes yet."}
                         </td>
                       </tr>
                     )}
@@ -8279,7 +8303,9 @@ export default function DepartmentKanban() {
                     </Table>
                   </div>
                 ) : (
-                  <div className="text-sm text-muted-foreground">No external meetings yet.</div>
+                  <div className="text-sm text-muted-foreground">
+                    {loadingExtras ? "Loading meetings..." : "No external meetings yet."}
+                  </div>
                 )}
                 {!isReadOnly ? (
                   <div className="border-t border-slate-200 pt-4">
