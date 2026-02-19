@@ -212,6 +212,18 @@ export default function CommonViewPage() {
     const [y, m, d] = s.split("-").map(Number)
     return new Date(y, m - 1, d)
   }
+  const parseDateOnly = (value?: string | null) => {
+    if (!value) return null
+    const raw = String(value).slice(0, 10)
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+    if (!match) return null
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const day = Number(match[3])
+    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
+    const parsed = new Date(year, month - 1, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
   // Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY
   const toDDMMYYYY = (isoDate: string) => {
     if (!isoDate) return ""
@@ -1401,12 +1413,13 @@ export default function CommonViewPage() {
             // Helper function to generate dates from start_date to due_date
             // Check/Control phase tasks should be treated as single-day assignments.
             const getTaskDates = (task: Task, singleDayOnly: boolean): string[] => {
-              const taskDateSource = task.planned_for || task.due_date || task.start_date || task.created_at
               if (singleDayOnly) {
-                return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
+                const dateOnly = parseDateOnly(task.planned_for || task.due_date || task.start_date)
+                const resolved = dateOnly ?? (task.created_at ? new Date(task.created_at) : null)
+                return resolved ? [toISODate(resolved)] : [today]
               }
-              const startDate = task.start_date ? new Date(task.start_date) : null
-              const dueDate = task.due_date ? new Date(task.due_date) : null
+              const startDate = parseDateOnly(task.start_date)
+              const dueDate = parseDateOnly(task.due_date)
               
               // If both start and due dates exist and are different, generate range
               if (startDate && dueDate && !Number.isNaN(startDate.getTime()) && !Number.isNaN(dueDate.getTime())) {
@@ -1436,7 +1449,9 @@ export default function CommonViewPage() {
               }
               
               // Fallback to single date
-              return taskDateSource ? [toISODate(new Date(taskDateSource))] : [today]
+              const dateOnly = parseDateOnly(task.planned_for || task.due_date || task.start_date)
+              const resolved = dateOnly ?? (task.created_at ? new Date(task.created_at) : null)
+              return resolved ? [toISODate(resolved)] : [today]
             }
             
             const taskDates = getTaskDates(t, isCheckPhase).filter(
@@ -1560,7 +1575,10 @@ export default function CommonViewPage() {
                 // For MST/VS/VL in Product Content with due_date, generate dates within the selected week
                 const weekStartDate = fromISODate(weekStartIso)
                 const weekEndDate = fromISODate(weekEndIso)
-                const dueDate = new Date(project.due_date)
+                const dueDate = parseDateOnly(project.due_date)
+                if (!dueDate) {
+                  continue
+                }
                 dueDate.setHours(0, 0, 0, 0)
                 const startDate = new Date(weekStartDate)
                 const endDate = new Date(weekEndDate)
