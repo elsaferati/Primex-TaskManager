@@ -3077,6 +3077,118 @@ async def weekly_plan_vs_final_compare(
     )
 
 
+@router.get("/weekly-snapshots/compare-by-id", response_model=WeeklySnapshotPlanVsActualOut)
+@router.get("/weekly-snapshots/compare/by-id", response_model=WeeklySnapshotPlanVsActualOut)
+async def weekly_snapshot_compare_by_id(
+    baseline_snapshot_id: uuid.UUID,
+    compare_snapshot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklySnapshotPlanVsActualOut:
+    if baseline_snapshot_id == compare_snapshot_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose two different snapshots.")
+
+    baseline_snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == baseline_snapshot_id))
+    ).scalar_one_or_none()
+    if baseline_snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline snapshot not found")
+
+    compare_snapshot = (
+        await db.execute(select(WeeklyPlannerSnapshot).where(WeeklyPlannerSnapshot.id == compare_snapshot_id))
+    ).scalar_one_or_none()
+    if compare_snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comparison snapshot not found")
+
+    ensure_department_access(user, baseline_snapshot.department_id)
+    ensure_department_access(user, compare_snapshot.department_id)
+
+    if baseline_snapshot.department_id != compare_snapshot.department_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshots must belong to the same department.")
+    if baseline_snapshot.week_start_date != compare_snapshot.week_start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshots must be from the same week.")
+
+    department = (
+        await db.execute(select(Department).where(Department.id == baseline_snapshot.department_id))
+    ).scalar_one_or_none()
+    department_name = department.name if department is not None else None
+
+    week_start = baseline_snapshot.week_start_date
+    week_end = baseline_snapshot.week_end_date or _get_next_5_working_days(week_start)[-1]
+
+    planned_tasks_by_key = _tasks_by_key_from_snapshot_payload(baseline_snapshot.payload or {})
+    actual_tasks_by_key = _tasks_by_key_from_snapshot_payload(compare_snapshot.payload or {})
+
+    as_of_date = week_end + timedelta(days=1)
+    buckets = _classify_weekly_plan_performance(
+        planned_tasks=planned_tasks_by_key,
+        actual_tasks=actual_tasks_by_key,
+        week_end=week_end,
+        as_of_date=as_of_date,
+    )
+
+    completed = [_to_compare_task_out(task) for task in buckets["completed"]]
+    in_progress = [_to_compare_task_out(task) for task in buckets["in_progress"]]
+    pending = [_to_compare_task_out(task) for task in buckets["pending"]]
+    late = [_to_compare_task_out(task) for task in buckets["late"]]
+    additional = [_to_compare_task_out(task) for task in buckets["additional"]]
+    removed_or_canceled = [_to_compare_task_out(task) for task in buckets["removed_or_canceled"]]
+
+    not_completed = [*in_progress, *pending, *late]
+    added_during_week = list(additional)
+
+    completed.sort(key=lambda task: task.title.lower())
+    in_progress.sort(key=lambda task: task.title.lower())
+    pending.sort(key=lambda task: task.title.lower())
+    late.sort(key=lambda task: task.title.lower())
+    additional.sort(key=lambda task: task.title.lower())
+    removed_or_canceled.sort(key=lambda task: task.title.lower())
+
+    summary = WeeklySnapshotCompareSummaryOut(
+        total_planned=len(planned_tasks_by_key),
+        completed=len(completed),
+        in_progress=len(in_progress),
+        pending=len(pending),
+        late=len(late),
+        additional=len(additional),
+        not_completed=len(not_completed),
+        added_during_week=len(added_during_week),
+        removed_or_canceled=len(removed_or_canceled),
+    )
+
+    by_assignee = _group_compare_tasks_by_assignee(
+        completed=completed,
+        in_progress=in_progress,
+        pending=pending,
+        late=late,
+        additional=additional,
+        removed_or_canceled=removed_or_canceled,
+    )
+
+    return WeeklySnapshotPlanVsActualOut(
+        week_start=week_start,
+        week_end=week_end,
+        department_id=baseline_snapshot.department_id,
+        department_name=department_name,
+        snapshot_id=baseline_snapshot.id,
+        snapshot_created_at=baseline_snapshot.created_at,
+        snapshot_created_by=baseline_snapshot.created_by,
+        final_snapshot_id=compare_snapshot.id,
+        final_snapshot_created_at=compare_snapshot.created_at,
+        final_snapshot_created_by=compare_snapshot.created_by,
+        summary=summary,
+        completed=completed,
+        in_progress=in_progress,
+        pending=pending,
+        late=late,
+        additional=additional,
+        not_completed=not_completed,
+        added_during_week=added_during_week,
+        removed_or_canceled=removed_or_canceled,
+        by_assignee=by_assignee,
+    )
+
+
 @router.get("/weekly-snapshots/compare", response_model=WeeklySnapshotCompareOut)
 async def weekly_snapshot_compare(
     department_id: uuid.UUID,
