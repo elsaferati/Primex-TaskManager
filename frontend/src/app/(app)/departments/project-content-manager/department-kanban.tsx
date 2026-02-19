@@ -998,7 +998,13 @@ function toMeetingInputValue(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 16)
+  const pad2 = (n: number) => String(n).padStart(2, "0")
+  const y = date.getFullYear()
+  const m = pad2(date.getMonth() + 1)
+  const d = pad2(date.getDate())
+  const h = pad2(date.getHours())
+  const min = pad2(date.getMinutes())
+  return `${y}-${m}-${d}T${h}:${min}`
 }
 
 function normalizePriority(value?: TaskPriority | string | null): TaskPriority {
