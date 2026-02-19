@@ -109,6 +109,18 @@ type WeeklyTableResponse = {
   saved_plan_id: string | null
 }
 
+type WeeklySnapshotVersion = {
+  id: string
+  snapshot_type: "PLANNED" | "FINAL"
+  created_at: string
+  is_official: boolean
+}
+
+type WeeklySnapshotComparePayload = {
+  planned_versions: WeeklySnapshotVersion[]
+  final_versions: WeeklySnapshotVersion[]
+}
+
 type WeeklyPlannerBlock = {
   entry_id: string
   user_id: string
@@ -243,6 +255,14 @@ export default function WeeklyPlannerPage() {
   const [isLoadingPlanVsActual, setIsLoadingPlanVsActual] = React.useState(false)
   const [planVsActualError, setPlanVsActualError] = React.useState<string | null>(null)
   const [planVsActual, setPlanVsActual] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [snapshotCompareOpen, setSnapshotCompareOpen] = React.useState(false)
+  const [snapshotCompareLoading, setSnapshotCompareLoading] = React.useState(false)
+  const [snapshotCompareListLoading, setSnapshotCompareListLoading] = React.useState(false)
+  const [snapshotCompareError, setSnapshotCompareError] = React.useState<string | null>(null)
+  const [snapshotCompareData, setSnapshotCompareData] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [snapshotCompareVersions, setSnapshotCompareVersions] = React.useState<WeeklySnapshotVersion[]>([])
+  const [baselineSnapshotId, setBaselineSnapshotId] = React.useState("")
+  const [compareSnapshotId, setCompareSnapshotId] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [manualTaskOpen, setManualTaskOpen] = React.useState(false)
@@ -2229,6 +2249,130 @@ export default function WeeklyPlannerPage() {
     }
   }
 
+  const plannedSnapshotOptions = React.useMemo(() => {
+    const options = snapshotCompareVersions
+      .filter((version) => version.snapshot_type === "PLANNED")
+      .map((version) => {
+      const typeLabel = version.snapshot_type === "PLANNED" ? "Planned" : "Final"
+      const officialLabel = version.is_official ? " (Official)" : ""
+      return {
+        id: version.id,
+        label: `${typeLabel}${officialLabel} - ${formatDateTimeDMY(version.created_at)}`,
+      }
+    })
+    return options.sort((a, b) => a.label.localeCompare(b.label))
+  }, [snapshotCompareVersions])
+
+  const finalSnapshotOptions = React.useMemo(() => {
+    const options = snapshotCompareVersions
+      .filter((version) => version.snapshot_type === "FINAL")
+      .map((version) => {
+        const typeLabel = version.snapshot_type === "PLANNED" ? "Planned" : "Final"
+        const officialLabel = version.is_official ? " (Official)" : ""
+        return {
+          id: version.id,
+          label: `${typeLabel}${officialLabel} - ${formatDateTimeDMY(version.created_at)}`,
+        }
+      })
+    return options.sort((a, b) => a.label.localeCompare(b.label))
+  }, [snapshotCompareVersions])
+
+  const loadSnapshotCompareVersions = React.useCallback(async () => {
+    if (!data) return
+    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) return
+
+    setSnapshotCompareListLoading(true)
+    setSnapshotCompareError(null)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("department_id", departmentId)
+      qs.set("week_start", data.week_start)
+      const res = await apiFetch(`/planners/weekly-snapshots/compare?${qs.toString()}`)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to load snapshot versions")
+        throw new Error(message || "Failed to load snapshot versions")
+      }
+      const payload = (await res.json()) as WeeklySnapshotComparePayload
+      const plannedVersions = payload.planned_versions || []
+      const finalVersions = payload.final_versions || []
+      const versions = [...plannedVersions, ...finalVersions]
+      setSnapshotCompareVersions(versions)
+
+      const preferredBaseline =
+        plannedVersions.find((v) => v.is_official) ??
+        plannedVersions[0]
+
+      const preferredCompare =
+        finalVersions[finalVersions.length - 1] ?? null
+
+      const nextBaseline = preferredBaseline?.id ?? ""
+      let nextCompare = preferredCompare?.id ?? ""
+
+      if (nextBaseline && nextCompare && nextBaseline === nextCompare) {
+        const fallback = finalVersions.find((v) => v.id !== nextBaseline)
+        nextCompare = fallback?.id ?? ""
+      }
+
+      setBaselineSnapshotId((prev) => (plannedVersions.some((v) => v.id === prev) ? prev : nextBaseline))
+      setCompareSnapshotId((prev) => (finalVersions.some((v) => v.id === prev) ? prev : nextCompare))
+    } catch (err) {
+      setSnapshotCompareError(err instanceof Error ? err.message : "Failed to load snapshot versions")
+      setSnapshotCompareVersions([])
+      setBaselineSnapshotId("")
+      setCompareSnapshotId("")
+    } finally {
+      setSnapshotCompareListLoading(false)
+    }
+  }, [apiFetch, data, departmentId])
+
+  const openSnapshotCompare = () => {
+    if (!data) return
+    if (!departmentId || departmentId === ALL_DEPARTMENTS_VALUE) {
+      toast.error("Select a specific department before comparing snapshots.")
+      return
+    }
+    setSnapshotCompareOpen(true)
+    setSnapshotCompareError(null)
+    setSnapshotCompareData(null)
+  }
+
+  const runSnapshotCompare = async () => {
+    if (!baselineSnapshotId || !compareSnapshotId) {
+      toast.error("Select both snapshots to compare.")
+      return
+    }
+    if (baselineSnapshotId === compareSnapshotId) {
+      toast.error("Choose two different snapshots.")
+      return
+    }
+    setSnapshotCompareLoading(true)
+    setSnapshotCompareError(null)
+    setSnapshotCompareData(null)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("baseline_snapshot_id", baselineSnapshotId)
+      qs.set("compare_snapshot_id", compareSnapshotId)
+      const path = `/planners/weekly-snapshots/compare/by-id?${qs.toString()}`
+      const res = await apiFetch(path)
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to compare snapshots")
+        throw new Error(message || "Failed to compare snapshots")
+      }
+      const payload = (await res.json()) as WeeklyPlanPerformanceResponse
+      setSnapshotCompareData(payload)
+    } catch (err) {
+      setSnapshotCompareError(err instanceof Error ? err.message : "Failed to compare snapshots")
+      setSnapshotCompareData(null)
+    } finally {
+      setSnapshotCompareLoading(false)
+    }
+  }
+
+  React.useEffect(() => {
+    if (!snapshotCompareOpen) return
+    void loadSnapshotCompareVersions()
+  }, [loadSnapshotCompareVersions, snapshotCompareOpen])
+
   const formatPlannerStatusLabel = (value?: string | null) => {
     const normalized = (value || "TODO")
       .trim()
@@ -2283,18 +2427,21 @@ export default function WeeklyPlannerPage() {
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
-                {isThisWeek ? (
-                  <>
-                    <DropdownMenuLabel>Compare</DropdownMenuLabel>
+                <>
+                  <DropdownMenuLabel>Compare</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={openSnapshotCompare}>
+                    Compare Snapshots...
+                  </DropdownMenuItem>
+                  {isThisWeek ? (
                     <DropdownMenuItem
                       onSelect={() => void openPlanVsActualCompare()}
                       disabled={isLoadingPlanVsActual}
                     >
                       {isLoadingPlanVsActual ? "Comparing..." : "Compare with Last Friday Plan"}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
+                  ) : null}
+                  <DropdownMenuSeparator />
+                </>
                 {canEditUserOrder ? (
                   <>
                     <DropdownMenuLabel>Ordering</DropdownMenuLabel>
@@ -2743,6 +2890,95 @@ export default function WeeklyPlannerPage() {
               }))
               return <WeeklyPlanPerformanceView data={planVsActual} assigneeColumns={columns} />
             })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={snapshotCompareOpen} onOpenChange={setSnapshotCompareOpen}>
+        <DialogContent className="sm:max-w-[1000px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Compare Weekly Snapshots</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Planned snapshot</Label>
+                <Select
+                  value={baselineSnapshotId}
+                  onValueChange={setBaselineSnapshotId}
+                  disabled={snapshotCompareListLoading || plannedSnapshotOptions.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={snapshotCompareListLoading ? "Loading snapshots..." : "Select planned snapshot"}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {plannedSnapshotOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Final snapshot</Label>
+                <Select
+                  value={compareSnapshotId}
+                  onValueChange={setCompareSnapshotId}
+                  disabled={snapshotCompareListLoading || finalSnapshotOptions.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={snapshotCompareListLoading ? "Loading snapshots..." : "Select final snapshot"}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {finalSnapshotOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {snapshotCompareListLoading ? (
+              <div className="text-sm text-muted-foreground">Loading snapshot versions...</div>
+            ) : null}
+            {!snapshotCompareListLoading && plannedSnapshotOptions.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No planned snapshots saved for this week.</div>
+            ) : null}
+            {!snapshotCompareListLoading && finalSnapshotOptions.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No final snapshots saved for this week.</div>
+            ) : null}
+            {snapshotCompareError ? (
+              <div className="text-sm text-destructive">{snapshotCompareError}</div>
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setSnapshotCompareOpen(false)}>
+                Close
+              </Button>
+              <Button
+                onClick={() => void runSnapshotCompare()}
+                disabled={
+                  snapshotCompareLoading ||
+                  snapshotCompareListLoading ||
+                  !baselineSnapshotId ||
+                  !compareSnapshotId
+                }
+              >
+                {snapshotCompareLoading ? "Comparing..." : "Compare"}
+              </Button>
+            </div>
+
+            {snapshotCompareData ? (
+              <WeeklyPlanPerformanceView data={snapshotCompareData} />
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
