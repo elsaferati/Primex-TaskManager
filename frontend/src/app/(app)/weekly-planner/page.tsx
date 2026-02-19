@@ -3,6 +3,9 @@
 import * as React from "react"
 import Link from "next/link"
 
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
+import { arrayMove, SortableContext, useSortable, horizontalListSortingStrategy } from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -12,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
-import { ChevronDown, Plus, X, Printer } from "lucide-react"
+import { ChevronDown, Plus, X, Printer, GripVertical } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -162,6 +165,63 @@ const timeToMinutes = (value?: string | null) => {
   return h * 60 + m
 }
 
+const buildDepartmentUsers = (dept: WeeklyTableDepartment): WeeklyPrintUser[] => {
+  const userMap = new Map<string, WeeklyPrintUser>()
+  dept.days.forEach((day) => {
+    day.users.forEach((userDay) => {
+      if (!userMap.has(userDay.user_id)) {
+        userMap.set(userDay.user_id, {
+          user_id: userDay.user_id,
+          user_name: userDay.user_name,
+        })
+      }
+    })
+  })
+  return Array.from(userMap.values())
+}
+
+type SortableUserHeaderProps = {
+  user: WeeklyPrintUser
+  isOrdering: boolean
+}
+
+const SortableUserHeader = ({ user, isOrdering }: SortableUserHeaderProps) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: user.user_id, disabled: !isOrdering })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : undefined,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center justify-center gap-2"
+    >
+      <div className="font-semibold">{user.user_name}</div>
+      {isOrdering ? (
+        <button
+          type="button"
+          className="text-slate-500 hover:text-slate-700"
+          {...attributes}
+          {...listeners}
+          title="Drag to reorder"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 export default function WeeklyPlannerPage() {
   const { apiFetch, user } = useAuth()
   const [departments, setDepartments] = React.useState<Department[]>([])
@@ -172,6 +232,10 @@ export default function WeeklyPlannerPage() {
   const [isThisWeek, setIsThisWeek] = React.useState(true)
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
+  const [orderedUsersByDept, setOrderedUsersByDept] = React.useState<Record<string, WeeklyPrintUser[]>>({})
+  const [orderDirtyByDept, setOrderDirtyByDept] = React.useState<Record<string, boolean>>({})
+  const [isOrderingUsers, setIsOrderingUsers] = React.useState(false)
+  const [isSavingUserOrder, setIsSavingUserOrder] = React.useState(false)
 
   const [isExporting, setIsExporting] = React.useState(false)
   const [savingSnapshotMode, setSavingSnapshotMode] = React.useState<"THIS_WEEK_FINAL" | "NEXT_WEEK_PLANNED" | null>(null)
@@ -193,6 +257,13 @@ export default function WeeklyPlannerPage() {
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
   const canDeleteProjects = user?.role === "ADMIN"
   const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canReorderUsers = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canEditUserOrder = canReorderUsers && departmentId !== ALL_DEPARTMENTS_VALUE
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  )
 
   // Drag-to-scroll refs and state
   const scrollContainerRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
@@ -410,6 +481,25 @@ export default function WeeklyPlannerPage() {
     }
   }, [apiFetch, departmentId, isThisWeek])
 
+  const getOrderedUsersForDept = React.useCallback((dept: WeeklyTableDepartment) => {
+    return orderedUsersByDept[dept.department_id] || buildDepartmentUsers(dept)
+  }, [orderedUsersByDept])
+
+  const handleUserOrderDragEnd = React.useCallback((deptId: string, event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setOrderedUsersByDept((prev) => {
+      const current = prev[deptId]
+      if (!current) return prev
+      const oldIndex = current.findIndex((u) => u.user_id === active.id)
+      const newIndex = current.findIndex((u) => u.user_id === over.id)
+      if (oldIndex < 0 || newIndex < 0) return prev
+      const nextOrder = arrayMove(current, oldIndex, newIndex)
+      return { ...prev, [deptId]: nextOrder }
+    })
+    setOrderDirtyByDept((prev) => ({ ...prev, [deptId]: true }))
+  }, [])
+
   const loadTaskChecklist = React.useCallback(async (taskId: string) => {
     if (!taskId || taskChecklists[taskId] !== undefined) return
     setChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
@@ -525,10 +615,60 @@ export default function WeeklyPlannerPage() {
     }
   }, [apiFetch, departmentId, isThisWeek])
 
+  const saveUserOrder = React.useCallback(async () => {
+    if (!canEditUserOrder) return
+    const deptId = departmentId
+    const orderedUsers = orderedUsersByDept[deptId]
+    if (!orderedUsers || orderedUsers.length === 0) {
+      toast.error("No users available to save.")
+      return
+    }
+    setIsSavingUserOrder(true)
+    try {
+      const res = await apiFetch("/planners/weekly-table/user-order", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          department_id: deptId,
+          ordered_user_ids: orderedUsers.map((u) => u.user_id),
+        }),
+      })
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to save user order")
+        toast.error(message || "Failed to save user order")
+        return
+      }
+      toast.success("User order saved.")
+      setOrderDirtyByDept((prev) => ({ ...prev, [deptId]: false }))
+      setIsOrderingUsers(false)
+      void loadPlanner()
+    } catch (err) {
+      console.error("Failed to save user order", err)
+      toast.error("Failed to save user order")
+    } finally {
+      setIsSavingUserOrder(false)
+    }
+  }, [apiFetch, canEditUserOrder, departmentId, orderedUsersByDept, loadPlanner])
+
   React.useEffect(() => {
     if (viewMode !== "current") return
     void loadPlanner()
   }, [loadPlanner, viewMode])
+
+  React.useEffect(() => {
+    if (!data) {
+      setOrderedUsersByDept({})
+      setOrderDirtyByDept({})
+      return
+    }
+    const nextOrder: Record<string, WeeklyPrintUser[]> = {}
+    data.departments.forEach((dept) => {
+      nextOrder[dept.department_id] = buildDepartmentUsers(dept)
+    })
+    setOrderedUsersByDept(nextOrder)
+    setOrderDirtyByDept({})
+    setIsOrderingUsers(false)
+  }, [data])
 
   React.useEffect(() => {
     if (!manualTaskOpen) {
@@ -1556,39 +1696,14 @@ export default function WeeklyPlannerPage() {
     const minUserColWidth = 48
     const targetUserColWidth = 72
 
-    const getUserDisplayName = (lookup: UserLookup) => (
-      lookup.full_name || lookup.username || ""
-    )
-
     const getDepartmentUsersForPrint = (dept: WeeklyTableDepartment) => {
-      const deptUsers = users
-        .filter((lookup) => lookup.department_id === dept.department_id)
-        .map((lookup) => ({
-          user_id: lookup.id,
-          user_name: getUserDisplayName(lookup).trim(),
-        }))
-        .filter((user) => user.user_name.length > 0)
-        .sort((a, b) => a.user_name.localeCompare(b.user_name))
+      const ordered = orderedUsersByDept[dept.department_id]
+      if (ordered && ordered.length > 0) {
+        return ordered
+      }
 
-      const dataUsersMap = new Map<string, WeeklyTableUserDay>()
-      dept.days.forEach((day) => {
-        day.users.forEach((userDay) => {
-          if (!dataUsersMap.has(userDay.user_id)) {
-            dataUsersMap.set(userDay.user_id, userDay)
-          }
-        })
-      })
-
-      const extraUsers = Array.from(dataUsersMap.values())
-        .filter((userDay) => !deptUsers.some((user) => user.user_id === userDay.user_id))
-        .map((userDay) => ({
-          user_id: userDay.user_id,
-          user_name: userDay.user_name,
-        }))
-        .filter((user) => user.user_name.trim().length > 0)
-        .sort((a, b) => a.user_name.localeCompare(b.user_name))
-
-      return [...deptUsers, ...extraUsers]
+      const fallbackUsers = buildDepartmentUsers(dept)
+      return fallbackUsers.filter((user) => user.user_name.trim().length > 0)
     }
 
     const getPrintableWidth = () => {
@@ -2137,46 +2252,73 @@ export default function WeeklyPlannerPage() {
       <div className="flex items-center justify-between">
         <div className="text-lg font-semibold">Weekly Planner</div>
         {viewMode === "current" && data && (
-          <div className="flex items-center gap-2">
-            {canSaveSnapshots ? (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => void saveWeeklySnapshot("THIS_WEEK_FINAL")}
-                  disabled={savingSnapshotMode !== null}
-                >
-                  {savingSnapshotMode === "THIS_WEEK_FINAL" ? "Saving..." : "Save This Week (Final)"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => void saveWeeklySnapshot("NEXT_WEEK_PLANNED")}
-                  disabled={savingSnapshotMode !== null}
-                >
-                  {savingSnapshotMode === "NEXT_WEEK_PLANNED" ? "Saving..." : "Save Next Week (Planned)"}
-                </Button>
-              </>
-            ) : null}
-            {isThisWeek ? (
-              <Button
-                variant="outline"
-                onClick={() => void openPlanVsActualCompare()}
-                disabled={isLoadingPlanVsActual}
-              >
-                {isLoadingPlanVsActual ? "Comparing..." : "Compare with Last Friday Plan"}
-              </Button>
-            ) : null}
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => setManualTaskOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add Task
             </Button>
-
-            <Button variant="outline" onClick={exportWeeklyPlannerExcel} disabled={isExporting}>
-              {isExporting ? "Exporting..." : "Export Excel"}
-            </Button>
-            <Button variant="outline" onClick={handlePrint} disabled={!data}>
-              <Printer className="mr-2 h-4 w-4" />
-              Print
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  Actions
+                  <ChevronDown className="h-4 w-4 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                {canSaveSnapshots ? (
+                  <>
+                    <DropdownMenuLabel>Snapshots</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() => void saveWeeklySnapshot("THIS_WEEK_FINAL")}
+                      disabled={savingSnapshotMode !== null}
+                    >
+                      {savingSnapshotMode === "THIS_WEEK_FINAL" ? "Saving..." : "Save This Week (Final)"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => void saveWeeklySnapshot("NEXT_WEEK_PLANNED")}
+                      disabled={savingSnapshotMode !== null}
+                    >
+                      {savingSnapshotMode === "NEXT_WEEK_PLANNED" ? "Saving..." : "Save Next Week (Planned)"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                {isThisWeek ? (
+                  <>
+                    <DropdownMenuLabel>Compare</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() => void openPlanVsActualCompare()}
+                      disabled={isLoadingPlanVsActual}
+                    >
+                      {isLoadingPlanVsActual ? "Comparing..." : "Compare with Last Friday Plan"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                {canEditUserOrder ? (
+                  <>
+                    <DropdownMenuLabel>Ordering</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => setIsOrderingUsers((prev) => !prev)}>
+                      {isOrderingUsers ? "Finish Ordering" : "Edit User Order"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => void saveUserOrder()}
+                      disabled={!orderDirtyByDept[departmentId] || isSavingUserOrder}
+                    >
+                      {isSavingUserOrder ? "Saving..." : "Save Order"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                <DropdownMenuLabel>Export & Print</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={exportWeeklyPlannerExcel} disabled={isExporting}>
+                  {isExporting ? "Exporting..." : "Export Excel"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handlePrint} disabled={!data}>
+                  Print
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>
@@ -2657,57 +2799,47 @@ export default function WeeklyPlannerPage() {
                   <CardTitle>{formatDepartmentName(dept.department_name)}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Table
-                    className="table-fixed w-full"
-                    containerProps={{
-                      ref: setScrollRef(dept.department_id),
-                      className: "max-h-[75vh] overflow-x-auto overflow-y-auto cursor-grab",
-                      onPointerDown: (e) => handlePointerDown(e, dept.department_id),
-                      onWheel: (e) => handleWheel(e, dept.department_id),
-                      style: {
-                        scrollbarWidth: "thin",
-                        scrollbarColor: "#94a3b8 #e2e8f0",
-                        touchAction: "pan-y",
-                      },
-                    }}
-                  >
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-24 min-w-24 sticky top-0 left-0 bg-background z-30 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
-                        <TableHead className="w-10 min-w-10 sticky top-0 left-24 bg-background z-30 text-center text-xs font-bold uppercase">Time</TableHead>
-                        <TableHead className="w-10 min-w-10 sticky top-0 left-34 bg-background z-30 text-center text-xs font-bold uppercase">LL</TableHead>
-                        {(() => {
-                          // Get all unique users from all days
-                          const userMap = new Map<string, WeeklyTableUserDay>()
-                          dept.days.forEach((day) => {
-                            day.users.forEach((userDay) => {
-                              if (!userMap.has(userDay.user_id)) {
-                                userMap.set(userDay.user_id, userDay)
-                              }
-                            })
-                          })
-                          const allUsers = Array.from(userMap.values())
+                  {(() => {
+                    const orderedUsers = getOrderedUsersForDept(dept)
+                    const orderedUserIds = orderedUsers.map((u) => u.user_id)
+                    const isOrderingActive = canEditUserOrder && isOrderingUsers
 
-                          return allUsers.map((user) => (
-                            <TableHead key={user.user_id} className="w-56 min-w-56 sticky top-0 bg-background z-20 text-center text-xs font-bold uppercase">
-                              <div className="font-semibold">{user.user_name}</div>
-                            </TableHead>
-                          ))
-                        })()}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                    return (
+                      <DndContext
+                        sensors={sensors}
+                        onDragEnd={(event) => handleUserOrderDragEnd(dept.department_id, event)}
+                      >
+                        <Table
+                          className="table-fixed w-full"
+                          containerProps={{
+                            ref: setScrollRef(dept.department_id),
+                            className: "max-h-[75vh] overflow-x-auto overflow-y-auto cursor-grab",
+                            onPointerDown: (e) => handlePointerDown(e, dept.department_id),
+                            onWheel: (e) => handleWheel(e, dept.department_id),
+                            style: {
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#94a3b8 #e2e8f0",
+                              touchAction: "pan-y",
+                            },
+                          }}
+                        >
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-24 min-w-24 sticky top-0 left-0 bg-background z-30 text-xs font-bold uppercase" rowSpan={2}>Day</TableHead>
+                              <TableHead className="w-10 min-w-10 sticky top-0 left-24 bg-background z-30 text-center text-xs font-bold uppercase">Time</TableHead>
+                              <TableHead className="w-10 min-w-10 sticky top-0 left-34 bg-background z-30 text-center text-xs font-bold uppercase">LL</TableHead>
+                              <SortableContext items={orderedUserIds} strategy={horizontalListSortingStrategy}>
+                                {orderedUsers.map((user) => (
+                                  <TableHead key={user.user_id} className="w-56 min-w-56 sticky top-0 bg-background z-20 text-center text-xs font-bold uppercase">
+                                    <SortableUserHeader user={user} isOrdering={isOrderingActive} />
+                                  </TableHead>
+                                ))}
+                              </SortableContext>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                       {dept.days.map((day, dayIndex) => {
-                        // Get all unique users from all days
-                        const userMap = new Map<string, WeeklyTableUserDay>()
-                        dept.days.forEach((d) => {
-                          d.users.forEach((userDay) => {
-                            if (!userMap.has(userDay.user_id)) {
-                              userMap.set(userDay.user_id, userDay)
-                            }
-                          })
-                        })
-                        const allUsers = Array.from(userMap.values())
+                        const allUsers = orderedUsers
 
                           const renderCellContent = (
                             projects: WeeklyTableProjectEntry[],
@@ -2996,9 +3128,9 @@ export default function WeeklyPlannerPage() {
                                 <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
                                   PRJK
-                                </TableCell>
+                              </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
                                   return (
@@ -3022,9 +3154,9 @@ export default function WeeklyPlannerPage() {
                                 <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">AM</div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
                                   FT
-                                </TableCell>
+                              </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
                                   return (
@@ -3047,9 +3179,9 @@ export default function WeeklyPlannerPage() {
                                 <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
                                   PRJK
-                                </TableCell>
+                              </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
                                   return (
@@ -3073,9 +3205,9 @@ export default function WeeklyPlannerPage() {
                                 <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                   <div className="text-xs font-medium text-primary">PM</div>
                                 </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
                                   FT
-                                </TableCell>
+                              </TableCell>
                                 {allUsers.map((user) => {
                                   const userDay = day.users.find((u) => u.user_id === user.user_id)
                                   return (
@@ -3095,8 +3227,11 @@ export default function WeeklyPlannerPage() {
                             </React.Fragment>
                           )
                       })}
-                    </TableBody>
-                  </Table>
+                          </TableBody>
+                        </Table>
+                      </DndContext>
+                    )
+                  })()}
                 </CardContent>
               </Card>
             ))}

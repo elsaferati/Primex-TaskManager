@@ -39,6 +39,7 @@ async def list_users(
             role=u.role,
             department_id=u.department_id,
             is_active=u.is_active,
+            weekly_planner_sort_order=u.weekly_planner_sort_order,
         )
         for u in users
     ]
@@ -62,6 +63,7 @@ async def list_users_lookup(
             role=u.role,
             department_id=u.department_id,
             is_active=u.is_active,
+            weekly_planner_sort_order=u.weekly_planner_sort_order,
         )
         for u in users
     ]
@@ -109,6 +111,7 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db), u
         role=new_user.role,
         department_id=new_user.department_id,
         is_active=new_user.is_active,
+        weekly_planner_sort_order=new_user.weekly_planner_sort_order,
     )
 
 
@@ -163,6 +166,7 @@ async def update_user(
         role=target.role,
         department_id=target.department_id,
         is_active=target.is_active,
+        weekly_planner_sort_order=target.weekly_planner_sort_order,
     )
 
 
@@ -191,5 +195,6 @@ async def deactivate_user(
         role=target.role,
         department_id=target.department_id,
         is_active=target.is_active,
+        weekly_planner_sort_order=target.weekly_planner_sort_order,
     )
 

@@ -5033,14 +5033,12 @@ export default function PcmProjectPage() {
                                     <Input
                                       value={toDateInput(task.due_date)}
                                       onChange={(e) => {
-                                        if (isLocked) return
                                         const nextValue = normalizeDueDateInput(e.target.value)
                                         const dueDate = nextValue ? new Date(nextValue).toISOString() : null
                                         void patchTask(task.id, { due_date: dueDate }, "Failed to update date")
                                       }}
                                       type="date"
                                       className="h-7 text-xs border-slate-300 bg-white"
-                                      disabled={isLocked}
                                     />
                                   </div>
                                   <div>

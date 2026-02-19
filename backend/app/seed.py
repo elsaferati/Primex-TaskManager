@@ -62,6 +62,7 @@ PCM_PROJECTS = [
         "status": TaskStatus.IN_PROGRESS,
         "current_phase": ProjectPhaseStatus.PLANNING,
         "progress_percentage": 48,
+        "is_template": True,
     },
 ]
 
