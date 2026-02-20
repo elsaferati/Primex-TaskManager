@@ -131,6 +131,7 @@ type SwimlaneRow = {
   count: number
   headerClass: string
   badgeClass: string
+  badges?: { value: number; className: string; label?: string }[]
   items: SwimlaneCell[]
 }
 
@@ -2023,6 +2024,26 @@ export default function CommonViewPage() {
     }
   }
 
+  const toggleOneHR1Filter = () => {
+    if (!typeMultiMode) {
+      setTypeFilters(new Set(["oneH", "r1"]))
+      return
+    }
+    setTypeFilters((prev) => {
+      const s = new Set(prev)
+      const hasOneH = s.has("oneH")
+      const hasR1 = s.has("r1")
+      if (hasOneH && hasR1) {
+        s.delete("oneH")
+        s.delete("r1")
+      } else {
+        s.add("oneH")
+        s.add("r1")
+      }
+      return s
+    })
+  }
+
   const selectAll = () => {
     if (!multiMode) {
       setMultiMode(true)
@@ -2248,6 +2269,7 @@ export default function CommonViewPage() {
 
   const showCard = (type: CommonType) => {
     if (typeFilters.size === 0) return true
+    if (type === "oneH") return typeFilters.has("oneH") || typeFilters.has("r1")
     return typeFilters.has(type)
   }
 
@@ -3029,6 +3051,9 @@ export default function CommonViewPage() {
 
 
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
+    const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
+    const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
+
     const lateSource = isMultiDate
       ? sortByDate(filtered.late, (x) => x.date, (x) => x.person)
       : filtered.late
@@ -3128,16 +3153,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent blocked",
     }))
 
-    const oneHSource = isMultiDate
-      ? sortByDate(filtered.oneH, (x) => x.date, (x) => x.title)
-      : filtered.oneH
-    const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
-      title: x.title,
-      assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent oneh",
-    }))
+    const oneHSource = includeOneH
+      ? isMultiDate
+        ? sortByDate(filtered.oneH, (x) => x.date, (x) => x.title)
+        : filtered.oneH
+      : []
 
     const personalSource = isMultiDate
       ? sortByDate(filtered.personal, (x) => x.date, (x) => x.title)
@@ -3180,16 +3200,39 @@ export default function CommonViewPage() {
       assignees: x.assignees,
     }))
 
-    const r1Source = isMultiDate
-      ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
-      : filtered.r1
-    const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
-      title: x.title,
-      assignees: x.assignees || (x.owner ? [x.owner] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent r1",
-    }))
+    const r1Source = includeR1
+      ? isMultiDate
+        ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
+        : filtered.r1
+      : []
+    const oneHR1Source = sortByDate(
+      [
+        ...oneHSource.map((item) => ({ kind: "oneH" as const, item })),
+        ...r1Source.map((item) => ({ kind: "r1" as const, item })),
+      ],
+      (x) => x.item.date,
+      (x) => x.item.title
+    )
+    const oneHR1Items: SwimlaneCell[] = oneHR1Source.map((entry) => {
+      if (entry.kind === "oneH") {
+        const x = entry.item as OneHItem
+        return {
+          title: x.title,
+          assignees: x.assignees || (x.person ? [x.person] : []),
+          subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+          dateLabel: formatDateHuman(x.date),
+          accentClass: "swimlane-accent oneh",
+        }
+      }
+      const x = entry.item as R1Item
+      return {
+        title: x.title,
+        assignees: x.assignees || (x.owner ? [x.owner] : []),
+        subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel: formatDateHuman(x.date),
+        accentClass: "swimlane-accent r1",
+      }
+    })
 
     const problemSource = isMultiDate
       ? sortByDate(filtered.problems, (x) => x.date, (x) => x.title)
@@ -3283,11 +3326,15 @@ export default function CommonViewPage() {
       },
       {
         id: "oneH",
-        label: "1H",
-        count: filtered.oneH.length,
+        label: "1H / R1",
+        count: filtered.oneH.length + filtered.r1.length,
         headerClass: "swimlane-header oneh",
         badgeClass: "swimlane-badge oneh",
-        items: oneHItems,
+        badges: [
+          { value: filtered.oneH.length, className: "swimlane-badge oneh", label: "1H" },
+          { value: filtered.r1.length, className: "swimlane-badge r1", label: "R1" },
+        ],
+        items: oneHR1Items,
       },
       {
         id: "personal",
@@ -3296,14 +3343,6 @@ export default function CommonViewPage() {
         headerClass: "swimlane-header personal",
         badgeClass: "swimlane-badge personal",
         items: personalItems,
-      },
-      {
-        id: "r1",
-        label: "R1",
-        count: filtered.r1.length,
-        headerClass: "swimlane-header r1",
-        badgeClass: "swimlane-badge r1",
-        items: r1Items,
       },
       {
         id: "priority",
@@ -3330,7 +3369,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, weekISOs])
+  }, [filtered, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
@@ -4011,7 +4050,8 @@ export default function CommonViewPage() {
               min-width: 0 !important;
             }
           .swimlane-header,
-          .swimlane-badge {
+          .swimlane-badge,
+          .swimlane-index {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
@@ -4353,7 +4393,7 @@ export default function CommonViewPage() {
           width: 150px;
           padding: 10px 10px;
           display: grid;
-          grid-template-columns: 1fr auto;
+          grid-template-columns: 28px 1fr auto;
           align-items: center;
           column-gap: 8px;
           font-weight: 700;
@@ -4365,6 +4405,26 @@ export default function CommonViewPage() {
           font-size: 12px;
           word-break: break-word;
           background: #f8f9fa;
+        }
+        .swimlane-index {
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.08);
+          color: #111827;
+          font-weight: 700;
+          font-size: 12px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .swimlane-label {
+          min-width: 0;
+        }
+        .swimlane-badges {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
         }
         .swimlane-badge {
           min-width: 24px;
@@ -5433,6 +5493,27 @@ export default function CommonViewPage() {
               All
             </button>
             <button
+              className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("blocked")}
+            >
+              BLL
+            </button>
+            <button
+              className={`chip ${typeFilters.has("oneH") || typeFilters.has("r1") ? "active" : ""}`}
+              type="button"
+              onClick={toggleOneHR1Filter}
+            >
+              1H/R1
+            </button>
+            <button
+              className={`chip ${typeFilters.has("personal") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("personal")}
+            >
+              P:
+            </button>
+            <button
               className={`chip ${typeFilters.has("late") ? "active" : ""}`}
               type="button"
               onClick={() => setTypeFilter("late")}
@@ -5473,34 +5554,6 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("bz")}
             >
               BZ
-            </button>
-            <button
-              className={`chip ${typeFilters.has("blocked") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("blocked")}
-            >
-              BLL
-            </button>
-            <button
-              className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("oneH")}
-            >
-              1H
-            </button>
-            <button
-              className={`chip ${typeFilters.has("personal") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("personal")}
-            >
-              P:
-            </button>
-            <button
-              className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("r1")}
-            >
-              R1
             </button>
             <button
               className={`chip ${typeFilters.has("priority") ? "active" : ""}`}
@@ -7123,6 +7176,8 @@ export default function CommonViewPage() {
                   .filter((row) => showCard(row.id))
                   .map((row, rowIndex) => {
                     const rowData = tableDataByDay?.[weekISOs[0]] || {}
+                    const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
+                    const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
                     let dayEntries: Record<string, any[]> = {}
                     weekISOs.forEach((iso) => {
                       const dayData = tableDataByDay?.[iso] || {}
@@ -7130,12 +7185,15 @@ export default function CommonViewPage() {
                       else if (row.id === "absent") dayEntries[iso] = dayData.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData.leave || []
                       else if (row.id === "blocked") dayEntries[iso] = dayData.blocked || []
-                      else if (row.id === "oneH") dayEntries[iso] = dayData.oneH || []
+                      else if (row.id === "oneH")
+                        dayEntries[iso] = [
+                          ...(includeOneH ? dayData.oneH || [] : []),
+                          ...(includeR1 ? dayData.r1 || [] : []),
+                        ]
                       else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
                       else if (row.id === "bz") dayEntries[iso] = dayData.bz || []
-                      else if (row.id === "r1") dayEntries[iso] = dayData.r1 || []
                       else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
                       else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
                       else if (row.id === "priority") dayEntries[iso] = dayData.priority || []
@@ -7458,13 +7516,24 @@ export default function CommonViewPage() {
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
             {swimlaneRows
               .filter((row) => showCard(row.id))
-              .map((row) => {
+              .map((row, rowIndex) => {
                 const cells = buildSwimlaneCells(row.items, swimlaneColumnCount)
                 return (
                   <div key={row.id} className="swimlane-row">
                     <div className={row.headerClass}>
-                      <span>{row.label}</span>
-                      <span className={row.badgeClass}>{row.count}</span>
+                      <span className="swimlane-index">{rowIndex + 1}</span>
+                      <span className="swimlane-label">{row.label}</span>
+                      <span className="swimlane-badges">
+                        {row.badges?.length ? (
+                          row.badges.map((badge, idx) => (
+                            <span key={`${row.id}-badge-${idx}`} className={badge.className} title={badge.label}>
+                              {badge.value}
+                            </span>
+                          ))
+                        ) : (
+                          <span className={row.badgeClass}>{row.count}</span>
+                        )}
+                      </span>
                     </div>
                     <div className="swimlane-content-shell">
                       <div className="swimlane-row-nav">
