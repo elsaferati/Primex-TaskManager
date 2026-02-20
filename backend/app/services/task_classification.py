@@ -5,9 +5,6 @@ from typing import Any
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
-_PROJECT_LIKE_PCM_TITLE_RE = re.compile(r"^(?:mst|tt)\b|^vs\s*/?\s*vl\b", re.IGNORECASE)
-
-
 # VS/VL template task titles (normalized). These are excluded from "fast task" logic.
 VS_VL_TEMPLATE_TITLES: set[str] = {
     "analizimi dhe identifikimi i kolonave",
@@ -33,20 +30,6 @@ def is_vs_vl_task_title(title: str | None) -> bool:
     return normalize_title(title) in VS_VL_TEMPLATE_TITLES
 
 
-def is_project_like_pcm_title(title: str | None) -> bool:
-    """
-    Detect tasks that look like PCM project items but were created as standalone tasks.
-
-    Examples:
-    - "MST OTTO - MR 370"
-    - "TT - Something"
-    - "VS/VL PROJEKT I MADH - X" (also accept "VS VL ...")
-    """
-    if not title:
-        return False
-    return bool(_PROJECT_LIKE_PCM_TITLE_RE.match(title.strip()))
-
-
 def is_fast_task_fields(
     *,
     title: str | None,
@@ -67,8 +50,6 @@ def is_fast_task_fields(
     if dependency_task_id is not None:
         return False
     if system_template_origin_id is not None:
-        return False
-    if is_project_like_pcm_title(title):
         return False
     if is_vs_vl_task_title(title):
         return False
