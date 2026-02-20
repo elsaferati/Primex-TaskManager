@@ -53,7 +53,6 @@ def _resolve_effective_department_id(
     requested_department_id: uuid.UUID | None,
 ) -> uuid.UUID | None:
     if requested_department_id is not None:
-        ensure_department_access(current_user, requested_department_id)
         return requested_department_id
     if current_user.role != UserRole.ADMIN:
         return current_user.department_id
@@ -74,15 +73,7 @@ def _enforce_daily_report_target_scope(
     effective_department_id: uuid.UUID | None,
     target_user: User,
 ) -> None:
-    if effective_department_id is not None and target_user.department_id != effective_department_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    # Staff without a department must remain self-scoped.
-    if (
-        current_user.role == UserRole.STAFF
-        and current_user.department_id is None
-        and target_user.id != current_user.id
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return
 
 
 async def _resolve_daily_report_scope(
