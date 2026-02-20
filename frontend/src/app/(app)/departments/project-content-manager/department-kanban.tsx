@@ -286,7 +286,7 @@ const INTERNAL_MEETING = {
       ],
     },
     M2: {
-      label: "M2 PER ZHVILLIM (12:00-12:15 MAX)",
+      label: "M2 PER ZHVILLIM (11:45-12:00 MAX)",
       items: [
         "A ka shenime GA/KA ne grupe/Trello?",
         "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
@@ -294,7 +294,7 @@ const INTERNAL_MEETING = {
       ],
     },
     M3: {
-      label: "M3 (ME TRELLO) PER ZHVILLIM (16:10-16:30 MAX)",
+      label: "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)",
       items: [
         "A ka shenime GA/KA ne grupe/Trello?",
         "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
@@ -5753,6 +5753,49 @@ export default function DepartmentKanban() {
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
+                    <div className="text-sm font-semibold text-slate-800">External Meetings</div>
+                    <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todayMeetings.length}</div>
+                </div>
+                {todayMeetings.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[520px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["MEETING TITLE", "MEETING DATE"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {todayMeetings.map((meeting) => (
+                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
+                          </TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">
+                    {loadingExtras ? "Loading meetings..." : "No meetings today."}
+                  </div>
+                )}
+              </Card>
+
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
                     <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
                     <div className="text-xs text-slate-500 mt-1">Tasks scheduled for today.</div>
                   </div>
@@ -5987,48 +6030,6 @@ export default function DepartmentKanban() {
                 )}
               </Card>
 
-              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-800">External Meetings</div>
-                    <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
-                  </div>
-                  <div className="text-xs font-semibold text-slate-600">{todayMeetings.length}</div>
-                </div>
-                {todayMeetings.length ? (
-                  <Table
-                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-                    className="min-w-[520px] text-[11px]"
-                  >
-                    <TableHeader>
-                      <TableRow className="bg-slate-50">
-                        {["MEETING TITLE", "MEETING DATE"].map((label) => (
-                          <TableHead
-                            key={label}
-                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-                          >
-                            {label}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {todayMeetings.map((meeting) => (
-                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
-                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
-                          </TableCell>
-                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="mt-3 text-sm text-slate-500">
-                    {loadingExtras ? "Loading meetings..." : "No meetings today."}
-                  </div>
-                )}
-              </Card>
             </div>
           </div>
         ) : null}
@@ -6647,24 +6648,32 @@ export default function DepartmentKanban() {
               {statusRows.map((row) => (
                 <div
                   key={row.id}
-                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:flex-row"
+                  className="rounded-2xl border border-slate-200 bg-white p-2"
                 >
-                  <div
-                    className={`relative w-full rounded-xl border border-slate-200 border-l-4 p-4 md:w-48 md:shrink-0 ${row.headerBg} ${row.headerText} ${row.borderClass}`}
-                  >
-                    <div className="text-sm font-semibold">{row.title}</div>
-                    <span
-                      className={`absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold ${row.badgeClass}`}
-                    >
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <div className="flex items-center gap-2">
+                      <div className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${row.itemBadgeClass}`}>
+                        {row.title}
+                      </div>
+                      <span className="text-[11px] text-slate-500">
+                        {row.items.length ? "Active items" : "No items"}
+                      </span>
+                    </div>
+                    <span className={`rounded-full px-1.5 py-0 text-[11px] font-semibold ${row.badgeClass}`}>
                       {row.count}
                     </span>
-                    <div className="mt-2 text-xs text-slate-500">
-                      {row.items.length ? "Active items" : "No items"}
-                    </div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 flex flex-col max-h-[300px] overflow-y-auto">
+                  <div className="mt-2 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
+                        <div className="hidden sm:grid sm:gap-0 sm:divide-x sm:divide-slate-200 sm:grid-cols-[minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.6fr)] px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                          <div className="sm:px-3">Title</div>
+                          <div className="sm:px-3">GA</div>
+                          <div className="sm:px-3">Status</div>
+                          <div className="sm:px-3">Type</div>
+                          <div className="sm:px-3">Assignees</div>
+                          <div className="sm:px-3 text-right">Actions</div>
+                        </div>
                         {row.items.map((t) => {
                           const statusValue = taskStatusValue(t)
                           const isCompleted = statusValue === "DONE"
@@ -6673,29 +6682,42 @@ export default function DepartmentKanban() {
                               key={t.id}
                               id={`task-${t.id}`}
                               href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
-                              className={`block rounded-lg border border-slate-200 border-l-4 px-3 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                              className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-1.5 text-sm transition hover:bg-slate-50 ${isCompleted
                                 ? "border-green-500 bg-green-50/30 opacity-75"
                                 : `${row.borderClass} bg-white`
                                 }`}
                             >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) && (
+                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.6fr)] sm:divide-x sm:divide-slate-200">
+                                <div className="sm:px-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                      {t.title}
+                                    </div>
+                                  </div>
+                                  {t.description ? (
+                                    <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                                  ) : null}
+                                </div>
+                                <div className="sm:px-3 flex items-start">
+                                  {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) ? (
                                     <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
                                       GA
                                     </Badge>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-400">-</span>
                                   )}
-                                  <div className={`font-medium text-xs ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                    {t.title}
-                                  </div>
+                                </div>
+                                <div className="sm:px-3 flex items-start">
                                   <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
                                     {reportStatusLabel(statusValue)}
                                   </Badge>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="sm:px-3 flex items-start">
                                   <Badge className={`border text-[11px] ${row.itemBadgeClass}`}>
                                     {row.itemBadge}
                                   </Badge>
+                                </div>
+                                <div className="sm:px-3 flex items-start gap-1 flex-wrap">
                                   {(() => {
                                     // Collect all assignees: from assigned_to and assignees array
                                     const assigneeIds = new Set<string>()
@@ -6722,7 +6744,7 @@ export default function DepartmentKanban() {
                                       return (
                                         <div
                                           key={userId}
-                                          className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                          className="h-5 w-5 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
                                           title={label}
                                         >
                                           {initials(label)}
@@ -6730,14 +6752,18 @@ export default function DepartmentKanban() {
                                       )
                                     })
 
-                                    return assigneeChips.length > 0 ? assigneeChips : null
+                                    return assigneeChips.length > 0 ? assigneeChips : (
+                                      <span className="text-[11px] text-slate-400">-</span>
+                                    )
                                   })()}
+                                </div>
+                                <div className="sm:px-3 flex items-start justify-end gap-2">
                                   {canDeleteNoProject ? (
                                     <>
                                       <Button
                                         variant="outline"
                                         size="icon"
-                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                        className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
                                         title="Edit"
                                         aria-label={`Edit ${t.title}`}
                                         onClick={(event) => {
@@ -6746,13 +6772,13 @@ export default function DepartmentKanban() {
                                           startEditTask(t)
                                         }}
                                       >
-                                        <Pencil className="h-3.5 w-3.5" />
+                                        <Pencil className="h-3 w-3" />
                                       </Button>
                                       <Button
                                         variant="outline"
                                         size="icon"
                                         disabled={deletingNoProjectTaskId === t.id}
-                                        className="h-6 w-6 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                        className="h-5 w-5 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
                                         title="Delete"
                                         aria-label={`Delete ${t.title}`}
                                         onClick={(event) => {
@@ -6761,15 +6787,12 @@ export default function DepartmentKanban() {
                                           void deleteNoProjectTask(t.id)
                                         }}
                                       >
-                                        <Trash2 className="h-3.5 w-3.5" />
+                                        <Trash2 className="h-3 w-3" />
                                       </Button>
                                     </>
                                   ) : null}
                                 </div>
                               </div>
-                              {t.description ? (
-                                <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
-                              ) : null}
                             </Link>
                           )
                         })}

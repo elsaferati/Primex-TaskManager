@@ -1510,6 +1510,11 @@ async def update_task(
         alignment_set = "alignment_user_ids" in payload.model_fields_set  # type: ignore[attr-defined]
     elif hasattr(payload, "__fields_set__"):
         alignment_set = "alignment_user_ids" in payload.__fields_set__  # type: ignore[attr-defined]
+    finish_period_set = False
+    if hasattr(payload, "model_fields_set"):
+        finish_period_set = "finish_period" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        finish_period_set = "finish_period" in payload.__fields_set__  # type: ignore[attr-defined]
     if alignment_set:
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         if payload.alignment_user_ids:
@@ -1522,7 +1527,7 @@ async def update_task(
 
     if payload.priority is not None:
         task.priority = payload.priority
-    if payload.finish_period is not None:
+    if finish_period_set:
         task.finish_period = payload.finish_period
     if payload.phase is not None:
         # Allow task editors to change phase (removed manager/admin restriction)
@@ -1689,7 +1694,7 @@ async def update_task(
             shared_values["start_date"] = task.start_date
         if payload.priority is not None:
             shared_values["priority"] = task.priority
-        if payload.finish_period is not None:
+        if finish_period_set:
             shared_values["finish_period"] = task.finish_period
         if payload.phase is not None:
             shared_values["phase"] = task.phase
