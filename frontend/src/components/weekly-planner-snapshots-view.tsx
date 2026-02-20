@@ -215,28 +215,28 @@ const getStatusCardClassesForDay = (
   dailyStatus?: string | null
 ) => {
   const normalized = (status || "TODO").toUpperCase()
-  if (normalized === "DONE" && completedAt && dayDate) {
-    const completedDate = completedAt.slice(0, 10)
-    const currentDate = dayDate.slice(0, 10)
-    if (completedDate === currentDate) {
-      return getStatusCardClasses("DONE")
-    }
-  }
+  
+  // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
   if (dailyStatus) {
     return getStatusCardClasses(dailyStatus)
   }
-  if (normalized !== "DONE") {
-    return getStatusCardClasses(normalized)
-  }
-  if (!completedAt || !dayDate) {
-    return getStatusCardClasses("IN_PROGRESS")
-  }
-  const completedDate = completedAt.slice(0, 10)
-  const currentDate = dayDate.slice(0, 10)
-  if (completedDate === currentDate) {
+  
+  // For non-MST/TT tasks, use timeline logic based on completion date
+  if (normalized === "DONE" && completedAt && dayDate) {
+    const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
+    const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
+    
+    // If the displayed day is before the completion date, show TODO/IN_PROGRESS
+    // (task wasn't done yet on that day)
+    if (currentDate < completedDate) {
+      return getStatusCardClasses("IN_PROGRESS")
+    }
+    // If the displayed day is on or after the completion date, show DONE
     return getStatusCardClasses("DONE")
   }
-  return getStatusCardClasses("IN_PROGRESS")
+  
+  // For non-DONE tasks or when dates aren't available, use the main status
+  return getStatusCardClasses(normalized)
 }
 
 const getStatusValueForDay = (
@@ -246,29 +246,29 @@ const getStatusValueForDay = (
   dailyStatus?: string | null
 ) => {
   const normalized = (status || "TODO").toUpperCase()
-  if (normalized === "DONE" && completedAt && dayDate) {
-    const completedDate = completedAt.slice(0, 10)
-    const currentDate = dayDate.slice(0, 10)
-    if (completedDate === currentDate) {
-      return "DONE"
-    }
-  }
+  
+  // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
   if (dailyStatus) {
     const normalizedDaily = dailyStatus.toUpperCase()
     return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
   }
-  if (normalized !== "DONE") {
-    return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
-  }
-  if (!completedAt || !dayDate) {
-    return "IN_PROGRESS"
-  }
-  const completedDate = completedAt.slice(0, 10)
-  const currentDate = dayDate.slice(0, 10)
-  if (completedDate === currentDate) {
+  
+  // For non-MST/TT tasks, use timeline logic based on completion date
+  if (normalized === "DONE" && completedAt && dayDate) {
+    const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
+    const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
+    
+    // If the displayed day is before the completion date, show IN_PROGRESS
+    // (task wasn't done yet on that day)
+    if (currentDate < completedDate) {
+      return "IN_PROGRESS"
+    }
+    // If the displayed day is on or after the completion date, show DONE
     return "DONE"
   }
-  return "IN_PROGRESS"
+  
+  // For non-DONE tasks or when dates aren't available, use the main status
+  return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
 }
 
 const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className: string } | null => {

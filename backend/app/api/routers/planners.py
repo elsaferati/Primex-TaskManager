@@ -29,6 +29,7 @@ from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_planner_exclusion import TaskPlannerExclusion
@@ -40,6 +41,7 @@ from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
+from app.services.system_task_occurrences import ensure_occurrences_in_range
 from app.schemas.planner import (
     MonthlyPlannerResponse,
     MonthlyPlannerSummary,
@@ -2154,6 +2156,25 @@ async def weekly_table_planner(
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
         
+        # Ensure system task occurrences exist for GA department and GANE ARIFAJ user
+        is_ga_dept = dept.name == "GA"
+        gane_arifaj_user = None
+        if is_ga_dept:
+            for u in dept_users:
+                if u.username and u.username.lower() == "gane.arifaj":
+                    gane_arifaj_user = u
+                    break
+        
+        if is_ga_dept and gane_arifaj_user:
+            # Ensure system task occurrences exist for the week (only once per department)
+            await ensure_occurrences_in_range(
+                db=db,
+                start=working_days[0],
+                end=working_days[-1],
+                template_ids=None,  # All templates
+            )
+            await db.commit()
+        
         for day_date in working_days:
             users_day_data: list[WeeklyTableUserDay] = []
             
@@ -2272,6 +2293,86 @@ async def weekly_table_planner(
                 pm_system_tasks: list[WeeklyTableTaskEntry] = []
                 am_fast_tasks: list[WeeklyTableTaskEntry] = []
                 pm_fast_tasks: list[WeeklyTableTaskEntry] = []
+                
+                # Fetch system tasks for GA department and GANE ARIFAJ user only
+                is_gane_arifaj = dept_user.username and dept_user.username.lower() == "gane.arifaj"
+                
+                if is_ga_dept and is_gane_arifaj:
+                    # Query system task occurrences for this user on this day
+                    # System tasks are assigned via assignee_ids or default_assignee_id in the template
+                    # The occurrence already exists for this user, so we just need to fetch it
+                    occ_rows = (
+                        await db.execute(
+                            select(SystemTaskOccurrence, SystemTaskTemplate)
+                            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
+                            .where(SystemTaskOccurrence.user_id == dept_user.id)
+                            .where(SystemTaskOccurrence.occurrence_date == day_date)
+                            .where(SystemTaskTemplate.is_active.is_(True))
+                            .order_by(SystemTaskTemplate.title)
+                        )
+                    ).all()
+                    
+                    # Debug logging
+                    if occ_rows:
+                        logger.debug(f"[SYSTEM TASKS] Found {len(occ_rows)} system task occurrences for GANE ARIFAJ on {day_date}")
+                    else:
+                        logger.debug(f"[SYSTEM TASKS] No system task occurrences found for GANE ARIFAJ on {day_date}")
+                    
+                    # Convert occurrences to WeeklyTableTaskEntry
+                    for occ, tmpl in occ_rows:
+                        # Map SystemTaskOccurrence status to TaskStatus
+                        # OPEN -> TODO, DONE -> DONE, NOT_DONE/SKIPPED -> TODO
+                        if occ.status == "DONE":
+                            task_status = TaskStatus.DONE
+                        elif occ.status in ("NOT_DONE", "SKIPPED"):
+                            task_status = TaskStatus.TODO
+                        else:  # OPEN or unknown
+                            task_status = TaskStatus.TODO
+                        
+                        # Determine completed_at from acted_at if status is DONE
+                        completed_at = occ.acted_at if occ.status == "DONE" else None
+                        
+                        # Get finish_period from template
+                        finish_period_value = tmpl.finish_period
+                        finish_period_upper = None
+                        if finish_period_value:
+                            finish_period_str = str(finish_period_value).strip()
+                            if finish_period_str:
+                                finish_period_upper = finish_period_str.upper()
+                        
+                        # Determine which time slot(s) this task should appear in
+                        is_pm = finish_period_upper == "PM"
+                        is_am = finish_period_upper == "AM"
+                        is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
+                        
+                        # Create the entry
+                        entry = WeeklyTableTaskEntry(
+                            task_id=None,  # System tasks don't have task IDs in weekly planner context
+                            title=tmpl.title,
+                            status=task_status,
+                            daily_status=None,  # System tasks use occurrence status
+                            completed_at=completed_at,
+                            daily_products=None,
+                            finish_period=tmpl.finish_period,
+                            fast_task_type=None,  # Not applicable for system tasks
+                            is_bllok=False,
+                            is_1h_report=False,
+                            is_r1=False,
+                            is_personal=False,
+                            ga_note_origin_id=None,
+                        )
+                        
+                        # Add to appropriate time slots
+                        # Note: System tasks don't have exclusions in the same way, but we check for consistency
+                        if is_both:
+                            # Add to both AM and PM
+                            am_system_tasks.append(entry)
+                            pm_system_tasks.append(entry)
+                        elif is_pm:
+                            pm_system_tasks.append(entry)
+                        else:
+                            # Default to AM if not PM and not both
+                            am_system_tasks.append(entry)
 
                 for task in user_tasks:
                     # Handle finish_period: None or empty means both AM and PM
