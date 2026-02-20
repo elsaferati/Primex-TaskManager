@@ -642,7 +642,8 @@ export function SystemTasksView({
     if (!templateId) return
     if (!canMarkDone) return
     const currentStatus = template.status || "OPEN"
-    const newStatus = currentStatus === "DONE" ? "OPEN" : "DONE"
+    if (currentStatus === "DONE") return
+    const newStatus = "DONE"
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
     const occurrenceDate = template.occurrence_date || today
     
@@ -675,7 +676,7 @@ export function SystemTasksView({
           return tId === templateId ? { ...t, status: newStatus } : t
         })
       )
-      toast.success(`Task marked as ${newStatus === "DONE" ? "done" : "open"}`)
+      toast.success("Task marked as done")
     } catch (error) {
       toast.error("Failed to update task status")
     } finally {
@@ -3459,19 +3460,19 @@ export function SystemTasksView({
                               <div className="text-right">
                                 <div className="flex flex-col items-end gap-2">
                                   {canMarkDone && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={updatingTaskIds.has(String(templateKey))}
-                                      onClick={() => void toggleTaskStatus(template)}
-                                      className="h-7 text-xs"
-                                    >
-                                      {updatingTaskIds.has(String(templateKey))
-                                        ? "Updating..."
-                                        : template.status === "DONE"
-                                          ? "Mark as TODO"
-                                          : "Mark done"}
-                                    </Button>
+                                    template.status === "DONE" ? (
+                                      <span className="text-xs text-emerald-700">Done</span>
+                                    ) : (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={updatingTaskIds.has(String(templateKey))}
+                                        onClick={() => void toggleTaskStatus(template)}
+                                        className="h-7 text-xs"
+                                      >
+                                        {updatingTaskIds.has(String(templateKey)) ? "Updating..." : "Mark done"}
+                                      </Button>
+                                    )
                                   )}
                                   {canEditTemplate(template) && (
                                     <Button

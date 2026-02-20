@@ -401,7 +401,7 @@ export default function AdminTasksPage() {
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
-  const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
+  const [showDailyUserReport, setShowDailyUserReport] = React.useState(true)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [allTasksReportCommentEdits, setAllTasksReportCommentEdits] = React.useState<Record<string, string>>({})
