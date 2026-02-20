@@ -168,6 +168,7 @@ const OVERVIEW_LABELS: Record<string, string> = {
   last_last_week: "Last Last Week",
   last_week: "Last Week",
   this_week: "This Week",
+  next_week: "Next Week",
 }
 
 const PLAN_VS_FINAL_PRINT_ROOT_ID = "plan-vs-final-report-print-root"

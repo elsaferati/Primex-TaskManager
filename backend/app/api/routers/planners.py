@@ -2815,11 +2815,13 @@ async def weekly_snapshot_overview(
         this_week_start - timedelta(days=14),
         this_week_start - timedelta(days=7),
         this_week_start,
+        this_week_start + timedelta(days=7),
     ]
     labels = {
         week_starts[0]: "last_last_week",
         week_starts[1]: "last_week",
         week_starts[2]: "this_week",
+        week_starts[3]: "next_week",
     }
 
     snapshots = (
