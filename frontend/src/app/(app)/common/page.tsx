@@ -214,15 +214,20 @@ export default function CommonViewPage() {
   }
   const parseDateOnly = (value?: string | null) => {
     if (!value) return null
-    const raw = String(value).slice(0, 10)
+    const raw = String(value).trim()
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
-    if (!match) return null
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
-    const parsed = new Date(year, month - 1, day)
-    return Number.isNaN(parsed.getTime()) ? null : parsed
+    if (match) {
+      const year = Number(match[1])
+      const month = Number(match[2])
+      const day = Number(match[3])
+      if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
+      const parsed = new Date(year, month - 1, day)
+      return Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+    const parsed = new Date(raw)
+    if (Number.isNaN(parsed.getTime())) return null
+    // Use local calendar date to avoid UTC date shifts for ISO timestamps.
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
   }
   // Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY
   const toDDMMYYYY = (isoDate: string) => {
@@ -274,6 +279,36 @@ export default function CommonViewPage() {
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
     return { hours, minutes }
   }
+  const parseTimeToMinutes = React.useCallback((value?: string | null) => {
+    if (!value) return null
+    let normalized = value.trim()
+    if (!normalized) return null
+    normalized = normalized.replace(/[()]/g, "").trim()
+    const lower = normalized.toLowerCase()
+    if (lower === "tbd" || lower === "n/a" || lower === "na") return null
+    if (normalized.includes("–") || normalized.includes("—") || normalized.includes("-")) {
+      const separator = normalized.includes("–") ? "–" : normalized.includes("—") ? "—" : "-"
+      normalized = normalized.split(separator)[0].trim()
+    }
+    const amPmMatch = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(normalized)
+    if (amPmMatch) {
+      let hours = Number(amPmMatch[1])
+      const minutes = Number(amPmMatch[2] ?? "0")
+      if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+      if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null
+      const isPm = amPmMatch[3].toLowerCase() === "pm"
+      hours = hours % 12
+      if (isPm) hours += 12
+      return hours * 60 + minutes
+    }
+    const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(normalized)
+    if (!timeMatch) return null
+    const hours = Number(timeMatch[1])
+    const minutes = Number(timeMatch[2])
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+    return hours * 60 + minutes
+  }, [])
   const toMeetingTimeValue = (value?: string | null) => {
     if (!value) return ""
     const date = new Date(value)
@@ -649,20 +684,38 @@ export default function CommonViewPage() {
   )
   const externalMeetingsSorted = React.useMemo(() => {
     return [...externalMeetings].sort((a, b) => {
-      const aDate = a.starts_at || a.created_at
-      const bDate = b.starts_at || b.created_at
-      const aTime = aDate ? new Date(aDate).getTime() : 0
-      const bTime = bDate ? new Date(bDate).getTime() : 0
-      return bTime - aTime
+      const aResolved = resolveExternalMeetingDate(a)
+      const bResolved = resolveExternalMeetingDate(b)
+      const aFallback = a.starts_at || a.created_at
+      const bFallback = b.starts_at || b.created_at
+      const aDate = aResolved ?? (aFallback ? new Date(aFallback) : null)
+      const bDate = bResolved ?? (bFallback ? new Date(bFallback) : null)
+      const aValid = aDate && !Number.isNaN(aDate.getTime())
+      const bValid = bDate && !Number.isNaN(bDate.getTime())
+      if (!aValid && !bValid) return a.title.localeCompare(b.title)
+      if (!aValid) return 1
+      if (!bValid) return -1
+      const diff = aDate!.getTime() - bDate!.getTime()
+      if (diff !== 0) return diff
+      return a.title.localeCompare(b.title)
     })
   }, [externalMeetings])
   const internalMeetingsSorted = React.useMemo(() => {
     return [...internalMeetings].sort((a, b) => {
-      const aDate = a.starts_at || a.created_at
-      const bDate = b.starts_at || b.created_at
-      const aTime = aDate ? new Date(aDate).getTime() : 0
-      const bTime = bDate ? new Date(bDate).getTime() : 0
-      return bTime - aTime
+      const aResolved = resolveExternalMeetingDate(a)
+      const bResolved = resolveExternalMeetingDate(b)
+      const aFallback = a.starts_at || a.created_at
+      const bFallback = b.starts_at || b.created_at
+      const aDate = aResolved ?? (aFallback ? new Date(aFallback) : null)
+      const bDate = bResolved ?? (bFallback ? new Date(bFallback) : null)
+      const aValid = aDate && !Number.isNaN(aDate.getTime())
+      const bValid = bDate && !Number.isNaN(bDate.getTime())
+      if (!aValid && !bValid) return a.title.localeCompare(b.title)
+      if (!aValid) return 1
+      if (!bValid) return -1
+      const diff = aDate!.getTime() - bDate!.getTime()
+      if (diff !== 0) return diff
+      return a.title.localeCompare(b.title)
     })
   }, [internalMeetings])
   const userById = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
@@ -1894,6 +1947,46 @@ export default function CommonViewPage() {
     },
     []
   )
+  const sortByTime = React.useCallback(
+    <T,>(
+      items: T[],
+      getTimeKey: (item: T) => string | null | undefined,
+      getTitle: (item: T) => string
+    ) => {
+      return [...items].sort((a, b) => {
+        const aMinutes = parseTimeToMinutes(getTimeKey(a))
+        const bMinutes = parseTimeToMinutes(getTimeKey(b))
+        if (aMinutes === null && bMinutes === null) return getTitle(a).localeCompare(getTitle(b))
+        if (aMinutes === null) return 1
+        if (bMinutes === null) return -1
+        if (aMinutes !== bMinutes) return aMinutes - bMinutes
+        return getTitle(a).localeCompare(getTitle(b))
+      })
+    },
+    [parseTimeToMinutes]
+  )
+  const sortByDateTime = React.useCallback(
+    <T,>(
+      items: T[],
+      getDateKey: (item: T) => string,
+      getTimeKey: (item: T) => string | null | undefined,
+      getTitle: (item: T) => string
+    ) => {
+      return [...items].sort((a, b) => {
+        const aDate = getDateKey(a)
+        const bDate = getDateKey(b)
+        if (aDate !== bDate) return aDate.localeCompare(bDate)
+        const aMinutes = parseTimeToMinutes(getTimeKey(a))
+        const bMinutes = parseTimeToMinutes(getTimeKey(b))
+        if (aMinutes === null && bMinutes === null) return getTitle(a).localeCompare(getTitle(b))
+        if (aMinutes === null) return 1
+        if (bMinutes === null) return -1
+        if (aMinutes !== bMinutes) return aMinutes - bMinutes
+        return getTitle(a).localeCompare(getTitle(b))
+      })
+    },
+    [parseTimeToMinutes]
+  )
 
   // Handlers
   const toggleDay = (iso: string) => {
@@ -3058,8 +3151,8 @@ export default function CommonViewPage() {
     }))
 
     const externalSource = isMultiDate
-      ? sortByDate(filtered.external, (x) => x.date, (x) => x.title)
-      : filtered.external
+      ? sortByDateTime(filtered.external, (x) => x.date, (x) => x.time, (x) => x.title)
+      : sortByTime(filtered.external, (x) => x.time, (x) => x.title)
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       subtitle: x.department || "Department TBD",
@@ -3067,8 +3160,8 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent external",
     }))
     const internalSource = isMultiDate
-      ? sortByDate(filtered.internal, (x) => x.date, (x) => x.title)
-      : filtered.internal
+      ? sortByDateTime(filtered.internal, (x) => x.date, (x) => x.time, (x) => x.title)
+      : sortByTime(filtered.internal, (x) => x.time, (x) => x.title)
     const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       subtitle: x.department || "Department TBD",
@@ -3237,7 +3330,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, isMultiDate, sortByDate, selectedDates, weekISOs])
+  }, [filtered, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
