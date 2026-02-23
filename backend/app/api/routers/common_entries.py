@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func
+from sqlalchemy import and_, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -32,6 +32,7 @@ from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
+FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
 
 def _safe_iso_date(value: str | None, fallback: date) -> date:
@@ -41,6 +42,21 @@ def _safe_iso_date(value: str | None, fallback: date) -> date:
         return date.fromisoformat(value)
     except ValueError:
         return fallback
+
+
+def _daily_feedback_filter():
+    return and_(
+        CommonEntry.category.in_(
+            [
+                CommonCategory.complaints,
+                CommonCategory.requests,
+                CommonCategory.proposals,
+                CommonCategory.problems,
+            ]
+        ),
+        CommonEntry.description.isnot(None),
+        CommonEntry.description.ilike(f"%{FEEDBACK_DAILY_MARKER}%"),
+    )
 
 
 def _parse_annual_leave(entry: CommonEntry) -> tuple[date, date, bool, str | None, str | None, str | None]:
@@ -124,11 +140,17 @@ async def list_entries(
         return [_to_out(e) for e in entries]
 
     effective_date = func.coalesce(CommonEntry.entry_date, func.date(CommonEntry.created_at))
-    non_annual_stmt = select(CommonEntry).where(CommonEntry.category != CommonCategory.annual_leave)
+    date_filters = []
     if from_ is not None:
-        non_annual_stmt = non_annual_stmt.where(effective_date >= from_)
+        date_filters.append(effective_date >= from_)
     if to is not None:
-        non_annual_stmt = non_annual_stmt.where(effective_date <= to)
+        date_filters.append(effective_date <= to)
+    date_filter = and_(*date_filters) if date_filters else None
+    daily_filter = _daily_feedback_filter()
+
+    non_annual_stmt = select(CommonEntry).where(CommonEntry.category != CommonCategory.annual_leave)
+    if date_filter is not None:
+        non_annual_stmt = non_annual_stmt.where(or_(date_filter, daily_filter))
     non_annual_entries = (await db.execute(non_annual_stmt)).scalars().all()
 
     annual_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)

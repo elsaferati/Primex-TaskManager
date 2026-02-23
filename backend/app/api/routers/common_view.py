@@ -34,6 +34,7 @@ from app.services.system_task_schedule import matches_template_date
 
 
 router = APIRouter()
+FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
 
 KNOWN_INCLUDES = {"users", "departments", "entries", "meetings", "system_tasks", "tasks"}
@@ -124,6 +125,21 @@ def _week_start_for(value: date | None) -> date:
 
 def _week_dates(week_start: date) -> list[date]:
     return [week_start + timedelta(days=i) for i in range(5)]
+
+
+def _daily_feedback_filter():
+    return and_(
+        CommonEntry.category.in_(
+            [
+                CommonCategory.complaints,
+                CommonCategory.requests,
+                CommonCategory.proposals,
+                CommonCategory.problems,
+            ]
+        ),
+        CommonEntry.description.isnot(None),
+        CommonEntry.description.ilike(f"%{FEEDBACK_DAILY_MARKER}%"),
+    )
 
 def _tirane_tz():
     tz = None
@@ -328,7 +344,8 @@ async def _compute_etag(
         parts.append(ts.isoformat() if ts else "")
     if "entries" in requested:
         entry_effective = func.coalesce(CommonEntry.entry_date, func.date(CommonEntry.created_at))
-        entry_filters = [entry_effective >= week_start, entry_effective <= week_end]
+        date_filter = and_(entry_effective >= week_start, entry_effective <= week_end)
+        entry_filters = [or_(date_filter, _daily_feedback_filter())]
         ts = await _max_timestamp(db, CommonEntry, CommonEntry.updated_at, entry_filters)
         parts.append(ts.isoformat() if ts else "")
     if "meetings" in requested:
@@ -451,8 +468,11 @@ async def get_common_view(
     if "entries" in requested:
         ts = _time_start()
         effective_date = func.coalesce(CommonEntry.entry_date, func.date(CommonEntry.created_at))
-        non_annual_stmt = select(CommonEntry).where(CommonEntry.category != CommonCategory.annual_leave)
-        non_annual_stmt = non_annual_stmt.where(effective_date >= week_start_date, effective_date <= week_end)
+        date_filter = and_(effective_date >= week_start_date, effective_date <= week_end)
+        non_annual_stmt = select(CommonEntry).where(
+            CommonEntry.category != CommonCategory.annual_leave,
+            or_(date_filter, _daily_feedback_filter()),
+        )
         non_annual_entries = (await db.execute(non_annual_stmt)).scalars().all()
 
         annual_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)

@@ -41,8 +41,8 @@ type PersonalItem = { title: string; person: string; date: string; note?: string
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
-type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string }
-type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string }
+type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string; everyday?: boolean }
+type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string; everyday?: boolean }
 type PriorityItem = {
   project: string
   date: string
@@ -182,6 +182,14 @@ const ALL_USERS_VALUE = "__all__"
 const ALL_USERS_LABEL = "All users"
 const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
+const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
+
+const parseFeedbackNote = (note: string | null | undefined) => {
+  const raw = note || ""
+  const everyday = raw.includes(FEEDBACK_DAILY_MARKER)
+  const cleaned = raw.split(FEEDBACK_DAILY_MARKER).join("").trim()
+  return { note: cleaned || undefined, everyday }
+}
 
 const initials = (name: string) => {
   const cleaned = name.trim()
@@ -486,6 +494,8 @@ export default function CommonViewPage() {
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
   const [formError, setFormError] = React.useState("")
+  const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
+  const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
@@ -1012,12 +1022,37 @@ export default function CommonViewPage() {
         missing: payload.missing,
         guardrails: payload.guardrails || null,
       })
+      const weekStartIso = payload.week_start
+      const normalizedFeedback = payload.items.feedback.map((item) => {
+        const parsed = parseFeedbackNote(item.note)
+        return {
+          ...item,
+          note: parsed.note,
+          everyday: parsed.everyday,
+          date: parsed.everyday ? weekStartIso : item.date,
+        }
+      })
+      const normalizedProblems = payload.items.problems.map((item) => {
+        const parsed = parseFeedbackNote(item.note)
+        return {
+          ...item,
+          note: parsed.note,
+          everyday: parsed.everyday,
+          date: parsed.everyday ? weekStartIso : item.date,
+        }
+      })
       setCommonData((prev) => {
         let next = { ...prev }
         for (const includeKey of payload.included) {
           const buckets = includeToBuckets[includeKey] || []
           for (const bucket of buckets) {
-            next = { ...next, [bucket]: payload.items[bucket] }
+            if (bucket === "feedback") {
+              next = { ...next, feedback: normalizedFeedback }
+            } else if (bucket === "problems") {
+              next = { ...next, problems: normalizedProblems }
+            } else {
+              next = { ...next, [bucket]: payload.items[bucket] }
+            }
           }
         }
         return next
@@ -1090,7 +1125,9 @@ export default function CommonViewPage() {
             }
             if (mounted) {
               if (selectedDates.size === 0) {
-                setSelectedDates(new Set([toISODate(new Date())]))
+                const weekDates = getWeekdays(weekStart).map(toISODate)
+                setSelectedDates(new Set(weekDates))
+                setMultiMode(true)
               }
               setDataLoaded(true)
             }
@@ -1356,20 +1393,30 @@ export default function CommonViewPage() {
                 owner: personName,
               })
             } else if (e.category === "Problems") {
+              const parsed = parseFeedbackNote(e.description)
+              let note = parsed.note || ""
+              note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
+              const problemDate = parsed.everyday ? weekStartIso : date
               allData.problems.push({
                 entryId: e.id,
                 title: e.title,
                 person: personName,
-                date,
-                note: e.description || undefined,
+                date: problemDate,
+                note: note || undefined,
+                everyday: parsed.everyday,
               })
             } else if (e.category === "Complaints" || e.category === "Requests" || e.category === "Proposals") {
+              const parsed = parseFeedbackNote(e.description)
+              let note = parsed.note || ""
+              note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
+              const feedbackDate = parsed.everyday ? weekStartIso : date
               allData.feedback.push({
                 entryId: e.id,
                 title: e.title,
                 person: personName,
-                date,
-                note: e.description || undefined,
+                date: feedbackDate,
+                note: note || undefined,
+                everyday: parsed.everyday,
               })
             }
           }
@@ -1802,7 +1849,9 @@ export default function CommonViewPage() {
 
         // Select today by default
         if (mounted && selectedDates.size === 0) {
-          setSelectedDates(new Set([toISODate(new Date())]))
+          const weekDates = getWeekdays(weekStart).map(toISODate)
+          setSelectedDates(new Set(weekDates))
+          setMultiMode(true)
         }
         
         // Mark data as loaded
@@ -1896,8 +1945,12 @@ export default function CommonViewPage() {
     const external = commonData.external.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const internal = commonData.internal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const problems = commonData.problems.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const feedback = commonData.feedback.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const problems = commonData.problems.filter(
+      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    )
+    const feedback = commonData.feedback.filter(
+      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    )
     const bz = commonData.bz.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
@@ -2024,26 +2077,6 @@ export default function CommonViewPage() {
     }
   }
 
-  const toggleOneHR1Filter = () => {
-    if (!typeMultiMode) {
-      setTypeFilters(new Set(["oneH", "r1"]))
-      return
-    }
-    setTypeFilters((prev) => {
-      const s = new Set(prev)
-      const hasOneH = s.has("oneH")
-      const hasR1 = s.has("r1")
-      if (hasOneH && hasR1) {
-        s.delete("oneH")
-        s.delete("r1")
-      } else {
-        s.add("oneH")
-        s.add("r1")
-      }
-      return s
-    })
-  }
-
   const selectAll = () => {
     if (!multiMode) {
       setMultiMode(true)
@@ -2051,10 +2084,23 @@ export default function CommonViewPage() {
     setSelectedDates(new Set(weekISOs))
   }
 
+  const selectWeek = (weekStartDate: Date) => {
+    const targetWeekIso = toISODate(weekStartDate)
+    if (toISODate(weekStart) !== targetWeekIso) {
+      setWeekStart(weekStartDate)
+    }
+    setSelectedDates(new Set(getWeekdays(weekStartDate).map(toISODate)))
+    setMultiMode(true)
+  }
+
   const selectToday = () => {
     const today = new Date()
-    setWeekStart(getMonday(today))
+    const todayMonday = getMonday(today)
+    if (toISODate(weekStart) !== toISODate(todayMonday)) {
+      setWeekStart(todayMonday)
+    }
     setSelectedDates(new Set([toISODate(today)]))
+    setMultiMode(false)
   }
 
   const handlePrint = () => {
@@ -2084,6 +2130,11 @@ export default function CommonViewPage() {
       window.removeEventListener("afterprint", handleAfterPrint)
     }
   }, [])
+
+  const today = new Date()
+  const todayIso = toISODate(today)
+  const thisWeekMonday = getMonday(today)
+  const thisWeekMondayIso = toISODate(thisWeekMonday)
 
   const handleExportExcel = async () => {
     if (exportingExcel) return
@@ -2209,8 +2260,11 @@ export default function CommonViewPage() {
       }
       
       // Add date information
-      if (formDate && formType !== "leave") {
+      if (formDate && formType !== "leave" && formType !== "feedback" && formType !== "problem") {
         description = description ? `${description}\nDate: ${formDate}` : `Date: ${formDate}`
+      }
+      if (formType === "feedback" || formType === "problem") {
+        description = description ? `${description}\n${FEEDBACK_DAILY_MARKER}` : FEEDBACK_DAILY_MARKER
       }
 
       if (isAllUsersLeave) {
@@ -2249,7 +2303,7 @@ export default function CommonViewPage() {
             category,
             title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
             description: description || null,
-            entry_date: formDate || null,
+            entry_date: formType === "feedback" || formType === "problem" ? null : formDate || null,
             assigned_to_user_id: assignedUserId || null,
           }),
         })
@@ -2269,7 +2323,6 @@ export default function CommonViewPage() {
 
   const showCard = (type: CommonType) => {
     if (typeFilters.size === 0) return true
-    if (type === "oneH") return typeFilters.has("oneH") || typeFilters.has("r1")
     return typeFilters.has(type)
   }
 
@@ -3049,6 +3102,55 @@ export default function CommonViewPage() {
     ]
   }
 
+  const swimlaneInfoText: Record<CommonType, string> = {
+    late: "Vonese",
+    absent: "Mungese",
+    leave: "Pushim vjetor ose feste",
+    blocked: "JANE DETYRA ME PRIORITET TE LARTE MERRET VETËM ME ATË DETYRË ",
+    oneH: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
+    external: "Takime externe",
+    internal: "Takime interne",
+    r1: "DETYRË E RE. THIRRET ÇDO 1 ORË DERISA TË SQAROHET. PASI SQAROHET NDERROHET STATUSI NE 1H",
+    problem: "Probleme",
+    feedback: "Feedback Note",
+    priority: "Projektet me prioritet- qe kane taska",
+    bz: "Barazime - AM:08:00-09:00/ 10:00-10:30/ 11:30-12:15 / PM:13:30-14:00/ 14:30-15:00 (VETEM PER URGJENCA)",
+  }
+
+  const swimlaneHeaderSubtext: Partial<Record<CommonType, string>> = {
+    bz:
+      "AM: 8-9/10-10:30/11:30-12:15/\nPM: 13:30-14/14:30-15 (URGJ)",
+    oneH: "AM: 08:50/10:00/11:00-11:50) \nPM: 14:30/16:00",
+    r1:"AM: 08:50/10:00/11:00-11:50)\nPM: 14:30/16:00",
+    blocked: "NUK PENGOHET.",
+    personal:"NGA GA/KA/\nPERGJEGJESIT BARAZOHEMI VETËM ME TA. BZ 16:00."
+  }
+
+  const toggleInfo = (rowId: CommonType) => {
+    setOpenInfoId((prev) => (prev === rowId ? null : rowId))
+  }
+
+  React.useEffect(() => {
+    if (!openInfoId) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!infoPopoverRef.current) return
+      if (infoPopoverRef.current.contains(event.target as Node)) return
+      setOpenInfoId(null)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenInfoId(null)
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [openInfoId])
+
 
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
@@ -3158,6 +3260,13 @@ export default function CommonViewPage() {
         ? sortByDate(filtered.oneH, (x) => x.date, (x) => x.title)
         : filtered.oneH
       : []
+    const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
+      title: x.title,
+      assignees: x.assignees || (x.person ? [x.person] : []),
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent oneh",
+    }))
 
     const personalSource = isMultiDate
       ? sortByDate(filtered.personal, (x) => x.date, (x) => x.title)
@@ -3205,56 +3314,43 @@ export default function CommonViewPage() {
         ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
         : filtered.r1
       : []
-    const oneHR1Source = sortByDate(
-      [
-        ...oneHSource.map((item) => ({ kind: "oneH" as const, item })),
-        ...r1Source.map((item) => ({ kind: "r1" as const, item })),
-      ],
-      (x) => x.item.date,
-      (x) => x.item.title
-    )
-    const oneHR1Items: SwimlaneCell[] = oneHR1Source.map((entry) => {
-      if (entry.kind === "oneH") {
-        const x = entry.item as OneHItem
-        return {
-          title: x.title,
-          assignees: x.assignees || (x.person ? [x.person] : []),
-          subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-          dateLabel: formatDateHuman(x.date),
-          accentClass: "swimlane-accent oneh",
-        }
-      }
-      const x = entry.item as R1Item
-      return {
-        title: x.title,
-        assignees: x.assignees || (x.owner ? [x.owner] : []),
-        subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-        dateLabel: formatDateHuman(x.date),
-        accentClass: "swimlane-accent r1",
-      }
-    })
+    const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
+      title: x.title,
+      assignees: x.assignees || (x.owner ? [x.owner] : []),
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent r1",
+    }))
 
     const problemSource = isMultiDate
       ? sortByDate(filtered.problems, (x) => x.date, (x) => x.title)
       : filtered.problems
-    const problemItems: SwimlaneCell[] = problemSource.map((x) => ({
-      title: x.title,
-      subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent problem",
-      entryId: x.entryId,
-    }))
+    const problemItems: SwimlaneCell[] = problemSource.map((x) => {
+      const dateLabel = x.everyday ? "" : formatDateHuman(x.date)
+      return {
+        title: x.title,
+        subtitle: `${x.person} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel,
+        accentClass: "swimlane-accent problem",
+        entryId: x.entryId,
+        assignees: x.person ? [x.person] : undefined,
+      }
+    })
 
     const feedbackSource = isMultiDate
       ? sortByDate(filtered.feedback, (x) => x.date, (x) => x.title)
       : filtered.feedback
-    const feedbackItems: SwimlaneCell[] = feedbackSource.map((x) => ({
-      title: x.title,
-      subtitle: `${x.person} - ${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent feedback",
-      entryId: x.entryId,
-    }))
+    const feedbackItems: SwimlaneCell[] = feedbackSource.map((x) => {
+      const dateLabel = x.everyday ? "" : formatDateHuman(x.date)
+      return {
+        title: x.title,
+        subtitle: `${x.person} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel,
+        accentClass: "swimlane-accent feedback",
+        entryId: x.entryId,
+        assignees: x.person ? [x.person] : undefined,
+      }
+    })
 
     const prioritySource = isMultiDate
       ? sortByDate(filtered.priority, (x) => x.date, (x) => x.project)
@@ -3326,15 +3422,19 @@ export default function CommonViewPage() {
       },
       {
         id: "oneH",
-        label: "1H / R1",
-        count: filtered.oneH.length + filtered.r1.length,
+        label: "1H",
+        count: filtered.oneH.length,
         headerClass: "swimlane-header oneh",
         badgeClass: "swimlane-badge oneh",
-        badges: [
-          { value: filtered.oneH.length, className: "swimlane-badge oneh", label: "1H" },
-          { value: filtered.r1.length, className: "swimlane-badge r1", label: "R1" },
-        ],
-        items: oneHR1Items,
+        items: oneHItems,
+      },
+      {
+        id: "r1",
+        label: "R1=1H",
+        count: filtered.r1.length,
+        headerClass: "swimlane-header r1",
+        badgeClass: "swimlane-badge r1",
+        items: r1Items,
       },
       {
         id: "personal",
@@ -3399,6 +3499,8 @@ export default function CommonViewPage() {
       feedback: FeedbackItem[]
       priority: PriorityItem[]
     }> = {}
+    const dailyFeedback = filtered.feedback.filter((x) => x.everyday)
+    const dailyProblems = filtered.problems.filter((x) => x.everyday)
     
     weekISOs.forEach((iso) => {
       if (filtered.fullyCoveredDates.has(iso)) {
@@ -3421,8 +3523,8 @@ export default function CommonViewPage() {
           internal: [],
           bz: [],
           r1: [],
-          problems: [],
-          feedback: [],
+          problems: dailyProblems,
+          feedback: dailyFeedback,
           priority: [],
         }
         return
@@ -3438,8 +3540,14 @@ export default function CommonViewPage() {
         internal: filtered.internal.filter((x) => x.date === iso),
         bz: filtered.bz.filter((x) => x.date === iso),
         r1: filtered.r1.filter((x) => x.date === iso),
-        problems: filtered.problems.filter((x) => x.date === iso),
-        feedback: filtered.feedback.filter((x) => x.date === iso),
+        problems: [
+          ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
+          ...dailyProblems,
+        ],
+        feedback: [
+          ...filtered.feedback.filter((x) => !x.everyday && x.date === iso),
+          ...dailyFeedback,
+        ],
         priority: filtered.priority.filter((x) => x.date === iso),
       }
     })
@@ -4055,6 +4163,9 @@ export default function CommonViewPage() {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
+          .common-view-title {
+            display: none !important;
+          }
           .swimlane-header.delay { background: var(--delay-bg) !important; color: #c2410c !important; }
           .swimlane-header.absence { background: var(--absence-bg) !important; color: #b91c1c !important; }
           .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
@@ -4136,6 +4247,15 @@ export default function CommonViewPage() {
           flex-grow: 1; 
           min-height: 0;
           background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%);
+        }
+        .common-view-title {
+          text-align: center;
+          font-weight: 800;
+          font-size: 16px;
+          letter-spacing: 0.6px;
+          padding: 10px 0;
+          color: #0f172a;
+          text-transform: uppercase;
         }
         .meeting-panel {
           margin: 16px 24px 0;
@@ -4389,11 +4509,20 @@ export default function CommonViewPage() {
         .swimlane-row + .swimlane-row {
           border-top: 1px solid var(--swim-border);
         }
+        .swimlane-index-col {
+          width: 44px;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f8fafc;
+          border-right: 1px solid var(--swim-border);
+        }
         .swimlane-header {
           width: 150px;
           padding: 10px 10px;
           display: grid;
-          grid-template-columns: 28px 1fr auto;
+          grid-template-columns: 1fr auto;
           align-items: center;
           column-gap: 8px;
           font-weight: 700;
@@ -4405,6 +4534,36 @@ export default function CommonViewPage() {
           font-size: 12px;
           word-break: break-word;
           background: #f8f9fa;
+        }
+        .swimlane-header-stacked {
+          grid-template-columns: 1fr auto;
+          grid-template-areas:
+            "label badges";
+          grid-auto-rows: auto;
+          row-gap: 0;
+          align-items: start;
+          justify-items: start;
+        }
+        .swimlane-header-stacked .swimlane-badges {
+          grid-area: badges;
+          justify-self: end;
+          align-self: start;
+        }
+        .swimlane-header-stacked .swimlane-label {
+          grid-area: label;
+        }
+        .swimlane-header-with-subtext {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 4px;
+        }
+        .swimlane-header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1px;
+          width: 100%;
         }
         .swimlane-index {
           width: 24px;
@@ -4420,8 +4579,20 @@ export default function CommonViewPage() {
         }
         .swimlane-label {
           min-width: 0;
+          white-space: pre-line;
+        }
+        .swimlane-label-sub {
+          display: block;
+          width: 100%;
+          grid-column: 1 / -1;
+          font-size: 9px;
+          font-weight: 400;
+          color: #475569;
+          white-space: pre-line;
+          line-height: 1.25;
         }
         .swimlane-badges {
+          position: relative;
           display: inline-flex;
           align-items: center;
           gap: 6px;
@@ -4438,6 +4609,42 @@ export default function CommonViewPage() {
           justify-content: center;
           background: #ffffff;
           border: 1px solid rgba(15, 23, 42, 0.12);
+        }
+        .swimlane-info-btn {
+          border: none;
+          background: transparent;
+          color: #64748b;
+          font-weight: 800;
+          font-size: 11px;
+          line-height: 1;
+          padding: 0 2px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: color 0.15s ease;
+        }
+        .swimlane-info-btn:hover {
+          color: #0f172a;
+        }
+        .swimlane-info-popover {
+          position: absolute;
+          top: calc(100% + 6px);
+          right: 0;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 0;
+          padding: 6px 8px;
+          font-size: 10px;
+          font-weight: 700;
+          color: #0f172a;
+          white-space: normal;
+          min-width: 180px;
+          max-width: 260px;
+          word-break: break-word;
+          line-height: 1.3;
+          z-index: 20;
+          box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
         }
         .swimlane-content-shell {
           position: relative;
@@ -5452,27 +5659,28 @@ export default function CommonViewPage() {
             })}
             </div>
             <div className="week-nav-buttons">
-              <button className="week-nav-btn" type="button" onClick={selectAll}>
-                Select All Days
+              <button
+                className={`week-nav-btn ${selectedDates.size === 1 && selectedDates.has(todayIso) && toISODate(weekStart) === thisWeekMondayIso ? "active" : ""}`}
+                type="button"
+                onClick={selectToday}
+              >
+                Today
               </button>
               <button
-                className={`week-nav-btn ${toISODate(weekStart) === toISODate(getMonday(new Date())) ? "active" : ""}`}
+                className={`week-nav-btn ${toISODate(weekStart) === thisWeekMondayIso && allDaysSelected ? "active" : ""}`}
                 type="button"
                 onClick={() => {
-                  const thisWeekMonday = getMonday(new Date())
-                  setWeekStart(thisWeekMonday)
-                  setSelectedDates(new Set([toISODate(thisWeekMonday)]))
+                  selectWeek(thisWeekMonday)
                 }}
               >
                 This Week
               </button>
               <button
-                className={`week-nav-btn ${toISODate(weekStart) === toISODate(addDays(getMonday(new Date()), 7)) ? "active" : ""}`}
+                className={`week-nav-btn ${toISODate(weekStart) === toISODate(addDays(thisWeekMonday, 7)) && allDaysSelected ? "active" : ""}`}
                 type="button"
                 onClick={() => {
-                  const nextWeekMonday = addDays(getMonday(new Date()), 7)
-                  setWeekStart(nextWeekMonday)
-                  setSelectedDates(new Set([toISODate(nextWeekMonday)]))
+                  const nextWeekMonday = addDays(thisWeekMonday, 7)
+                  selectWeek(nextWeekMonday)
                 }}
               >
                 Next Week
@@ -5500,11 +5708,18 @@ export default function CommonViewPage() {
               BLL
             </button>
             <button
-              className={`chip ${typeFilters.has("oneH") || typeFilters.has("r1") ? "active" : ""}`}
+              className={`chip ${typeFilters.has("oneH") ? "active" : ""}`}
               type="button"
-              onClick={toggleOneHR1Filter}
+              onClick={() => setTypeFilter("oneH")}
             >
-              1H/R1
+              1H
+            </button>
+            <button
+              className={`chip ${typeFilters.has("r1") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("r1")}
+            >
+              R1
             </button>
             <button
               className={`chip ${typeFilters.has("personal") ? "active" : ""}`}
@@ -5512,27 +5727,6 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("personal")}
             >
               P:
-            </button>
-            <button
-              className={`chip ${typeFilters.has("late") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("late")}
-            >
-              VONS
-            </button>
-            <button
-              className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("absent")}
-            >
-              MUNG
-            </button>
-            <button
-              className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
-              type="button"
-              onClick={() => setTypeFilter("leave")}
-            >
-              PV/FEST
             </button>
             <button
               className={`chip ${typeFilters.has("external") ? "active" : ""}`}
@@ -5575,6 +5769,27 @@ export default function CommonViewPage() {
               onClick={() => setTypeFilter("feedback")}
             >
               ANK/KRK/PRZ
+            </button>
+            <button
+              className={`chip ${typeFilters.has("late") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("late")}
+            >
+              VONS
+            </button>
+            <button
+              className={`chip ${typeFilters.has("absent") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("absent")}
+            >
+              MUNG
+            </button>
+            <button
+              className={`chip ${typeFilters.has("leave") ? "active" : ""}`}
+              type="button"
+              onClick={() => setTypeFilter("leave")}
+            >
+              PV/FEST
             </button>
             </div>
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
@@ -7139,6 +7354,7 @@ export default function CommonViewPage() {
       ) : null}
 
       <div className="view-container">
+        <div className="common-view-title">PERMBLEDHJA - COMMON VIEW</div>
         {allDaysSelected ? (
           <div className="week-table-view">
             <div className="print-header">
@@ -7185,11 +7401,8 @@ export default function CommonViewPage() {
                       else if (row.id === "absent") dayEntries[iso] = dayData.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData.leave || []
                       else if (row.id === "blocked") dayEntries[iso] = dayData.blocked || []
-                      else if (row.id === "oneH")
-                        dayEntries[iso] = [
-                          ...(includeOneH ? dayData.oneH || [] : []),
-                          ...(includeR1 ? dayData.r1 || [] : []),
-                        ]
+                      else if (row.id === "oneH") dayEntries[iso] = includeOneH ? dayData.oneH || [] : []
+                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData.r1 || [] : []
                       else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
@@ -7341,7 +7554,14 @@ export default function CommonViewPage() {
                       } else if (row.id === "problem" || row.id === "feedback") {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {initials(e.person || e.title || "")}: {e.note || ""}</span>
+                            <span>{idx + 1}. {e.title}{e.note ? ` - ${e.note}` : ""}</span>
+                            <div className="week-table-avatars">
+                              {entryAssignees(e).map((name: string) => (
+                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                  {initials(name)}
+                                </span>
+                              ))}
+                            </div>
                             {canDeleteCommon && e.entryId ? (
                               <button
                                 type="button"
@@ -7520,20 +7740,66 @@ export default function CommonViewPage() {
                 const cells = buildSwimlaneCells(row.items, swimlaneColumnCount)
                 return (
                   <div key={row.id} className="swimlane-row">
-                    <div className={row.headerClass}>
+                    <div className="swimlane-index-col">
                       <span className="swimlane-index">{rowIndex + 1}</span>
-                      <span className="swimlane-label">{row.label}</span>
-                      <span className="swimlane-badges">
-                        {row.badges?.length ? (
-                          row.badges.map((badge, idx) => (
-                            <span key={`${row.id}-badge-${idx}`} className={badge.className} title={badge.label}>
-                              {badge.value}
-                            </span>
-                          ))
-                        ) : (
-                          <span className={row.badgeClass}>{row.count}</span>
-                        )}
-                      </span>
+                    </div>
+                    <div
+                      className={[
+                        row.headerClass,
+                        swimlaneHeaderSubtext[row.id] ? "swimlane-header-with-subtext" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      {(() => {
+                        const headerSubtext = swimlaneHeaderSubtext[row.id]
+                        const badges = (
+                          <span className="swimlane-badges">
+                            {row.badges?.length ? (
+                              row.badges.map((badge, idx) => (
+                                <span key={`${row.id}-badge-${idx}`} className={badge.className} title={badge.label}>
+                                  {badge.value}
+                                </span>
+                              ))
+                            ) : (
+                              <span className={row.badgeClass}>{row.count}</span>
+                            )}
+                            <button
+                              type="button"
+                              className="swimlane-info-btn"
+                              onClick={() => toggleInfo(row.id)}
+                              aria-label="Info"
+                              title="Info"
+                            >
+                              +
+                            </button>
+                            {openInfoId === row.id ? (
+                              <div className="swimlane-info-popover" ref={infoPopoverRef}>
+                                {swimlaneInfoText[row.id] || "Info Not Set"}
+                              </div>
+                            ) : null}
+                          </span>
+                        )
+
+                        if (headerSubtext) {
+                          return (
+                            <>
+                              <div className="swimlane-header-row">
+                                <span className="swimlane-label">{row.label}</span>
+                                {badges}
+                              </div>
+                              <span className="swimlane-label-sub">{headerSubtext}</span>
+                            </>
+                          )
+                        }
+
+                        return (
+                          <>
+                            <span className="swimlane-label">{row.label}</span>
+                            {badges}
+                          </>
+                        )
+                      })()}
                     </div>
                     <div className="swimlane-content-shell">
                       <div className="swimlane-row-nav">
@@ -7715,8 +7981,9 @@ export default function CommonViewPage() {
                     </div>
                   )}
 
-                  <div className="form-row">
-                    <label htmlFor="cv-date">Date (DD/MM/YYYY)</label>
+                  {formType !== "feedback" && formType !== "problem" && (
+                    <div className="form-row">
+                      <label htmlFor="cv-date">Date (DD/MM/YYYY)</label>
                     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                       <input
                         id="cv-date"
@@ -7782,6 +8049,7 @@ export default function CommonViewPage() {
                       </svg>
                     </div>
                   </div>
+                  )}
 
                   {formType === "late" && (
                     <>
