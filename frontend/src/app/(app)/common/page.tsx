@@ -36,11 +36,27 @@ type LeaveItem = {
   userId?: string
 }
 type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
-type OneHItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type OneHItem = {
+  title: string
+  person: string
+  date: string
+  note?: string
+  assignees?: string[]
+  departmentId?: string
+  isDone?: boolean
+}
 type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
-type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
+type R1Item = {
+  title: string
+  date: string
+  owner: string
+  note?: string
+  assignees?: string[]
+  departmentId?: string
+  isDone?: boolean
+}
 type ProblemItem = {
   entryId?: string
   title: string
@@ -140,6 +156,7 @@ type SwimlaneCell = {
   entryId?: string
   number?: number
   entryDate?: string
+  isDone?: boolean
 }
 type SwimlaneRow = {
   id: CommonType
@@ -585,6 +602,54 @@ export default function CommonViewPage() {
     []
   )
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
+  const departmentsById = React.useMemo(() => {
+    return new Map(departments.map((d) => [d.id, d]))
+  }, [departments])
+  const getDepartmentMeta = React.useCallback(
+    (departmentId?: string) => {
+      const dept = departmentId ? departmentsById.get(departmentId) : undefined
+      const name = (dept?.name || "").trim()
+      const code = (dept?.code || "").trim().toUpperCase()
+      const lower = name.toLowerCase()
+      let rank = 3
+      if (lower.includes("development")) rank = 0
+      else if (lower.includes("graphic design")) rank = 1
+      else if (code === "PCM" || lower.includes("project content") || lower.includes("content manager")) rank = 2
+      const sortName = name || "ZZZ"
+      return { rank, name: sortName }
+    },
+    [departmentsById]
+  )
+  const compareTaskOrder = React.useCallback(
+    (a: { isDone?: boolean; departmentId?: string; title?: string }, b: { isDone?: boolean; departmentId?: string; title?: string }) => {
+      const doneA = a.isDone ? 1 : 0
+      const doneB = b.isDone ? 1 : 0
+      if (doneA !== doneB) return doneA - doneB
+      const metaA = getDepartmentMeta(a.departmentId)
+      const metaB = getDepartmentMeta(b.departmentId)
+      if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
+      if (metaA.rank === 3) {
+        const nameCmp = metaA.name.localeCompare(metaB.name)
+        if (nameCmp) return nameCmp
+      }
+      return (a.title || "").localeCompare(b.title || "")
+    },
+    [getDepartmentMeta]
+  )
+  const sortTasksByOrder = React.useCallback(
+    <T extends { date: string; isDone?: boolean; departmentId?: string; title?: string }>(items: T[], multiDate: boolean) => {
+      const sorted = [...items]
+      sorted.sort((a, b) => {
+        if (multiDate) {
+          const dateCmp = a.date.localeCompare(b.date)
+          if (dateCmp) return dateCmp
+        }
+        return compareTaskOrder(a, b)
+      })
+      return sorted
+    },
+    [compareTaskOrder]
+  )
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
   const [editingExternalMeetingTitle, setEditingExternalMeetingTitle] = React.useState("")
@@ -1076,6 +1141,16 @@ export default function CommonViewPage() {
           date: parsed.everyday ? weekStartIso : item.date,
         }
       })
+      const normalizedOneH = payload.items.oneH.map((item: any) => ({
+        ...item,
+        departmentId: item.departmentId || item.department_id || undefined,
+        isDone: Boolean(item.isDone),
+      }))
+      const normalizedR1 = payload.items.r1.map((item: any) => ({
+        ...item,
+        departmentId: item.departmentId || item.department_id || undefined,
+        isDone: Boolean(item.isDone),
+      }))
       const normalizedProblems = payload.items.problems.map((item) => {
         const parsed = parseFeedbackNote(item.note)
         return {
@@ -1092,6 +1167,10 @@ export default function CommonViewPage() {
           for (const bucket of buckets) {
             if (bucket === "feedback") {
               next = { ...next, feedback: normalizedFeedback }
+            } else if (bucket === "oneH") {
+              next = { ...next, oneH: normalizedOneH }
+            } else if (bucket === "r1") {
+              next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
               next = { ...next, problems: normalizedProblems }
             } else {
@@ -1534,15 +1613,11 @@ export default function CommonViewPage() {
             dates: Set<string>;
           }>()
 
-          // Second pass: process active tasks for date-specific data and other categories
+          // Second pass: process tasks for date-specific data and other categories
           for (const t of tasks) {
-            // Only show tasks that are in progress (not completed)
-            // Skip tasks that are done (have completed_at set or status is "Done")
-            if (t.completed_at) {
-              continue
-            }
-            // Also skip if status is explicitly "Done"
-            if (t.status && (t.status.toLowerCase() === "done" || t.status.toLowerCase() === "completed")) {
+            const statusValue = (t.status || "").toLowerCase()
+            const isDone = Boolean(t.completed_at) || statusValue === "done" || statusValue === "completed"
+            if (isDone && !t.is_1h_report && !t.is_r1) {
               continue
             }
 
@@ -1555,6 +1630,8 @@ export default function CommonViewPage() {
               ? [ownerName]
               : []
             const assigneeLabel = assigneeNames.length ? assigneeNames.join(", ") : "Unknown"
+            const departmentId =
+              t.assignees?.find((a) => a.department_id)?.department_id || assignee?.department_id || t.department_id || undefined
             
             const phaseValue = (t.phase || "").toUpperCase()
             const isCheckPhase = phaseValue === "CHECK" || phaseValue === "CONTROL"
@@ -1628,6 +1705,8 @@ export default function CommonViewPage() {
                   assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
+                  departmentId,
+                  isDone,
                 })
               }
               if (t.is_personal) {
@@ -1646,6 +1725,8 @@ export default function CommonViewPage() {
                   owner: assigneeLabel,
                   assignees: assigneeNames,
                   note: t.description || undefined,
+                  departmentId,
+                  isDone,
                 })
               }
             }
@@ -3303,17 +3384,14 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent blocked",
     }))
 
-    const oneHSource = includeOneH
-      ? isMultiDate
-        ? sortByDate(filtered.oneH, (x) => x.date, (x) => x.title)
-        : filtered.oneH
-      : []
+    const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
     const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent oneh",
+      isDone: x.isDone,
     }))
 
     const personalSource = isMultiDate
@@ -3347,8 +3425,8 @@ export default function CommonViewPage() {
     }))
 
     const bzSource = isMultiDate
-      ? sortByDate(filtered.bz, (x) => x.date, (x) => x.title)
-      : filtered.bz
+      ? sortByDateTime(filtered.bz, (x) => x.date, (x) => x.time, (x) => x.title)
+      : sortByTime(filtered.bz, (x) => x.time, (x) => x.title)
     const bzItems: SwimlaneCell[] = bzSource.map((x) => ({
       title: x.title,
       subtitle: `${formatTimeLabel(x.time)}${x.bzWithLabel ? ` - BZ: ${x.bzWithLabel}` : ""}`.trim(),
@@ -3357,17 +3435,14 @@ export default function CommonViewPage() {
       assignees: x.assignees,
     }))
 
-    const r1Source = includeR1
-      ? isMultiDate
-        ? sortByDate(filtered.r1, (x) => x.date, (x) => x.title)
-        : filtered.r1
-      : []
+    const r1Source = includeR1 ? sortTasksByOrder(filtered.r1, isMultiDate) : []
     const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent r1",
+      isDone: x.isDone,
     }))
 
     const problemSource = isMultiDate
@@ -3582,12 +3657,12 @@ export default function CommonViewPage() {
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         blocked: filtered.blocked.filter((x) => x.date === iso),
-        oneH: filtered.oneH.filter((x) => x.date === iso),
+        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
         personal: filtered.personal.filter((x) => x.date === iso),
         external: filtered.external.filter((x) => x.date === iso),
         internal: filtered.internal.filter((x) => x.date === iso),
-        bz: filtered.bz.filter((x) => x.date === iso),
-        r1: filtered.r1.filter((x) => x.date === iso),
+        bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso), false),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -3601,7 +3676,7 @@ export default function CommonViewPage() {
     })
     
     return dataByDay
-  }, [allDaysSelected, weekISOs, filtered])
+  }, [allDaysSelected, weekISOs, filtered, sortByTime])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -4626,6 +4701,7 @@ export default function CommonViewPage() {
           justify-content: space-between;
           gap: 1px;
           width: 100%;
+          flex: 1 1 auto;
         }
         .swimlane-index {
           width: 24px;
@@ -4652,6 +4728,7 @@ export default function CommonViewPage() {
           color: #475569;
           white-space: pre-line;
           line-height: 1.25;
+          margin-top: auto;
         }
         .swimlane-badges {
           position: relative;
@@ -4813,6 +4890,10 @@ export default function CommonViewPage() {
           color: var(--swim-muted);
           font-style: italic;
         }
+        .swimlane-cell.done {
+          background: #d4ffe1;
+          border-left-color: #ffffff;
+        }
         .swimlane-title-row {
           display: flex;
           flex-direction: column;
@@ -4820,6 +4901,7 @@ export default function CommonViewPage() {
           gap: 6px;
           width: 100%;
           padding-right: 0;
+          flex: 1 1 auto;
         }
         .swimlane-title {
           flex: 1 1 auto;
@@ -4836,6 +4918,13 @@ export default function CommonViewPage() {
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
+        }
+        .swimlane-meta {
+          margin-top: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 100%;
         }
         .swimlane-delete {
           position: absolute;
@@ -7887,6 +7976,7 @@ export default function CommonViewPage() {
                                   "swimlane-cell",
                                   cell.accentClass || "",
                                   cell.placeholder ? "placeholder" : "",
+                                  cell.isDone ? "done" : "",
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
@@ -7938,18 +8028,30 @@ export default function CommonViewPage() {
                                   <div className="swimlane-title">
                                     {stripInitialsPrefix(cell.title)}
                                   </div>
-                                  {(row.id === "external" ||
-                                    row.id === "internal" ||
-                                    row.id === "bz" ||
-                                    row.id === "late" ||
-                                    row.id === "absent" ||
-                                    row.id === "leave") &&
-                                  cell.subtitle ? (
-                                    <div className="swimlane-subtitle">{cell.subtitle}</div>
-                                  ) : null}
-                                  {cell.dateLabel && !["late", "absent", "leave"].includes(row.id) ? (
-                                    <div className="swimlane-date">{cell.dateLabel}</div>
-                                  ) : null}
+                                  {(() => {
+                                    const showSubtitle =
+                                      (row.id === "external" ||
+                                        row.id === "internal" ||
+                                        row.id === "bz" ||
+                                        row.id === "late" ||
+                                        row.id === "absent" ||
+                                        row.id === "leave") &&
+                                      Boolean(cell.subtitle)
+                                    const showDate =
+                                      Boolean(cell.dateLabel) &&
+                                      !["late", "absent", "leave"].includes(row.id)
+                                    if (!showSubtitle && !showDate) return null
+                                    return (
+                                      <div className="swimlane-meta">
+                                        {showSubtitle ? (
+                                          <div className="swimlane-subtitle">{cell.subtitle}</div>
+                                        ) : null}
+                                        {showDate ? (
+                                          <div className="swimlane-date">{cell.dateLabel}</div>
+                                        ) : null}
+                                      </div>
+                                    )
+                                  })()}
                                 </div>
                               </div>
                             ) : (

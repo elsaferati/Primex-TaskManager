@@ -255,11 +255,10 @@ def _initials(name: str) -> str:
 
 
 def _should_include_task(task: Task) -> bool:
-    if task.completed_at:
-        return False
     status_value = (task.status or "").lower()
-    if status_value in {"done", "completed"}:
-        return False
+    is_done = bool(task.completed_at) or status_value in {"done", "completed"}
+    if is_done:
+        return bool(getattr(task, "is_1h_report", False) or getattr(task, "is_r1", False))
     return True
 
 
@@ -672,6 +671,13 @@ async def get_common_view(
                     assignees = [user_for_task]
             assignee_names = [u.full_name or u.username or u.email for u in assignees if u]
             owner_label = ", ".join([n for n in assignee_names if n]) or "Unknown"
+            status_value = (t.status or "").lower()
+            is_done = bool(t.completed_at) or status_value in {"done", "completed"}
+            dept_id = None
+            if assignees:
+                dept_id = assignees[0].department_id
+            if dept_id is None:
+                dept_id = t.department_id
 
             phase_value = (t.phase or "").upper()
             is_check_phase = phase_value in {"CHECK", "CONTROL"}
@@ -701,6 +707,8 @@ async def get_common_view(
                             "assignees": assignee_names or None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "department_id": str(dept_id) if dept_id else None,
+                            "isDone": is_done,
                         }
                     )
                 if t.is_personal:
@@ -723,6 +731,8 @@ async def get_common_view(
                             "owner": owner_label,
                             "assignees": assignee_names or None,
                             "note": t.description or None,
+                            "department_id": str(dept_id) if dept_id else None,
+                            "isDone": is_done,
                         }
                     )
 
