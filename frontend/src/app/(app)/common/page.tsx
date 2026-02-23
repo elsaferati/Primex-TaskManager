@@ -1271,9 +1271,9 @@ export default function CommonViewPage() {
             }
             if (mounted) {
               if (selectedDates.size === 0) {
-                const weekDates = getWeekdays(weekStart).map(toISODate)
-                setSelectedDates(new Set(weekDates))
-                setMultiMode(true)
+                const todayIso = toISODate(new Date())
+                setSelectedDates(new Set([todayIso]))
+                setMultiMode(false)
               }
               setDataLoaded(true)
             }
@@ -2001,9 +2001,9 @@ export default function CommonViewPage() {
 
         // Select today by default
         if (mounted && selectedDates.size === 0) {
-          const weekDates = getWeekdays(weekStart).map(toISODate)
-          setSelectedDates(new Set(weekDates))
-          setMultiMode(true)
+          const todayIso = toISODate(new Date())
+          setSelectedDates(new Set([todayIso]))
+          setMultiMode(false)
         }
         
         // Mark data as loaded

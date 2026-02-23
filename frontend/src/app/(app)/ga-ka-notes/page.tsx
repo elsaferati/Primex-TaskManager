@@ -1722,6 +1722,12 @@ export default function GaKaNotesPage() {
                       note.status === "CLOSED" ||
                       (note as { isClosed?: boolean }).isClosed === true ||
                       (note as { closed?: boolean }).closed === true
+                    const createdAt = new Date(note.created_at).getTime()
+                    const updatedAt = new Date(note.updated_at).getTime()
+                    const isEdited =
+                      Number.isFinite(createdAt) &&
+                      Number.isFinite(updatedAt) &&
+                      updatedAt > createdAt
                     const aggregatedStatus =
                       taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
@@ -1800,19 +1806,19 @@ export default function GaKaNotesPage() {
                                     <ImageIcon className="h-4 w-4" />
                                   </Button>
                                 ) : null}
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="h-7 w-7 shrink-0 sm:hidden"
-                                  disabled={hasTask}
-                                  aria-disabled={hasTask}
-                                  title={hasTask ? "Edit disabled when task exists" : "Edit"}
-                                  aria-label="Edit note"
-                                  onClick={() => openEditNote(note)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                {!note.is_converted_to_task && canCreateTask ? (
+                                {!hasTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 sm:hidden"
+                                    aria-label="Edit note"
+                                    title="Edit"
+                                    onClick={() => openEditNote(note)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                                {!hasTask && canCreateTask ? (
                                   <Button
                                     variant="outline"
                                     size="icon"
@@ -1833,6 +1839,15 @@ export default function GaKaNotesPage() {
                               {note.priority ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}`}>
                                   {note.priority}
+                                </Badge>
+                              ) : null}
+                              {isEdited && !hasTask ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200"
+                                  title={`Edited ${formatDate(note.updated_at)}`}
+                                >
+                                  Edited
                                 </Badge>
                               ) : null}
                               {isClosed ? (
@@ -1948,7 +1963,7 @@ export default function GaKaNotesPage() {
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
-                            {note.is_converted_to_task ? (
+                            {hasTask ? (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
                                 Task Created
                               </Badge>
